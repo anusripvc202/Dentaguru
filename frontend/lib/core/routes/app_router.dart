@@ -17,32 +17,48 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   void _showAuthDialog(
     BuildContext context, {
-    required String portalTitle,
+    required String portalRole, // 'Patient', 'Dentist', or 'Admin'
     required String defaultEmail,
     required String targetRoute,
     required Color accentColor,
     required IconData portalIcon,
     int initialTab = 0,
   }) {
+    // Form Controllers
     final loginEmailController = TextEditingController(text: defaultEmail);
     final loginPasswordController = TextEditingController(text: 'password123');
     bool showLoginPassword = false;
 
-    final regNameController = TextEditingController(text: 'Sarah Jenkins');
-    final regEmailController = TextEditingController(text: 'sarah.jenkins@dentaguru.com');
-    final regPhoneController = TextEditingController(text: '+1 202 555 0142');
-    final regAgeController = TextEditingController(text: '28');
-    final regPasswordController = TextEditingController(text: 'Password@123');
+    // Common Registration Fields
+    final nameController = TextEditingController(
+      text: portalRole == 'Dentist'
+          ? 'Dr. Sarah Jenkins'
+          : portalRole == 'Admin'
+              ? 'Robert Vance'
+              : 'Sarah Jenkins',
+    );
+    final emailController = TextEditingController(text: defaultEmail);
+    final phoneController = TextEditingController(text: '+1 202 555 0142');
+    final passwordController = TextEditingController(text: 'Password@123');
     bool showRegPassword = false;
     bool agreeTerms = true;
 
-    String selectedRole = portalTitle.contains('Dentist')
-        ? 'Dentist'
-        : portalTitle.contains('Admin')
-            ? 'Admin'
-            : 'Patient';
+    // Patient Specific
+    final ageController = TextEditingController(text: '28');
+    final emergencyContactController = TextEditingController(text: '+1 202 555 9988');
     String selectedGender = 'Female';
     String selectedBloodGroup = 'O+';
+
+    // Dentist Specific
+    final licenseNoController = TextEditingController(text: 'DEN-884920-US');
+    final clinicNameController = TextEditingController(text: 'Apex Dental Care & Implant Center');
+    final experienceController = TextEditingController(text: '8 Years');
+    String selectedSpecialty = 'Orthodontics';
+
+    // Admin Specific
+    final adminTitleController = TextEditingController(text: 'Chief Medical Administrator');
+    final facilityIdController = TextEditingController(text: 'FAC-FL-90210');
+    final adminSecurityKeyController = TextEditingController(text: 'ADM-SEC-9901');
 
     final galleryAvatars = [
       'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150',
@@ -50,7 +66,7 @@ class _LoginScreenState extends State<LoginScreen> {
       'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150',
       'https://images.unsplash.com/photo-1622253692010-333f2da6031d?w=150',
     ];
-    int selectedAvatarIndex = 0;
+    int selectedAvatarIndex = portalRole == 'Dentist' ? 3 : 0;
 
     showDialog(
       context: context,
@@ -60,34 +76,28 @@ class _LoginScreenState extends State<LoginScreen> {
           initialIndex: initialTab,
           child: StatefulBuilder(
             builder: (context, setModalState) {
-              final activeAccent = selectedRole == 'Dentist'
-                  ? const Color(0xFF0284C7)
-                  : selectedRole == 'Admin'
-                      ? AppTheme.brandOrange
-                      : AppTheme.primaryBlue;
-
               return Dialog(
                 backgroundColor: Colors.white,
                 elevation: 12,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
                 child: Container(
-                  constraints: const BoxConstraints(maxWidth: 450, maxHeight: 680),
+                  constraints: const BoxConstraints(maxWidth: 460, maxHeight: 690),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        // Header info
+                        // Dialog Header
                         Row(
                           children: [
                             Container(
                               padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
-                                color: activeAccent.withValues(alpha: 0.12),
+                                color: accentColor.withValues(alpha: 0.12),
                                 borderRadius: BorderRadius.circular(14),
                               ),
-                              child: Icon(portalIcon, color: activeAccent, size: 24),
+                              child: Icon(portalIcon, color: accentColor, size: 24),
                             ),
                             const SizedBox(width: 14),
                             Expanded(
@@ -95,7 +105,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    '$selectedRole Account Portal',
+                                    '$portalRole Access Portal',
                                     style: const TextStyle(
                                       fontWeight: FontWeight.bold,
                                       fontSize: 18,
@@ -103,9 +113,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                     ),
                                   ),
                                   const SizedBox(height: 2),
-                                  const Text(
-                                    'DentaGuru Digital Healthcare Network',
-                                    style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                                  Text(
+                                    'DentaGuru Digital Network • $portalRole Module',
+                                    style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                   ),
                                 ],
                               ),
@@ -118,7 +128,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: 16),
 
-                        // Side by Side Tab Switcher (Sign In & Register)
+                        // Side by Side Tab Bar (Sign In & Register)
                         Container(
                           height: 48,
                           padding: const EdgeInsets.all(4),
@@ -128,11 +138,11 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           child: TabBar(
                             indicator: BoxDecoration(
-                              color: activeAccent,
+                              color: accentColor,
                               borderRadius: BorderRadius.circular(10),
                               boxShadow: [
                                 BoxShadow(
-                                  color: activeAccent.withValues(alpha: 0.3),
+                                  color: accentColor.withValues(alpha: 0.3),
                                   blurRadius: 6,
                                   offset: const Offset(0, 2),
                                 ),
@@ -151,22 +161,51 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: 16),
 
-                        // Tab Content Body
+                        // Tab Body View
                         Expanded(
                           child: TabBarView(
                             children: [
-                              // ================= TAB 1: SIGN IN =================
+                              // ================= 1. SIGN IN FORM =================
                               SingleChildScrollView(
                                 physics: const BouncingScrollPhysics(),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.stretch,
                                   children: [
-                                    const SizedBox(height: 12),
+                                    const SizedBox(height: 8),
+                                    // Quick Demo Fill Banner
+                                    InkWell(
+                                      onTap: () {
+                                        setModalState(() {
+                                          loginEmailController.text = defaultEmail;
+                                          loginPasswordController.text = 'password123';
+                                        });
+                                      },
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                        decoration: BoxDecoration(
+                                          color: accentColor.withValues(alpha: 0.08),
+                                          borderRadius: BorderRadius.circular(10),
+                                          border: Border.all(color: accentColor.withValues(alpha: 0.2)),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.touch_app_rounded, color: accentColor, size: 16),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              'Tap to auto-fill $portalRole demo credentials',
+                                              style: TextStyle(fontSize: 11, color: accentColor, fontWeight: FontWeight.bold),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 16),
+
                                     TextField(
                                       controller: loginEmailController,
                                       decoration: InputDecoration(
-                                        labelText: 'Email Address',
-                                        hintText: 'user@dentaguru.com',
+                                        labelText: '$portalRole Email / ID',
                                         prefixIcon: const Icon(Icons.email_outlined, size: 20),
                                         filled: true,
                                         fillColor: const Color(0xFFF8FAFC),
@@ -178,6 +217,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       ),
                                     ),
                                     const SizedBox(height: 14),
+
                                     TextField(
                                       controller: loginPasswordController,
                                       obscureText: !showLoginPassword,
@@ -211,106 +251,54 @@ class _LoginScreenState extends State<LoginScreen> {
                                         onPressed: () {},
                                         child: Text(
                                           'Forgot Password?',
-                                          style: TextStyle(color: activeAccent, fontWeight: FontWeight.w600, fontSize: 12),
+                                          style: TextStyle(color: accentColor, fontWeight: FontWeight.w600, fontSize: 12),
                                         ),
                                       ),
                                     ),
                                     const SizedBox(height: 16),
                                     ElevatedButton(
                                       style: ElevatedButton.styleFrom(
-                                        backgroundColor: activeAccent,
+                                        backgroundColor: accentColor,
                                         foregroundColor: Colors.white,
                                         padding: const EdgeInsets.symmetric(vertical: 16),
-                                        elevation: 0,
+                                        elevation: 2,
                                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                                       ),
                                       onPressed: () {
                                         Navigator.of(dialogContext).pop();
                                         context.go(targetRoute);
                                       },
-                                      child: const Text('Sign In to Account', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                      child: Text('Sign In as $portalRole', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                                     ),
                                   ],
                                 ),
                               ),
 
-                              // ================= TAB 2: REDESIGNED REGISTER =================
+                              // ================= 2. REGISTER FORM =================
                               SingleChildScrollView(
                                 physics: const BouncingScrollPhysics(),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.stretch,
                                   children: [
-                                    // 1. Account Role Selector Chips
-                                    const Text(
-                                      'Select Account Type',
-                                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textMuted),
-                                    ),
-                                    const SizedBox(height: 8),
+                                    const SizedBox(height: 6),
+                                    // Avatar Selection Header
                                     Row(
                                       children: [
-                                        _buildRoleChip(
-                                          title: 'Patient',
-                                          icon: Icons.person_rounded,
-                                          isSelected: selectedRole == 'Patient',
-                                          activeColor: AppTheme.primaryBlue,
-                                          onTap: () => setModalState(() => selectedRole = 'Patient'),
+                                        CircleAvatar(
+                                          radius: 26,
+                                          backgroundColor: accentColor.withValues(alpha: 0.15),
+                                          backgroundImage: NetworkImage(galleryAvatars[selectedAvatarIndex]),
                                         ),
-                                        const SizedBox(width: 8),
-                                        _buildRoleChip(
-                                          title: 'Dentist',
-                                          icon: Icons.medical_services_rounded,
-                                          isSelected: selectedRole == 'Dentist',
-                                          activeColor: const Color(0xFF0284C7),
-                                          onTap: () => setModalState(() => selectedRole = 'Dentist'),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        _buildRoleChip(
-                                          title: 'Clinic',
-                                          icon: Icons.local_hospital_rounded,
-                                          isSelected: selectedRole == 'Admin',
-                                          activeColor: AppTheme.brandOrange,
-                                          onTap: () => setModalState(() => selectedRole = 'Admin'),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 16),
-
-                                    // 2. Avatar Selection Row
-                                    Row(
-                                      children: [
-                                        // Selected avatar display
-                                        Stack(
-                                          children: [
-                                            CircleAvatar(
-                                              radius: 28,
-                                              backgroundColor: activeAccent.withValues(alpha: 0.15),
-                                              backgroundImage: NetworkImage(galleryAvatars[selectedAvatarIndex]),
-                                            ),
-                                            Positioned(
-                                              right: 0,
-                                              bottom: 0,
-                                              child: Container(
-                                                padding: const EdgeInsets.all(4),
-                                                decoration: BoxDecoration(
-                                                  color: activeAccent,
-                                                  shape: BoxShape.circle,
-                                                  border: Border.all(color: Colors.white, width: 1.5),
-                                                ),
-                                                child: const Icon(Icons.camera_alt_rounded, color: Colors.white, size: 10),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(width: 14),
+                                        const SizedBox(width: 12),
                                         Expanded(
                                           child: Column(
                                             crossAxisAlignment: CrossAxisAlignment.start,
                                             children: [
-                                              const Text(
-                                                'Choose Profile Avatar',
-                                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
+                                              Text(
+                                                '$portalRole Profile Photo',
+                                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textDark),
                                               ),
-                                              const SizedBox(height: 6),
+                                              const SizedBox(height: 4),
                                               SingleChildScrollView(
                                                 scrollDirection: Axis.horizontal,
                                                 child: Row(
@@ -319,17 +307,17 @@ class _LoginScreenState extends State<LoginScreen> {
                                                     return GestureDetector(
                                                       onTap: () => setModalState(() => selectedAvatarIndex = idx),
                                                       child: Container(
-                                                        margin: const EdgeInsets.only(right: 8),
+                                                        margin: const EdgeInsets.only(right: 6),
                                                         padding: const EdgeInsets.all(2),
                                                         decoration: BoxDecoration(
                                                           shape: BoxShape.circle,
                                                           border: Border.all(
-                                                            color: isSelected ? activeAccent : Colors.transparent,
+                                                            color: isSelected ? accentColor : Colors.transparent,
                                                             width: 2,
                                                           ),
                                                         ),
                                                         child: CircleAvatar(
-                                                          radius: 14,
+                                                          radius: 12,
                                                           backgroundImage: NetworkImage(galleryAvatars[idx]),
                                                         ),
                                                       ),
@@ -344,11 +332,15 @@ class _LoginScreenState extends State<LoginScreen> {
                                     ),
                                     const SizedBox(height: 16),
 
-                                    // 3. Name Field
+                                    // Field 1: Name / Title
                                     TextField(
-                                      controller: regNameController,
+                                      controller: nameController,
                                       decoration: InputDecoration(
-                                        labelText: 'Full Name',
+                                        labelText: portalRole == 'Dentist'
+                                            ? 'Full Name & Title (e.g. Dr. John Doe, DDS)'
+                                            : portalRole == 'Admin'
+                                                ? 'Administrator Full Name'
+                                                : 'Patient Full Name',
                                         prefixIcon: const Icon(Icons.person_outline_rounded, size: 18),
                                         filled: true,
                                         fillColor: const Color(0xFFF8FAFC),
@@ -361,11 +353,11 @@ class _LoginScreenState extends State<LoginScreen> {
                                     ),
                                     const SizedBox(height: 10),
 
-                                    // 4. Email Field
+                                    // Field 2: Email
                                     TextField(
-                                      controller: regEmailController,
+                                      controller: emailController,
                                       decoration: InputDecoration(
-                                        labelText: 'Email Address',
+                                        labelText: '$portalRole Email Address',
                                         prefixIcon: const Icon(Icons.email_outlined, size: 18),
                                         filled: true,
                                         fillColor: const Color(0xFFF8FAFC),
@@ -378,103 +370,265 @@ class _LoginScreenState extends State<LoginScreen> {
                                     ),
                                     const SizedBox(height: 10),
 
-                                    // 5. Phone & Age Row
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          flex: 3,
-                                          child: TextField(
-                                            controller: regPhoneController,
-                                            decoration: InputDecoration(
-                                              labelText: 'Phone',
-                                              prefixIcon: const Icon(Icons.phone_outlined, size: 18),
-                                              filled: true,
-                                              fillColor: const Color(0xFFF8FAFC),
-                                              border: OutlineInputBorder(
-                                                borderRadius: BorderRadius.circular(12),
-                                                borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                                    // ============ ROLE-SPECIFIC FIELDS ============
+                                    if (portalRole == 'Patient') ...[
+                                      // Patient Specific: Phone & Age Row
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            flex: 3,
+                                            child: TextField(
+                                              controller: phoneController,
+                                              decoration: InputDecoration(
+                                                labelText: 'Phone Number',
+                                                prefixIcon: const Icon(Icons.phone_outlined, size: 18),
+                                                filled: true,
+                                                fillColor: const Color(0xFFF8FAFC),
+                                                border: OutlineInputBorder(
+                                                  borderRadius: BorderRadius.circular(12),
+                                                  borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                                                ),
+                                                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
                                               ),
-                                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                                             ),
                                           ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          flex: 2,
-                                          child: TextField(
-                                            controller: regAgeController,
-                                            decoration: InputDecoration(
-                                              labelText: 'Age',
-                                              prefixIcon: const Icon(Icons.cake_outlined, size: 18),
-                                              filled: true,
-                                              fillColor: const Color(0xFFF8FAFC),
-                                              border: OutlineInputBorder(
-                                                borderRadius: BorderRadius.circular(12),
-                                                borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            flex: 2,
+                                            child: TextField(
+                                              controller: ageController,
+                                              decoration: InputDecoration(
+                                                labelText: 'Age',
+                                                prefixIcon: const Icon(Icons.cake_outlined, size: 18),
+                                                filled: true,
+                                                fillColor: const Color(0xFFF8FAFC),
+                                                border: OutlineInputBorder(
+                                                  borderRadius: BorderRadius.circular(12),
+                                                  borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                                                ),
+                                                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
                                               ),
-                                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
                                             ),
                                           ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 12),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 10),
 
-                                    // 6. Gender Selector
-                                    Row(
-                                      children: [
-                                        const Text('Gender: ', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppTheme.textMuted)),
-                                        const SizedBox(width: 8),
-                                        Wrap(
-                                          spacing: 6,
-                                          children: ['Female', 'Male', 'Other'].map((g) {
-                                            final isSelected = selectedGender == g;
-                                            return ChoiceChip(
-                                              label: Text(g, style: TextStyle(fontSize: 11, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
-                                              selected: isSelected,
-                                              selectedColor: activeAccent.withValues(alpha: 0.15),
-                                              labelStyle: TextStyle(color: isSelected ? activeAccent : AppTheme.textDark),
-                                              onSelected: (val) {
-                                                if (val) setModalState(() => selectedGender = g);
-                                              },
+                                      // Gender Chips
+                                      Row(
+                                        children: [
+                                          const Text('Gender: ', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppTheme.textMuted)),
+                                          const SizedBox(width: 8),
+                                          Wrap(
+                                            spacing: 6,
+                                            children: ['Female', 'Male', 'Other'].map((g) {
+                                              final isSelected = selectedGender == g;
+                                              return ChoiceChip(
+                                                label: Text(g, style: TextStyle(fontSize: 11, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
+                                                selected: isSelected,
+                                                selectedColor: accentColor.withValues(alpha: 0.15),
+                                                labelStyle: TextStyle(color: isSelected ? accentColor : AppTheme.textDark),
+                                                onSelected: (val) {
+                                                  if (val) setModalState(() => selectedGender = g);
+                                                },
+                                              );
+                                            }).toList(),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 10),
+
+                                      // Blood Group Chips
+                                      const Text('Blood Group', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppTheme.textMuted)),
+                                      const SizedBox(height: 6),
+                                      SingleChildScrollView(
+                                        scrollDirection: Axis.horizontal,
+                                        child: Row(
+                                          children: ['O+', 'A+', 'B+', 'AB+', 'O-', 'A-'].map((bg) {
+                                            final isSelected = selectedBloodGroup == bg;
+                                            return Padding(
+                                              padding: const EdgeInsets.only(right: 6),
+                                              child: ChoiceChip(
+                                                label: Text(bg, style: const TextStyle(fontSize: 11)),
+                                                selected: isSelected,
+                                                selectedColor: accentColor,
+                                                labelStyle: TextStyle(color: isSelected ? Colors.white : AppTheme.textDark, fontWeight: FontWeight.bold),
+                                                onSelected: (val) {
+                                                  if (val) setModalState(() => selectedBloodGroup = bg);
+                                                },
+                                              ),
                                             );
                                           }).toList(),
                                         ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 10),
+                                      ),
+                                      const SizedBox(height: 10),
 
-                                    // 7. Blood Group Quick Chips
-                                    const Text('Blood Group', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppTheme.textMuted)),
-                                    const SizedBox(height: 6),
-                                    SingleChildScrollView(
-                                      scrollDirection: Axis.horizontal,
-                                      child: Row(
-                                        children: ['O+', 'A+', 'B+', 'AB+', 'O-', 'A-'].map((bg) {
-                                          final isSelected = selectedBloodGroup == bg;
-                                          return Padding(
-                                            padding: const EdgeInsets.only(right: 6),
-                                            child: ChoiceChip(
-                                              label: Text(bg, style: const TextStyle(fontSize: 11)),
-                                              selected: isSelected,
-                                              selectedColor: activeAccent,
-                                              labelStyle: TextStyle(color: isSelected ? Colors.white : AppTheme.textDark, fontWeight: FontWeight.bold),
-                                              onSelected: (val) {
-                                                if (val) setModalState(() => selectedBloodGroup = bg);
-                                              },
-                                            ),
+                                      // Emergency Contact
+                                      TextField(
+                                        controller: emergencyContactController,
+                                        decoration: InputDecoration(
+                                          labelText: 'Emergency Contact Phone',
+                                          prefixIcon: const Icon(Icons.contact_phone_outlined, size: 18),
+                                          filled: true,
+                                          fillColor: const Color(0xFFF8FAFC),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                                          ),
+                                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                        ),
+                                      ),
+                                    ] else if (portalRole == 'Dentist') ...[
+                                      // Dentist Specific: License No. & Specialty
+                                      TextField(
+                                        controller: licenseNoController,
+                                        decoration: InputDecoration(
+                                          labelText: 'Dental License Registration No.',
+                                          prefixIcon: const Icon(Icons.badge_outlined, size: 18),
+                                          filled: true,
+                                          fillColor: const Color(0xFFF8FAFC),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                                          ),
+                                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 10),
+
+                                      // Specialty Dropdown
+                                      DropdownButtonFormField<String>(
+                                        value: selectedSpecialty,
+                                        decoration: InputDecoration(
+                                          labelText: 'Dental Specialization',
+                                          prefixIcon: const Icon(Icons.medical_services_outlined, size: 18),
+                                          filled: true,
+                                          fillColor: const Color(0xFFF8FAFC),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                                          ),
+                                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                        ),
+                                        items: [
+                                          'Orthodontics',
+                                          'Endodontics',
+                                          'Periodontics',
+                                          'Pediatric Dentistry',
+                                          'Oral & Maxillofacial Surgery',
+                                          'General Dentistry',
+                                        ].map((sp) {
+                                          return DropdownMenuItem(
+                                            value: sp,
+                                            child: Text(sp, style: const TextStyle(fontSize: 12)),
                                           );
                                         }).toList(),
+                                        onChanged: (val) {
+                                          if (val != null) {
+                                            setModalState(() => selectedSpecialty = val);
+                                          }
+                                        },
                                       ),
-                                    ),
-                                    const SizedBox(height: 12),
+                                      const SizedBox(height: 10),
 
-                                    // 8. Password Field with Visibility Toggle
+                                      // Clinic Name & Experience
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            flex: 3,
+                                            child: TextField(
+                                              controller: clinicNameController,
+                                              decoration: InputDecoration(
+                                                labelText: 'Clinic / Practice Name',
+                                                prefixIcon: const Icon(Icons.location_city_outlined, size: 18),
+                                                filled: true,
+                                                fillColor: const Color(0xFFF8FAFC),
+                                                border: OutlineInputBorder(
+                                                  borderRadius: BorderRadius.circular(12),
+                                                  borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                                                ),
+                                                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            flex: 2,
+                                            child: TextField(
+                                              controller: experienceController,
+                                              decoration: InputDecoration(
+                                                labelText: 'Experience',
+                                                prefixIcon: const Icon(Icons.work_history_outlined, size: 18),
+                                                filled: true,
+                                                fillColor: const Color(0xFFF8FAFC),
+                                                border: OutlineInputBorder(
+                                                  borderRadius: BorderRadius.circular(12),
+                                                  borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                                                ),
+                                                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ] else if (portalRole == 'Admin') ...[
+                                      // Admin Specific: Admin Title & Facility ID
+                                      TextField(
+                                        controller: adminTitleController,
+                                        decoration: InputDecoration(
+                                          labelText: 'Administrative Designation Title',
+                                          prefixIcon: const Icon(Icons.admin_panel_settings_outlined, size: 18),
+                                          filled: true,
+                                          fillColor: const Color(0xFFF8FAFC),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                                          ),
+                                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 10),
+
+                                      TextField(
+                                        controller: facilityIdController,
+                                        decoration: InputDecoration(
+                                          labelText: 'Healthcare Facility Tax / License ID',
+                                          prefixIcon: const Icon(Icons.verified_outlined, size: 18),
+                                          filled: true,
+                                          fillColor: const Color(0xFFF8FAFC),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                                          ),
+                                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 10),
+
+                                      TextField(
+                                        controller: adminSecurityKeyController,
+                                        obscureText: true,
+                                        decoration: InputDecoration(
+                                          labelText: 'System Security Passcode',
+                                          prefixIcon: const Icon(Icons.key_outlined, size: 18),
+                                          filled: true,
+                                          fillColor: const Color(0xFFF8FAFC),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                                          ),
+                                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                        ),
+                                      ),
+                                    ],
+                                    const SizedBox(height: 10),
+
+                                    // Password Field with Toggle
                                     TextField(
-                                      controller: regPasswordController,
+                                      controller: passwordController,
                                       obscureText: !showRegPassword,
                                       decoration: InputDecoration(
-                                        labelText: 'Set Password',
+                                        labelText: 'Set Account Password',
                                         prefixIcon: const Icon(Icons.lock_outline, size: 18),
                                         suffixIcon: IconButton(
                                           icon: Icon(
@@ -496,30 +650,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                                       ),
                                     ),
-                                    const SizedBox(height: 6),
-
-                                    // Password Strength Bar
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: Container(
-                                            height: 4,
-                                            decoration: BoxDecoration(
-                                              color: const Color(0xFF22C55E),
-                                              borderRadius: BorderRadius.circular(2),
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        const Text(
-                                          'Strong Password',
-                                          style: TextStyle(fontSize: 10, color: Color(0xFF16A34A), fontWeight: FontWeight.bold),
-                                        ),
-                                      ],
-                                    ),
                                     const SizedBox(height: 12),
 
-                                    // Terms & Privacy Checkbox
+                                    // Terms Checkbox
                                     Row(
                                       children: [
                                         SizedBox(
@@ -527,28 +660,28 @@ class _LoginScreenState extends State<LoginScreen> {
                                           height: 24,
                                           child: Checkbox(
                                             value: agreeTerms,
-                                            activeColor: activeAccent,
+                                            activeColor: accentColor,
                                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
                                             onChanged: (val) => setModalState(() => agreeTerms = val ?? true),
                                           ),
                                         ),
                                         const SizedBox(width: 8),
-                                        const Expanded(
+                                        Expanded(
                                           child: Text(
-                                            'I agree to DentaGuru Terms & Privacy Policy',
-                                            style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                                            'I agree to DentaGuru $portalRole Terms & Privacy Policy',
+                                            style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                           ),
                                         ),
                                       ],
                                     ),
                                     const SizedBox(height: 16),
 
-                                    // Submit Registration Button
+                                    // Create Account CTA Button
                                     ElevatedButton.icon(
                                       icon: const Icon(Icons.check_circle_outline_rounded, size: 18),
-                                      label: const Text('Create Account', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                      label: Text('Create $portalRole Account', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                                       style: ElevatedButton.styleFrom(
-                                        backgroundColor: agreeTerms ? activeAccent : Colors.grey,
+                                        backgroundColor: agreeTerms ? accentColor : Colors.grey,
                                         foregroundColor: Colors.white,
                                         padding: const EdgeInsets.symmetric(vertical: 14),
                                         elevation: 2,
@@ -559,7 +692,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                               Navigator.of(dialogContext).pop();
                                               ScaffoldMessenger.of(context).showSnackBar(
                                                 SnackBar(
-                                                  content: Text('🎉 Welcome ${regNameController.text}! Your $selectedRole Account is ready.'),
+                                                  content: Text('🎉 Registered ${nameController.text} as $portalRole!'),
                                                   backgroundColor: const Color(0xFF10B981),
                                                   duration: const Duration(seconds: 3),
                                                 ),
@@ -587,52 +720,12 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Widget _buildRoleChip({
-    required String title,
-    required IconData icon,
-    required bool isSelected,
-    required Color activeColor,
-    required VoidCallback onTap,
-  }) {
-    return Expanded(
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
-          decoration: BoxDecoration(
-            color: isSelected ? activeColor.withValues(alpha: 0.12) : const Color(0xFFF8FAFC),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isSelected ? activeColor : const Color(0xFFE2E8F0),
-              width: isSelected ? 1.8 : 1.0,
-            ),
-          ),
-          child: Column(
-            children: [
-              Icon(icon, color: isSelected ? activeColor : AppTheme.textMuted, size: 18),
-              const SizedBox(height: 4),
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                  color: isSelected ? activeColor : AppTheme.textDark,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.softBlueBg,
       body: Container(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(24),
         child: Center(
           child: SingleChildScrollView(
             child: Column(
@@ -640,7 +733,7 @@ class _LoginScreenState extends State<LoginScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Center(
-                  child: DentaGuruLogo(height: 64),
+                  child: DentaGuruLogo(height: 68),
                 ),
                 const SizedBox(height: 10),
                 const Text(
@@ -648,38 +741,44 @@ class _LoginScreenState extends State<LoginScreen> {
                   textAlign: TextAlign.center,
                   style: TextStyle(color: AppTheme.textMuted, fontSize: 13),
                 ),
-                const SizedBox(height: 30),
+                const SizedBox(height: 32),
 
-                // 1. Patient Portal Section
-                _buildPortalCard(
+                // 1. Patient Portal Card
+                _buildPortalLandingCard(
                   context,
                   title: 'Patient Portal',
+                  subtitle: 'Book appointments, view treatment plans & digital prescriptions',
                   icon: Icons.person_rounded,
                   accentColor: AppTheme.primaryBlue,
                   defaultEmail: 'sarah.jenkins@dentaguru.com',
                   targetRoute: '/patient',
+                  portalRole: 'Patient',
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 16),
 
-                // 2. Dentist Portal Section
-                _buildPortalCard(
+                // 2. Dentist Portal Card
+                _buildPortalLandingCard(
                   context,
                   title: 'Dentist Portal',
+                  subtitle: 'Practitioner workspace, treatment timelines & patient logs',
                   icon: Icons.medical_services_rounded,
                   accentColor: const Color(0xFF0284C7),
                   defaultEmail: 'dr.rodriguez@dentaguru.com',
                   targetRoute: '/dentist',
+                  portalRole: 'Dentist',
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 16),
 
-                // 3. Admin Dashboard Section
-                _buildPortalCard(
+                // 3. Admin Dashboard Card
+                _buildPortalLandingCard(
                   context,
                   title: 'Admin Dashboard',
+                  subtitle: 'Clinic management, staff roles, billing & system configuration',
                   icon: Icons.admin_panel_settings_rounded,
                   accentColor: AppTheme.brandOrange,
                   defaultEmail: 'admin@dentaguru.com',
                   targetRoute: '/admin',
+                  portalRole: 'Admin',
                 ),
               ],
             ),
@@ -689,99 +788,88 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Widget _buildPortalCard(
+  Widget _buildPortalLandingCard(
     BuildContext context, {
     required String title,
+    required String subtitle,
     required IconData icon,
     required Color accentColor,
     required String defaultEmail,
     required String targetRoute,
+    required String portalRole,
   }) {
     return Container(
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 10,
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 14,
             offset: const Offset(0, 4),
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: accentColor.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(icon, color: accentColor, size: 20),
-              ),
-              const SizedBox(width: 12),
-              Text(
-                title,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textDark),
-              ),
-            ],
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: () => _showAuthDialog(
+            context,
+            portalRole: portalRole,
+            defaultEmail: defaultEmail,
+            targetRoute: targetRoute,
+            accentColor: accentColor,
+            portalIcon: icon,
+            initialTab: 0,
           ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              // Side by Side Login Button
-              Expanded(
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.login_rounded, size: 16),
-                  label: const Text('Sign In', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: accentColor,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: accentColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(14),
                   ),
-                  onPressed: () => _showAuthDialog(
-                    context,
-                    portalTitle: '$title Sign In',
-                    defaultEmail: defaultEmail,
-                    targetRoute: targetRoute,
-                    accentColor: accentColor,
-                    portalIcon: icon,
-                    initialTab: 0,
+                  child: Icon(icon, color: accentColor, size: 28),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 17,
+                          color: AppTheme.textDark,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        style: const TextStyle(fontSize: 12, color: AppTheme.textMuted, height: 1.3),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              // Side by Side Register Button
-              Expanded(
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.person_add_rounded, size: 16),
-                  label: const Text('Register', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    side: BorderSide(color: accentColor, width: 1.5),
-                    foregroundColor: accentColor,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                const SizedBox(width: 12),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: accentColor.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
                   ),
-                  onPressed: () => _showAuthDialog(
-                    context,
-                    portalTitle: '$title Register',
-                    defaultEmail: defaultEmail,
-                    targetRoute: targetRoute,
-                    accentColor: accentColor,
-                    portalIcon: icon,
-                    initialTab: 1,
-                  ),
+                  child: Icon(Icons.arrow_forward_rounded, color: accentColor, size: 20),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ],
+        ),
       ),
     );
   }
