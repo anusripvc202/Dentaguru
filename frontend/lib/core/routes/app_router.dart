@@ -24,49 +24,40 @@ class _LoginScreenState extends State<LoginScreen> {
     required IconData portalIcon,
     int initialTab = 0,
   }) {
-    // Form Controllers
+    // Form Controllers - Empty defaults for registration fields
     final loginEmailController = TextEditingController(text: defaultEmail);
     final loginPasswordController = TextEditingController(text: 'password123');
     bool showLoginPassword = false;
 
-    // Common Registration Fields
-    final nameController = TextEditingController(
-      text: portalRole == 'Dentist'
-          ? 'Dr. Sarah Jenkins'
-          : portalRole == 'Admin'
-              ? 'Robert Vance'
-              : 'Sarah Jenkins',
-    );
-    final emailController = TextEditingController(text: defaultEmail);
-    final phoneController = TextEditingController(text: '+1 202 555 0142');
-    final passwordController = TextEditingController(text: 'Password@123');
+    // Registration Fields (EMPTY by default)
+    final nameController = TextEditingController();
+    final emailController = TextEditingController();
+    final phoneController = TextEditingController();
+    final passwordController = TextEditingController();
     bool showRegPassword = false;
     bool agreeTerms = true;
 
+    // Single Selected Image from Gallery
+    String? selectedGalleryImage;
+
+    // Dropdown Values (null by default)
+    String? selectedGender;
+    String? selectedBloodGroup;
+
     // Patient Specific
-    final ageController = TextEditingController(text: '28');
-    final emergencyContactController = TextEditingController(text: '+1 202 555 9988');
-    String selectedGender = 'Female';
-    String selectedBloodGroup = 'O+';
+    final ageController = TextEditingController();
+    final emergencyContactController = TextEditingController();
 
     // Dentist Specific
-    final licenseNoController = TextEditingController(text: 'DEN-884920-US');
-    final clinicNameController = TextEditingController(text: 'Apex Dental Care & Implant Center');
-    final experienceController = TextEditingController(text: '8 Years');
-    String selectedSpecialty = 'Orthodontics';
+    final licenseNoController = TextEditingController();
+    final clinicNameController = TextEditingController();
+    final experienceController = TextEditingController();
+    String? selectedSpecialty;
 
     // Admin Specific
-    final adminTitleController = TextEditingController(text: 'Chief Medical Administrator');
-    final facilityIdController = TextEditingController(text: 'FAC-FL-90210');
-    final adminSecurityKeyController = TextEditingController(text: 'ADM-SEC-9901');
-
-    final galleryAvatars = [
-      'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150',
-      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-      'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150',
-      'https://images.unsplash.com/photo-1622253692010-333f2da6031d?w=150',
-    ];
-    int selectedAvatarIndex = portalRole == 'Dentist' ? 3 : 0;
+    final adminTitleController = TextEditingController();
+    final facilityIdController = TextEditingController();
+    final adminSecurityKeyController = TextEditingController();
 
     showDialog(
       context: context,
@@ -78,10 +69,10 @@ class _LoginScreenState extends State<LoginScreen> {
             builder: (context, setModalState) {
               return Dialog(
                 backgroundColor: Colors.white,
-                elevation: 12,
+                elevation: 16,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
                 child: Container(
-                  constraints: const BoxConstraints(maxWidth: 460, maxHeight: 690),
+                  constraints: const BoxConstraints(maxWidth: 460, maxHeight: 700),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
                     child: Column(
@@ -91,7 +82,8 @@ class _LoginScreenState extends State<LoginScreen> {
                         // Dialog Header
                         Row(
                           children: [
-                            Container(
+                            AnimatedContainer(
+                              duration: const Duration(milliseconds: 300),
                               padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
                                 color: accentColor.withValues(alpha: 0.12),
@@ -114,7 +106,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ),
                                   const SizedBox(height: 2),
                                   Text(
-                                    'DentaGuru Digital Network • $portalRole Module',
+                                    'DentaGuru Healthcare Network • $portalRole Module',
                                     style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                   ),
                                 ],
@@ -128,7 +120,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: 16),
 
-                        // Side by Side Tab Bar (Sign In & Register)
+                        // Side by Side Animated Tab Bar (Sign In & Register)
                         Container(
                           height: 48,
                           padding: const EdgeInsets.all(4),
@@ -182,7 +174,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       },
                                       borderRadius: BorderRadius.circular(10),
                                       child: Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                         decoration: BoxDecoration(
                                           color: accentColor.withValues(alpha: 0.08),
                                           borderRadius: BorderRadius.circular(10),
@@ -206,6 +198,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       controller: loginEmailController,
                                       decoration: InputDecoration(
                                         labelText: '$portalRole Email / ID',
+                                        hintText: 'e.g. user@dentaguru.com',
                                         prefixIcon: const Icon(Icons.email_outlined, size: 20),
                                         filled: true,
                                         fillColor: const Color(0xFFF8FAFC),
@@ -223,6 +216,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       obscureText: !showLoginPassword,
                                       decoration: InputDecoration(
                                         labelText: 'Password',
+                                        hintText: '••••••••',
                                         prefixIcon: const Icon(Icons.lock_outline, size: 20),
                                         suffixIcon: IconButton(
                                           icon: Icon(
@@ -274,73 +268,124 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ),
                               ),
 
-                              // ================= 2. REGISTER FORM =================
+                              // ================= 2. REDESIGNED REGISTER FORM =================
                               SingleChildScrollView(
                                 physics: const BouncingScrollPhysics(),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.stretch,
                                   children: [
                                     const SizedBox(height: 6),
-                                    // Avatar Selection Header
-                                    Row(
-                                      children: [
-                                        CircleAvatar(
-                                          radius: 26,
-                                          backgroundColor: accentColor.withValues(alpha: 0.15),
-                                          backgroundImage: NetworkImage(galleryAvatars[selectedAvatarIndex]),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                '$portalRole Profile Photo',
-                                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textDark),
-                                              ),
-                                              const SizedBox(height: 4),
-                                              SingleChildScrollView(
-                                                scrollDirection: Axis.horizontal,
-                                                child: Row(
-                                                  children: List.generate(galleryAvatars.length, (idx) {
-                                                    final isSelected = selectedAvatarIndex == idx;
-                                                    return GestureDetector(
-                                                      onTap: () => setModalState(() => selectedAvatarIndex = idx),
-                                                      child: Container(
-                                                        margin: const EdgeInsets.only(right: 6),
-                                                        padding: const EdgeInsets.all(2),
-                                                        decoration: BoxDecoration(
-                                                          shape: BoxShape.circle,
-                                                          border: Border.all(
-                                                            color: isSelected ? accentColor : Colors.transparent,
-                                                            width: 2,
-                                                          ),
-                                                        ),
-                                                        child: CircleAvatar(
-                                                          radius: 12,
-                                                          backgroundImage: NetworkImage(galleryAvatars[idx]),
-                                                        ),
-                                                      ),
-                                                    );
-                                                  }),
-                                                ),
-                                              ),
-                                            ],
+
+                                    // Gallery Image Upload Box (Single selection only!)
+                                    GestureDetector(
+                                      onTap: () {
+                                        setModalState(() {
+                                          selectedGalleryImage = selectedGalleryImage == null
+                                              ? 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=300'
+                                              : selectedGalleryImage == 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=300'
+                                                  ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300'
+                                                  : 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=300';
+                                        });
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('📸 Profile photo selected from Gallery!'),
+                                            duration: Duration(seconds: 1),
+                                          ),
+                                        );
+                                      },
+                                      child: AnimatedContainer(
+                                        duration: const Duration(milliseconds: 250),
+                                        curve: Curves.easeInOut,
+                                        height: 90,
+                                        decoration: BoxDecoration(
+                                          color: selectedGalleryImage != null
+                                              ? accentColor.withValues(alpha: 0.05)
+                                              : const Color(0xFFF8FAFC),
+                                          borderRadius: BorderRadius.circular(16),
+                                          border: Border.all(
+                                            color: selectedGalleryImage != null ? accentColor : const Color(0xFFCBD5E1),
+                                            width: selectedGalleryImage != null ? 2 : 1.5,
                                           ),
                                         ),
-                                      ],
+                                        child: selectedGalleryImage != null
+                                            ? Row(
+                                                mainAxisAlignment: MainAxisAlignment.center,
+                                                children: [
+                                                  Container(
+                                                    decoration: BoxDecoration(
+                                                      shape: BoxShape.circle,
+                                                      border: Border.all(color: accentColor, width: 2),
+                                                    ),
+                                                    child: CircleAvatar(
+                                                      radius: 30,
+                                                      backgroundImage: NetworkImage(selectedGalleryImage!),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 14),
+                                                  Column(
+                                                    mainAxisAlignment: MainAxisAlignment.center,
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    children: [
+                                                      const Text(
+                                                        'Profile Photo Loaded',
+                                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
+                                                      ),
+                                                      const SizedBox(height: 2),
+                                                      Row(
+                                                        children: [
+                                                          Icon(Icons.photo_library_rounded, size: 14, color: accentColor),
+                                                          const SizedBox(width: 4),
+                                                          Text(
+                                                            'Tap to pick another from Gallery',
+                                                            style: TextStyle(fontSize: 11, color: accentColor, fontWeight: FontWeight.w600),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
+                                              )
+                                            : Column(
+                                                mainAxisAlignment: MainAxisAlignment.center,
+                                                children: [
+                                                  Container(
+                                                    padding: const EdgeInsets.all(8),
+                                                    decoration: BoxDecoration(
+                                                      color: accentColor.withValues(alpha: 0.1),
+                                                      shape: BoxShape.circle,
+                                                    ),
+                                                    child: Icon(Icons.add_a_photo_rounded, color: accentColor, size: 20),
+                                                  ),
+                                                  const SizedBox(height: 6),
+                                                  const Text(
+                                                    'Upload Profile Picture from Gallery',
+                                                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppTheme.textDark),
+                                                  ),
+                                                  const SizedBox(height: 2),
+                                                  const Text(
+                                                    'Tap to select image file',
+                                                    style: TextStyle(fontSize: 10, color: AppTheme.textMuted),
+                                                  ),
+                                                ],
+                                              ),
+                                      ),
                                     ),
                                     const SizedBox(height: 16),
 
-                                    // Field 1: Name / Title
+                                    // Field 1: Name
                                     TextField(
                                       controller: nameController,
                                       decoration: InputDecoration(
                                         labelText: portalRole == 'Dentist'
-                                            ? 'Full Name & Title (e.g. Dr. John Doe, DDS)'
+                                            ? 'Full Name & Practitioner Title'
                                             : portalRole == 'Admin'
                                                 ? 'Administrator Full Name'
                                                 : 'Patient Full Name',
+                                        hintText: portalRole == 'Dentist'
+                                            ? 'e.g. Dr. Sarah Jenkins, DDS'
+                                            : portalRole == 'Admin'
+                                                ? 'e.g. Robert Vance'
+                                                : 'e.g. Sarah Jenkins',
                                         prefixIcon: const Icon(Icons.person_outline_rounded, size: 18),
                                         filled: true,
                                         fillColor: const Color(0xFFF8FAFC),
@@ -357,7 +402,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                     TextField(
                                       controller: emailController,
                                       decoration: InputDecoration(
-                                        labelText: '$portalRole Email Address',
+                                        labelText: 'Email Address',
+                                        hintText: 'e.g. sarah@example.com',
                                         prefixIcon: const Icon(Icons.email_outlined, size: 18),
                                         filled: true,
                                         fillColor: const Color(0xFFF8FAFC),
@@ -372,7 +418,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                                     // ============ ROLE-SPECIFIC FIELDS ============
                                     if (portalRole == 'Patient') ...[
-                                      // Patient Specific: Phone & Age Row
+                                      // Phone & Age Row
                                       Row(
                                         children: [
                                           Expanded(
@@ -381,6 +427,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                               controller: phoneController,
                                               decoration: InputDecoration(
                                                 labelText: 'Phone Number',
+                                                hintText: 'e.g. +1 202 555 0142',
                                                 prefixIcon: const Icon(Icons.phone_outlined, size: 18),
                                                 filled: true,
                                                 fillColor: const Color(0xFFF8FAFC),
@@ -399,6 +446,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                               controller: ageController,
                                               decoration: InputDecoration(
                                                 labelText: 'Age',
+                                                hintText: 'e.g. 28',
                                                 prefixIcon: const Icon(Icons.cake_outlined, size: 18),
                                                 filled: true,
                                                 fillColor: const Color(0xFFF8FAFC),
@@ -414,60 +462,71 @@ class _LoginScreenState extends State<LoginScreen> {
                                       ),
                                       const SizedBox(height: 10),
 
-                                      // Gender Chips
-                                      Row(
-                                        children: [
-                                          const Text('Gender: ', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppTheme.textMuted)),
-                                          const SizedBox(width: 8),
-                                          Wrap(
-                                            spacing: 6,
-                                            children: ['Female', 'Male', 'Other'].map((g) {
-                                              final isSelected = selectedGender == g;
-                                              return ChoiceChip(
-                                                label: Text(g, style: TextStyle(fontSize: 11, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
-                                                selected: isSelected,
-                                                selectedColor: accentColor.withValues(alpha: 0.15),
-                                                labelStyle: TextStyle(color: isSelected ? accentColor : AppTheme.textDark),
-                                                onSelected: (val) {
-                                                  if (val) setModalState(() => selectedGender = g);
-                                                },
-                                              );
-                                            }).toList(),
+                                      // Gender Dropdown
+                                      DropdownButtonFormField<String>(
+                                        value: selectedGender,
+                                        decoration: InputDecoration(
+                                          labelText: 'Gender',
+                                          hintText: 'Select Gender',
+                                          prefixIcon: const Icon(Icons.people_outline_rounded, size: 18),
+                                          filled: true,
+                                          fillColor: const Color(0xFFF8FAFC),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
                                           ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 10),
-
-                                      // Blood Group Chips
-                                      const Text('Blood Group', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppTheme.textMuted)),
-                                      const SizedBox(height: 6),
-                                      SingleChildScrollView(
-                                        scrollDirection: Axis.horizontal,
-                                        child: Row(
-                                          children: ['O+', 'A+', 'B+', 'AB+', 'O-', 'A-'].map((bg) {
-                                            final isSelected = selectedBloodGroup == bg;
-                                            return Padding(
-                                              padding: const EdgeInsets.only(right: 6),
-                                              child: ChoiceChip(
-                                                label: Text(bg, style: const TextStyle(fontSize: 11)),
-                                                selected: isSelected,
-                                                selectedColor: accentColor,
-                                                labelStyle: TextStyle(color: isSelected ? Colors.white : AppTheme.textDark, fontWeight: FontWeight.bold),
-                                                onSelected: (val) {
-                                                  if (val) setModalState(() => selectedBloodGroup = bg);
-                                                },
-                                              ),
-                                            );
-                                          }).toList(),
+                                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                                         ),
+                                        items: ['Female', 'Male', 'Other', 'Prefer not to say'].map((g) {
+                                          return DropdownMenuItem(
+                                            value: g,
+                                            child: Text(g, style: const TextStyle(fontSize: 13)),
+                                          );
+                                        }).toList(),
+                                        onChanged: (val) => setModalState(() => selectedGender = val),
                                       ),
                                       const SizedBox(height: 10),
 
-                                      // Emergency Contact
+                                      // Blood Group Dropdown
+                                      DropdownButtonFormField<String>(
+                                        value: selectedBloodGroup,
+                                        decoration: InputDecoration(
+                                          labelText: 'Blood Group',
+                                          hintText: 'Select Blood Group',
+                                          prefixIcon: const Icon(Icons.bloodtype_outlined, size: 18),
+                                          filled: true,
+                                          fillColor: const Color(0xFFF8FAFC),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                                          ),
+                                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                        ),
+                                        items: [
+                                          'O Positive (O+)',
+                                          'A Positive (A+)',
+                                          'B Positive (B+)',
+                                          'AB Positive (AB+)',
+                                          'O Negative (O-)',
+                                          'A Negative (A-)',
+                                          'B Negative (B-)',
+                                          'AB Negative (AB-)',
+                                        ].map((bg) {
+                                          return DropdownMenuItem(
+                                            value: bg,
+                                            child: Text(bg, style: const TextStyle(fontSize: 13)),
+                                          );
+                                        }).toList(),
+                                        onChanged: (val) => setModalState(() => selectedBloodGroup = val),
+                                      ),
+                                      const SizedBox(height: 10),
+
+                                      // Emergency Contact Phone
                                       TextField(
                                         controller: emergencyContactController,
                                         decoration: InputDecoration(
                                           labelText: 'Emergency Contact Phone',
+                                          hintText: 'e.g. +1 202 555 9988',
                                           prefixIcon: const Icon(Icons.contact_phone_outlined, size: 18),
                                           filled: true,
                                           fillColor: const Color(0xFFF8FAFC),
@@ -479,11 +538,12 @@ class _LoginScreenState extends State<LoginScreen> {
                                         ),
                                       ),
                                     ] else if (portalRole == 'Dentist') ...[
-                                      // Dentist Specific: License No. & Specialty
+                                      // License No.
                                       TextField(
                                         controller: licenseNoController,
                                         decoration: InputDecoration(
                                           labelText: 'Dental License Registration No.',
+                                          hintText: 'e.g. DEN-884920-US',
                                           prefixIcon: const Icon(Icons.badge_outlined, size: 18),
                                           filled: true,
                                           fillColor: const Color(0xFFF8FAFC),
@@ -501,6 +561,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                         value: selectedSpecialty,
                                         decoration: InputDecoration(
                                           labelText: 'Dental Specialization',
+                                          hintText: 'Select Specialization',
                                           prefixIcon: const Icon(Icons.medical_services_outlined, size: 18),
                                           filled: true,
                                           fillColor: const Color(0xFFF8FAFC),
@@ -517,17 +578,14 @@ class _LoginScreenState extends State<LoginScreen> {
                                           'Pediatric Dentistry',
                                           'Oral & Maxillofacial Surgery',
                                           'General Dentistry',
+                                          'Prosthodontics',
                                         ].map((sp) {
                                           return DropdownMenuItem(
                                             value: sp,
-                                            child: Text(sp, style: const TextStyle(fontSize: 12)),
+                                            child: Text(sp, style: const TextStyle(fontSize: 13)),
                                           );
                                         }).toList(),
-                                        onChanged: (val) {
-                                          if (val != null) {
-                                            setModalState(() => selectedSpecialty = val);
-                                          }
-                                        },
+                                        onChanged: (val) => setModalState(() => selectedSpecialty = val),
                                       ),
                                       const SizedBox(height: 10),
 
@@ -539,7 +597,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                             child: TextField(
                                               controller: clinicNameController,
                                               decoration: InputDecoration(
-                                                labelText: 'Clinic / Practice Name',
+                                                labelText: 'Practice Name',
+                                                hintText: 'e.g. Apex Dental Center',
                                                 prefixIcon: const Icon(Icons.location_city_outlined, size: 18),
                                                 filled: true,
                                                 fillColor: const Color(0xFFF8FAFC),
@@ -557,7 +616,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                             child: TextField(
                                               controller: experienceController,
                                               decoration: InputDecoration(
-                                                labelText: 'Experience',
+                                                labelText: 'Years Exp.',
+                                                hintText: 'e.g. 8 Years',
                                                 prefixIcon: const Icon(Icons.work_history_outlined, size: 18),
                                                 filled: true,
                                                 fillColor: const Color(0xFFF8FAFC),
@@ -572,11 +632,12 @@ class _LoginScreenState extends State<LoginScreen> {
                                         ],
                                       ),
                                     ] else if (portalRole == 'Admin') ...[
-                                      // Admin Specific: Admin Title & Facility ID
+                                      // Admin Designation Title
                                       TextField(
                                         controller: adminTitleController,
                                         decoration: InputDecoration(
-                                          labelText: 'Administrative Designation Title',
+                                          labelText: 'Designation Title',
+                                          hintText: 'e.g. Chief Administrator',
                                           prefixIcon: const Icon(Icons.admin_panel_settings_outlined, size: 18),
                                           filled: true,
                                           fillColor: const Color(0xFFF8FAFC),
@@ -592,7 +653,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                       TextField(
                                         controller: facilityIdController,
                                         decoration: InputDecoration(
-                                          labelText: 'Healthcare Facility Tax / License ID',
+                                          labelText: 'Facility Tax / License ID',
+                                          hintText: 'e.g. FAC-FL-90210',
                                           prefixIcon: const Icon(Icons.verified_outlined, size: 18),
                                           filled: true,
                                           fillColor: const Color(0xFFF8FAFC),
@@ -610,6 +672,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                         obscureText: true,
                                         decoration: InputDecoration(
                                           labelText: 'System Security Passcode',
+                                          hintText: '••••••••',
                                           prefixIcon: const Icon(Icons.key_outlined, size: 18),
                                           filled: true,
                                           fillColor: const Color(0xFFF8FAFC),
@@ -629,6 +692,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       obscureText: !showRegPassword,
                                       decoration: InputDecoration(
                                         labelText: 'Set Account Password',
+                                        hintText: '••••••••',
                                         prefixIcon: const Icon(Icons.lock_outline, size: 18),
                                         suffixIcon: IconButton(
                                           icon: Icon(
@@ -689,10 +753,11 @@ class _LoginScreenState extends State<LoginScreen> {
                                       ),
                                       onPressed: agreeTerms
                                           ? () {
+                                              final displayName = nameController.text.trim().isEmpty ? '$portalRole User' : nameController.text.trim();
                                               Navigator.of(dialogContext).pop();
                                               ScaffoldMessenger.of(context).showSnackBar(
                                                 SnackBar(
-                                                  content: Text('🎉 Registered ${nameController.text} as $portalRole!'),
+                                                  content: Text('🎉 Registered $displayName as $portalRole!'),
                                                   backgroundColor: const Color(0xFF10B981),
                                                   duration: const Duration(seconds: 3),
                                                 ),
