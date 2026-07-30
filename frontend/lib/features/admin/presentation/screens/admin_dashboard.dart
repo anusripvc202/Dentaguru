@@ -13,7 +13,7 @@ class AdminDashboardScreen extends StatefulWidget {
 }
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
-  int _selectedNavIndex = 0; // 0: Dashboard, 3: Patients, 5: Payments/Revenue
+  int _selectedNavIndex = 0; // 0: Dashboard, 1: Clinics, 2: Dentists, 3: Patients, 5: Revenue
   final PatientProblemService _problemService = PatientProblemService();
 
   @override
@@ -60,115 +60,124 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 "Tap link to confirm appointment: https://dentaguru.com/app/book?dr=${req.id}";
 
             return Dialog(
+              backgroundColor: Colors.white,
+              elevation: 16,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
               child: Container(
                 constraints: const BoxConstraints(maxWidth: 480),
                 padding: const EdgeInsets.all(22),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF10B981).withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(12),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(Icons.mark_chat_read_rounded, color: Color(0xFF10B981), size: 24),
                           ),
-                          child: const Icon(Icons.mark_chat_read_rounded, color: Color(0xFF10B981), size: 24),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Suggest Doctor for ${req.patientName}',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textDark),
-                              ),
-                              Text(
-                                'Problem: ${req.problemCategory} (${req.severity})',
-                                style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
-                              ),
-                            ],
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Suggest Doctor for ${req.patientName}',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textDark),
+                                ),
+                                Text(
+                                  'Issue: ${req.problemCategory} (${req.severity})',
+                                  style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                                ),
+                              ],
+                            ),
                           ),
+                          IconButton(
+                            icon: const Icon(Icons.close_rounded, color: AppTheme.textMuted, size: 20),
+                            onPressed: () => Navigator.of(dialogContext).pop(),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Select Doctor Dropdown
+                      DropdownButtonFormField<String>(
+                        initialValue: selectedDoctor,
+                        decoration: InputDecoration(
+                          labelText: 'Select Specialized Dentist',
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Select Doctor Dropdown
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedDoctor,
-                      decoration: InputDecoration(
-                        labelText: 'Select Specialized Dentist',
-                        filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        items: doctorsMap.keys.map((doc) => DropdownMenuItem(value: doc, child: Text(doc, style: const TextStyle(fontSize: 12)))).toList(),
+                        onChanged: (val) {
+                          if (val != null) setModalState(() => selectedDoctor = val);
+                        },
                       ),
-                      items: doctorsMap.keys.map((doc) => DropdownMenuItem(value: doc, child: Text(doc, style: const TextStyle(fontSize: 12)))).toList(),
-                      onChanged: (val) {
-                        if (val != null) setModalState(() => selectedDoctor = val);
-                      },
-                    ),
-                    const SizedBox(height: 12),
+                      const SizedBox(height: 14),
 
-                    // WhatsApp Message Live Preview Box
-                    const Text('WhatsApp Notification Preview:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.textMuted)),
-                    const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFDCFCE7),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFF86EFAC)),
+                      // WhatsApp Live Message Box
+                      const Text('WhatsApp Notification Message Preview:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.textMuted)),
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFDCFCE7),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFF86EFAC)),
+                        ),
+                        child: Text(
+                          waText,
+                          style: const TextStyle(fontSize: 11, color: Color(0xFF14532D), height: 1.35, fontFamily: 'monospace'),
+                        ),
                       ),
-                      child: Text(
-                        waText,
-                        style: const TextStyle(fontSize: 11, color: Color(0xFF14532D), height: 1.35, fontFamily: 'monospace'),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
+                      const SizedBox(height: 18),
 
-                    ElevatedButton.icon(
-                      icon: const Icon(Icons.send_rounded, size: 18),
-                      label: const Text('Send WhatsApp Notification', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF10B981),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      onPressed: () async {
-                        _problemService.assignDoctorToRequest(
-                          requestId: req.id,
-                          doctorName: doctorNameOnly,
-                          specialty: doctorSpecialty,
-                          adminNotes: adminNotesController.text,
-                        );
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.send_rounded, size: 18),
+                        label: const Text('Send WhatsApp Notification', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF10B981),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          elevation: 2,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () async {
+                          _problemService.assignDoctorToRequest(
+                            requestId: req.id,
+                            doctorName: doctorNameOnly,
+                            specialty: doctorSpecialty,
+                            adminNotes: adminNotesController.text,
+                          );
 
-                        final waUrl = Uri.parse("https://wa.me/?text=${Uri.encodeComponent(waText)}");
-                        try {
-                          if (await canLaunchUrl(waUrl)) {
-                            await launchUrl(waUrl, mode: LaunchMode.externalApplication);
+                          final waUrl = Uri.parse("https://wa.me/?text=${Uri.encodeComponent(waText)}");
+                          try {
+                            if (await canLaunchUrl(waUrl)) {
+                              await launchUrl(waUrl, mode: LaunchMode.externalApplication);
+                            }
+                          } catch (e) {
+                            debugPrint('WhatsApp launcher info: $e');
                           }
-                        } catch (e) {
-                          debugPrint('WhatsApp launcher info: $e');
-                        }
 
-                        Navigator.of(dialogContext).pop();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('📱 WhatsApp notification sent to ${req.patientName} & $doctorNameOnly!'),
-                            backgroundColor: const Color(0xFF10B981),
-                            duration: const Duration(seconds: 3),
-                          ),
-                        );
-                      },
-                    ),
-                  ],
+                          Navigator.of(dialogContext).pop();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('📱 WhatsApp notification sent to ${req.patientName} & $doctorNameOnly!'),
+                              backgroundColor: const Color(0xFF10B981),
+                              duration: const Duration(seconds: 3),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
                 ),
               ),
             );
@@ -180,7 +189,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isDesktop = MediaQuery.of(context).size.width >= 900;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isDesktop = screenWidth >= 900;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -188,7 +198,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ? null
           : AppBar(
               backgroundColor: Colors.white,
-              elevation: 0,
+              elevation: 0.5,
               title: const DentaGuruLogo(height: 32),
               actions: [
                 IconButton(
@@ -206,7 +216,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       drawer: isDesktop ? null : Drawer(child: _buildSidebarContent()),
       body: Row(
         children: [
-          // Sidebar Menu (Visible on Desktop Web)
+          // Sidebar Menu (Only visible on desktop screens >= 900px)
           if (isDesktop)
             Container(
               width: 220,
@@ -217,11 +227,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               child: _buildSidebarContent(),
             ),
 
-          // Main View Panel Area
+          // Main View Content Panel Area
           Expanded(
             child: Column(
               children: [
-                // Desktop Top Header Bar
+                // Desktop Header Bar
                 if (isDesktop)
                   Container(
                     height: 64,
@@ -235,7 +245,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       children: [
                         Text(
                           _getNavTitle(),
-                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark),
                         ),
                         Row(
                           children: [
@@ -268,7 +278,26 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     ),
                   ),
 
-                // Main Panel View Content
+                // Mobile Horizontal Navigation Pills Bar
+                if (!isDesktop)
+                  Container(
+                    height: 52,
+                    color: Colors.white,
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      child: Row(
+                        children: [
+                          _buildMobileNavPill(0, 'Dashboard', Icons.grid_view_rounded),
+                          _buildMobileNavPill(3, 'Patients', Icons.people_outline_rounded),
+                          _buildMobileNavPill(1, 'Clinics', Icons.local_hospital_outlined),
+                          _buildMobileNavPill(5, 'Revenue', Icons.account_balance_wallet_outlined),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                // Selected Panel Body
                 Expanded(
                   child: _buildSelectedPanel(),
                 ),
@@ -283,6 +312,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               currentIndex: _getBottomNavIndex(),
               selectedItemColor: AppTheme.primaryBlue,
               unselectedItemColor: AppTheme.textMuted,
+              selectedFontSize: 12,
+              unselectedFontSize: 12,
               onTap: (index) {
                 setState(() {
                   if (index == 0) _selectedNavIndex = 0; // Dashboard
@@ -299,6 +330,36 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
+  Widget _buildMobileNavPill(int index, String label, IconData icon) {
+    final isSelected = _selectedNavIndex == index;
+    return GestureDetector(
+      onTap: () => setState(() => _selectedNavIndex = index),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.only(right: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.primaryBlue : const Color(0xFFF1F5F9),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 15, color: isSelected ? Colors.white : AppTheme.textMedium),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                color: isSelected ? Colors.white : AppTheme.textDark,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   int _getBottomNavIndex() {
     if (_selectedNavIndex == 3) return 1;
     if (_selectedNavIndex == 5) return 2;
@@ -308,25 +369,25 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   String _getNavTitle() {
     switch (_selectedNavIndex) {
       case 0:
-        return 'Dashboard & Patient Consultations';
+        return 'Admin Dashboard & Patient Consultations';
       case 1:
-        return 'Clinics';
+        return 'Clinics Directory';
       case 2:
-        return 'Dentists';
+        return 'Dentists Management';
       case 3:
-        return 'Patients';
+        return 'Patients Directory';
       case 4:
-        return 'Appointments';
+        return 'Appointments Schedule';
       case 5:
-        return 'Revenue Overview';
+        return 'Revenue & Financial Overview';
       case 6:
-        return 'Reports';
+        return 'Analytics & Reports';
       case 7:
-        return 'Reviews';
+        return 'Patient Reviews';
       case 8:
-        return 'Settings';
+        return 'System Settings';
       default:
-        return 'Dashboard';
+        return 'Admin Dashboard';
     }
   }
 
@@ -409,31 +470,38 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   // ==========================================
-  // PANEL 1: ADMIN DASHBOARD WITH PATIENT CONSULTATIONS
+  // PANEL 1: ADMIN DASHBOARD (RESPONSIVE)
   // ==========================================
   Widget _buildDashboardPanel() {
     final requests = _problemService.requests;
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 4 Top Key Metrics Cards (Row of 4)
+          // KPI Metrics Grid (Responsive Layout)
           LayoutBuilder(
             builder: (context, constraints) {
-              final isWide = constraints.maxWidth > 750;
+              final w = constraints.maxWidth;
+              final crossCount = w > 800 ? 4 : (w > 460 ? 2 : 1);
+              final childRatio = w > 800 ? 1.6 : (w > 460 ? 1.8 : 2.4);
+
               return GridView.count(
-                crossAxisCount: isWide ? 4 : 2,
+                crossAxisCount: crossCount,
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
-                crossAxisSpacing: 14,
-                mainAxisSpacing: 14,
-                childAspectRatio: isWide ? 1.6 : 1.4,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: childRatio,
                 children: [
                   const _KpiCard(title: 'Total Patients', value: '1,284', growth: '+12.4%'),
-                  _KpiCard(title: 'Pending Consultations', value: '${requests.where((r) => r.status == "Pending Admin Review").length}', growth: 'Requires Review'),
+                  _KpiCard(
+                    title: 'Pending Consultations',
+                    value: '${requests.where((r) => r.status == "Pending Admin Review").length}',
+                    growth: 'Requires Review',
+                  ),
                   const _KpiCard(title: 'Total Revenue', value: '₹24,85,200', growth: '+15.3%'),
                   const _KpiCard(title: 'Active Clinics', value: '156', growth: '+11.9%'),
                 ],
@@ -442,13 +510,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ),
           const SizedBox(height: 20),
 
-          // PATIENT PROBLEM CONSULTATION REQUESTS SECTION
+          // PATIENT PROBLEM CONSULTATIONS CARD (RESPONSIVE)
           Container(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(18),
               border: Border.all(color: const Color(0xFFE2E8F0)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.02),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -456,19 +531,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '🩺 Patient Problem Consultations & Doctor Assignments',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-                        ),
-                        SizedBox(height: 2),
-                        Text(
-                          'Review patient reported symptoms & suggest specialized dentist via WhatsApp',
-                          style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
-                        ),
-                      ],
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '🩺 Patient Problem Consultations',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            'Review symptoms & suggest specialized dentist via WhatsApp',
+                            style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                          ),
+                        ],
+                      ),
                     ),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -477,12 +554,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Row(
-                        children: [
-                          const Icon(Icons.mark_chat_read_rounded, size: 14, color: Color(0xFF16A34A)),
-                          const SizedBox(width: 4),
+                        children: const [
+                          Icon(Icons.mark_chat_read_rounded, size: 14, color: Color(0xFF16A34A)),
+                          SizedBox(width: 4),
                           Text(
-                            'WhatsApp Enabled',
-                            style: TextStyle(color: const Color(0xFF16A34A), fontWeight: FontWeight.bold, fontSize: 11),
+                            'WhatsApp',
+                            style: TextStyle(color: Color(0xFF16A34A), fontWeight: FontWeight.bold, fontSize: 11),
                           ),
                         ],
                       ),
@@ -494,106 +571,158 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 if (requests.isEmpty)
                   const Padding(
                     padding: EdgeInsets.all(12),
-                    child: Text('No patient problem requests found.'),
+                    child: Text('No patient consultation requests submitted.'),
                   )
                 else
                   Column(
                     children: requests.map((req) {
                       final isPending = req.status == 'Pending Admin Review';
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF8FAFC),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: isPending ? const Color(0xFFFDE68A) : const Color(0xFFE2E8F0)),
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: isPending ? const Color(0xFFFEF3C7) : const Color(0xFFDCFCE7),
-                                shape: BoxShape.circle,
-                              ),
-                              child: Icon(
-                                isPending ? Icons.pending_actions_rounded : Icons.check_circle_rounded,
-                                color: isPending ? const Color(0xFFD97706) : const Color(0xFF16A34A),
-                                size: 20,
+
+                      return LayoutBuilder(
+                        builder: (context, cardConstraints) {
+                          final isNarrow = cardConstraints.maxWidth < 520;
+
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: isPending ? const Color(0xFFFDE68A) : const Color(0xFFE2E8F0),
+                                width: isPending ? 1.5 : 1,
                               ),
                             ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Text(
-                                        '${req.patientName} (${req.patientPhone})',
-                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Top Row: Status Icon, Patient Name & Severity
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: isPending ? const Color(0xFFFEF3C7) : const Color(0xFFDCFCE7),
+                                        shape: BoxShape.circle,
                                       ),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                        decoration: BoxDecoration(
-                                          color: req.severity == 'Severe'
-                                              ? Colors.red.shade100
-                                              : req.severity == 'Moderate'
-                                                  ? Colors.orange.shade100
-                                                  : Colors.blue.shade100,
-                                          borderRadius: BorderRadius.circular(8),
-                                        ),
-                                        child: Text(
-                                          '${req.severity} Severity',
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.bold,
-                                            color: req.severity == 'Severe'
-                                                ? Colors.red.shade900
-                                                : req.severity == 'Moderate'
-                                                    ? Colors.orange.shade900
-                                                    : AppTheme.primaryBlue,
+                                      child: Icon(
+                                        isPending ? Icons.pending_actions_rounded : Icons.check_circle_rounded,
+                                        color: isPending ? const Color(0xFFD97706) : const Color(0xFF16A34A),
+                                        size: 18,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            req.patientName,
+                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+                                            overflow: TextOverflow.ellipsis,
                                           ),
+                                          Text(
+                                            req.patientPhone,
+                                            style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: req.severity == 'Severe'
+                                            ? Colors.red.shade100
+                                            : req.severity == 'Moderate'
+                                                ? Colors.orange.shade100
+                                                : Colors.blue.shade100,
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Text(
+                                        '${req.severity}',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: req.severity == 'Severe'
+                                              ? Colors.red.shade900
+                                              : req.severity == 'Moderate'
+                                                  ? Colors.orange.shade900
+                                                  : AppTheme.primaryBlue,
                                         ),
                                       ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'Issue: ${req.problemCategory}',
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.primaryBlue),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    req.problemDescription,
-                                    style: const TextStyle(fontSize: 12, color: AppTheme.textMedium),
-                                  ),
-                                  if (req.assignedDoctorName != null) ...[
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      '👨‍⚕️ Assigned Doctor: ${req.assignedDoctorName} (${req.assignedDoctorSpecialty})',
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF16A34A)),
                                     ),
                                   ],
+                                ),
+                                const SizedBox(height: 10),
+
+                                // Issue Category Badge & Description
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.primaryBlue.withValues(alpha: 0.08),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    'Issue: ${req.problemCategory}',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.primaryBlue),
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  req.problemDescription,
+                                  style: const TextStyle(fontSize: 12, color: AppTheme.textMedium, height: 1.3),
+                                ),
+
+                                if (req.assignedDoctorName != null) ...[
+                                  const SizedBox(height: 10),
+                                  Container(
+                                    padding: const EdgeInsets.all(10),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF0FDF4),
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(color: const Color(0xFFBBF7D0)),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        const Icon(Icons.verified_user_rounded, color: Color(0xFF16A34A), size: 16),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            'Assigned: ${req.assignedDoctorName} (${req.assignedDoctorSpecialty})',
+                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFF14532D)),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
                                 ],
-                              ),
+
+                                const SizedBox(height: 12),
+
+                                // Action Button (Full Width on narrow screens!)
+                                SizedBox(
+                                  width: isNarrow ? double.infinity : null,
+                                  child: ElevatedButton.icon(
+                                    icon: const Icon(Icons.mark_chat_read_rounded, size: 16),
+                                    label: Text(
+                                      isPending ? 'Suggest Doctor & WhatsApp' : 'Resend WhatsApp',
+                                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: isPending ? const Color(0xFF10B981) : AppTheme.primaryBlue,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                      elevation: 1,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                    ),
+                                    onPressed: () => _showAssignDoctorDialog(context, req),
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 12),
-                            ElevatedButton.icon(
-                              icon: const Icon(Icons.mark_chat_read_rounded, size: 14),
-                              label: Text(isPending ? 'Suggest Doctor' : 'Resend WhatsApp', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: isPending ? const Color(0xFF10B981) : AppTheme.primaryBlue,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                              ),
-                              onPressed: () => _showAssignDoctorDialog(context, req),
-                            ),
-                          ],
-                        ),
+                          );
+                        },
                       );
                     }).toList(),
                   ),
@@ -602,7 +731,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ),
           const SizedBox(height: 20),
 
-          // 2 Charts Row Side-by-Side (Appointment Overview & Appointments by Status)
+          // Charts Row
           LayoutBuilder(
             builder: (context, constraints) {
               if (constraints.maxWidth >= 800) {
@@ -631,7 +760,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Widget _buildAppointmentOverviewCard() {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
@@ -671,7 +800,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Widget _buildAppointmentsByStatusCard() {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
@@ -687,10 +816,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           const SizedBox(height: 20),
           Row(
             children: [
-              // Donut Chart Graphic
               SizedBox(
-                width: 120,
-                height: 120,
+                width: 110,
+                height: 110,
                 child: CustomPaint(
                   painter: _DonutChartPainter(
                     slices: const [
@@ -701,17 +829,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   ),
                 ),
               ),
-              const SizedBox(width: 20),
-
-              // Legend
+              const SizedBox(width: 16),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: const [
                     _LegendRow(color: Color(0xFF0D9488), label: 'Completed', value: '65%'),
-                    SizedBox(height: 12),
+                    SizedBox(height: 10),
                     _LegendRow(color: Color(0xFF0052CC), label: 'Scheduled', value: '25%'),
-                    SizedBox(height: 12),
+                    SizedBox(height: 10),
                     _LegendRow(color: Color(0xFF60A5FA), label: 'Cancelled', value: '10%'),
                   ],
                 ),
@@ -729,17 +855,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Widget _buildPatientsPanel() {
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header Row with "Add Patient" Button
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
                 'Patients',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.textDark),
               ),
               ElevatedButton.icon(
                 onPressed: () {},
@@ -748,35 +873,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primaryBlue,
                   elevation: 0,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
 
-          // Search Bar
-          Container(
-            width: 320,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
-            ),
-            child: const TextField(
-              decoration: InputDecoration(
-                hintText: 'Search patients...',
-                hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 13),
-                prefixIcon: Icon(Icons.search_rounded, color: AppTheme.textMuted),
-                border: InputBorder.none,
-                contentPadding: EdgeInsets.symmetric(vertical: 12),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Patient Data Table Container
           Container(
             width: double.infinity,
             decoration: BoxDecoration(
@@ -784,34 +888,24 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               borderRadius: BorderRadius.circular(18),
               border: Border.all(color: const Color(0xFFE2E8F0)),
             ),
-            child: Column(
-              children: [
-                // Table Headers Row
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-                  ),
-                  child: Row(
-                    children: const [
-                      Expanded(flex: 3, child: Text('Name', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textMuted))),
-                      Expanded(flex: 1, child: Text('Age', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textMuted))),
-                      Expanded(flex: 3, child: Text('Phone', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textMuted))),
-                      Expanded(flex: 2, child: Text('Last Visit', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textMuted))),
-                      Expanded(flex: 2, child: Text('Status', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textMuted))),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1, color: Color(0xFFE2E8F0)),
-
-                // Table Data Rows
-                _buildPatientRow('Jane Smith', '28', '+1 202 555 0132', 'Oct 12, 2023', 'Active', const Color(0xFFDCFCE7), const Color(0xFF16A34A)),
-                _buildPatientRow('Michael Ross', '45', '+1 202 555 0107', 'Sep 28, 2023', 'Follow-up', const Color(0xFFDBEAFE), const Color(0xFF2563EB)),
-                _buildPatientRow('Alice Wong', '32', '+1 202 555 0155', 'Aug 15, 2023', 'Inactive', const Color(0xFFF1F5F9), const Color(0xFF64748B)),
-                _buildPatientRow('David Kim', '19', '+1 202 555 0177', '--', 'New', const Color(0xFFFFEDD5), const Color(0xFFF97316)),
-                _buildPatientRow('Emma Johnson', '27', '+1 202 555 0133', 'Oct 10, 2023', 'Active', const Color(0xFFDCFCE7), const Color(0xFF16A34A)),
-              ],
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                columns: const [
+                  DataColumn(label: Text('Name', style: TextStyle(fontWeight: FontWeight.bold))),
+                  DataColumn(label: Text('Age', style: TextStyle(fontWeight: FontWeight.bold))),
+                  DataColumn(label: Text('Phone', style: TextStyle(fontWeight: FontWeight.bold))),
+                  DataColumn(label: Text('Last Visit', style: TextStyle(fontWeight: FontWeight.bold))),
+                  DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.bold))),
+                ],
+                rows: [
+                  _buildDataRow('Jane Smith', '28', '+1 202 555 0132', 'Oct 12, 2023', 'Active', const Color(0xFFDCFCE7), const Color(0xFF16A34A)),
+                  _buildDataRow('Michael Ross', '45', '+1 202 555 0107', 'Sep 28, 2023', 'Follow-up', const Color(0xFFDBEAFE), const Color(0xFF2563EB)),
+                  _buildDataRow('Alice Wong', '32', '+1 202 555 0155', 'Aug 15, 2023', 'Inactive', const Color(0xFFF1F5F9), const Color(0xFF64748B)),
+                  _buildDataRow('David Kim', '19', '+1 202 555 0177', '--', 'New', const Color(0xFFFFEDD5), const Color(0xFFF97316)),
+                  _buildDataRow('Emma Johnson', '27', '+1 202 555 0133', 'Oct 10, 2023', 'Active', const Color(0xFFDCFCE7), const Color(0xFF16A34A)),
+                ],
+              ),
             ),
           ),
         ],
@@ -819,60 +913,33 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildPatientRow(
-    String name,
-    String age,
-    String phone,
-    String lastVisit,
-    String status,
-    Color bg,
-    Color text,
-  ) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Color(0xFFF1F5F9))),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            flex: 3,
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 14,
-                  backgroundColor: AppTheme.softBlueCard,
-                  child: Text(
-                    name[0],
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    name,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(flex: 1, child: Text(age, style: const TextStyle(fontSize: 13, color: AppTheme.textMedium))),
-          Expanded(flex: 3, child: Text(phone, style: const TextStyle(fontSize: 13, color: AppTheme.textMedium))),
-          Expanded(flex: 2, child: Text(lastVisit, style: const TextStyle(fontSize: 13, color: AppTheme.textMedium))),
-          Expanded(
-            flex: 2,
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
-                child: Text(status, style: TextStyle(color: text, fontSize: 11, fontWeight: FontWeight.bold)),
+  DataRow _buildDataRow(String name, String age, String phone, String lastVisit, String status, Color bg, Color text) {
+    return DataRow(
+      cells: [
+        DataCell(
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 12,
+                backgroundColor: AppTheme.softBlueCard,
+                child: Text(name[0], style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue)),
               ),
-            ),
+              const SizedBox(width: 8),
+              Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            ],
           ),
-        ],
-      ),
+        ),
+        DataCell(Text(age)),
+        DataCell(Text(phone)),
+        DataCell(Text(lastVisit)),
+        DataCell(
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10)),
+            child: Text(status, style: TextStyle(color: text, fontSize: 11, fontWeight: FontWeight.bold)),
+          ),
+        ),
+      ],
     );
   }
 
@@ -882,15 +949,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Widget _buildRevenuePanel() {
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
             'Revenue Overview',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.textDark),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
           LayoutBuilder(
             builder: (context, constraints) {
               if (constraints.maxWidth >= 800) {
@@ -919,7 +986,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Widget _buildMonthRevenueCard() {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
@@ -932,7 +999,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           const SizedBox(height: 4),
           Row(
             children: const [
-              Text('₹24,85,200', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
+              Text('₹24,85,200', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
               SizedBox(width: 10),
               Text('+15.3%', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
             ],
@@ -956,7 +1023,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Widget _buildRevenueByServiceCard() {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
@@ -970,8 +1037,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           Row(
             children: [
               SizedBox(
-                width: 120,
-                height: 120,
+                width: 110,
+                height: 110,
                 child: CustomPaint(
                   painter: _DonutChartPainter(
                     slices: const [
@@ -1010,7 +1077,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       children: [
         Container(
           width: 22,
-          height: 110 * pct,
+          height: 100 * pct,
           decoration: BoxDecoration(
             color: isHighlight ? AppTheme.primaryBlue : AppTheme.softBlueCard,
             borderRadius: BorderRadius.circular(6),
@@ -1046,6 +1113,13 @@ class _KpiCard extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1053,7 +1127,7 @@ class _KpiCard extends StatelessWidget {
         children: [
           Text(title, style: const TextStyle(fontSize: 11, color: AppTheme.textMuted, fontWeight: FontWeight.w500)),
           const SizedBox(height: 6),
-          Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
+          Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
           const SizedBox(height: 4),
           Text(growth, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
         ],
@@ -1126,7 +1200,7 @@ class _AreaCurvePainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-// Donut Slice Data Structure & Painter
+// Donut Slice & Custom Painter
 class _DonutSlice {
   final double pct;
   final Color color;
@@ -1135,33 +1209,28 @@ class _DonutSlice {
 
 class _DonutChartPainter extends CustomPainter {
   final List<_DonutSlice> slices;
-
-  _DonutChartPainter({required this.slices});
+  const _DonutChartPainter({required this.slices});
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width / 2;
-    const strokeWidth = 20.0;
+    double startAngle = -1.57;
 
-    double startAngle = -1.5708; // -90 deg
-
-    for (var slice in slices) {
-      final sweepAngle = slice.pct * 6.28318; // 2 * pi
-
+    for (final slice in slices) {
+      final sweepAngle = slice.pct * 2 * 3.14159;
       final paint = Paint()
         ..color = slice.color
         ..style = PaintingStyle.stroke
-        ..strokeWidth = strokeWidth;
+        ..strokeWidth = 22;
 
       canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius - (strokeWidth / 2)),
+        Rect.fromCircle(center: center, radius: radius - 11),
         startAngle,
         sweepAngle,
         false,
         paint,
       );
-
       startAngle += sweepAngle;
     }
   }
