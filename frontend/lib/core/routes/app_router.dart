@@ -474,7 +474,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                                       // Gender Dropdown
                                       DropdownButtonFormField<String>(
-                                        value: selectedGender,
+                                        initialValue: selectedGender,
                                         decoration: InputDecoration(
                                           labelText: 'Gender',
                                           hintText: 'Select Gender',
@@ -499,7 +499,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                                       // Blood Group Dropdown
                                       DropdownButtonFormField<String>(
-                                        value: selectedBloodGroup,
+                                        initialValue: selectedBloodGroup,
                                         decoration: InputDecoration(
                                           labelText: 'Blood Group',
                                           hintText: 'Select Blood Group',
@@ -568,7 +568,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                                       // Specialty Dropdown
                                       DropdownButtonFormField<String>(
-                                        value: selectedSpecialty,
+                                        initialValue: selectedSpecialty,
                                         decoration: InputDecoration(
                                           labelText: 'Dental Specialization',
                                           hintText: 'Select Specialization',
