@@ -628,59 +628,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       ),
     );
   }
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 4 Top Key Metrics Cards (Row of 4)
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final isWide = constraints.maxWidth > 750;
-              return GridView.count(
-                crossAxisCount: isWide ? 4 : 2,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisSpacing: 14,
-                mainAxisSpacing: 14,
-                childAspectRatio: isWide ? 1.6 : 1.4,
-                children: const [
-                  _KpiCard(title: 'Total Patients', value: '1,284', growth: '+12.4%'),
-                  _KpiCard(title: 'Total Appointments', value: '3,842', growth: '+9.7%'),
-                  _KpiCard(title: 'Total Revenue', value: '₹24,85,200', growth: '+15.3%'),
-                  _KpiCard(title: 'Active Clinics', value: '156', growth: '+11.9%'),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 20),
-
-          // 2 Charts Row Side-by-Side (Appointment Overview & Appointments by Status)
-          LayoutBuilder(
-            builder: (context, constraints) {
-              if (constraints.maxWidth >= 800) {
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(flex: 3, child: _buildAppointmentOverviewCard()),
-                    const SizedBox(width: 16),
-                    Expanded(flex: 2, child: _buildAppointmentsByStatusCard()),
-                  ],
-                );
-              }
-              return Column(
-                children: [
-                  _buildAppointmentOverviewCard(),
-                  const SizedBox(height: 16),
-                  _buildAppointmentsByStatusCard(),
-                ],
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
 
   Widget _buildAppointmentOverviewCard() {
     return Container(
