@@ -1,5 +1,7 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import '../widgets/denta_guru_logo.dart';
 import '../theme/app_theme.dart';
 import '../../features/patient/presentation/screens/patient_dashboard.dart';
@@ -24,9 +26,9 @@ class _LoginScreenState extends State<LoginScreen> {
     required IconData portalIcon,
     int initialTab = 0,
   }) {
-    // Form Controllers - Empty defaults for registration fields
-    final loginEmailController = TextEditingController(text: defaultEmail);
-    final loginPasswordController = TextEditingController(text: 'password123');
+    // Form Controllers - Empty defaults for ALL fields (Login & Register)
+    final loginEmailController = TextEditingController();
+    final loginPasswordController = TextEditingController();
     bool showLoginPassword = false;
 
     // Registration Fields (EMPTY by default)
@@ -37,8 +39,30 @@ class _LoginScreenState extends State<LoginScreen> {
     bool showRegPassword = false;
     bool agreeTerms = true;
 
-    // Single Selected Image from Gallery
-    String? selectedGalleryImage;
+    // Picked Image Bytes from Device Gallery
+    Uint8List? pickedImageBytes;
+    String? pickedImageName;
+
+    Future<void> pickGalleryImage(StateSetter setModalState) async {
+      try {
+        final ImagePicker picker = ImagePicker();
+        final XFile? image = await picker.pickImage(
+          source: ImageSource.gallery,
+          maxWidth: 800,
+          maxHeight: 800,
+          imageQuality: 85,
+        );
+        if (image != null) {
+          final bytes = await image.readAsBytes();
+          setModalState(() {
+            pickedImageBytes = bytes;
+            pickedImageName = image.name;
+          });
+        }
+      } catch (e) {
+        debugPrint('Gallery picker info: $e');
+      }
+    }
 
     // Dropdown Values (null by default)
     String? selectedGender;
@@ -157,7 +181,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         Expanded(
                           child: TabBarView(
                             children: [
-                              // ================= 1. SIGN IN FORM =================
+                              // ================= 1. SIGN IN FORM (EMPTY DEFAULTS) =================
                               SingleChildScrollView(
                                 physics: const BouncingScrollPhysics(),
                                 child: Column(
@@ -198,7 +222,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       controller: loginEmailController,
                                       decoration: InputDecoration(
                                         labelText: '$portalRole Email / ID',
-                                        hintText: 'e.g. user@dentaguru.com',
+                                        hintText: 'Enter your email or user ID',
                                         prefixIcon: const Icon(Icons.email_outlined, size: 20),
                                         filled: true,
                                         fillColor: const Color(0xFFF8FAFC),
@@ -216,7 +240,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       obscureText: !showLoginPassword,
                                       decoration: InputDecoration(
                                         labelText: 'Password',
-                                        hintText: '••••••••',
+                                        hintText: 'Enter your password',
                                         prefixIcon: const Icon(Icons.lock_outline, size: 20),
                                         suffixIcon: IconButton(
                                           icon: Icon(
@@ -276,38 +300,24 @@ class _LoginScreenState extends State<LoginScreen> {
                                   children: [
                                     const SizedBox(height: 6),
 
-                                    // Gallery Image Upload Box (Single selection only!)
+                                    // Real Device Gallery Image Picker Box
                                     GestureDetector(
-                                      onTap: () {
-                                        setModalState(() {
-                                          selectedGalleryImage = selectedGalleryImage == null
-                                              ? 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=300'
-                                              : selectedGalleryImage == 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=300'
-                                                  ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300'
-                                                  : 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=300';
-                                        });
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(
-                                            content: Text('📸 Profile photo selected from Gallery!'),
-                                            duration: Duration(seconds: 1),
-                                          ),
-                                        );
-                                      },
+                                      onTap: () => pickGalleryImage(setModalState),
                                       child: AnimatedContainer(
                                         duration: const Duration(milliseconds: 250),
                                         curve: Curves.easeInOut,
-                                        height: 90,
+                                        height: 94,
                                         decoration: BoxDecoration(
-                                          color: selectedGalleryImage != null
+                                          color: pickedImageBytes != null
                                               ? accentColor.withValues(alpha: 0.05)
                                               : const Color(0xFFF8FAFC),
                                           borderRadius: BorderRadius.circular(16),
                                           border: Border.all(
-                                            color: selectedGalleryImage != null ? accentColor : const Color(0xFFCBD5E1),
-                                            width: selectedGalleryImage != null ? 2 : 1.5,
+                                            color: pickedImageBytes != null ? accentColor : const Color(0xFFCBD5E1),
+                                            width: pickedImageBytes != null ? 2 : 1.5,
                                           ),
                                         ),
-                                        child: selectedGalleryImage != null
+                                        child: pickedImageBytes != null
                                             ? Row(
                                                 mainAxisAlignment: MainAxisAlignment.center,
                                                 children: [
@@ -318,7 +328,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                                     ),
                                                     child: CircleAvatar(
                                                       radius: 30,
-                                                      backgroundImage: NetworkImage(selectedGalleryImage!),
+                                                      backgroundImage: MemoryImage(pickedImageBytes!),
                                                     ),
                                                   ),
                                                   const SizedBox(width: 14),
@@ -326,9 +336,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                                     mainAxisAlignment: MainAxisAlignment.center,
                                                     crossAxisAlignment: CrossAxisAlignment.start,
                                                     children: [
-                                                      const Text(
-                                                        'Profile Photo Loaded',
-                                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
+                                                      Text(
+                                                        pickedImageName ?? 'Gallery Photo Selected',
+                                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textDark),
                                                       ),
                                                       const SizedBox(height: 2),
                                                       Row(
@@ -336,7 +346,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                                           Icon(Icons.photo_library_rounded, size: 14, color: accentColor),
                                                           const SizedBox(width: 4),
                                                           Text(
-                                                            'Tap to pick another from Gallery',
+                                                            'Tap to change photo from Gallery',
                                                             style: TextStyle(fontSize: 11, color: accentColor, fontWeight: FontWeight.w600),
                                                           ),
                                                         ],
@@ -358,12 +368,12 @@ class _LoginScreenState extends State<LoginScreen> {
                                                   ),
                                                   const SizedBox(height: 6),
                                                   const Text(
-                                                    'Upload Profile Picture from Gallery',
+                                                    'Upload Profile Picture from Device Gallery',
                                                     style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppTheme.textDark),
                                                   ),
                                                   const SizedBox(height: 2),
                                                   const Text(
-                                                    'Tap to select image file',
+                                                    'Tap to open device photo gallery',
                                                     style: TextStyle(fontSize: 10, color: AppTheme.textMuted),
                                                   ),
                                                 ],
