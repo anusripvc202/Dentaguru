@@ -1,7 +1,9 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
+import '../../../../core/services/patient_problem_service.dart';
 
 class PatientDashboardScreen extends StatefulWidget {
   const PatientDashboardScreen({super.key});
@@ -12,9 +14,186 @@ class PatientDashboardScreen extends StatefulWidget {
 
 class _PatientDashboardScreenState extends State<PatientDashboardScreen> {
   int _currentIndex = 0;
+  final PatientProblemService _patientService = PatientProblemService();
+
+  @override
+  void initState() {
+    super.initState();
+    _patientService.addListener(_onServiceUpdate);
+  }
+
+  @override
+  void dispose() {
+    _patientService.removeListener(_onServiceUpdate);
+    super.dispose();
+  }
+
+  void _onServiceUpdate() {
+    if (mounted) setState(() {});
+  }
+
+  void _showReportProblemDialog(BuildContext context) {
+    final descriptionController = TextEditingController();
+    String selectedCategory = 'Toothache & Sensitivity';
+    String selectedSeverity = 'Moderate';
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Dialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 440),
+                padding: const EdgeInsets.all(22),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryBlue.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.health_and_safety_rounded, color: AppTheme.primaryBlue, size: 24),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Report Dental Problem',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppTheme.textDark),
+                              ),
+                              Text(
+                                'Submit symptoms for Admin review & Doctor suggestion',
+                                style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+
+                    // Problem Category Dropdown
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedCategory,
+                      decoration: InputDecoration(
+                        labelText: 'Dental Issue Category',
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      ),
+                      items: [
+                        'Toothache & Sensitivity',
+                        'Bleeding Gums & Swelling',
+                        'Wisdom Tooth Pain',
+                        'Aligners & Braces Adjustment',
+                        'Tooth Decay / Cavity',
+                        'Teeth Cleaning & Whitening',
+                      ].map((cat) => DropdownMenuItem(value: cat, child: Text(cat, style: const TextStyle(fontSize: 13)))).toList(),
+                      onChanged: (val) => setModalState(() => selectedCategory = val ?? selectedCategory),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Symptom Description
+                    TextField(
+                      controller: descriptionController,
+                      maxLines: 3,
+                      decoration: InputDecoration(
+                        labelText: 'Describe Symptoms & Pain Duration',
+                        hintText: 'e.g. Severe throbbing pain in lower molar when eating hot/cold foods...',
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Pain Severity Chips
+                    const Text('Pain Severity Level:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppTheme.textMuted)),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: ['Mild', 'Moderate', 'Severe'].map((sev) {
+                        final isSelected = selectedSeverity == sev;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            label: Text(sev, style: TextStyle(fontSize: 12, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
+                            selected: isSelected,
+                            selectedColor: sev == 'Severe'
+                                ? Colors.red.shade100
+                                : sev == 'Moderate'
+                                    ? Colors.orange.shade100
+                                    : Colors.blue.shade100,
+                            labelStyle: TextStyle(
+                              color: sev == 'Severe'
+                                  ? Colors.red.shade900
+                                  : sev == 'Moderate'
+                                      ? Colors.orange.shade900
+                                      : AppTheme.primaryBlue,
+                            ),
+                            onSelected: (val) {
+                              if (val) setModalState(() => selectedSeverity = sev);
+                            },
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 20),
+
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.send_rounded, size: 18),
+                      label: const Text('Submit Problem to Admin', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primaryBlue,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: () {
+                        if (descriptionController.text.trim().isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Please enter a description of your symptoms.')),
+                          );
+                          return;
+                        }
+                        _patientService.submitProblem(
+                          problemCategory: selectedCategory,
+                          problemDescription: descriptionController.text.trim(),
+                          severity: selectedSeverity,
+                        );
+                        Navigator.of(dialogContext).pop();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('✅ Dental problem submitted! Admin will suggest a doctor shortly.'),
+                            backgroundColor: Color(0xFF10B981),
+                            duration: Duration(seconds: 3),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final patient = _patientService.currentPatient;
+
     return Scaffold(
       backgroundColor: AppTheme.softBlueBg,
       appBar: AppBar(
@@ -26,16 +205,21 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> {
           if (_currentIndex == 0)
             Padding(
               padding: const EdgeInsets.only(right: 16),
-              child: CircleAvatar(
-                radius: 18,
-                backgroundColor: AppTheme.primaryBlue.withOpacity(0.1),
-                child: const Text(
-                  'SJ',
-                  style: TextStyle(
-                    color: AppTheme.primaryBlue,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                  ),
+              child: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppTheme.primaryBlue, width: 1.5),
+                ),
+                child: CircleAvatar(
+                  radius: 18,
+                  backgroundColor: AppTheme.primaryBlue.withOpacity(0.1),
+                  backgroundImage: patient.photoBytes != null ? MemoryImage(patient.photoBytes!) : null,
+                  child: patient.photoBytes == null
+                      ? Text(
+                          patient.name.isNotEmpty ? patient.name[0].toUpperCase() : 'P',
+                          style: const TextStyle(color: AppTheme.primaryBlue, fontWeight: FontWeight.bold, fontSize: 14),
+                        )
+                      : null,
                 ),
               ),
             )
@@ -138,28 +322,214 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> {
   // TAB 1: HOME TAB
   // ==========================================
   Widget _buildHomeTab() {
+    final patient = _patientService.currentPatient;
+    final requests = _patientService.requests;
+
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Greeting Header
+          // Logged-In Greeting Header
           Row(
-            children: const [
-              Text(
-                'Hello, Sarah',
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textDark,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Hello, ${patient.name}',
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.textDark,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${patient.email} • ${patient.bloodGroup}',
+                      style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                    ),
+                  ],
                 ),
               ),
-              SizedBox(width: 6),
-              Text('👋', style: TextStyle(fontSize: 20)),
+              const Text('👋', style: TextStyle(fontSize: 22)),
             ],
           ),
           const SizedBox(height: 16),
+
+          // Report Dental Problem Banner Button
+          InkWell(
+            onTap: () => _showReportProblemDialog(context),
+            borderRadius: BorderRadius.circular(18),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF0284C7), Color(0xFF0369A1)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(18),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF0284C7).withOpacity(0.3),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.add_alert_rounded, color: Colors.white, size: 24),
+                  ),
+                  const SizedBox(width: 14),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Have a Dental Problem?',
+                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Report symptoms to Admin & get recommended a specialized Doctor',
+                          style: TextStyle(color: Colors.white70, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white, size: 16),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // Section: Reported Problems & Admin Doctor Suggestions
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: const [
+              Text(
+                'Reported Problems & Doctor Suggestions',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          if (requests.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFFEEF2F6)),
+              ),
+              child: const Center(
+                child: Text('No dental problems reported yet. Tap above to report.', style: TextStyle(color: AppTheme.textMuted, fontSize: 13)),
+              ),
+            )
+          else
+            Column(
+              children: requests.map((req) {
+                final isSuggested = req.status == 'Doctor Suggested';
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: isSuggested ? const Color(0xFF10B981) : const Color(0xFFEEF2F6), width: isSuggested ? 1.5 : 1),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              req.problemCategory,
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: isSuggested ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              req.status,
+                              style: TextStyle(
+                                color: isSuggested ? const Color(0xFF16A34A) : const Color(0xFFD97706),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        req.problemDescription,
+                        style: const TextStyle(fontSize: 12, color: AppTheme.textMedium),
+                      ),
+                      if (isSuggested) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF0FDF4),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFBBF7D0)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.check_circle_rounded, color: Color(0xFF16A34A), size: 20),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '👨‍⚕️ Admin Suggested: ${req.assignedDoctorName}',
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF14532D)),
+                                    ),
+                                    Text(
+                                      'Specialty: ${req.assignedDoctorSpecialty} • WhatsApp notification sent!',
+                                      style: const TextStyle(fontSize: 11, color: Color(0xFF15803D)),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          const SizedBox(height: 20),
+
+          // "Your Next Visit" Card
+          _buildNextVisitCard(),
+          const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
 
           // "Your Next Visit" Card
           _buildNextVisitCard(),
@@ -930,6 +1300,8 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> {
   // TAB 4: PROFILE TAB
   // ==========================================
   Widget _buildProfileTab() {
+    final patient = _patientService.currentPatient;
+
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
@@ -946,11 +1318,16 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> {
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: AppTheme.softBlueCard,
-                  border: Border.all(color: AppTheme.primaryBlue, width: 2),
-                  image: const DecorationImage(
-                    image: NetworkImage('https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150'),
-                    fit: BoxFit.cover,
-                  ),
+                  border: Border.all(color: AppTheme.primaryBlue, width: 2.5),
+                  image: patient.photoBytes != null
+                      ? DecorationImage(
+                          image: MemoryImage(patient.photoBytes!),
+                          fit: BoxFit.cover,
+                        )
+                      : const DecorationImage(
+                          image: NetworkImage('https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150'),
+                          fit: BoxFit.cover,
+                        ),
                 ),
               ),
               Positioned(
@@ -969,40 +1346,52 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> {
           ),
           const SizedBox(height: 12),
 
-          // User Name & ID
-          const Text(
-            'Sarah Jenkins',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+          // User Name & Email
+          Text(
+            patient.name,
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.textDark),
           ),
           const SizedBox(height: 2),
-          const Text(
-            'Patient ID: DG-00429',
-            style: TextStyle(fontSize: 13, color: AppTheme.textMuted),
+          Text(
+            patient.email,
+            style: const TextStyle(fontSize: 13, color: AppTheme.textMuted),
           ),
           const SizedBox(height: 20),
 
-          // Stat Cards (Blood Group & Age)
+          // Stat Cards Row 1 (Blood Group & Age)
           Row(
             children: [
               Expanded(
-                child: _buildProfileStatCard('BLOOD GROUP', 'O Positive'),
+                child: _buildProfileStatCard('BLOOD GROUP', patient.bloodGroup),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: _buildProfileStatCard('AGE', '28 Years'),
+                child: _buildProfileStatCard('AGE', '${patient.age} Years'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Stat Cards Row 2 (Gender & Phone)
+          Row(
+            children: [
+              Expanded(
+                child: _buildProfileStatCard('GENDER', patient.gender),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildProfileStatCard('PHONE', patient.phone),
               ),
             ],
           ),
           const SizedBox(height: 20),
 
           // Option Items List
+          _buildProfileOptionItem(Icons.contact_phone_outlined, 'Emergency Contact: ${patient.emergencyContact}'),
+          const SizedBox(height: 10),
           _buildProfileOptionItem(Icons.shield_outlined, 'Insurance Details'),
           const SizedBox(height: 10),
-          _buildProfileOptionItem(Icons.account_balance_wallet_outlined, 'Payment Methods'),
-          const SizedBox(height: 10),
           _buildProfileOptionItem(Icons.person_outline_rounded, 'Personal Information'),
-          const SizedBox(height: 10),
-          _buildProfileOptionItem(Icons.settings_outlined, 'App Settings'),
           const SizedBox(height: 24),
 
           // Log Out Button

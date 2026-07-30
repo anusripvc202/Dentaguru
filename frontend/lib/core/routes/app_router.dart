@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import '../widgets/denta_guru_logo.dart';
 import '../theme/app_theme.dart';
+import '../services/patient_problem_service.dart';
 import '../../features/patient/presentation/screens/patient_dashboard.dart';
 import '../../features/dentist/presentation/screens/dentist_timeline.dart';
 import '../../features/clinic/presentation/screens/clinic_dashboard.dart';
@@ -181,7 +182,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         Expanded(
                           child: TabBarView(
                             children: [
-                              // ================= 1. SIGN IN FORM (EMPTY DEFAULTS) =================
+                              // ================= 1. SIGN IN FORM =================
                               SingleChildScrollView(
                                 physics: const BouncingScrollPhysics(),
                                 child: Column(
@@ -283,6 +284,19 @@ class _LoginScreenState extends State<LoginScreen> {
                                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                                       ),
                                       onPressed: () {
+                                        if (portalRole == 'Patient') {
+                                          final enteredEmail = loginEmailController.text.trim();
+                                          final extractedName = enteredEmail.isNotEmpty ? enteredEmail.split('@').first : 'Sarah Jenkins';
+                                          PatientProblemService().updatePatientProfile(
+                                            name: extractedName,
+                                            email: enteredEmail.isNotEmpty ? enteredEmail : defaultEmail,
+                                            phone: '+1 202 555 0142',
+                                            age: '28',
+                                            gender: 'Female',
+                                            bloodGroup: 'O Positive (O+)',
+                                            emergencyContact: '+1 202 555 9988',
+                                          );
+                                        }
                                         Navigator.of(dialogContext).pop();
                                         context.go(targetRoute);
                                       },
@@ -764,6 +778,18 @@ class _LoginScreenState extends State<LoginScreen> {
                                       onPressed: agreeTerms
                                           ? () {
                                               final displayName = nameController.text.trim().isEmpty ? '$portalRole User' : nameController.text.trim();
+                                              if (portalRole == 'Patient') {
+                                                PatientProblemService().updatePatientProfile(
+                                                  name: displayName,
+                                                  email: emailController.text,
+                                                  phone: phoneController.text,
+                                                  age: ageController.text,
+                                                  gender: selectedGender ?? 'Female',
+                                                  bloodGroup: selectedBloodGroup ?? 'O Positive (O+)',
+                                                  emergencyContact: emergencyContactController.text,
+                                                  photoBytes: pickedImageBytes,
+                                                );
+                                              }
                                               Navigator.of(dialogContext).pop();
                                               ScaffoldMessenger.of(context).showSnackBar(
                                                 SnackBar(

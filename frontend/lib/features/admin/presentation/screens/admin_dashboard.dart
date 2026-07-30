@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
+import '../../../../core/services/patient_problem_service.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -12,6 +14,169 @@ class AdminDashboardScreen extends StatefulWidget {
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   int _selectedNavIndex = 0; // 0: Dashboard, 3: Patients, 5: Payments/Revenue
+  final PatientProblemService _problemService = PatientProblemService();
+
+  @override
+  void initState() {
+    super.initState();
+    _problemService.addListener(_onServiceUpdate);
+  }
+
+  @override
+  void dispose() {
+    _problemService.removeListener(_onServiceUpdate);
+    super.dispose();
+  }
+
+  void _onServiceUpdate() {
+    if (mounted) setState(() {});
+  }
+
+  void _showAssignDoctorDialog(BuildContext context, PatientConsultationRequest req) {
+    String selectedDoctor = 'Dr. Sarah Jenkins (Orthodontics)';
+    final adminNotesController = TextEditingController();
+
+    final doctorsMap = {
+      'Dr. Sarah Jenkins (Orthodontics)': 'Orthodontics',
+      'Dr. Michael Chen (Endodontics & Root Canal)': 'Endodontics',
+      'Dr. Elena Rodriguez (Pediatric & General Dentistry)': 'General Dentistry',
+      'Dr. Robert Vance (Oral & Maxillofacial Surgery)': 'Oral Surgery',
+    };
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final doctorNameOnly = selectedDoctor.split(' (').first;
+            final doctorSpecialty = doctorsMap[selectedDoctor] ?? 'General Dentistry';
+
+            final waText = "🏥 *DentaGuru Clinical Recommendation*\n\n"
+                "Dear *${req.patientName}*,\n"
+                "Our Clinical Admin team has reviewed your reported dental problem:\n"
+                "📌 *Issue*: ${req.problemCategory}\n"
+                "⚡ *Severity*: ${req.severity}\n\n"
+                "👨‍⚕️ *Recommended Doctor*: *$doctorNameOnly* ($doctorSpecialty)\n\n"
+                "Tap link to confirm appointment: https://dentaguru.com/app/book?dr=${req.id}";
+
+            return Dialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 480),
+                padding: const EdgeInsets.all(22),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.mark_chat_read_rounded, color: Color(0xFF10B981), size: 24),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Suggest Doctor for ${req.patientName}',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textDark),
+                              ),
+                              Text(
+                                'Problem: ${req.problemCategory} (${req.severity})',
+                                style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Select Doctor Dropdown
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedDoctor,
+                      decoration: InputDecoration(
+                        labelText: 'Select Specialized Dentist',
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      ),
+                      items: doctorsMap.keys.map((doc) => DropdownMenuItem(value: doc, child: Text(doc, style: const TextStyle(fontSize: 12)))).toList(),
+                      onChanged: (val) {
+                        if (val != null) setModalState(() => selectedDoctor = val);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+
+                    // WhatsApp Message Live Preview Box
+                    const Text('WhatsApp Notification Preview:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.textMuted)),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFDCFCE7),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF86EFAC)),
+                      ),
+                      child: Text(
+                        waText,
+                        style: const TextStyle(fontSize: 11, color: Color(0xFF14532D), height: 1.35, fontFamily: 'monospace'),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.send_rounded, size: 18),
+                      label: const Text('Send WhatsApp Notification', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF10B981),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: () async {
+                        _problemService.assignDoctorToRequest(
+                          requestId: req.id,
+                          doctorName: doctorNameOnly,
+                          specialty: doctorSpecialty,
+                          adminNotes: adminNotesController.text,
+                        );
+
+                        final waUrl = Uri.parse("https://wa.me/?text=${Uri.encodeComponent(waText)}");
+                        try {
+                          if (await canLaunchUrl(waUrl)) {
+                            await launchUrl(waUrl, mode: LaunchMode.externalApplication);
+                          }
+                        } catch (e) {
+                          debugPrint('WhatsApp launcher info: $e');
+                        }
+
+                        Navigator.of(dialogContext).pop();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('📱 WhatsApp notification sent to ${req.patientName} & $doctorNameOnly!'),
+                            backgroundColor: const Color(0xFF10B981),
+                            duration: const Duration(seconds: 3),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -143,7 +308,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   String _getNavTitle() {
     switch (_selectedNavIndex) {
       case 0:
-        return 'Dashboard';
+        return 'Dashboard & Patient Consultations';
       case 1:
         return 'Clinics';
       case 2:
@@ -244,10 +409,225 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   // ==========================================
-  // PANEL 1: ADMIN DASHBOARD
+  // PANEL 1: ADMIN DASHBOARD WITH PATIENT CONSULTATIONS
   // ==========================================
   Widget _buildDashboardPanel() {
+    final requests = _problemService.requests;
+
     return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 4 Top Key Metrics Cards (Row of 4)
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth > 750;
+              return GridView.count(
+                crossAxisCount: isWide ? 4 : 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisSpacing: 14,
+                mainAxisSpacing: 14,
+                childAspectRatio: isWide ? 1.6 : 1.4,
+                children: [
+                  const _KpiCard(title: 'Total Patients', value: '1,284', growth: '+12.4%'),
+                  _KpiCard(title: 'Pending Consultations', value: '${requests.where((r) => r.status == "Pending Admin Review").length}', growth: 'Requires Review'),
+                  const _KpiCard(title: 'Total Revenue', value: '₹24,85,200', growth: '+15.3%'),
+                  const _KpiCard(title: 'Active Clinics', value: '156', growth: '+11.9%'),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 20),
+
+          // PATIENT PROBLEM CONSULTATION REQUESTS SECTION
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '🩺 Patient Problem Consultations & Doctor Assignments',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Review patient reported symptoms & suggest specialized dentist via WhatsApp',
+                          style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                        ),
+                      ],
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFDCFCE7),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.mark_chat_read_rounded, size: 14, color: Color(0xFF16A34A)),
+                          const SizedBox(width: 4),
+                          Text(
+                            'WhatsApp Enabled',
+                            style: TextStyle(color: const Color(0xFF16A34A), fontWeight: FontWeight.bold, fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                if (requests.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Text('No patient problem requests found.'),
+                  )
+                else
+                  Column(
+                    children: requests.map((req) {
+                      final isPending = req.status == 'Pending Admin Review';
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: isPending ? const Color(0xFFFDE68A) : const Color(0xFFE2E8F0)),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: isPending ? const Color(0xFFFEF3C7) : const Color(0xFFDCFCE7),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                isPending ? Icons.pending_actions_rounded : Icons.check_circle_rounded,
+                                color: isPending ? const Color(0xFFD97706) : const Color(0xFF16A34A),
+                                size: 20,
+                              ),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        '${req.patientName} (${req.patientPhone})',
+                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+                                      ),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          color: req.severity == 'Severe'
+                                              ? Colors.red.shade100
+                                              : req.severity == 'Moderate'
+                                                  ? Colors.orange.shade100
+                                                  : Colors.blue.shade100,
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Text(
+                                          '${req.severity} Severity',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                            color: req.severity == 'Severe'
+                                                ? Colors.red.shade900
+                                                : req.severity == 'Moderate'
+                                                    ? Colors.orange.shade900
+                                                    : AppTheme.primaryBlue,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Issue: ${req.problemCategory}',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.primaryBlue),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    req.problemDescription,
+                                    style: const TextStyle(fontSize: 12, color: AppTheme.textMedium),
+                                  ),
+                                  if (req.assignedDoctorName != null) ...[
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      '👨‍⚕️ Assigned Doctor: ${req.assignedDoctorName} (${req.assignedDoctorSpecialty})',
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF16A34A)),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            ElevatedButton.icon(
+                              icon: const Icon(Icons.mark_chat_read_rounded, size: 14),
+                              label: Text(isPending ? 'Suggest Doctor' : 'Resend WhatsApp', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: isPending ? const Color(0xFF10B981) : AppTheme.primaryBlue,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              onPressed: () => _showAssignDoctorDialog(context, req),
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // 2 Charts Row Side-by-Side (Appointment Overview & Appointments by Status)
+          LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxWidth >= 800) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(flex: 3, child: _buildAppointmentOverviewCard()),
+                    const SizedBox(width: 16),
+                    Expanded(flex: 2, child: _buildAppointmentsByStatusCard()),
+                  ],
+                );
+              }
+              return Column(
+                children: [
+                  _buildAppointmentOverviewCard(),
+                  const SizedBox(height: 16),
+                  _buildAppointmentsByStatusCard(),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.all(20),
       child: Column(
