@@ -27,10 +27,15 @@ dependencies:
   # Biometric Auth Security
   local_auth: ^2.1.8
 
+  # Firebase — Push Notifications & Core
+  firebase_core: ^3.1.0
+  firebase_messaging: ^15.0.0
+  flutter_local_notifications: ^17.0.0
+
   # Dynamic Visual Assets
   flutter_spinkit: ^5.2.0
   google_fonts: ^6.1.0
-  lucide_icons: ^0.311.0
+  lucide_icons: ^0.257.0
 
 dev_dependencies:
   flutter_test:
@@ -43,3 +48,6 @@ flutter:
   uses-material-design: true
   assets:
     - assets/
+    - assets/dentaguru_logo.png
+    - assets/dentaguru_tooth_icon.png
+    - assets/dentaguru_tooth_icon_transparent.png

@@ -4,48 +4,64 @@ import 'package:google_fonts/google_fonts.dart';
 class AppTheme {
   AppTheme._();
 
-  static const Color primaryTeal = Color(0xFF0D9488);
-  static const Color primaryTealLight = Color(0xFF14B8A6);
-  static const Color secondaryBlue = Color(0xFF0EA5E9);
-  static const Color accentLime = Color(0xFF84CC16);
-  
-  static const Color darkBg = Color(0xFF0F172A);
-  static const Color darkCard = Color(0xFF1E293B);
-  
-  static const Color lightBg = Color(0xFFF8FAFC);
-  static const Color lightCard = Colors.white;
+  // Brand Colors matching DentaGuru design mockup & logo
+  static const Color primaryBlue = Color(0xFF0052CC);
+  static const Color primaryBlueDark = Color(0xFF0B46A4);
+  static const Color brandOrange = Color(0xFFFF7A00);
+  static const Color brandOrangeLight = Color(0xFFFF9500);
+
+  // Soft Tint & Background Colors
+  static const Color softBlueBg = Color(0xFFF4F7FC);
+  static const Color cardBg = Colors.white;
+  static const Color softBlueCard = Color(0xFFEBF2FE);
+  static const Color softBlueBorder = Color(0xFFD4E3FC);
+
+  // Text Colors
+  static const Color textDark = Color(0xFF0F172A);
+  static const Color textMedium = Color(0xFF475569);
+  static const Color textMuted = Color(0xFF8C9BAB);
+
+  // Status Colors
+  static const Color statusConfirmedBg = Color(0xFFEBF2FE);
+  static const Color statusConfirmedText = Color(0xFF0052CC);
+  static const Color statusCancelBg = Color(0xFFFEE2E2);
+  static const Color statusCancelText = Color(0xFFEF4444);
 
   // 1. LIGHT MODE THEME
   static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.light,
-      primaryColor: primaryTeal,
-      scaffoldBackgroundColor: lightBg,
+      primaryColor: primaryBlue,
+      scaffoldBackgroundColor: softBlueBg,
       colorScheme: const ColorScheme.light(
-        primary: primaryTeal,
-        secondary: secondaryBlue,
-        tertiary: accentLime,
-        background: lightBg,
-        surface: lightCard,
+        primary: primaryBlue,
+        secondary: brandOrange,
+        tertiary: primaryBlueDark,
+        surface: cardBg,
         onPrimary: Colors.white,
       ),
       textTheme: GoogleFonts.plusJakartaSansTextTheme(ThemeData.light().textTheme).copyWith(
-        titleLarge: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 22),
-        titleMedium: GoogleFonts.outfit(fontWeight: FontWeight.w600, fontSize: 16),
+        titleLarge: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 22, color: textDark),
+        titleMedium: GoogleFonts.outfit(fontWeight: FontWeight.w600, fontSize: 16, color: textDark),
+        bodyLarge: GoogleFonts.plusJakartaSans(fontSize: 14, color: textDark),
+        bodyMedium: GoogleFonts.plusJakartaSans(fontSize: 13, color: textMedium),
       ),
-      cardTheme: CardTheme(
-        color: lightCard,
-        elevation: 2,
-        shadowColor: Colors.black.withOpacity(0.05),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      cardTheme: CardThemeData(
+        color: cardBg,
+        elevation: 0.5,
+        shadowColor: Colors.black.withOpacity(0.04),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: Color(0xFFEEF2F6), width: 1),
+        ),
       ),
       appBarTheme: const AppBarTheme(
-        backgroundColor: lightBg,
+        backgroundColor: softBlueBg,
         elevation: 0,
         centerTitle: false,
-        iconTheme: IconThemeData(color: Colors.black87),
-        titleTextStyle: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 20),
+        iconTheme: IconThemeData(color: primaryBlue),
+        titleTextStyle: TextStyle(color: textDark, fontWeight: FontWeight.bold, fontSize: 20),
       ),
     );
   }
@@ -55,27 +71,25 @@ class AppTheme {
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
-      primaryColor: primaryTealLight,
-      scaffoldBackgroundColor: darkBg,
+      primaryColor: primaryBlue,
+      scaffoldBackgroundColor: const Color(0xFF0F172A),
       colorScheme: const ColorScheme.dark(
-        primary: primaryTealLight,
-        secondary: secondaryBlue,
-        tertiary: accentLime,
-        background: darkBg,
-        surface: darkCard,
+        primary: primaryBlue,
+        secondary: brandOrange,
+        surface: Color(0xFF1E293B),
         onPrimary: Colors.white,
       ),
       textTheme: GoogleFonts.plusJakartaSansTextTheme(ThemeData.dark().textTheme).copyWith(
         titleLarge: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 22, color: Colors.white),
         titleMedium: GoogleFonts.outfit(fontWeight: FontWeight.w600, fontSize: 16, color: Colors.white),
       ),
-      cardTheme: CardTheme(
-        color: darkCard,
+      cardTheme: CardThemeData(
+        color: const Color(0xFF1E293B),
         elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       ),
       appBarTheme: const AppBarTheme(
-        backgroundColor: darkBg,
+        backgroundColor: Color(0xFF0F172A),
         elevation: 0,
         centerTitle: false,
         iconTheme: IconThemeData(color: Colors.white),
@@ -84,3 +98,4 @@ class AppTheme {
     );
   }
 }
+

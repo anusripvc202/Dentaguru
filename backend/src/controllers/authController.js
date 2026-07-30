@@ -21,7 +21,7 @@ const generateTokens = (user) => {
 
 // 1. REGISTER
 exports.register = async (req, res) => {
-    const { name, email, password, phone, role } = req.body;
+    const { name, email, password, phone, role, fcmToken } = req.body;
     try {
         // Check conflicts
         const existingEmail = await User.findOne({ email });
@@ -35,6 +35,8 @@ exports.register = async (req, res) => {
         }
 
         const user = new User({ name, email, password, phone, role });
+        // Save Firebase FCM device token if provided (for push notifications)
+        if (fcmToken) user.deviceToken = fcmToken;
         await user.save();
 
         const { accessToken, refreshToken } = generateTokens(user);
@@ -62,7 +64,7 @@ exports.register = async (req, res) => {
 
 // 2. LOGIN
 exports.login = async (req, res) => {
-    const { email, password } = req.body;
+    const { email, password, fcmToken } = req.body;
     try {
         const user = await User.findOne({ email });
         if (!user) {
@@ -72,6 +74,11 @@ exports.login = async (req, res) => {
         const isMatch = await user.comparePassword(password);
         if (!isMatch) {
             return res.status(400).json({ success: false, message: 'Invalid credentials.' });
+        }
+
+        // Update FCM device token on login (tokens can rotate)
+        if (fcmToken && user.deviceToken !== fcmToken) {
+            user.deviceToken = fcmToken;
         }
 
         const { accessToken, refreshToken } = generateTokens(user);
@@ -187,5 +194,19 @@ exports.saveBiometric = async (req, res) => {
         res.json({ success: true, message: 'Biometric token configured successfully.' });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to configure biometrics.' });
+    }
+};
+
+// 6. UPDATE FCM DEVICE TOKEN (Firebase Push Notifications)
+exports.updateFcmToken = async (req, res) => {
+    const { fcmToken } = req.body;
+    if (!fcmToken) {
+        return res.status(400).json({ success: false, message: 'fcmToken is required.' });
+    }
+    try {
+        await User.findByIdAndUpdate(req.user.id, { deviceToken: fcmToken });
+        res.json({ success: true, message: 'FCM device token updated successfully.' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: 'Failed to update FCM token.' });
     }
 };

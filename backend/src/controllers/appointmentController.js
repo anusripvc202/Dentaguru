@@ -1,4 +1,5 @@
-const { Appointment, Clinic } = require('../models/Schemas');
+const { Appointment, Clinic, User } = require('../models/Schemas');
+const { sendPushNotification } = require('../services/notificationService');
 
 // 1. BOOK APPOINTMENT
 exports.bookAppointment = async (req, res) => {
@@ -18,11 +19,22 @@ exports.bookAppointment = async (req, res) => {
             date: new Date(date),
             timeSlot,
             treatment,
-            status: 'confirmed', // Defaults directly to confirmed for ease of testing
+            status: 'confirmed',
             qrCodeString: `DENTAGURU-${req.user.id}-${Date.now()}`
         });
 
         await appointment.save();
+
+        // 🔔 Firebase FCM — Notify patient of confirmed booking
+        const patient = await User.findById(req.user.id).select('deviceToken name');
+        if (patient?.deviceToken) {
+            await sendPushNotification(
+                patient.deviceToken,
+                '✅ Appointment Confirmed!',
+                `Your appointment for ${treatment} at ${timeSlot} on ${new Date(date).toDateString()} is confirmed.`,
+                { appointmentId: String(appointment._id), type: 'appointment_confirmed' }
+            );
+        }
 
         res.status(201).json({
             success: true,
@@ -90,6 +102,17 @@ exports.rescheduleAppointment = async (req, res) => {
         appointment.status = 'rescheduled';
         await appointment.save();
 
+        // 🔔 Firebase FCM — Notify patient of reschedule
+        const patient = await User.findById(appointment.patientId).select('deviceToken');
+        if (patient?.deviceToken) {
+            await sendPushNotification(
+                patient.deviceToken,
+                '📅 Appointment Rescheduled',
+                `Your appointment has been rescheduled to ${timeSlot} on ${new Date(date).toDateString()}.`,
+                { appointmentId: String(appointment._id), type: 'appointment_rescheduled' }
+            );
+        }
+
         res.json({ success: true, message: 'Appointment rescheduled successfully.', appointment });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to reschedule appointment.' });
@@ -111,6 +134,17 @@ exports.cancelAppointment = async (req, res) => {
 
         appointment.status = 'cancelled';
         await appointment.save();
+
+        // 🔔 Firebase FCM — Notify patient of cancellation
+        const patient = await User.findById(appointment.patientId).select('deviceToken');
+        if (patient?.deviceToken) {
+            await sendPushNotification(
+                patient.deviceToken,
+                '❌ Appointment Cancelled',
+                `Your appointment has been cancelled. Book a new one anytime on DentaGuru.`,
+                { appointmentId: String(appointment._id), type: 'appointment_cancelled' }
+            );
+        }
 
         res.json({ success: true, message: 'Appointment cancelled successfully.', appointment });
     } catch (err) {

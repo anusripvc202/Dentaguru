@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import '../../../../core/widgets/denta_guru_logo.dart';
+
+import 'package:go_router/go_router.dart';
 
 class ClinicDashboardScreen extends StatefulWidget {
   const ClinicDashboardScreen({super.key});
@@ -16,18 +19,18 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Smile Craft Dental Care', style: TextStyle(fontWeight: FontWeight.bold)),
-            Text('Partner Clinic Panel', style: TextStyle(fontSize: 12, color: Colors.grey)),
-          ],
-        ),
+        title: const DentaGuruLogo(height: 28),
         actions: [
           IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: () {},
-          )
+            icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
+            tooltip: 'Log Out',
+            onPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Logged out successfully.')),
+              );
+              context.go('/');
+            },
+          ),
         ],
       ),
       body: IndexedStack(
@@ -94,7 +97,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                   ),
                   const SizedBox(height: 12),
                   const Row(
-                    mainAxisAlignment: MainAxisAlignment.between,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text('Monday - Friday'),
                       Text('09:00 AM - 08:00 PM', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -102,7 +105,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                   ),
                   const Divider(height: 24),
                   const Row(
-                    mainAxisAlignment: MainAxisAlignment.between,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text('Saturday'),
                       Text('10:00 AM - 05:00 PM', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -120,7 +123,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.between,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -174,7 +177,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
       padding: const EdgeInsets.all(16),
       children: [
         Row(
-          mainAxisAlignment: MainAxisAlignment.between,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text('Attached Doctors', style: theme.textTheme.titleMedium),
             ElevatedButton.icon(
@@ -220,7 +223,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
       padding: const EdgeInsets.all(16),
       children: [
         Row(
-          mainAxisAlignment: MainAxisAlignment.between,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text('Services Configure', style: theme.textTheme.titleMedium),
             IconButton(
