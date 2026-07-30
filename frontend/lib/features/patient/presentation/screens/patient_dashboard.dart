@@ -531,61 +531,6 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> {
     );
   }
 
-          // "Your Next Visit" Card
-          _buildNextVisitCard(),
-          const SizedBox(height: 24),
-
-          // Quick Actions
-          const Text(
-            'Quick Actions',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-          ),
-          const SizedBox(height: 14),
-          _buildQuickActionsRow(),
-          const SizedBox(height: 24),
-
-          // Recent Treatments Header
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Recent Treatments',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-              ),
-              TextButton(
-                onPressed: () {},
-                style: TextButton.styleFrom(
-                  padding: EdgeInsets.zero,
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                child: const Text(
-                  'View All',
-                  style: TextStyle(color: AppTheme.primaryBlue, fontWeight: FontWeight.w600, fontSize: 13),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-
-          // Treatment Items
-          _buildTreatmentItem(
-            icon: Icons.medical_information_outlined,
-            title: 'Wisdom Tooth Extraction',
-            subtitle: 'Sep 12, 2023 • Dr. Elena Rodriguez',
-          ),
-          const SizedBox(height: 10),
-          _buildTreatmentItem(
-            icon: Icons.clean_hands_outlined,
-            title: 'Deep Cleaning',
-            subtitle: 'Jun 05, 2023 • Dr. Marcus Chen',
-          ),
-          const SizedBox(height: 20),
-        ],
-      ),
-    );
-  }
-
   Widget _buildNextVisitCard() {
     return Container(
       decoration: BoxDecoration(
