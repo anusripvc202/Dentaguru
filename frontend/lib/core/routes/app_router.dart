@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import '../widgets/denta_guru_logo.dart';
 import '../theme/app_theme.dart';
 import '../services/patient_problem_service.dart';
+import '../../features/home/presentation/screens/home_screen.dart';
 import '../../features/patient/presentation/screens/patient_dashboard.dart';
 import '../../features/dentist/presentation/screens/dentist_timeline.dart';
 import '../../features/clinic/presentation/screens/clinic_dashboard.dart';
@@ -104,19 +105,29 @@ class _LoginScreenState extends State<LoginScreen> {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        // Dialog Header
+                        // Professional Dialog Header with DentaGuru Logo
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const DentaGuruLogo(height: 36),
+                            IconButton(
+                              icon: const Icon(Icons.close_rounded, color: AppTheme.textMuted, size: 22),
+                              onPressed: () => Navigator.of(dialogContext).pop(),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
                         Row(
                           children: [
-                            AnimatedContainer(
-                              duration: const Duration(milliseconds: 300),
-                              padding: const EdgeInsets.all(10),
+                            Container(
+                              padding: const EdgeInsets.all(8),
                               decoration: BoxDecoration(
                                 color: accentColor.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(14),
+                                borderRadius: BorderRadius.circular(10),
                               ),
-                              child: Icon(portalIcon, color: accentColor, size: 24),
+                              child: Icon(portalIcon, color: accentColor, size: 18),
                             ),
-                            const SizedBox(width: 14),
+                            const SizedBox(width: 10),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -125,21 +136,16 @@ class _LoginScreenState extends State<LoginScreen> {
                                     '$portalRole Access Portal',
                                     style: const TextStyle(
                                       fontWeight: FontWeight.bold,
-                                      fontSize: 18,
+                                      fontSize: 17,
                                       color: AppTheme.textDark,
                                     ),
                                   ),
-                                  const SizedBox(height: 2),
                                   Text(
                                     'DentaGuru Healthcare Network • $portalRole Module',
                                     style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                   ),
                                 ],
                               ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.close_rounded, color: AppTheme.textMuted, size: 20),
-                              onPressed: () => Navigator.of(dialogContext).pop(),
                             ),
                           ],
                         ),
@@ -221,17 +227,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
                                     TextField(
                                       controller: loginEmailController,
-                                      decoration: InputDecoration(
-                                        labelText: '$portalRole Email / ID',
-                                        hintText: 'Enter your email or user ID',
-                                        prefixIcon: const Icon(Icons.email_outlined, size: 20),
-                                        filled: true,
-                                        fillColor: const Color(0xFFF8FAFC),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(14),
-                                          borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-                                        ),
-                                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                      decoration: _buildCleanFieldDecoration(
+                                        label: '$portalRole Email / User ID',
+                                        icon: Icons.email_outlined,
+                                        accentColor: accentColor,
                                       ),
                                     ),
                                     const SizedBox(height: 14),
@@ -239,10 +238,10 @@ class _LoginScreenState extends State<LoginScreen> {
                                     TextField(
                                       controller: loginPasswordController,
                                       obscureText: !showLoginPassword,
-                                      decoration: InputDecoration(
-                                        labelText: 'Password',
-                                        hintText: 'Enter your password',
-                                        prefixIcon: const Icon(Icons.lock_outline, size: 20),
+                                      decoration: _buildCleanFieldDecoration(
+                                        label: 'Password',
+                                        icon: Icons.lock_outline,
+                                        accentColor: accentColor,
                                         suffixIcon: IconButton(
                                           icon: Icon(
                                             showLoginPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
@@ -254,13 +253,6 @@ class _LoginScreenState extends State<LoginScreen> {
                                             });
                                           },
                                         ),
-                                        filled: true,
-                                        fillColor: const Color(0xFFF8FAFC),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(14),
-                                          borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-                                        ),
-                                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                                       ),
                                     ),
                                     const SizedBox(height: 8),
@@ -399,46 +391,28 @@ class _LoginScreenState extends State<LoginScreen> {
                                     // Field 1: Name
                                     TextField(
                                       controller: nameController,
-                                      decoration: InputDecoration(
-                                        labelText: portalRole == 'Dentist'
+                                      decoration: _buildCleanFieldDecoration(
+                                        label: portalRole == 'Dentist'
                                             ? 'Full Name & Practitioner Title'
                                             : portalRole == 'Admin'
                                                 ? 'Administrator Full Name'
                                                 : 'Patient Full Name',
-                                        hintText: portalRole == 'Dentist'
-                                            ? 'e.g. Dr. Sarah Jenkins, DDS'
-                                            : portalRole == 'Admin'
-                                                ? 'e.g. Robert Vance'
-                                                : 'e.g. Sarah Jenkins',
-                                        prefixIcon: const Icon(Icons.person_outline_rounded, size: 18),
-                                        filled: true,
-                                        fillColor: const Color(0xFFF8FAFC),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(12),
-                                          borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-                                        ),
-                                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                        icon: Icons.person_outline_rounded,
+                                        accentColor: accentColor,
                                       ),
                                     ),
-                                    const SizedBox(height: 10),
+                                    const SizedBox(height: 12),
 
                                     // Field 2: Email
                                     TextField(
                                       controller: emailController,
-                                      decoration: InputDecoration(
-                                        labelText: 'Email Address',
-                                        hintText: 'e.g. sarah@example.com',
-                                        prefixIcon: const Icon(Icons.email_outlined, size: 18),
-                                        filled: true,
-                                        fillColor: const Color(0xFFF8FAFC),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(12),
-                                          borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-                                        ),
-                                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                      decoration: _buildCleanFieldDecoration(
+                                        label: 'Email Address',
+                                        icon: Icons.email_outlined,
+                                        accentColor: accentColor,
                                       ),
                                     ),
-                                    const SizedBox(height: 10),
+                                    const SizedBox(height: 12),
 
                                     // ============ ROLE-SPECIFIC FIELDS ============
                                     if (portalRole == 'Patient') ...[
@@ -449,17 +423,10 @@ class _LoginScreenState extends State<LoginScreen> {
                                             flex: 3,
                                             child: TextField(
                                               controller: phoneController,
-                                              decoration: InputDecoration(
-                                                labelText: 'Phone Number',
-                                                hintText: 'e.g. +1 202 555 0142',
-                                                prefixIcon: const Icon(Icons.phone_outlined, size: 18),
-                                                filled: true,
-                                                fillColor: const Color(0xFFF8FAFC),
-                                                border: OutlineInputBorder(
-                                                  borderRadius: BorderRadius.circular(12),
-                                                  borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-                                                ),
-                                                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                                              decoration: _buildCleanFieldDecoration(
+                                                label: 'Phone Number',
+                                                icon: Icons.phone_outlined,
+                                                accentColor: accentColor,
                                               ),
                                             ),
                                           ),
@@ -468,38 +435,24 @@ class _LoginScreenState extends State<LoginScreen> {
                                             flex: 2,
                                             child: TextField(
                                               controller: ageController,
-                                              decoration: InputDecoration(
-                                                labelText: 'Age',
-                                                hintText: 'e.g. 28',
-                                                prefixIcon: const Icon(Icons.cake_outlined, size: 18),
-                                                filled: true,
-                                                fillColor: const Color(0xFFF8FAFC),
-                                                border: OutlineInputBorder(
-                                                  borderRadius: BorderRadius.circular(12),
-                                                  borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-                                                ),
-                                                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                                              decoration: _buildCleanFieldDecoration(
+                                                label: 'Age',
+                                                icon: Icons.cake_outlined,
+                                                accentColor: accentColor,
                                               ),
                                             ),
                                           ),
                                         ],
                                       ),
-                                      const SizedBox(height: 10),
+                                      const SizedBox(height: 12),
 
                                       // Gender Dropdown
                                       DropdownButtonFormField<String>(
                                         initialValue: selectedGender,
-                                        decoration: InputDecoration(
-                                          labelText: 'Gender',
-                                          hintText: 'Select Gender',
-                                          prefixIcon: const Icon(Icons.people_outline_rounded, size: 18),
-                                          filled: true,
-                                          fillColor: const Color(0xFFF8FAFC),
-                                          border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(12),
-                                            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-                                          ),
-                                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                        decoration: _buildCleanFieldDecoration(
+                                          label: 'Gender',
+                                          icon: Icons.people_outline_rounded,
+                                          accentColor: accentColor,
                                         ),
                                         items: ['Female', 'Male', 'Other', 'Prefer not to say'].map((g) {
                                           return DropdownMenuItem(
@@ -509,22 +462,15 @@ class _LoginScreenState extends State<LoginScreen> {
                                         }).toList(),
                                         onChanged: (val) => setModalState(() => selectedGender = val),
                                       ),
-                                      const SizedBox(height: 10),
+                                      const SizedBox(height: 12),
 
                                       // Blood Group Dropdown
                                       DropdownButtonFormField<String>(
                                         initialValue: selectedBloodGroup,
-                                        decoration: InputDecoration(
-                                          labelText: 'Blood Group',
-                                          hintText: 'Select Blood Group',
-                                          prefixIcon: const Icon(Icons.bloodtype_outlined, size: 18),
-                                          filled: true,
-                                          fillColor: const Color(0xFFF8FAFC),
-                                          border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(12),
-                                            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-                                          ),
-                                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                        decoration: _buildCleanFieldDecoration(
+                                          label: 'Blood Group',
+                                          icon: Icons.bloodtype_outlined,
+                                          accentColor: accentColor,
                                         ),
                                         items: [
                                           'O Positive (O+)',
@@ -543,57 +489,47 @@ class _LoginScreenState extends State<LoginScreen> {
                                         }).toList(),
                                         onChanged: (val) => setModalState(() => selectedBloodGroup = val),
                                       ),
-                                      const SizedBox(height: 10),
+                                      const SizedBox(height: 12),
 
                                       // Emergency Contact Phone
                                       TextField(
                                         controller: emergencyContactController,
-                                        decoration: InputDecoration(
-                                          labelText: 'Emergency Contact Phone',
-                                          hintText: 'e.g. +1 202 555 9988',
-                                          prefixIcon: const Icon(Icons.contact_phone_outlined, size: 18),
-                                          filled: true,
-                                          fillColor: const Color(0xFFF8FAFC),
-                                          border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(12),
-                                            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-                                          ),
-                                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                        decoration: _buildCleanFieldDecoration(
+                                          label: 'Emergency Contact Phone',
+                                          icon: Icons.contact_phone_outlined,
+                                          accentColor: accentColor,
                                         ),
                                       ),
                                     ] else if (portalRole == 'Dentist') ...[
+                                      // Contact Phone Number
+                                      TextField(
+                                        controller: phoneController,
+                                        decoration: _buildCleanFieldDecoration(
+                                          label: 'Contact Phone Number',
+                                          icon: Icons.phone_outlined,
+                                          accentColor: accentColor,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+
                                       // License No.
                                       TextField(
                                         controller: licenseNoController,
-                                        decoration: InputDecoration(
-                                          labelText: 'Dental License Registration No.',
-                                          hintText: 'e.g. DEN-884920-US',
-                                          prefixIcon: const Icon(Icons.badge_outlined, size: 18),
-                                          filled: true,
-                                          fillColor: const Color(0xFFF8FAFC),
-                                          border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(12),
-                                            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-                                          ),
-                                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                        decoration: _buildCleanFieldDecoration(
+                                          label: 'Dental License Registration No.',
+                                          icon: Icons.badge_outlined,
+                                          accentColor: accentColor,
                                         ),
                                       ),
-                                      const SizedBox(height: 10),
+                                      const SizedBox(height: 12),
 
                                       // Specialty Dropdown
                                       DropdownButtonFormField<String>(
                                         initialValue: selectedSpecialty,
-                                        decoration: InputDecoration(
-                                          labelText: 'Dental Specialization',
-                                          hintText: 'Select Specialization',
-                                          prefixIcon: const Icon(Icons.medical_services_outlined, size: 18),
-                                          filled: true,
-                                          fillColor: const Color(0xFFF8FAFC),
-                                          border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(12),
-                                            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-                                          ),
-                                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                        decoration: _buildCleanFieldDecoration(
+                                          label: 'Dental Specialization',
+                                          icon: Icons.medical_services_outlined,
+                                          accentColor: accentColor,
                                         ),
                                         items: [
                                           'Orthodontics',
@@ -611,7 +547,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                         }).toList(),
                                         onChanged: (val) => setModalState(() => selectedSpecialty = val),
                                       ),
-                                      const SizedBox(height: 10),
+                                      const SizedBox(height: 12),
 
                                       // Clinic Name & Experience
                                       Row(
@@ -620,17 +556,10 @@ class _LoginScreenState extends State<LoginScreen> {
                                             flex: 3,
                                             child: TextField(
                                               controller: clinicNameController,
-                                              decoration: InputDecoration(
-                                                labelText: 'Practice Name',
-                                                hintText: 'e.g. Apex Dental Center',
-                                                prefixIcon: const Icon(Icons.location_city_outlined, size: 18),
-                                                filled: true,
-                                                fillColor: const Color(0xFFF8FAFC),
-                                                border: OutlineInputBorder(
-                                                  borderRadius: BorderRadius.circular(12),
-                                                  borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-                                                ),
-                                                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                                              decoration: _buildCleanFieldDecoration(
+                                                label: 'Practice Name',
+                                                icon: Icons.location_city_outlined,
+                                                accentColor: accentColor,
                                               ),
                                             ),
                                           ),
@@ -639,17 +568,10 @@ class _LoginScreenState extends State<LoginScreen> {
                                             flex: 2,
                                             child: TextField(
                                               controller: experienceController,
-                                              decoration: InputDecoration(
-                                                labelText: 'Years Exp.',
-                                                hintText: 'e.g. 8 Years',
-                                                prefixIcon: const Icon(Icons.work_history_outlined, size: 18),
-                                                filled: true,
-                                                fillColor: const Color(0xFFF8FAFC),
-                                                border: OutlineInputBorder(
-                                                  borderRadius: BorderRadius.circular(12),
-                                                  borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-                                                ),
-                                                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                                              decoration: _buildCleanFieldDecoration(
+                                                label: 'Years Exp.',
+                                                icon: Icons.work_history_outlined,
+                                                accentColor: accentColor,
                                               ),
                                             ),
                                           ),
@@ -659,65 +581,44 @@ class _LoginScreenState extends State<LoginScreen> {
                                       // Admin Designation Title
                                       TextField(
                                         controller: adminTitleController,
-                                        decoration: InputDecoration(
-                                          labelText: 'Designation Title',
-                                          hintText: 'e.g. Chief Administrator',
-                                          prefixIcon: const Icon(Icons.admin_panel_settings_outlined, size: 18),
-                                          filled: true,
-                                          fillColor: const Color(0xFFF8FAFC),
-                                          border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(12),
-                                            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-                                          ),
-                                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                        decoration: _buildCleanFieldDecoration(
+                                          label: 'Designation Title',
+                                          icon: Icons.admin_panel_settings_outlined,
+                                          accentColor: accentColor,
                                         ),
                                       ),
-                                      const SizedBox(height: 10),
+                                      const SizedBox(height: 12),
 
                                       TextField(
                                         controller: facilityIdController,
-                                        decoration: InputDecoration(
-                                          labelText: 'Facility Tax / License ID',
-                                          hintText: 'e.g. FAC-FL-90210',
-                                          prefixIcon: const Icon(Icons.verified_outlined, size: 18),
-                                          filled: true,
-                                          fillColor: const Color(0xFFF8FAFC),
-                                          border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(12),
-                                            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-                                          ),
-                                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                        decoration: _buildCleanFieldDecoration(
+                                          label: 'Facility Tax / License ID',
+                                          icon: Icons.verified_outlined,
+                                          accentColor: accentColor,
                                         ),
                                       ),
-                                      const SizedBox(height: 10),
+                                      const SizedBox(height: 12),
 
                                       TextField(
                                         controller: adminSecurityKeyController,
                                         obscureText: true,
-                                        decoration: InputDecoration(
-                                          labelText: 'System Security Passcode',
-                                          hintText: '••••••••',
-                                          prefixIcon: const Icon(Icons.key_outlined, size: 18),
-                                          filled: true,
-                                          fillColor: const Color(0xFFF8FAFC),
-                                          border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(12),
-                                            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-                                          ),
-                                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                                        decoration: _buildCleanFieldDecoration(
+                                          label: 'System Security Passcode',
+                                          icon: Icons.key_outlined,
+                                          accentColor: accentColor,
                                         ),
                                       ),
                                     ],
-                                    const SizedBox(height: 10),
+                                    const SizedBox(height: 12),
 
                                     // Password Field with Toggle
                                     TextField(
                                       controller: passwordController,
                                       obscureText: !showRegPassword,
-                                      decoration: InputDecoration(
-                                        labelText: 'Set Account Password',
-                                        hintText: '••••••••',
-                                        prefixIcon: const Icon(Icons.lock_outline, size: 18),
+                                      decoration: _buildCleanFieldDecoration(
+                                        label: 'Set Account Password',
+                                        icon: Icons.lock_outline,
+                                        accentColor: accentColor,
                                         suffixIcon: IconButton(
                                           icon: Icon(
                                             showRegPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
@@ -729,13 +630,6 @@ class _LoginScreenState extends State<LoginScreen> {
                                             });
                                           },
                                         ),
-                                        filled: true,
-                                        fillColor: const Color(0xFFF8FAFC),
-                                        border: OutlineInputBorder(
-                                          borderRadius: BorderRadius.circular(12),
-                                          borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-                                        ),
-                                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                                       ),
                                     ),
                                     const SizedBox(height: 12),
@@ -772,8 +666,6 @@ class _LoginScreenState extends State<LoginScreen> {
                                         backgroundColor: agreeTerms ? accentColor : Colors.grey,
                                         foregroundColor: Colors.white,
                                         padding: const EdgeInsets.symmetric(vertical: 14),
-                                        elevation: 2,
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                       ),
                                       onPressed: agreeTerms
                                           ? () {
@@ -788,6 +680,17 @@ class _LoginScreenState extends State<LoginScreen> {
                                                   bloodGroup: selectedBloodGroup ?? 'O Positive (O+)',
                                                   emergencyContact: emergencyContactController.text,
                                                   photoBytes: pickedImageBytes,
+                                                );
+                                              } else if (portalRole == 'Dentist') {
+                                                final expNum = int.tryParse(experienceController.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 5;
+                                                PatientProblemService().registerDoctor(
+                                                  name: displayName,
+                                                  email: emailController.text,
+                                                  phone: phoneController.text,
+                                                  licenseNumber: licenseNoController.text,
+                                                  specialty: selectedSpecialty ?? 'General Dentistry',
+                                                  clinicName: clinicNameController.text,
+                                                  experienceYears: expNum,
                                                 );
                                               }
                                               Navigator.of(dialogContext).pop();
@@ -825,6 +728,26 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.softBlueBg,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 1,
+        shadowColor: Colors.black.withValues(alpha: 0.05),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded, color: AppTheme.primaryBlue),
+          onPressed: () => context.go('/'),
+          tooltip: 'Back to Home Page',
+        ),
+        title: const Row(
+          children: [
+            DentaGuruLogo(height: 34),
+            SizedBox(width: 10),
+            Text(
+              'Portal Selection',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textDark),
+            ),
+          ],
+        ),
+      ),
       body: Container(
         padding: const EdgeInsets.all(24),
         child: Center(
@@ -833,16 +756,53 @@ class _LoginScreenState extends State<LoginScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Center(
-                  child: DentaGuruLogo(height: 68),
+                // Professional Card Box with Real Transparent Logo
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.04),
+                        blurRadius: 16,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                    border: Border.all(color: const Color(0xFFEEF2F6)),
+                  ),
+                  child: Column(
+                    children: [
+                      const DentaGuruLogo(height: 60),
+                      const SizedBox(height: 10),
+                      const Text(
+                        'Multi-Vendor Dental Healthcare Ecosystem',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: AppTheme.textDark, fontSize: 13, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: const [
+                            Icon(Icons.shield_outlined, size: 12, color: Color(0xFF10B981)),
+                            SizedBox(width: 4),
+                            Text(
+                              'Encrypted Access • HIPAA Compliant',
+                              style: TextStyle(fontSize: 10, color: Color(0xFF10B981), fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 10),
-                const Text(
-                  'Multi-Vendor Dental Healthcare Ecosystem',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: AppTheme.textMuted, fontSize: 13),
-                ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 24),
 
                 // 1. Patient Portal Card
                 _buildPortalLandingCard(
@@ -889,6 +849,41 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  InputDecoration _buildCleanFieldDecoration({
+    required String label,
+    required IconData icon,
+    required Color accentColor,
+    Widget? suffixIcon,
+  }) {
+    return InputDecoration(
+      labelText: label,
+      hintText: null, // Zero pre-filled text sitting inside the input!
+      floatingLabelBehavior: FloatingLabelBehavior.auto,
+      floatingLabelStyle: TextStyle(
+        color: accentColor,
+        fontWeight: FontWeight.bold,
+        fontSize: 13,
+      ),
+      labelStyle: const TextStyle(
+        color: AppTheme.textMuted,
+        fontSize: 13,
+      ),
+      prefixIcon: Icon(icon, size: 18, color: AppTheme.textMuted),
+      suffixIcon: suffixIcon,
+      filled: true,
+      fillColor: const Color(0xFFF8FAFC),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: Color(0xFFE2E8F0), width: 1.2),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: accentColor, width: 2),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+    );
+  }
+
   Widget _buildPortalLandingCard(
     BuildContext context, {
     required String title,
@@ -899,43 +894,90 @@ class _LoginScreenState extends State<LoginScreen> {
     required String targetRoute,
     required String portalRole,
   }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
-          ),
-        ],
+    return _AnimatedPortalCard(
+      title: title,
+      subtitle: subtitle,
+      icon: icon,
+      accentColor: accentColor,
+      onTap: () => _showAuthDialog(
+        context,
+        portalRole: portalRole,
+        defaultEmail: defaultEmail,
+        targetRoute: targetRoute,
+        accentColor: accentColor,
+        portalIcon: icon,
+        initialTab: 0,
       ),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(18),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: () => _showAuthDialog(
-            context,
-            portalRole: portalRole,
-            defaultEmail: defaultEmail,
-            targetRoute: targetRoute,
-            accentColor: accentColor,
-            portalIcon: icon,
-            initialTab: 0,
+    );
+  }
+}
+
+// Custom Animated Portal Card with Hover & Scale Transitions
+class _AnimatedPortalCard extends StatefulWidget {
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color accentColor;
+  final VoidCallback onTap;
+
+  const _AnimatedPortalCard({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.accentColor,
+    required this.onTap,
+  });
+
+  @override
+  State<_AnimatedPortalCard> createState() => _AnimatedPortalCardState();
+}
+
+class _AnimatedPortalCardState extends State<_AnimatedPortalCard> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: GestureDetector(
+        onTapDown: (_) => setState(() => _isHovered = true),
+        onTapUp: (_) {
+          setState(() => _isHovered = false);
+          widget.onTap();
+        },
+        onTapCancel: () => setState(() => _isHovered = false),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          transform: Matrix4.diagonal3Values(_isHovered ? 1.02 : 1.0, _isHovered ? 1.02 : 1.0, 1.0),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: _isHovered ? widget.accentColor : const Color(0xFFE2E8F0),
+              width: _isHovered ? 2 : 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: _isHovered ? widget.accentColor.withValues(alpha: 0.18) : Colors.black.withValues(alpha: 0.04),
+                blurRadius: _isHovered ? 18 : 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
           child: Padding(
             padding: const EdgeInsets.all(20),
             child: Row(
               children: [
-                Container(
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: accentColor.withValues(alpha: 0.12),
+                    color: widget.accentColor.withValues(alpha: _isHovered ? 0.2 : 0.12),
                     borderRadius: BorderRadius.circular(14),
                   ),
-                  child: Icon(icon, color: accentColor, size: 28),
+                  child: Icon(widget.icon, color: widget.accentColor, size: 28),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
@@ -943,7 +985,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        title,
+                        widget.title,
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 17,
@@ -952,20 +994,25 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        subtitle,
+                        widget.subtitle,
                         style: const TextStyle(fontSize: 12, color: AppTheme.textMuted, height: 1.3),
                       ),
                     ],
                   ),
                 ),
                 const SizedBox(width: 12),
-                Container(
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: accentColor.withValues(alpha: 0.1),
+                    color: widget.accentColor.withValues(alpha: _isHovered ? 0.2 : 0.1),
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(Icons.arrow_forward_rounded, color: accentColor, size: 20),
+                  child: Icon(
+                    Icons.arrow_forward_rounded,
+                    color: widget.accentColor,
+                    size: 20,
+                  ),
                 ),
               ],
             ),
@@ -982,6 +1029,10 @@ final GoRouter appRouter = GoRouter(
   routes: [
     GoRoute(
       path: '/',
+      builder: (context, state) => const HomeScreen(),
+    ),
+    GoRoute(
+      path: '/login',
       builder: (context, state) => const LoginScreen(),
     ),
     GoRoute(

@@ -35,6 +35,7 @@ router.delete('/appointments/:id', authenticateJWT, appointments.cancelAppointme
 router.post('/clinics', authenticateJWT, requireRole(['Clinic', 'SuperAdmin']), clinics.registerClinicProfile);
 router.get('/clinics', clinics.getClinics);
 router.get('/clinics/:clinicId/dentists', clinics.getClinicDentists);
+router.get('/dentists', clinics.getAllDentists);
 
 // ─────────────────────────────────────────────
 // 4. SECURE CLOUD STORAGE ENDPOINTS (AWS S3)

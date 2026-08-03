@@ -55,3 +55,15 @@ exports.getClinicDentists = async (req, res) => {
         res.status(500).json({ success: false, message: 'Failed to fetch clinic dentists.' });
     }
 };
+
+// 4. GET ALL DENTISTS
+exports.getAllDentists = async (req, res) => {
+    try {
+        const dentists = await Dentist.find()
+            .populate('userId', 'name email phone')
+            .populate('clinicId', 'clinicName location');
+        res.json({ success: true, count: dentists.length, dentists });
+    } catch (err) {
+        res.status(500).json({ success: false, message: 'Failed to fetch all dentists.' });
+    }
+};

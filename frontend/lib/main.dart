@@ -26,7 +26,7 @@ class DentaGuruApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp.router(
-      title: 'Denta Guru',
+      title: 'DentaGuru Dental Healthcare Platform',
       debugShowCheckedModeBanner: false,
 
       // Themes configurations
@@ -37,49 +37,70 @@ class DentaGuruApp extends StatelessWidget {
       // Router configuration
       routerConfig: appRouter,
 
-      // Mobile Device Frame Wrapper for Web / Chrome
+      // Mobile Device Frame Wrapper for Web / Chrome (Neat Mobile App Aesthetics)
       builder: (context, child) {
         final screenWidth = MediaQuery.of(context).size.width;
 
-        // If running on Chrome/Web desktop (>550px), render inside Mobile Phone Bezel Shell
+        // If running on Chrome/Web desktop (>550px), render inside Flagship Mobile Shell
         if (screenWidth > 550) {
           return Scaffold(
-            backgroundColor: const Color(0xFF0F172A),
+            backgroundColor: const Color(0xFF0B132B),
             body: Center(
               child: Container(
-                width: 430,
-                height: 880,
+                width: 420,
+                height: 870,
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(38),
-                  border: Border.all(color: const Color(0xFF334155), width: 8),
+                  borderRadius: BorderRadius.circular(44),
+                  border: Border.all(color: const Color(0xFF1E293B), width: 10),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.5),
-                      blurRadius: 30,
-                      spreadRadius: 5,
-                      offset: const Offset(0, 10),
+                      color: Colors.black.withValues(alpha: 0.6),
+                      blurRadius: 40,
+                      spreadRadius: 8,
+                      offset: const Offset(0, 15),
+                    ),
+                    BoxShadow(
+                      color: const Color(0xFF0052CC).withValues(alpha: 0.25),
+                      blurRadius: 60,
+                      spreadRadius: -10,
                     ),
                   ],
                 ),
                 clipBehavior: Clip.antiAlias,
                 child: Column(
                   children: [
-                    // Top Phone Notch Indicator
+                    // Flagship Phone Dynamic Island / Notch Bar
                     Container(
-                      height: 28,
+                      height: 32,
                       color: Colors.white,
-                      child: Center(
-                        child: Container(
-                          width: 130,
-                          height: 14,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF0F172A),
-                            borderRadius: BorderRadius.vertical(bottom: Radius.circular(10)),
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            '9:41',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
                           ),
-                        ),
+                          Container(
+                            width: 110,
+                            height: 18,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0F172A),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          const Row(
+                            children: [
+                              Icon(Icons.wifi_rounded, size: 13, color: Color(0xFF0F172A)),
+                              SizedBox(width: 4),
+                              Icon(Icons.battery_5_bar_rounded, size: 14, color: Color(0xFF0F172A)),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
+                    // Main App Content Window
                     Expanded(child: child ?? const SizedBox()),
                   ],
                 ),
