@@ -1156,14 +1156,13 @@ class _AnimatedFeatureTileState extends State<_AnimatedFeatureTile> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOutCubic,
-          transform: Matrix4.diagonal3Values(_isHovered ? 1.03 : 1.0, _isHovered ? 1.03 : 1.0, 1.0),
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: _isHovered ? widget.color.withValues(alpha: 0.04) : Colors.white,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: _isHovered ? widget.color : const Color(0xFFE2E8F0),
-              width: _isHovered ? 2 : 1,
+              width: 1.5,
             ),
             boxShadow: [
               BoxShadow(

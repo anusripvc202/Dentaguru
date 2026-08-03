@@ -1085,14 +1085,13 @@ class _AnimatedPatientActionTileState extends State<_AnimatedPatientActionTile> 
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOutCubic,
-            transform: Matrix4.diagonal3Values(_isHovered ? 1.05 : 1.0, _isHovered ? 1.05 : 1.0, 1.0),
             padding: const EdgeInsets.symmetric(vertical: 14),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: _isHovered ? widget.color.withValues(alpha: 0.04) : Colors.white,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
                 color: _isHovered ? widget.color : const Color(0xFFE2E8F0),
-                width: _isHovered ? 2 : 1,
+                width: 1.5,
               ),
               boxShadow: [
                 BoxShadow(

@@ -950,19 +950,18 @@ class _AnimatedPortalCardState extends State<_AnimatedPortalCard> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOutCubic,
-          transform: Matrix4.diagonal3Values(_isHovered ? 1.02 : 1.0, _isHovered ? 1.02 : 1.0, 1.0),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: _isHovered ? widget.accentColor.withValues(alpha: 0.03) : Colors.white,
             borderRadius: BorderRadius.circular(18),
             border: Border.all(
               color: _isHovered ? widget.accentColor : const Color(0xFFE2E8F0),
-              width: _isHovered ? 2 : 1,
+              width: 1.5,
             ),
             boxShadow: [
               BoxShadow(
                 color: _isHovered ? widget.accentColor.withValues(alpha: 0.18) : Colors.black.withValues(alpha: 0.04),
-                blurRadius: _isHovered ? 18 : 12,
-                offset: const Offset(0, 4),
+                blurRadius: _isHovered ? 16 : 8,
+                offset: _isHovered ? const Offset(0, 6) : const Offset(0, 2),
               ),
             ],
           ),
@@ -986,10 +985,10 @@ class _AnimatedPortalCardState extends State<_AnimatedPortalCard> {
                     children: [
                       Text(
                         widget.title,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 17,
-                          color: AppTheme.textDark,
+                          color: _isHovered ? widget.accentColor : AppTheme.textDark,
                         ),
                       ),
                       const SizedBox(height: 4),
@@ -1008,10 +1007,14 @@ class _AnimatedPortalCardState extends State<_AnimatedPortalCard> {
                     color: widget.accentColor.withValues(alpha: _isHovered ? 0.2 : 0.1),
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(
-                    Icons.arrow_forward_rounded,
-                    color: widget.accentColor,
-                    size: 20,
+                  child: AnimatedPadding(
+                    duration: const Duration(milliseconds: 200),
+                    padding: EdgeInsets.only(left: _isHovered ? 3.0 : 0.0),
+                    child: Icon(
+                      Icons.arrow_forward_rounded,
+                      color: widget.accentColor,
+                      size: 20,
+                    ),
                   ),
                 ),
               ],
