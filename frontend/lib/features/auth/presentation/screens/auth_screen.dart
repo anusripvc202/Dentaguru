@@ -206,6 +206,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   ? _phoneController.text.trim()
                   : (!email.contains('@') && email.isNotEmpty ? email : '9063663180'));
           PatientProblemService().updatePatientProfile(
+            id: userData['id']?.toString() ?? '',
             name: userData['name'] ?? email.split('@').first,
             email: userData['email'] ?? email,
             phone: userPhone,

@@ -221,8 +221,11 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                         );
 
                         // 🌐 Automatically upload record to Supabase 'appointments' table!
+                        final pId = _patientService.currentPatient.id.isNotEmpty
+                            ? _patientService.currentPatient.id
+                            : _patientService.currentPatient.email;
                         ApiService().createAppointment(
-                          patientId: _patientService.currentPatient.email,
+                          patientId: pId,
                           dentistId: '',
                           clinicId: '',
                           date: DateTime.now().toIso8601String(),

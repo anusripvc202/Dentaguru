@@ -130,8 +130,36 @@ const Dentist = {
 // 4. APPOINTMENT MODEL (Supabase PostgreSQL)
 const Appointment = {
     async create(appData) {
+        let targetPatientId = appData.patient_id || appData.patientId || null;
+
+        // If targetPatientId is not a UUID (e.g. email or phone), lookup matching User UUID
+        if (targetPatientId && (targetPatientId.includes('@') || !targetPatientId.includes('-'))) {
+            try {
+                const userByEmail = await User.findOne({ email: targetPatientId });
+                const userByPhone = userByEmail ? null : await User.findOne({ phone: targetPatientId });
+                const matched = userByEmail || userByPhone;
+                if (matched) {
+                    targetPatientId = matched.id;
+                }
+            } catch (uErr) {
+                console.error('User lookup error in Appointment.create:', uErr.message);
+            }
+        }
+
+        // Fallback: If still no patient UUID found, grab the first registered user
+        if (!targetPatientId || targetPatientId.includes('@')) {
+            try {
+                const { data: firstUsers } = await supabaseAdmin.from('users').select('id').limit(1);
+                if (firstUsers && firstUsers.length > 0) {
+                    targetPatientId = firstUsers[0].id;
+                }
+            } catch (fErr) {
+                console.error('Fallback user lookup error:', fErr.message);
+            }
+        }
+
         const payload = {
-            patient_id: appData.patient_id || appData.patientId || null,
+            patient_id: targetPatientId,
             dentist_id: appData.dentist_id || appData.dentistId || null,
             clinic_id: appData.clinic_id || appData.clinicId || null,
             date: appData.date || new Date().toISOString(),

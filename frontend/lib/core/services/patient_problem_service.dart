@@ -42,6 +42,7 @@ class DoctorModel {
 
 /// Model representing logged-in patient profile details
 class PatientProfile {
+  String id;
   String name;
   String email;
   String phone;
@@ -52,13 +53,14 @@ class PatientProfile {
   Uint8List? photoBytes;
 
   PatientProfile({
-    this.name = 'Sarah Jenkins',
-    this.email = 'sarah.jenkins@dentaguru.com',
-    this.phone = '+1 202 555 0142',
+    this.id = '',
+    this.name = '',
+    this.email = '',
+    this.phone = '',
     this.age = '28',
     this.gender = 'Female',
     this.bloodGroup = 'O Positive (O+)',
-    this.emergencyContact = '+1 202 555 9988',
+    this.emergencyContact = '',
     this.photoBytes,
   });
 }
@@ -124,6 +126,7 @@ class PatientProblemService extends ChangeNotifier {
   List<PatientConsultationRequest> get requests => List.unmodifiable(_requests);
 
   void updatePatientProfile({
+    String id = '',
     required String name,
     required String email,
     required String phone,
@@ -139,6 +142,7 @@ class PatientProblemService extends ChangeNotifier {
     final cachedPhoto = photoBytes ?? _userPhotoCache[email.trim().toLowerCase()];
 
     currentPatient = PatientProfile(
+      id: id.trim(),
       name: name.trim().isEmpty ? 'Patient' : name.trim(),
       email: email.trim().isEmpty ? 'patient@dentaguru.com' : email.trim(),
       phone: phone.trim(),
