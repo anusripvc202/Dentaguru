@@ -6,6 +6,7 @@ const auth = require('../controllers/authController');
 const appointments = require('../controllers/appointmentController');
 const clinics = require('../controllers/clinicController');
 const upload = require('../controllers/uploadController');
+const chat = require('../controllers/chatController');
 
 // Middlewares
 const { authenticateJWT, requireRole } = require('../middleware/auth');
@@ -44,6 +45,10 @@ router.get('/dentists', clinics.getAllDentists);
 // POST /api/v1/upload          — Upload file (multipart/form-data, field: "file", optional: "folder")
 // GET  /api/v1/upload/signed-url?key=<s3-key> — Get 15-min pre-signed access URL
 router.post('/upload', authenticateJWT, upload.uploadFile);
-router.get('/upload/signed-url', authenticateJWT, upload.getSignedFileUrl);
+// ─────────────────────────────────────────────
+// 5. CHAT MESSAGES ENDPOINTS (Supabase)
+// ─────────────────────────────────────────────
+router.post('/chat/send', chat.sendMessage);
+router.get('/chat/messages', chat.getMessages);
 
 module.exports = router;
