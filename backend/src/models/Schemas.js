@@ -84,13 +84,16 @@ const Clinic = {
 
     async create(clinicData) {
         const payload = {
-            user_id: clinicData.userId,
-            clinic_name: clinicData.clinicName,
-            location: clinicData.location,
+            user_id: clinicData.user_id || clinicData.userId || null,
+            clinic_name: clinicData.clinic_name || clinicData.clinicName || 'DentaGuru Care Center',
+            location: clinicData.location || '123 Healthcare Blvd, Medical Hub, Suite 400',
+            rating: clinicData.rating || 5.0,
+            reviews_count: clinicData.reviews_count || clinicData.reviewsCount || 0,
+            verified: clinicData.verified !== undefined ? clinicData.verified : true,
             services: clinicData.services || [],
             pricing: clinicData.pricing || [],
-            latitude: clinicData.coordinates?.coordinates?.[1] || null,
-            longitude: clinicData.coordinates?.coordinates?.[0] || null
+            latitude: clinicData.latitude || clinicData.coordinates?.coordinates?.[1] || null,
+            longitude: clinicData.longitude || clinicData.coordinates?.coordinates?.[0] || null
         };
         const { data, error } = await supabaseAdmin.from('clinics').insert(payload).select().single();
         if (error) throw error;
