@@ -173,15 +173,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 children: const [
                   Text(
                     'Ready to experience DentaGuru?',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      fontSize: 13,
+                      fontSize: 12,
                       color: AppTheme.textDark,
                     ),
                   ),
                   Text(
-                    'Tap top-right Login to access your portal',
-                    style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                    'Tap to access your portal',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 10, color: AppTheme.textMuted),
                   ),
                 ],
               ),
@@ -251,12 +255,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   children: const [
                     Icon(Icons.auto_awesome_rounded, color: AppTheme.brandOrange, size: 14),
                     SizedBox(width: 6),
-                    Text(
-                      'Next-Gen Dental Healthcare Platform',
-                      style: TextStyle(
-                        color: AppTheme.brandOrange,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
+                    Flexible(
+                      child: Text(
+                        'Next-Gen Dental Healthcare Platform',
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: AppTheme.brandOrange,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ],
@@ -287,10 +294,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ),
             const SizedBox(height: 20),
 
-            // Action Buttons Row with Animations
-            Row(
+            // Action Buttons Responsive Wrap for All Mobiles
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
               children: [
-                Expanded(
+                SizedBox(
+                  width: MediaQuery.of(context).size.width < 400 ? double.infinity : null,
                   child: ElevatedButton.icon(
                     onPressed: () => context.go('/login'),
                     icon: const Icon(Icons.login_rounded, size: 18),
@@ -301,7 +311,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.brandOrange,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
                       ),
@@ -310,25 +320,27 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    _scrollController.animateTo(
-                      380,
-                      duration: const Duration(milliseconds: 600),
-                      curve: Curves.easeInOutCubic,
-                    );
-                  },
-                  icon: const Icon(Icons.info_outline_rounded, size: 18, color: Colors.white),
-                  label: const Text(
-                    'Explore Features',
-                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.white),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                    side: const BorderSide(color: Color(0xFF475569), width: 1.5),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
+                SizedBox(
+                  width: MediaQuery.of(context).size.width < 400 ? double.infinity : null,
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      _scrollController.animateTo(
+                        380,
+                        duration: const Duration(milliseconds: 600),
+                        curve: Curves.easeInOutCubic,
+                      );
+                    },
+                    icon: const Icon(Icons.info_outline_rounded, size: 18, color: Colors.white),
+                    label: const Text(
+                      'Explore Features',
+                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.white),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      side: const BorderSide(color: Color(0xFF475569), width: 1.5),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                     ),
                   ),
                 ),
@@ -364,12 +376,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             children: const [
               Icon(Icons.apps_rounded, color: AppTheme.primaryBlue, size: 22),
               SizedBox(width: 8),
-              Text(
-                'About DentaGuru Application',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textDark,
+              Expanded(
+                child: Text(
+                  'About DentaGuru Application',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.textDark,
+                  ),
                 ),
               ),
             ],
@@ -633,12 +647,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             children: const [
               Icon(Icons.star_rounded, color: AppTheme.brandOrange, size: 22),
               SizedBox(width: 8),
-              Text(
-                'Platform Features',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textDark,
+              Expanded(
+                child: Text(
+                  'Platform Features',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.textDark,
+                  ),
                 ),
               ),
             ],
@@ -726,12 +742,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             children: const [
               Icon(Icons.verified_user_rounded, color: AppTheme.primaryBlue, size: 22),
               SizedBox(width: 8),
-              Text(
-                'Comprehensive Care Capabilities',
-                style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textDark,
+              Expanded(
+                child: Text(
+                  'Comprehensive Care Capabilities',
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.textDark,
+                  ),
                 ),
               ),
             ],
@@ -889,12 +907,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             children: const [
               Icon(Icons.route_rounded, color: AppTheme.primaryBlue, size: 22),
               SizedBox(width: 8),
-              Text(
-                'How DentaGuru Works',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textDark,
+              Expanded(
+                child: Text(
+                  'How DentaGuru Works',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.textDark,
+                  ),
                 ),
               ),
             ],
@@ -1004,12 +1024,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             children: const [
               Icon(Icons.format_quote_rounded, color: AppTheme.brandOrange, size: 24),
               SizedBox(width: 6),
-              Text(
-                'Trusted by Doctors & Patients',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textDark,
+              Expanded(
+                child: Text(
+                  'Trusted by Doctors & Patients',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.textDark,
+                  ),
                 ),
               ),
             ],
@@ -1034,15 +1056,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       child: Text('DR', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
                     ),
                     SizedBox(width: 10),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Dr. Elena Rodriguez, DDS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark)),
-                        Text('Senior Orthodontist', style: TextStyle(fontSize: 10, color: AppTheme.textMuted)),
-                      ],
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Dr. Elena Rodriguez, DDS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark), overflow: TextOverflow.ellipsis),
+                          Text('Senior Orthodontist', style: TextStyle(fontSize: 10, color: AppTheme.textMuted), overflow: TextOverflow.ellipsis),
+                        ],
+                      ),
                     ),
-                    Spacer(),
+                    SizedBox(width: 6),
                     Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 14),
                         Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 14),
