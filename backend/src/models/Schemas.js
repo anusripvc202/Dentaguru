@@ -131,14 +131,15 @@ const Dentist = {
 const Appointment = {
     async create(appData) {
         const payload = {
-            patient_id: appData.patientId,
-            dentist_id: appData.dentistId,
-            clinic_id: appData.clinicId,
-            date: appData.date,
-            time_slot: appData.timeSlot,
-            treatment: appData.treatment,
+            patient_id: appData.patient_id || appData.patientId || null,
+            dentist_id: appData.dentist_id || appData.dentistId || null,
+            clinic_id: appData.clinic_id || appData.clinicId || null,
+            date: appData.date || new Date().toISOString(),
+            time_slot: appData.time_slot || appData.timeSlot || 'Today, 2:30 PM',
+            treatment: appData.treatment || 'Dental Consultation',
             status: appData.status || 'confirmed',
-            qr_code_string: appData.qrCodeString
+            payment_status: appData.payment_status || appData.paymentStatus || 'paid',
+            qr_code_string: appData.qr_code_string || appData.qrCodeString || null
         };
         const { data, error } = await supabaseAdmin.from('appointments').insert(payload).select().single();
         if (error) throw error;
