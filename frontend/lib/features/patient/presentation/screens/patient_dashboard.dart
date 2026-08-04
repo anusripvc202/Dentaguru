@@ -261,6 +261,134 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     );
   }
 
+  void _showLiveChatModal(BuildContext context) {
+    final msgController = TextEditingController();
+    final patient = _patientService.currentPatient;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (modalContext) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(modalContext).viewInsets.bottom + 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryBlue.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.chat_rounded, color: AppTheme.primaryBlue, size: 24),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        Text('Live Doctor Consultation Chat', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textDark)),
+                        Text('Send a message to your assigned dentist or admin', style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 20),
+                    onPressed: () => Navigator.of(modalContext).pop(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Row(
+                  children: [
+                    const CircleAvatar(
+                      radius: 14,
+                      backgroundColor: AppTheme.primaryBlue,
+                      child: Text('DR', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                    ),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text('Dr. Nikhil (Endodontics) - Online', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppTheme.textDark)),
+                    ),
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(color: Color(0xFF10B981), shape: BoxShape.circle),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: msgController,
+                maxLines: 3,
+                decoration: InputDecoration(
+                  hintText: 'Type your question or medical inquiry...',
+                  hintStyle: const TextStyle(fontSize: 13, color: AppTheme.textMuted),
+                  filled: true,
+                  fillColor: const Color(0xFFF8FAFC),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppTheme.primaryBlue, width: 2)),
+                ),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: () async {
+                  final text = msgController.text.trim();
+                  if (text.isEmpty) return;
+
+                  Navigator.of(modalContext).pop();
+
+                  // 🌐 Post chat message to Supabase backend!
+                  final pId = patient.id.isNotEmpty ? patient.id : patient.email;
+                  await ApiService().sendMessage(
+                    senderId: pId,
+                    message: text,
+                    roomId: 'PATIENT-${patient.name.toUpperCase()}',
+                  );
+
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('✅ Chat message sent to doctor! ("$text")')),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.send_rounded, size: 18),
+                label: const Text('Send Message to Doctor', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryBlue,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final patient = _patientService.currentPatient;
@@ -356,6 +484,12 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
             ),
           ],
         ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showLiveChatModal(context),
+        backgroundColor: AppTheme.primaryBlue,
+        icon: const Icon(Icons.chat_bubble_rounded, color: Colors.white, size: 20),
+        label: const Text('Live Chat', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
       ),
     );
   }

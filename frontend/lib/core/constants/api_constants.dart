@@ -21,4 +21,7 @@ class ApiConstants {
   // AWS S3 Cloud Storage Endpoints
   static const String upload = '$baseUrl/upload';
   static const String signedUrl = '$baseUrl/upload/signed-url';
+
+  // Chat Endpoints
+  static const String chatSend = '$baseUrl/chat/send';
 }

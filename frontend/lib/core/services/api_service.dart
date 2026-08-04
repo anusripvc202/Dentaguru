@@ -153,4 +153,27 @@ class ApiService {
       return {'success': false, 'message': 'Failed to create appointment.'};
     }
   }
+
+  /// Send a live chat message to Supabase
+  Future<Map<String, dynamic>> sendMessage({
+    required String senderId,
+    required String message,
+    required String roomId,
+  }) async {
+    try {
+      final url = Uri.parse(ApiConstants.chatSend);
+      final response = await http.post(
+        url,
+        headers: _headers,
+        body: jsonEncode({
+          'senderId': senderId,
+          'message': message,
+          'roomId': roomId,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to send chat message.'};
+    }
+  }
 }
