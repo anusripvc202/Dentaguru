@@ -7,12 +7,22 @@ const apiRoutes = require('./routes/api');
 const app = express();
 
 // ─────────────────────────────────────────────
-// 1. SECURITY HEADERS — Helmet.js
-//    Sets: Content-Security-Policy, HSTS,
-//    X-Frame-Options, X-Content-Type-Options,
-//    Referrer-Policy, and more.
+// 1. CORS & PARSING MIDDLEWARE
 // ─────────────────────────────────────────────
-app.use(helmet());
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true
+}));
+app.options('*', cors());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// ─────────────────────────────────────────────
+// 2. SECURITY HEADERS — Helmet.js
+// ─────────────────────────────────────────────
+app.use(helmet({ crossOriginResourcePolicy: false }));
 
 // Force HTTPS in production
 if (process.env.NODE_ENV === 'production') {
@@ -25,7 +35,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // ─────────────────────────────────────────────
-// 2. RATE LIMITING — Brute-force protection
+// 3. RATE LIMITING — Brute-force protection
 // ─────────────────────────────────────────────
 
 // General API rate limit: 100 requests per 15 minutes
@@ -37,10 +47,10 @@ const generalLimiter = rateLimit({
     message: { success: false, message: 'Too many requests. Please try again later.' },
 });
 
-// Strict auth rate limit: 10 attempts per 15 minutes
+// Strict auth rate limit: 50 attempts per 15 minutes
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 10,
+    max: 50,
     standardHeaders: true,
     legacyHeaders: false,
     message: { success: false, message: 'Too many authentication attempts. Please wait 15 minutes.' },
@@ -50,24 +60,29 @@ app.use('/api/v1/auth', authLimiter);
 app.use('/api/', generalLimiter);
 
 // ─────────────────────────────────────────────
-// 3. MIDDLEWARE
-// ─────────────────────────────────────────────
-app.use(cors({
-    origin: process.env.CORS_ORIGIN || '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-}));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// ─────────────────────────────────────────────
 // 4. ROUTES
 // ─────────────────────────────────────────────
 app.use('/api/v1', apiRoutes);
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-    res.json({ status: 'healthy', timestamp: new Date(), version: '2.0.0' });
+const { isConnected } = require('./config/db');
+const { checkSupabaseHealth } = require('./config/supabase');
+
+// Health check endpoint with MongoDB & Supabase diagnostic status
+app.get('/health', async (req, res) => {
+    const mongoStatus = isConnected() ? 'connected' : 'disconnected';
+    const supabaseHealth = await checkSupabaseHealth();
+
+    res.json({
+        status: 'healthy',
+        timestamp: new Date(),
+        version: '2.0.0',
+        services: {
+            mongodb: {
+                status: mongoStatus,
+            },
+            supabase: supabaseHealth
+        }
+    });
 });
 
 // ─────────────────────────────────────────────

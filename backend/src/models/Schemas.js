@@ -1,116 +1,209 @@
-const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const { supabaseAdmin } = require('../config/supabase');
 
-// 1. USER SCHEMA (Auth & Core User Identity)
-const UserSchema = new mongoose.Schema({
-    name: { type: String, required: true },
-    email: { type: String, required: true, unique: true, index: true },
-    password: { type: String, required: true },
-    phone: { type: String, required: true, unique: true, index: true },
-    role: { 
-        type: String, 
-        enum: ['Patient', 'Dentist', 'Clinic', 'SuperAdmin'], 
-        default: 'Patient' 
-    },
-    biometricToken: { type: String, default: null },
-    deviceToken: { type: String, default: null }, // FCM Push Notification Token
-    refreshTokens: [{ type: String }],
-    walletBalance: { type: Number, default: 0 },
-    loyaltyPoints: { type: Number, default: 0 }
-}, { timestamps: true });
-
-// Pre-save password hashing
-UserSchema.pre('save', async function(next) {
-    if (!this.isModified('password')) return next();
-    try {
-        const salt = await bcrypt.genSalt(10);
-        this.password = await bcrypt.hash(this.password, salt);
-        next();
-    } catch (err) {
-        next(err);
-    }
-});
-
-// Compare password helper
-UserSchema.methods.comparePassword = async function(candidatePassword) {
-    return await bcrypt.compare(candidatePassword, this.password);
+// Helper to hash password
+const hashPassword = async (password) => {
+    const salt = await bcrypt.genSalt(10);
+    return await bcrypt.hash(password, salt);
 };
 
-// 2. CLINIC PROFILE SCHEMA
-const ClinicSchema = new mongoose.Schema({
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    clinicName: { type: String, required: true },
-    location: { type: String, required: true },
-    coordinates: {
-        type: { type: String, default: 'Point' },
-        coordinates: { type: [Number], index: '2dsphere' } // [Longitude, Latitude]
+// Helper to compare password
+const comparePassword = async (plainPassword, hashedPassword) => {
+    return await bcrypt.compare(plainPassword, hashedPassword);
+};
+
+// 1. USER MODEL (Supabase PostgreSQL)
+const User = {
+    async findOne(query) {
+        let req = supabaseAdmin.from('users').select('*');
+        for (const [key, val] of Object.entries(query)) {
+            req = req.eq(key, val);
+        }
+        const { data, error } = await req.maybeSingle();
+        if (error) throw error;
+        return data;
     },
-    verified: { type: Boolean, default: false },
-    plan: { type: String, enum: ['Standard', 'Premium'], default: 'Standard' },
-    activeSlots: [{ type: String }], // Array of timing slot strings e.g. ["09:00 AM", "10:00 AM"]
-    services: [{ type: String }],
-    pricing: [{ service: String, price: Number }],
-    rating: { type: Number, default: 0 },
-    reviewsCount: { type: Number, default: 0 }
-}, { timestamps: true });
 
-// 3. DENTIST PROFILE SCHEMA
-const DentistSchema = new mongoose.Schema({
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    clinicId: { type: mongoose.Schema.Types.ObjectId, ref: 'Clinic', required: true, index: true },
-    speciality: { type: String, required: true },
-    licenseNumber: { type: String, required: true, unique: true },
-    availabilityStatus: { type: String, enum: ['Available', 'On Break', 'Offline'], default: 'Available' },
-    rating: { type: Number, default: 0 },
-    reviewsCount: { type: Number, default: 0 }
-}, { timestamps: true });
-
-// 4. APPOINTMENT SCHEMA
-const AppointmentSchema = new mongoose.Schema({
-    patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    dentistId: { type: mongoose.Schema.Types.ObjectId, ref: 'Dentist', required: true, index: true },
-    clinicId: { type: mongoose.Schema.Types.ObjectId, ref: 'Clinic', required: true, index: true },
-    date: { type: Date, required: true, index: true },
-    timeSlot: { type: String, required: true }, // e.g. "09:30 AM"
-    treatment: { type: String, required: true },
-    status: { 
-        type: String, 
-        enum: ['pending', 'confirmed', 'rescheduled', 'cancelled'], 
-        default: 'pending' 
+    async findById(id) {
+        const { data, error } = await supabaseAdmin.from('users').select('*').eq('id', id).single();
+        if (error) return null;
+        return data;
     },
-    paymentStatus: { type: String, enum: ['unpaid', 'paid', 'refunded'], default: 'unpaid' },
-    paymentId: { type: String, default: null },
-    qrCodeString: { type: String }
-}, { timestamps: true });
 
-// 5. MEDICAL RECORD SCHEMA
-const MedicalRecordSchema = new mongoose.Schema({
-    patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    dentistId: { type: mongoose.Schema.Types.ObjectId, ref: 'Dentist', required: true },
-    diagnosis: { type: String, required: true },
-    notes: { type: String },
-    prescriptions: [{ medicine: String, dosage: String, frequency: String }],
-    xrayUrls: [{ type: String }], // URLs to secure cloud files
-    labReportUrls: [{ type: String }]
-}, { timestamps: true });
+    async create(userData) {
+        if (userData.password && !userData.password.startsWith('$2a$') && !userData.password.startsWith('$2b$')) {
+            userData.password = await hashPassword(userData.password);
+        }
+        const { data, error } = await supabaseAdmin.from('users').insert(userData).select().single();
+        if (error) throw error;
+        return data;
+    },
 
-// 6. CHAT MESSAGE SCHEMA
-const ChatMessageSchema = new mongoose.Schema({
-    roomId: { type: String, required: true, index: true },
-    senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    receiverId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    message: { type: String, required: true },
-    type: { type: String, enum: ['text', 'image', 'file'], default: 'text' },
-    read: { type: Boolean, default: false }
-}, { timestamps: true });
+    async findByIdAndUpdate(id, updateData) {
+        if (updateData.password && !updateData.password.startsWith('$2a$') && !updateData.password.startsWith('$2b$')) {
+            updateData.password = await hashPassword(updateData.password);
+        }
+        const { data, error } = await supabaseAdmin.from('users').update(updateData).eq('id', id).select().single();
+        if (error) throw error;
+        return data;
+    },
 
-// Compile models
-const User = mongoose.model('User', UserSchema);
-const Clinic = mongoose.model('Clinic', ClinicSchema);
-const Dentist = mongoose.model('Dentist', DentistSchema);
-const Appointment = mongoose.model('Appointment', AppointmentSchema);
-const MedicalRecord = mongoose.model('MedicalRecord', MedicalRecordSchema);
-const ChatMessage = mongoose.model('ChatMessage', ChatMessageSchema);
+    comparePassword
+};
+
+// 2. CLINIC MODEL (Supabase PostgreSQL)
+const Clinic = {
+    async findOne(query) {
+        let req = supabaseAdmin.from('clinics').select('*');
+        for (const [key, val] of Object.entries(query)) {
+            req = req.eq(key, val);
+        }
+        const { data, error } = await req.maybeSingle();
+        if (error) throw error;
+        return data;
+    },
+
+    async findById(id) {
+        const { data, error } = await supabaseAdmin.from('clinics').select('*').eq('id', id).single();
+        if (error) return null;
+        return data;
+    },
+
+    async find(query = {}) {
+        let req = supabaseAdmin.from('clinics').select('*');
+        if (query.clinicName) {
+            req = req.ilike('clinic_name', `%${query.clinicName}%`);
+        }
+        if (query.services) {
+            req = req.contains('services', [query.services]);
+        }
+        const { data, error } = await req.order('rating', { ascending: false });
+        if (error) throw error;
+        return data || [];
+    },
+
+    async create(clinicData) {
+        const payload = {
+            user_id: clinicData.userId,
+            clinic_name: clinicData.clinicName,
+            location: clinicData.location,
+            services: clinicData.services || [],
+            pricing: clinicData.pricing || [],
+            latitude: clinicData.coordinates?.coordinates?.[1] || null,
+            longitude: clinicData.coordinates?.coordinates?.[0] || null
+        };
+        const { data, error } = await supabaseAdmin.from('clinics').insert(payload).select().single();
+        if (error) throw error;
+        return data;
+    }
+};
+
+// 3. DENTIST MODEL (Supabase PostgreSQL)
+const Dentist = {
+    async findOne(query) {
+        let req = supabaseAdmin.from('dentists').select('*');
+        for (const [key, val] of Object.entries(query)) {
+            req = req.eq(key, val);
+        }
+        const { data, error } = await req.maybeSingle();
+        if (error) throw error;
+        return data;
+    },
+
+    async find(query = {}) {
+        let req = supabaseAdmin.from('dentists').select('*, users(name, email, phone), clinics(clinic_name, location)');
+        for (const [key, val] of Object.entries(query)) {
+            req = req.eq(key, val);
+        }
+        const { data, error } = await req;
+        if (error) throw error;
+        return data || [];
+    },
+
+    async create(dentistData) {
+        const { data, error } = await supabaseAdmin.from('dentists').insert(dentistData).select().single();
+        if (error) throw error;
+        return data;
+    }
+};
+
+// 4. APPOINTMENT MODEL (Supabase PostgreSQL)
+const Appointment = {
+    async create(appData) {
+        const payload = {
+            patient_id: appData.patientId,
+            dentist_id: appData.dentistId,
+            clinic_id: appData.clinicId,
+            date: appData.date,
+            time_slot: appData.timeSlot,
+            treatment: appData.treatment,
+            status: appData.status || 'confirmed',
+            qr_code_string: appData.qrCodeString
+        };
+        const { data, error } = await supabaseAdmin.from('appointments').insert(payload).select().single();
+        if (error) throw error;
+        return data;
+    },
+
+    async find(query = {}) {
+        let req = supabaseAdmin.from('appointments').select('*, patient:users!patient_id(name, email, phone), clinic:clinics!clinic_id(clinic_name, location)');
+        if (query.patientId) req = req.eq('patient_id', query.patientId);
+        if (query.dentistId) req = req.eq('dentist_id', query.dentistId);
+        if (query.clinicId) req = req.eq('clinic_id', query.clinicId);
+
+        const { data, error } = await req.order('date', { ascending: true });
+        if (error) throw error;
+        return data || [];
+    },
+
+    async findById(id) {
+        const { data, error } = await supabaseAdmin.from('appointments').select('*').eq('id', id).single();
+        if (error) return null;
+        return data;
+    },
+
+    async findByIdAndUpdate(id, updateData) {
+        const { data, error } = await supabaseAdmin.from('appointments').update(updateData).eq('id', id).select().single();
+        if (error) throw error;
+        return data;
+    }
+};
+
+// 5. MEDICAL RECORD MODEL (Supabase PostgreSQL)
+const MedicalRecord = {
+    async create(recordData) {
+        const { data, error } = await supabaseAdmin.from('medical_records').insert(recordData).select().single();
+        if (error) throw error;
+        return data;
+    },
+    async find(query = {}) {
+        let req = supabaseAdmin.from('medical_records').select('*');
+        for (const [key, val] of Object.entries(query)) {
+            req = req.eq(key, val);
+        }
+        const { data, error } = await req;
+        if (error) throw error;
+        return data || [];
+    }
+};
+
+// 6. CHAT MESSAGE MODEL (Supabase PostgreSQL)
+const ChatMessage = {
+    async create(messageData) {
+        const { data, error } = await supabaseAdmin.from('chat_messages').insert(messageData).select().single();
+        if (error) throw error;
+        return data;
+    },
+    async find(query = {}) {
+        let req = supabaseAdmin.from('chat_messages').select('*');
+        for (const [key, val] of Object.entries(query)) {
+            req = req.eq(key, val);
+        }
+        const { data, error } = await req.order('created_at', { ascending: true });
+        if (error) throw error;
+        return data || [];
+    }
+};
 
 module.exports = {
     User,
@@ -118,5 +211,6 @@ module.exports = {
     Dentist,
     Appointment,
     MedicalRecord,
-    ChatMessage
+    ChatMessage,
+    comparePassword
 };

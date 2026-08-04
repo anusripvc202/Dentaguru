@@ -285,6 +285,11 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   // ==========================================
   Widget _buildDashboardTab() {
     final requests = _patientService.requests;
+    final currentDoc = _patientService.currentDoctor;
+    final docName = currentDoc?.name ?? 'Dr. Elena Rodriguez';
+    final docSpecialty = currentDoc?.specialty ?? 'Senior Orthodontist';
+    final clinicName = currentDoc?.clinicName ?? 'Apex Dental Center';
+    final photoBytes = currentDoc?.photoBytes;
 
     return FadeTransition(
       opacity: _fadeAnimation,
@@ -322,20 +327,25 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                         shape: BoxShape.circle,
                         border: Border.all(color: AppTheme.brandOrange, width: 2),
                       ),
-                      child: const CircleAvatar(
-                        radius: 24,
-                        backgroundColor: AppTheme.primaryBlue,
-                        child: Text('DR', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                      ),
+                      child: photoBytes != null
+                          ? CircleAvatar(
+                              radius: 24,
+                              backgroundImage: MemoryImage(photoBytes),
+                            )
+                          : const CircleAvatar(
+                              radius: 24,
+                              backgroundColor: AppTheme.primaryBlue,
+                              child: Text('DR', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                            ),
                     ),
                     const SizedBox(width: 14),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            'Dr. Elena Rodriguez 🩺',
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                          Text(
+                            '$docName 🩺',
+                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
                           ),
                           const SizedBox(height: 2),
                           Row(
@@ -346,13 +356,19 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                   color: AppTheme.brandOrange.withValues(alpha: 0.2),
                                   borderRadius: BorderRadius.circular(10),
                                 ),
-                                child: const Text(
-                                  'Senior Orthodontist',
-                                  style: TextStyle(fontSize: 10, color: AppTheme.brandOrange, fontWeight: FontWeight.bold),
+                                child: Text(
+                                  docSpecialty,
+                                  style: const TextStyle(fontSize: 10, color: AppTheme.brandOrange, fontWeight: FontWeight.bold),
                                 ),
                               ),
                               const SizedBox(width: 6),
-                              const Text('• Apex Dental Center', style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                              Expanded(
+                                child: Text(
+                                  '• $clinicName',
+                                  style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
                             ],
                           ),
                         ],

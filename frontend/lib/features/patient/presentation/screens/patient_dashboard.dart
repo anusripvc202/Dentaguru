@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
+import '../../../../core/services/api_service.dart';
 
 class PatientDashboardScreen extends StatefulWidget {
   const PatientDashboardScreen({super.key});
@@ -218,6 +219,16 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                           problemDescription: descriptionController.text.trim(),
                           severity: selectedSeverity,
                         );
+
+                        // 🌐 Automatically upload record to Supabase 'appointments' table!
+                        ApiService().createAppointment(
+                          patientId: _patientService.currentPatient.email,
+                          dentistId: '',
+                          clinicId: '',
+                          date: DateTime.now().toIso8601String(),
+                          timeSlot: 'Pending Review',
+                          treatment: '$selectedCategory: ${descriptionController.text.trim()}',
+                        );
                         Navigator.of(dialogContext).pop();
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
@@ -423,6 +434,31 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                           ],
                         ),
                       ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppTheme.primaryBlue, width: 2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppTheme.primaryBlue.withValues(alpha: 0.2),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: CircleAvatar(
+                      radius: 26,
+                      backgroundColor: AppTheme.softBlueCard,
+                      backgroundImage: patient.photoBytes != null ? MemoryImage(patient.photoBytes!) : null,
+                      child: patient.photoBytes == null
+                          ? Text(
+                              patient.name.isNotEmpty ? patient.name[0].toUpperCase() : 'P',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppTheme.primaryBlue),
+                            )
+                          : null,
                     ),
                   ),
                 ],

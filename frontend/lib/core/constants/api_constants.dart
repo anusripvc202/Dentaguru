@@ -1,8 +1,8 @@
 class ApiConstants {
   ApiConstants._();
 
-  /// Live Production Vercel Backend API URL
-  static const String baseUrl = 'https://dentaguru-simulator.vercel.app/api/v1';
+  /// Local Express Backend API Base URL
+  static const String baseUrl = 'http://localhost:5000/api/v1';
 
   // Authentication Endpoints
   static const String login = '$baseUrl/auth/login';

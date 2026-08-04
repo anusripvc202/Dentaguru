@@ -1,38 +1,31 @@
-const { Appointment, Clinic, User } = require('../models/Schemas');
+const { Appointment, Clinic, Dentist, User } = require('../models/Schemas');
 const { sendPushNotification } = require('../services/notificationService');
 
 // 1. BOOK APPOINTMENT
 exports.bookAppointment = async (req, res) => {
-    const { dentistId, clinicId, date, timeSlot, treatment } = req.body;
+    const { dentistId, clinicId, date, timeSlot, treatment, patientId } = req.body;
     try {
-        // Validate clinic availability slot
-        const clinic = await Clinic.findById(clinicId);
-        if (!clinic) {
-            return res.status(404).json({ success: false, message: 'Clinic not found.' });
-        }
-
-        // Create appointment
-        const appointment = new Appointment({
-            patientId: req.user.id,
-            dentistId,
-            clinicId,
-            date: new Date(date),
-            timeSlot,
-            treatment,
+        const targetPatientId = patientId || (req.user ? req.user.id : null);
+        const appointment = await Appointment.create({
+            patient_id: targetPatientId,
+            dentist_id: dentistId || null,
+            clinic_id: clinicId || null,
+            date: date ? new Date(date).toISOString() : new Date().toISOString(),
+            time_slot: timeSlot || 'Today, 2:30 PM',
+            treatment: treatment || 'Dental Consultation',
             status: 'confirmed',
-            qrCodeString: `DENTAGURU-${req.user.id}-${Date.now()}`
+            payment_status: 'paid',
+            qr_code_string: `DENTAGURU-${targetPatientId}-${Date.now()}`
         });
 
-        await appointment.save();
-
-        // 🔔 Firebase FCM — Notify patient of confirmed booking
-        const patient = await User.findById(req.user.id).select('deviceToken name');
-        if (patient?.deviceToken) {
+        // 🔔 Firebase FCM Push Notification
+        const patient = await User.findById(req.user.id);
+        if (patient?.device_token) {
             await sendPushNotification(
-                patient.deviceToken,
+                patient.device_token,
                 '✅ Appointment Confirmed!',
                 `Your appointment for ${treatment} at ${timeSlot} on ${new Date(date).toDateString()} is confirmed.`,
-                { appointmentId: String(appointment._id), type: 'appointment_confirmed' }
+                { appointmentId: String(appointment.id), type: 'appointment_confirmed' }
             );
         }
 
@@ -47,35 +40,29 @@ exports.bookAppointment = async (req, res) => {
     }
 };
 
-// 2. GET APPOINTMENTS (Role specific list)
+// 2. GET APPOINTMENTS
 exports.getAppointments = async (req, res) => {
     try {
         let query = {};
         if (req.user.role === 'Patient') {
             query.patientId = req.user.id;
         } else if (req.user.role === 'Dentist') {
-            // Find dentist profile first
-            const dentist = await mongoose.model('Dentist').findOne({ userId: req.user.id });
+            const dentist = await Dentist.findOne({ user_id: req.user.id });
             if (dentist) {
-                query.dentistId = dentist._id;
+                query.dentistId = dentist.id;
             } else {
                 return res.status(400).json({ success: false, message: 'Dentist profile not found.' });
             }
         } else if (req.user.role === 'Clinic') {
-            const clinic = await Clinic.findOne({ userId: req.user.id });
+            const clinic = await Clinic.findOne({ user_id: req.user.id });
             if (clinic) {
-                query.clinicId = clinic._id;
+                query.clinicId = clinic.id;
             } else {
                 return res.status(400).json({ success: false, message: 'Clinic profile not found.' });
             }
         }
-        // SuperAdmin gets all
 
-        const list = await Appointment.find(query)
-            .populate('patientId', 'name email phone')
-            .populate('clinicId', 'clinicName location')
-            .sort({ date: 1 });
-
+        const list = await Appointment.find(query);
         res.json({ success: true, count: list.length, appointments: list });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to fetch appointments.' });
@@ -92,28 +79,27 @@ exports.rescheduleAppointment = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Appointment not found.' });
         }
 
-        // Restrict edits to patient owner or doctor/clinic
-        if (req.user.role === 'Patient' && appointment.patientId.toString() !== req.user.id) {
+        if (req.user.role === 'Patient' && appointment.patient_id !== req.user.id) {
             return res.status(403).json({ success: false, message: 'Access denied.' });
         }
 
-        appointment.date = new Date(date);
-        appointment.timeSlot = timeSlot;
-        appointment.status = 'rescheduled';
-        await appointment.save();
+        const updated = await Appointment.findByIdAndUpdate(id, {
+            date: new Date(date).toISOString(),
+            time_slot: timeSlot,
+            status: 'rescheduled'
+        });
 
-        // 🔔 Firebase FCM — Notify patient of reschedule
-        const patient = await User.findById(appointment.patientId).select('deviceToken');
-        if (patient?.deviceToken) {
+        const patient = await User.findById(appointment.patient_id);
+        if (patient?.device_token) {
             await sendPushNotification(
-                patient.deviceToken,
+                patient.device_token,
                 '📅 Appointment Rescheduled',
                 `Your appointment has been rescheduled to ${timeSlot} on ${new Date(date).toDateString()}.`,
-                { appointmentId: String(appointment._id), type: 'appointment_rescheduled' }
+                { appointmentId: String(id), type: 'appointment_rescheduled' }
             );
         }
 
-        res.json({ success: true, message: 'Appointment rescheduled successfully.', appointment });
+        res.json({ success: true, message: 'Appointment rescheduled successfully.', appointment: updated });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to reschedule appointment.' });
     }
@@ -128,25 +114,23 @@ exports.cancelAppointment = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Appointment not found.' });
         }
 
-        if (req.user.role === 'Patient' && appointment.patientId.toString() !== req.user.id) {
+        if (req.user.role === 'Patient' && appointment.patient_id !== req.user.id) {
             return res.status(403).json({ success: false, message: 'Access denied.' });
         }
 
-        appointment.status = 'cancelled';
-        await appointment.save();
+        const updated = await Appointment.findByIdAndUpdate(id, { status: 'cancelled' });
 
-        // 🔔 Firebase FCM — Notify patient of cancellation
-        const patient = await User.findById(appointment.patientId).select('deviceToken');
-        if (patient?.deviceToken) {
+        const patient = await User.findById(appointment.patient_id);
+        if (patient?.device_token) {
             await sendPushNotification(
-                patient.deviceToken,
+                patient.device_token,
                 '❌ Appointment Cancelled',
                 `Your appointment has been cancelled. Book a new one anytime on DentaGuru.`,
-                { appointmentId: String(appointment._id), type: 'appointment_cancelled' }
+                { appointmentId: String(id), type: 'appointment_cancelled' }
             );
         }
 
-        res.json({ success: true, message: 'Appointment cancelled successfully.', appointment });
+        res.json({ success: true, message: 'Appointment cancelled successfully.', appointment: updated });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to cancel appointment.' });
     }

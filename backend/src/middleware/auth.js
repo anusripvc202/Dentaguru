@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { User } = require('../models/Schemas');
-const supabase = require('../config/supabase');
+const { supabase } = require('../config/supabase');
 
 const authenticateJWT = async (req, res, next) => {
     const authHeader = req.headers.authorization;
@@ -29,7 +29,7 @@ const authenticateJWT = async (req, res, next) => {
             const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretjwtkey123');
             
             // Optional DB fetch fallback
-            const user = await User.findById(decoded.id).select('-password');
+            const user = await User.findById(decoded.id);
             if (user) {
                 req.user = user;
             } else {

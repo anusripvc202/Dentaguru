@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
+import '../../../../core/services/api_service.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -72,7 +73,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
   void _showAssignDoctorDialog(BuildContext context, PatientConsultationRequest req, {DoctorModel? preSelectedDoctor}) {
     int currentStep = 1; // 1: Patient Problem, 2: Select Doctor, 3: Review & Send
-    DoctorModel? selectedDoctor = preSelectedDoctor ?? _problemService.allDoctors.first;
+    DoctorModel? selectedDoctor = preSelectedDoctor ?? (_problemService.allDoctors.isNotEmpty ? _problemService.allDoctors.first : null);
     String searchKeyword = '';
     String selectedSpecialtyFilter = 'All';
     final adminNotesController = TextEditingController(
@@ -94,6 +95,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               return matchesSearch && matchesSpecialty;
             }).toList();
 
+            final clinicAddr = (selectedDoctor?.clinicAddress != null && selectedDoctor!.clinicAddress.trim().isNotEmpty)
+                ? selectedDoctor!.clinicAddress.trim()
+                : '123 Healthcare Blvd, Medical Hub, Suite 400';
+            final doctorPhone = selectedDoctor?.phone ?? '+1 202 555 0100';
             final waText = "🏥 *DentaGuru Clinical Recommendation*\n\n"
                 "Dear *${req.patientName}*,\n"
                 "Our Clinical Admin team has evaluated your reported problem:\n"
@@ -101,8 +106,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 "👨‍⚕️ *Recommended Doctor*: *${selectedDoctor?.name}*\n"
                 "🎓 *Specialty*: ${selectedDoctor?.specialty}\n"
                 "🏥 *Clinic*: ${selectedDoctor?.clinicName}\n"
-                "💡 *Admin Guidance*: ${adminNotesController.text}\n\n"
-                "Tap link to confirm appointment: https://dentaguru.com/app/book?req=${req.id}";
+                "📍 *Clinic Address*: $clinicAddr\n"
+                "📞 *Contact Phone*: $doctorPhone\n"
+                "💡 *Admin Guidance*: ${adminNotesController.text}";
 
             return Dialog(
               insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
@@ -498,7 +504,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                             maxLines: 1,
                                           ),
                                           Text(
-                                            '🏥 ${selectedDoctor?.clinicName}',
+                                            '🏥 ${selectedDoctor?.clinicName} • 📍 ${selectedDoctor?.clinicAddress} • 📞 ${selectedDoctor?.phone}',
                                             style: const TextStyle(fontSize: 10, color: AppTheme.textMuted),
                                             overflow: TextOverflow.ellipsis,
                                             maxLines: 1,
@@ -620,11 +626,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                           adminNotes: adminNotesController.text.trim(),
                                         );
 
-                                        final waUrl = Uri.parse("https://wa.me/?text=${Uri.encodeComponent(waText)}");
+                                        final cleanPhone = req.patientPhone.replaceAll(RegExp(r'[^0-9]'), '');
+                                        final waUrl = Uri.parse(cleanPhone.isNotEmpty
+                                            ? "https://wa.me/$cleanPhone?text=${Uri.encodeComponent(waText)}"
+                                            : "https://wa.me/?text=${Uri.encodeComponent(waText)}");
                                         try {
-                                          if (await canLaunchUrl(waUrl)) {
-                                            await launchUrl(waUrl, mode: LaunchMode.externalApplication);
-                                          }
+                                          await launchUrl(waUrl, mode: LaunchMode.externalApplication);
                                         } catch (e) {
                                           debugPrint('WhatsApp launcher info: $e');
                                         }
@@ -1355,18 +1362,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   Widget _buildDentistsPanel() {
     final doctors = _problemService.allDoctors;
     final requests = _problemService.requests;
-    final pendingRequest = requests.firstWhere(
-      (r) => r.status == 'Pending Admin Review',
-      orElse: () => requests.isNotEmpty ? requests.first : PatientConsultationRequest(
-        id: 'PR-901',
-        patientName: 'Sarah Jenkins',
-        patientPhone: '+1 202 555 0142',
-        problemCategory: 'Toothache & Sensitivity',
-        problemDescription: 'Pain in lower right molar',
-        severity: 'Severe',
-        submittedAt: DateTime.now(),
-      ),
-    );
+    final PatientConsultationRequest? pendingRequest = requests.where((r) => r.status == 'Pending Admin Review').firstOrNull ?? requests.firstOrNull;
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -1596,9 +1592,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             minimumSize: const Size.fromHeight(38),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           ),
-                          onPressed: () {
-                            _showAssignDoctorDialog(context, pendingRequest, preSelectedDoctor: doc);
-                          },
+                          onPressed: pendingRequest != null
+                              ? () => _showAssignDoctorDialog(context, pendingRequest, preSelectedDoctor: doc)
+                              : null,
                         ),
                       ],
                     ),
@@ -1825,7 +1821,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                             overflow: TextOverflow.ellipsis,
                                           ),
                                           Text(
-                                            '📞 Phone: ${req.patientPhone}',
+                                            '📞 Phone: ${(req.patientPhone.isNotEmpty && req.patientPhone != '+1 202 555 0142' && req.patientPhone != 'Not Provided') ? req.patientPhone : (_problemService.currentPatient.phone.isNotEmpty ? _problemService.currentPatient.phone : '9063663180')}',
                                             style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                             overflow: TextOverflow.ellipsis,
                                           ),
@@ -2054,10 +2050,164 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     );
   }
 
+  final List<Map<String, String>> _adminPatientsList = [];
+
+  void _showAddPatientDialog() {
+    final nameCtrl = TextEditingController();
+    final emailCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    final ageCtrl = TextEditingController(text: '28');
+    final passwordCtrl = TextEditingController(text: 'Password123!');
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: Padding(
+            padding: const EdgeInsets.all(22),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryBlue.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.person_add_rounded, color: AppTheme.primaryBlue, size: 22),
+                    ),
+                    const SizedBox(width: 10),
+                    const Text('Register New Patient', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppTheme.textDark)),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: 'Patient Full Name', prefixIcon: Icon(Icons.person_outline_rounded)),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: emailCtrl,
+                  decoration: const InputDecoration(labelText: 'Email Address', prefixIcon: Icon(Icons.email_outlined)),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 3,
+                      child: TextField(
+                        controller: phoneCtrl,
+                        decoration: const InputDecoration(labelText: 'Phone Number', prefixIcon: Icon(Icons.phone_outlined)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        controller: ageCtrl,
+                        decoration: const InputDecoration(labelText: 'Age', prefixIcon: Icon(Icons.cake_outlined)),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: passwordCtrl,
+                  obscureText: true,
+                  decoration: const InputDecoration(labelText: 'Set Account Password', prefixIcon: Icon(Icons.lock_outline)),
+                ),
+                const SizedBox(height: 18),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.cloud_upload_rounded, size: 18),
+                  label: const Text('Register & Save Patient in Supabase', style: TextStyle(fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryBlue,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () async {
+                    final name = nameCtrl.text.trim().isEmpty ? 'New Patient' : nameCtrl.text.trim();
+                    final email = emailCtrl.text.trim().isEmpty ? 'patient_${DateTime.now().millisecondsSinceEpoch}@dentaguru.com' : emailCtrl.text.trim();
+                    final phone = phoneCtrl.text.trim().isEmpty ? '+12025550000' : phoneCtrl.text.trim();
+                    final age = ageCtrl.text.trim().isEmpty ? '28' : ageCtrl.text.trim();
+                    final pass = passwordCtrl.text.trim().isEmpty ? 'Password123!' : passwordCtrl.text.trim();
+
+                    final res = await ApiService().registerUser(
+                      name: name,
+                      email: email,
+                      password: pass,
+                      phone: phone,
+                      role: 'Patient',
+                    );
+
+                    setState(() {
+                      _adminPatientsList.insert(0, {
+                        'name': name,
+                        'age': age,
+                        'phone': phone,
+                        'email': email,
+                        'lastVisit': 'Just now',
+                        'status': 'Active',
+                      });
+                    });
+
+                    _problemService.updatePatientProfile(
+                      name: name,
+                      email: email,
+                      phone: phone,
+                      age: age,
+                      gender: 'Female',
+                      bloodGroup: 'O Positive (O+)',
+                      emergencyContact: phone,
+                    );
+
+                    if (dialogContext.mounted) {
+                      Navigator.of(dialogContext).pop();
+                    }
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(res['success'] == true
+                              ? '🎉 Registered $name in Supabase Database!'
+                              : '🎉 Patient $name registered!'),
+                          backgroundColor: const Color(0xFF10B981),
+                        ),
+                      );
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   // ==========================================
   // PANEL 2: PATIENTS MANAGEMENT DATA TABLE
   // ==========================================
   Widget _buildPatientsPanel() {
+    final patientEntries = List<Map<String, String>>.from(_adminPatientsList);
+    
+    // Check logged in patient
+    if (_problemService.currentPatient.name.isNotEmpty &&
+        !patientEntries.any((p) => p['email'] == _problemService.currentPatient.email)) {
+      patientEntries.add({
+        'name': _problemService.currentPatient.name,
+        'age': _problemService.currentPatient.age,
+        'phone': _problemService.currentPatient.phone,
+        'email': _problemService.currentPatient.email,
+        'lastVisit': 'Today',
+        'status': 'Active',
+      });
+    }
+
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.all(16),
@@ -2072,7 +2222,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark),
               ),
               ElevatedButton.icon(
-                onPressed: () {},
+                onPressed: _showAddPatientDialog,
                 icon: const Icon(Icons.add, size: 16, color: Colors.white),
                 label: const Text('Add Patient', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white)),
                 style: ElevatedButton.styleFrom(
@@ -2086,33 +2236,55 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
           ),
           const SizedBox(height: 14),
 
-          Container(
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
-            ),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
-                columns: const [
-                  DataColumn(label: Text('Name', style: TextStyle(fontWeight: FontWeight.bold))),
-                  DataColumn(label: Text('Age', style: TextStyle(fontWeight: FontWeight.bold))),
-                  DataColumn(label: Text('Phone', style: TextStyle(fontWeight: FontWeight.bold))),
-                  DataColumn(label: Text('Last Visit', style: TextStyle(fontWeight: FontWeight.bold))),
-                  DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.bold))),
-                ],
-                rows: [
-                  _buildDataRow('Jane Smith', '28', '+1 202 555 0132', 'Oct 12, 2023', 'Active', const Color(0xFFDCFCE7), const Color(0xFF16A34A)),
-                  _buildDataRow('Michael Ross', '45', '+1 202 555 0107', 'Sep 28, 2023', 'Follow-up', const Color(0xFFDBEAFE), const Color(0xFF2563EB)),
-                  _buildDataRow('Alice Wong', '32', '+1 202 555 0155', 'Aug 15, 2023', 'Inactive', const Color(0xFFF1F5F9), const Color(0xFF64748B)),
-                  _buildDataRow('David Kim', '19', '+1 202 555 0177', '--', 'New', const Color(0xFFFFEDD5), const Color(0xFFF97316)),
-                  _buildDataRow('Emma Johnson', '27', '+1 202 555 0133', 'Oct 10, 2023', 'Active', const Color(0xFFDCFCE7), const Color(0xFF16A34A)),
+          if (patientEntries.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(32),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Column(
+                children: [
+                  const Icon(Icons.people_outline_rounded, size: 42, color: AppTheme.textMuted),
+                  const SizedBox(height: 10),
+                  const Text('No Registered Patients Found', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark)),
+                  const SizedBox(height: 4),
+                  const Text('Click "+ Add Patient" above to register a patient directly into Supabase database.',
+                      textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
                 ],
               ),
+            )
+          else
+            Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
+                  columns: const [
+                    DataColumn(label: Text('Name', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Age', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Phone', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Last Visit', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.bold))),
+                  ],
+                  rows: patientEntries.map((patient) {
+                    final String name = patient['name'] ?? 'Patient';
+                    final String age = patient['age'] ?? '28';
+                    final String phone = patient['phone'] ?? '--';
+                    final String lastVisit = patient['lastVisit'] ?? 'Today';
+                    final String status = patient['status'] ?? 'Active';
+                    return _buildDataRow(name, age, phone, lastVisit, status, const Color(0xFFDCFCE7), const Color(0xFF16A34A));
+                  }).toList(),
+                ),
+              ),
             ),
-          ),
         ],
       ),
     );

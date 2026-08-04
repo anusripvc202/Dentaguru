@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
-const { User } = require('../models/Schemas');
+const { User, Dentist, comparePassword } = require('../models/Schemas');
+const { supabase } = require('../config/supabase');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretjwtkey123';
 const REFRESH_SECRET = process.env.REFRESH_SECRET || 'supersecretrefreshkey456';
@@ -7,23 +8,22 @@ const REFRESH_SECRET = process.env.REFRESH_SECRET || 'supersecretrefreshkey456';
 // Helper: Generate JWT tokens
 const generateTokens = (user) => {
     const accessToken = jwt.sign(
-        { id: user._id, role: user.role },
+        { id: user.id, role: user.role },
         JWT_SECRET,
-        { expiresIn: '15m' } // 15 minutes
+        { expiresIn: '15m' }
     );
     const refreshToken = jwt.sign(
-        { id: user._id },
+        { id: user.id },
         REFRESH_SECRET,
-        { expiresIn: '7d' } // 7 days
+        { expiresIn: '7d' }
     );
     return { accessToken, refreshToken };
 };
 
 // 1. REGISTER
 exports.register = async (req, res) => {
-    const { name, email, password, phone, role, fcmToken } = req.body;
+    const { name, email, password, phone, role, fcmToken, specialty, licenseNumber, clinicName, clinicAddress, profilePhoto } = req.body;
     try {
-        // Check conflicts
         const existingEmail = await User.findOne({ email });
         if (existingEmail) {
             return res.status(400).json({ success: false, message: 'Email already registered.' });
@@ -34,24 +34,68 @@ exports.register = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Phone number already registered.' });
         }
 
-        const user = new User({ name, email, password, phone, role });
-        // Save Firebase FCM device token if provided (for push notifications)
-        if (fcmToken) user.deviceToken = fcmToken;
-        await user.save();
+        const user = await User.create({
+            name,
+            email,
+            password,
+            phone,
+            role: role || 'Patient',
+            device_token: fcmToken || null,
+            biometric_token: profilePhoto || null
+        });
+
+        // If registering as a Dentist, automatically insert row into 'dentists' and 'clinics' tables
+        if (role === 'Dentist' || (role && role.toLowerCase() === 'dentist')) {
+            const licNum = (licenseNumber && licenseNumber.trim())
+                ? licenseNumber.trim()
+                : `DEN-LIC-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+            try {
+                await Dentist.create({
+                    user_id: user.id,
+                    speciality: specialty || 'General Dentistry',
+                    license_number: licNum,
+                    availability_status: 'Available',
+                    rating: 5.0,
+                    reviews_count: 0
+                });
+                console.log(`✅ Dentist record created in 'dentists' table for user: ${user.name}`);
+            } catch (dErr) {
+                console.error('⚠️ Dentist Table Creation Warning:', dErr.message);
+            }
+
+            try {
+                const cName = clinicName && clinicName.trim() ? clinicName.trim() : `${user.name}'s Dental Practice`;
+                const cAddr = clinicAddress && clinicAddress.trim() ? clinicAddress.trim() : '123 Healthcare Blvd, Medical Hub, Suite 400';
+                await Clinic.create({
+                    user_id: user.id,
+                    clinic_name: cName,
+                    location: cAddr,
+                    verified: true,
+                    rating: 5.0,
+                    reviews_count: 0
+                });
+                console.log(`✅ Clinic record created in 'clinics' table for: ${cName}`);
+            } catch (cErr) {
+                console.error('⚠️ Clinic Table Creation Warning:', cErr.message);
+            }
+        }
 
         const { accessToken, refreshToken } = generateTokens(user);
-        user.refreshTokens.push(refreshToken);
-        await user.save();
+        await User.findByIdAndUpdate(user.id, {
+            refresh_tokens: [refreshToken]
+        });
 
         res.status(201).json({
             success: true,
-            message: 'User registered successfully.',
+            message: 'User registered successfully in Supabase PostgreSQL.',
             user: {
-                id: user._id,
+                id: user.id,
                 name: user.name,
                 email: user.email,
                 phone: user.phone,
-                role: user.role
+                role: user.role,
+                profilePhoto: user.biometric_token
             },
             accessToken,
             refreshToken
@@ -66,32 +110,37 @@ exports.register = async (req, res) => {
 exports.login = async (req, res) => {
     const { email, password, fcmToken } = req.body;
     try {
-        const user = await User.findOne({ email });
+        let user = await User.findOne({ email });
         if (!user) {
-            return res.status(400).json({ success: false, message: 'Invalid credentials.' });
+            user = await User.findOne({ phone: email });
+        }
+        if (!user) {
+            return res.status(400).json({ success: false, message: 'Invalid credentials. User not registered.' });
         }
 
-        const isMatch = await user.comparePassword(password);
+        const isMatch = await comparePassword(password, user.password);
         if (!isMatch) {
             return res.status(400).json({ success: false, message: 'Invalid credentials.' });
         }
 
-        // Update FCM device token on login (tokens can rotate)
-        if (fcmToken && user.deviceToken !== fcmToken) {
-            user.deviceToken = fcmToken;
-        }
-
         const { accessToken, refreshToken } = generateTokens(user);
-        user.refreshTokens.push(refreshToken);
-        await user.save();
+        const existingTokens = user.refresh_tokens || [];
+        existingTokens.push(refreshToken);
+
+        const updatePayload = { refresh_tokens: existingTokens };
+        if (fcmToken) updatePayload.device_token = fcmToken;
+
+        await User.findByIdAndUpdate(user.id, updatePayload);
 
         res.json({
             success: true,
             user: {
-                id: user._id,
+                id: user.id,
                 name: user.name,
                 email: user.email,
-                role: user.role
+                phone: user.phone,
+                role: user.role,
+                profilePhoto: user.biometric_token
             },
             accessToken,
             refreshToken
@@ -111,11 +160,10 @@ exports.requestOTP = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Phone number not found. Please register first.' });
         }
         
-        // In production, trigger SMS gateway. Here we return mock code.
         res.json({
             success: true,
             message: 'OTP Code sent successfully via SMS.',
-            mockCode: '8849' // Sent back for testing ease
+            mockCode: '8849'
         });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to request OTP.' });
@@ -135,14 +183,15 @@ exports.verifyOTP = async (req, res) => {
         }
 
         const { accessToken, refreshToken } = generateTokens(user);
-        user.refreshTokens.push(refreshToken);
-        await user.save();
+        const existingTokens = user.refresh_tokens || [];
+        existingTokens.push(refreshToken);
+        await User.findByIdAndUpdate(user.id, { refresh_tokens: existingTokens });
 
         res.json({
             success: true,
             message: 'OTP Verified successfully.',
             user: {
-                id: user._id,
+                id: user.id,
                 name: user.name,
                 email: user.email,
                 role: user.role
@@ -164,13 +213,12 @@ exports.refreshToken = async (req, res) => {
         const decoded = jwt.verify(token, REFRESH_SECRET);
         const user = await User.findById(decoded.id);
 
-        if (!user || !user.refreshTokens.includes(token)) {
+        if (!user || !(user.refresh_tokens || []).includes(token)) {
             return res.status(403).json({ success: false, message: 'Invalid refresh token.' });
         }
 
-        // Generate new access token
         const newAccessToken = jwt.sign(
-            { id: user._id, role: user.role },
+            { id: user.id, role: user.role },
             JWT_SECRET,
             { expiresIn: '15m' }
         );
@@ -188,9 +236,7 @@ exports.refreshToken = async (req, res) => {
 exports.saveBiometric = async (req, res) => {
     const { biometricToken } = req.body;
     try {
-        const user = await User.findById(req.user.id);
-        user.biometricToken = biometricToken;
-        await user.save();
+        await User.findByIdAndUpdate(req.user.id, { biometric_token: biometricToken });
         res.json({ success: true, message: 'Biometric token configured successfully.' });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to configure biometrics.' });
@@ -204,9 +250,57 @@ exports.updateFcmToken = async (req, res) => {
         return res.status(400).json({ success: false, message: 'fcmToken is required.' });
     }
     try {
-        await User.findByIdAndUpdate(req.user.id, { deviceToken: fcmToken });
+        await User.findByIdAndUpdate(req.user.id, { device_token: fcmToken });
         res.json({ success: true, message: 'FCM device token updated successfully.' });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to update FCM token.' });
+    }
+};
+
+// 7. SUPABASE AUTH USER SYNC
+exports.supabaseAuthSync = async (req, res) => {
+    const { supabaseToken, name, phone, role } = req.body;
+    if (!supabaseToken) {
+        return res.status(400).json({ success: false, message: 'supabaseToken is required.' });
+    }
+
+    try {
+        const { data: { user: sbUser }, error } = await supabase.auth.getUser(supabaseToken);
+        if (error || !sbUser) {
+            return res.status(401).json({ success: false, message: 'Invalid Supabase Auth token.' });
+        }
+
+        let dbUser = await User.findOne({ email: sbUser.email });
+        if (!dbUser) {
+            dbUser = await User.create({
+                name: name || sbUser.user_metadata?.full_name || sbUser.email.split('@')[0],
+                email: sbUser.email,
+                password: `sb_${sbUser.id.substring(0, 12)}`,
+                phone: phone || sbUser.phone || `+1000${Math.floor(1000000 + Math.random() * 9000000)}`,
+                role: role || sbUser.user_metadata?.role || 'Patient'
+            });
+        }
+
+        const { accessToken, refreshToken } = generateTokens(dbUser);
+        const existingTokens = dbUser.refresh_tokens || [];
+        existingTokens.push(refreshToken);
+        await User.findByIdAndUpdate(dbUser.id, { refresh_tokens: existingTokens });
+
+        res.json({
+            success: true,
+            message: 'Supabase identity synced successfully.',
+            user: {
+                id: dbUser.id,
+                name: dbUser.name,
+                email: dbUser.email,
+                role: dbUser.role,
+                phone: dbUser.phone
+            },
+            accessToken,
+            refreshToken
+        });
+    } catch (err) {
+        console.error('Supabase Auth Sync Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to sync Supabase Auth identity.' });
     }
 };

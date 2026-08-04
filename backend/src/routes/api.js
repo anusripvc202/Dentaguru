@@ -18,6 +18,7 @@ router.post('/auth/login', auth.login);
 router.post('/auth/otp/request', auth.requestOTP);
 router.post('/auth/otp/verify', auth.verifyOTP);
 router.post('/auth/refresh', auth.refreshToken);
+router.post('/auth/supabase-sync', auth.supabaseAuthSync);
 router.post('/auth/biometric', authenticateJWT, auth.saveBiometric);
 router.put('/auth/fcm-token', authenticateJWT, auth.updateFcmToken);
 
