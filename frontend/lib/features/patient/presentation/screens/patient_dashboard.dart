@@ -899,6 +899,17 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                       );
                                     },
                                   ),
+                                  const SizedBox(height: 8),
+                                  OutlinedButton.icon(
+                                    icon: const Icon(Icons.chat_rounded, size: 16, color: Color(0xFF16A34A)),
+                                    label: Text('Chat with ${req.assignedDoctorName}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF16A34A))),
+                                    style: OutlinedButton.styleFrom(
+                                      minimumSize: const Size.fromHeight(40),
+                                      side: const BorderSide(color: Color(0xFF16A34A), width: 1.5),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                    ),
+                                    onPressed: () => _showLiveChatModal(context),
+                                  ),
                                 ],
                               ),
                             ),
