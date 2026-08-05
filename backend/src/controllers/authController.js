@@ -319,11 +319,7 @@ exports.resetDatabase = async (req, res) => {
     try {
         const tables = ['chat_messages', 'medical_records', 'appointments', 'dentists', 'clinics', 'users'];
         for (const tbl of tables) {
-            const { data } = await supabaseAdmin.from(tbl).select('id');
-            if (data && data.length > 0) {
-                const ids = data.map(r => r.id);
-                await supabaseAdmin.from(tbl).delete().in('id', ids);
-            }
+            await supabaseAdmin.from(tbl).delete().gt('created_at', '1970-01-01');
         }
 
         res.json({

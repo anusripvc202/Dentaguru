@@ -8,15 +8,9 @@ async function clearDatabase() {
 
         for (const tbl of tables) {
             console.log(`Clearing ${tbl} table...`);
-            const { data } = await supabaseAdmin.from(tbl).select('id');
-            if (data && data.length > 0) {
-                const ids = data.map(r => r.id);
-                const { error } = await supabaseAdmin.from(tbl).delete().in('id', ids);
-                if (error) console.error(`Error deleting from ${tbl}:`, error.message);
-                else console.log(`  - Deleted ${ids.length} rows from ${tbl}.`);
-            } else {
-                console.log(`  - ${tbl} is already empty.`);
-            }
+            const { error } = await supabaseAdmin.from(tbl).delete().gt('created_at', '1970-01-01');
+            if (error) console.error(`Error deleting from ${tbl}:`, error.message);
+            else console.log(`  - ${tbl} cleared successfully.`);
         }
 
         console.log('✅ ALL SUPABASE POSTGRESQL TABLES CLEARED SUCCESSFULLY!');
