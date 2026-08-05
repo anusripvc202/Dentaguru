@@ -151,69 +151,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         ),
       ),
 
-      // Floating Sticky Bottom Action Bar on Mobile with Animation
-      bottomNavigationBar: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              blurRadius: 16,
-              offset: const Offset(0, -4),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
-                  Text(
-                    'Ready to experience DentaGuru?',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                      color: AppTheme.textDark,
-                    ),
-                  ),
-                  Text(
-                    'Tap to access your portal',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 10, color: AppTheme.textMuted),
-                  ),
-                ],
-              ),
-            ),
-            ScaleTransition(
-              scale: _pulseScaleAnimation,
-              child: ElevatedButton.icon(
-                onPressed: () => context.go('/login'),
-                icon: const Icon(Icons.arrow_forward_rounded, size: 18),
-                label: const Text(
-                  'Visit Login Page',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primaryBlue,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  elevation: 4,
-                  shadowColor: AppTheme.primaryBlue.withValues(alpha: 0.4),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -304,27 +241,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               spacing: 10,
               runSpacing: 10,
               children: [
-                SizedBox(
-                  width: MediaQuery.of(context).size.width < 400 ? double.infinity : null,
-                  child: ElevatedButton.icon(
-                    onPressed: () => context.go('/login'),
-                    icon: const Icon(Icons.login_rounded, size: 18),
-                    label: const Text(
-                      'Go to Login Page',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.brandOrange,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      elevation: 6,
-                      shadowColor: AppTheme.brandOrange.withValues(alpha: 0.4),
-                    ),
-                  ),
-                ),
+
                 SizedBox(
                   width: MediaQuery.of(context).size.width < 400 ? double.infinity : null,
                   child: OutlinedButton.icon(
@@ -1122,31 +1039,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ),
           ),
           const SizedBox(height: 6),
-          const Text(
-            'Tap below or use top-right Login to access your portal.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
-          ),
-          const SizedBox(height: 18),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () => context.go('/login'),
-              icon: const Icon(Icons.arrow_forward_rounded, size: 18),
-              label: const Text(
-                'Go to Login Page',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.brandOrange,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
-            ),
-          ),
         ],
       ),
     );
