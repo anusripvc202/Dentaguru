@@ -2406,6 +2406,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   }
 
   Widget _buildMonthRevenueCard() {
+    final requests = _problemService.requests;
+    final totalRev = requests.length * 85;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -2419,10 +2422,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
           const Text('Total Monthly Revenue', style: TextStyle(fontSize: 11, color: AppTheme.textMuted, fontWeight: FontWeight.w600)),
           const SizedBox(height: 4),
           Row(
-            children: const [
-              Text('₹24,85,200', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
-              SizedBox(width: 10),
-              Text('+15.3%', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
+            children: [
+              Text('\$$totalRev', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
+              const SizedBox(width: 10),
+              Text(totalRev > 0 ? '+100%' : 'Live Sync', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: totalRev > 0 ? const Color(0xFF10B981) : AppTheme.textMuted)),
             ],
           ),
           const SizedBox(height: 20),
