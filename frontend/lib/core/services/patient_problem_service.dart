@@ -487,8 +487,16 @@ class PatientProblemService extends ChangeNotifier {
         bool addedAny = false;
         for (final item in list) {
           final reqId = item['_id'] ?? item['id'] ?? 'REQ-${item['patient_id']}-${DateTime.now().millisecondsSinceEpoch}';
-          final pName = item['patient_id'] ?? 'Patient';
-          final docName = item['dentist_id'] ?? 'Assigned Specialist';
+          final rawP = (item['patient_name'] ?? item['patientName'] ?? item['patient_id'] ?? 'Patient').toString();
+          final pName = (rawP.contains('-') && rawP.length > 20) 
+              ? (currentPatient.name.isNotEmpty ? currentPatient.name : 'Patient') 
+              : rawP;
+
+          final rawD = (item['dentist_name'] ?? item['dentistName'] ?? item['dentist_id'] ?? 'Assigned Specialist').toString();
+          final docName = (rawD.contains('-') && rawD.length > 20) 
+              ? (currentDoctor?.name ?? 'Assigned Specialist') 
+              : rawD;
+
           final clinic = item['clinic_id'] ?? 'DentaGuru Care Center';
           final treatment = item['treatment'] ?? 'Dental Consultation';
 
@@ -497,14 +505,14 @@ class PatientProblemService extends ChangeNotifier {
               0,
               PatientConsultationRequest(
                 id: reqId.toString(),
-                patientName: pName.toString(),
+                patientName: pName,
                 patientPhone: '+12025550199',
                 problemCategory: treatment.toString(),
                 problemDescription: 'Scheduled consultation via DentaGuru DB',
                 severity: 'Moderate',
                 submittedAt: DateTime.now(),
                 status: 'Doctor Suggested',
-                assignedDoctorName: docName.toString(),
+                assignedDoctorName: docName,
                 assignedDoctorSpecialty: 'Dental Specialist',
                 assignedDoctorClinic: clinic.toString(),
                 adminNotes: 'Restored from Supabase database record',
