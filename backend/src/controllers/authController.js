@@ -317,12 +317,14 @@ exports.supabaseAuthSync = async (req, res) => {
 // 8. RESET ALL DATABASE TABLES
 exports.resetDatabase = async (req, res) => {
     try {
-        await supabaseAdmin.from('chat_messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        await supabaseAdmin.from('medical_records').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        await supabaseAdmin.from('appointments').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        await supabaseAdmin.from('dentists').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        await supabaseAdmin.from('clinics').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        await supabaseAdmin.from('users').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        const tables = ['chat_messages', 'medical_records', 'appointments', 'dentists', 'clinics', 'users'];
+        for (const tbl of tables) {
+            const { data } = await supabaseAdmin.from(tbl).select('id');
+            if (data && data.length > 0) {
+                const ids = data.map(r => r.id);
+                await supabaseAdmin.from(tbl).delete().in('id', ids);
+            }
+        }
 
         res.json({
             success: true,

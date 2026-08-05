@@ -4,23 +4,20 @@ const { supabaseAdmin } = require('../config/supabase');
 async function clearDatabase() {
     console.log('⚡ Starting Supabase PostgreSQL Database Reset...');
     try {
-        console.log('Clearing chat_messages table...');
-        await supabaseAdmin.from('chat_messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        const tables = ['chat_messages', 'medical_records', 'appointments', 'dentists', 'clinics', 'users'];
 
-        console.log('Clearing medical_records table...');
-        await supabaseAdmin.from('medical_records').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-
-        console.log('Clearing appointments table...');
-        await supabaseAdmin.from('appointments').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-
-        console.log('Clearing dentists table...');
-        await supabaseAdmin.from('dentists').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-
-        console.log('Clearing clinics table...');
-        await supabaseAdmin.from('clinics').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-
-        console.log('Clearing users table...');
-        await supabaseAdmin.from('users').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        for (const tbl of tables) {
+            console.log(`Clearing ${tbl} table...`);
+            const { data } = await supabaseAdmin.from(tbl).select('id');
+            if (data && data.length > 0) {
+                const ids = data.map(r => r.id);
+                const { error } = await supabaseAdmin.from(tbl).delete().in('id', ids);
+                if (error) console.error(`Error deleting from ${tbl}:`, error.message);
+                else console.log(`  - Deleted ${ids.length} rows from ${tbl}.`);
+            } else {
+                console.log(`  - ${tbl} is already empty.`);
+            }
+        }
 
         console.log('✅ ALL SUPABASE POSTGRESQL TABLES CLEARED SUCCESSFULLY!');
         process.exit(0);
