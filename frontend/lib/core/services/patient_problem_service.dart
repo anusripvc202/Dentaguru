@@ -320,6 +320,9 @@ class PatientProblemService extends ChangeNotifier {
         _medicalRecords.addAll(List<Map<String, dynamic>>.from(list));
       }
 
+      // 5. Sync live appointments from Supabase DB API
+      syncAppointmentsFromApi();
+
       // 4. Load All Doctors Directory
       final docListStr = prefs.getString('dentaguru_all_doctors');
       if (docListStr != null && docListStr.isNotEmpty) {
@@ -474,6 +477,49 @@ class PatientProblemService extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('Sync doctors error: $e');
+    }
+  }
+
+  Future<void> syncAppointmentsFromApi() async {
+    try {
+      final list = await ApiService().fetchAppointments();
+      if (list.isNotEmpty) {
+        bool addedAny = false;
+        for (final item in list) {
+          final reqId = item['_id'] ?? item['id'] ?? 'REQ-${item['patient_id']}-${DateTime.now().millisecondsSinceEpoch}';
+          final pName = item['patient_id'] ?? 'Patient';
+          final docName = item['dentist_id'] ?? 'Assigned Specialist';
+          final clinic = item['clinic_id'] ?? 'DentaGuru Care Center';
+          final treatment = item['treatment'] ?? 'Dental Consultation';
+
+          if (!_requests.any((r) => r.id == reqId || (r.patientName == pName && r.problemCategory == treatment))) {
+            _requests.insert(
+              0,
+              PatientConsultationRequest(
+                id: reqId.toString(),
+                patientName: pName.toString(),
+                patientPhone: '+12025550199',
+                problemCategory: treatment.toString(),
+                symptomDescription: 'Scheduled consultation via DentaGuru DB',
+                status: 'Doctor Suggested',
+                assignedDoctorName: docName.toString(),
+                assignedDoctorSpecialty: 'Dental Specialist',
+                assignedDoctorClinic: clinic.toString(),
+                adminNotes: 'Restored from Supabase database record',
+                whatsappNotificationSent: true,
+              ),
+            );
+            addedAny = true;
+          }
+        }
+
+        if (addedAny) {
+          _saveToStorage();
+          notifyListeners();
+        }
+      }
+    } catch (e) {
+      debugPrint('Sync appointments error: $e');
     }
   }
 

@@ -5,7 +5,7 @@ const { sendPushNotification } = require('../services/notificationService');
 exports.bookAppointment = async (req, res) => {
     const { dentistId, clinicId, date, timeSlot, treatment, patientId } = req.body;
     try {
-        const targetPatientId = patientId || (req.user ? req.user.id : null);
+        const targetPatientId = patientId || (req.user ? req.user.id : 'PATIENT-GUEST');
         const appointment = await Appointment.create({
             patient_id: targetPatientId,
             dentist_id: dentistId || null,
@@ -19,14 +19,16 @@ exports.bookAppointment = async (req, res) => {
         });
 
         // 🔔 Firebase FCM Push Notification
-        const patient = await User.findById(req.user.id);
-        if (patient?.device_token) {
-            await sendPushNotification(
-                patient.device_token,
-                '✅ Appointment Confirmed!',
-                `Your appointment for ${treatment} at ${timeSlot} on ${new Date(date).toDateString()} is confirmed.`,
-                { appointmentId: String(appointment.id), type: 'appointment_confirmed' }
-            );
+        if (req.user && req.user.id) {
+            const patient = await User.findById(req.user.id);
+            if (patient?.device_token) {
+                await sendPushNotification(
+                    patient.device_token,
+                    '✅ Appointment Confirmed!',
+                    `Your appointment for ${treatment} at ${timeSlot} on ${new Date(date).toDateString()} is confirmed.`,
+                    { appointmentId: String(appointment.id), type: 'appointment_confirmed' }
+                );
+            }
         }
 
         res.status(201).json({
@@ -43,28 +45,28 @@ exports.bookAppointment = async (req, res) => {
 // 2. GET APPOINTMENTS
 exports.getAppointments = async (req, res) => {
     try {
+        const { patientId, dentistId, clinicId } = req.query;
         let query = {};
-        if (req.user.role === 'Patient') {
-            query.patientId = req.user.id;
-        } else if (req.user.role === 'Dentist') {
-            const dentist = await Dentist.findOne({ user_id: req.user.id });
-            if (dentist) {
-                query.dentistId = dentist.id;
-            } else {
-                return res.status(400).json({ success: false, message: 'Dentist profile not found.' });
-            }
-        } else if (req.user.role === 'Clinic') {
-            const clinic = await Clinic.findOne({ user_id: req.user.id });
-            if (clinic) {
-                query.clinicId = clinic.id;
-            } else {
-                return res.status(400).json({ success: false, message: 'Clinic profile not found.' });
+        if (patientId) query.patient_id = patientId;
+        if (dentistId) query.dentist_id = dentistId;
+        if (clinicId) query.clinic_id = clinicId;
+
+        if (req.user) {
+            if (req.user.role === 'Patient') {
+                query.patient_id = req.user.id;
+            } else if (req.user.role === 'Dentist') {
+                const dentist = await Dentist.findOne({ user_id: req.user.id });
+                if (dentist) query.dentist_id = dentist.id;
+            } else if (req.user.role === 'Clinic') {
+                const clinic = await Clinic.findOne({ user_id: req.user.id });
+                if (clinic) query.clinic_id = clinic.id;
             }
         }
 
         const list = await Appointment.find(query);
         res.json({ success: true, count: list.length, appointments: list });
     } catch (err) {
+        console.error('Get Appointments Error:', err.message);
         res.status(500).json({ success: false, message: 'Failed to fetch appointments.' });
     }
 };

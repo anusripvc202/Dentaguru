@@ -154,6 +154,24 @@ class ApiService {
     }
   }
 
+  /// Fetch live appointments from Supabase backend
+  Future<List<dynamic>> fetchAppointments({String? patientId, String? dentistId}) async {
+    try {
+      final uri = Uri.parse(ApiConstants.appointments).replace(queryParameters: {
+        if (patientId != null && patientId.isNotEmpty) 'patientId': patientId,
+        if (dentistId != null && dentistId.isNotEmpty) 'dentistId': dentistId,
+      });
+      final response = await http.get(uri, headers: _headers);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['appointments'] ?? [];
+      }
+    } catch (e) {
+      debugPrint('Fetch appointments error: $e');
+    }
+    return [];
+  }
+
   /// Send a live chat message to Supabase
   Future<Map<String, dynamic>> sendMessage({
     required String senderId,

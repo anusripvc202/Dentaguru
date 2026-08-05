@@ -28,10 +28,10 @@ router.post('/auth/reset-db', auth.resetDatabase);
 // ─────────────────────────────────────────────
 // 2. APPOINTMENTS ENDPOINTS
 // ─────────────────────────────────────────────
-router.post('/appointments', authenticateJWT, appointments.bookAppointment);
-router.get('/appointments', authenticateJWT, appointments.getAppointments);
-router.put('/appointments/:id', authenticateJWT, appointments.rescheduleAppointment);
-router.delete('/appointments/:id', authenticateJWT, appointments.cancelAppointment);
+router.post('/appointments', appointments.bookAppointment);
+router.get('/appointments', appointments.getAppointments);
+router.put('/appointments/:id', appointments.rescheduleAppointment);
+router.delete('/appointments/:id', appointments.cancelAppointment);
 
 // ─────────────────────────────────────────────
 // 3. CLINIC PROFILE ENDPOINTS
