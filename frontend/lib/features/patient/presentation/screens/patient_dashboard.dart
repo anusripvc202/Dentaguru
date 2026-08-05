@@ -951,7 +951,6 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
       ],
     );
   }
-
   Widget _buildProgressLine({required bool isDone}) {
     return Container(
       width: 14,
@@ -961,16 +960,44 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   }
 
   Widget _buildNextVisitCard() {
+    final requests = _patientService.requests;
+    final assignedReq = requests.where((r) => r.assignedDoctorName != null && r.assignedDoctorName!.isNotEmpty).firstOrNull ?? requests.firstOrNull;
+
+    if (assignedReq == null) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+        ),
+        child: const Column(
+          children: [
+            Icon(Icons.calendar_today_rounded, size: 32, color: AppTheme.primaryBlue),
+            SizedBox(height: 8),
+            Text('No Scheduled Visits', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark)),
+            SizedBox(height: 2),
+            Text('Submit a dental problem or report symptoms to schedule a visit.', textAlign: TextAlign.center, style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+          ],
+        ),
+      );
+    }
+
+    final docName = assignedReq.assignedDoctorName ?? 'Attending Specialist';
+    final clinicName = assignedReq.assignedDoctorClinic ?? 'DentaGuru Care Center';
+    final isConfirmed = assignedReq.status == 'Doctor Suggested' || assignedReq.status == 'Confirmed';
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFEEF2F6)),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 10,
-            offset: const Offset(0, 4),
+            offset: const Offset(0, 3),
           ),
         ],
       ),
@@ -989,39 +1016,48 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                 const SizedBox(height: 10),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Tomorrow • 09:30 AM',
-                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-                        ),
-                        const SizedBox(height: 2),
-                        Row(
-                          children: const [
-                            Text(
-                              'Routine Cleaning & Consultation',
-                              style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
-                            ),
-                            SizedBox(width: 6),
-                            Text(
-                              '• 💰 Fee Paid: \$75',
-                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
-                            ),
-                          ],
-                        ),
-                      ],
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Today • 02:30 PM',
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                          ),
+                          const SizedBox(height: 4),
+                          Wrap(
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                assignedReq.problemCategory,
+                                style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                              ),
+                              const SizedBox(width: 4),
+                              const Text(
+                                '• 💰 Fee: \$85',
+                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
+                    const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
-                        color: AppTheme.statusConfirmedBg,
+                        color: isConfirmed ? AppTheme.statusConfirmedBg : const Color(0xFFFEF3C7),
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      child: const Text(
-                        'Confirmed',
-                        style: TextStyle(color: AppTheme.statusConfirmedText, fontSize: 11, fontWeight: FontWeight.bold),
+                      child: Text(
+                        isConfirmed ? 'Confirmed' : 'Pending',
+                        style: TextStyle(
+                          color: isConfirmed ? AppTheme.statusConfirmedText : const Color(0xFFD97706),
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ],
@@ -1044,19 +1080,23 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                   child: const Icon(Icons.person_rounded, color: AppTheme.primaryBlue, size: 22),
                 ),
                 const SizedBox(width: 12),
-                const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Dr. Elena Rodriguez',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
-                    ),
-                    SizedBox(height: 2),
-                    Text(
-                      'Apex Dental Center • Room #304',
-                      style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
-                    ),
-                  ],
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        docName,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        clinicName,
+                        style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -1070,6 +1110,9 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   // TAB 2: APPOINTMENTS TAB
   // ==========================================
   Widget _buildAppointmentsTab() {
+    final requests = _patientService.requests;
+    final pastRequests = requests.where((r) => r.status == 'Completed').toList();
+
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.all(16),
@@ -1085,27 +1128,52 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
           const SizedBox(height: 16),
           _buildNextVisitCard(),
           const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
-            ),
-            child: const Row(
-              children: [
-                Icon(Icons.history_rounded, color: AppTheme.primaryBlue, size: 24),
-                SizedBox(width: 12),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          const Text('Past Visit History', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
+          const SizedBox(height: 10),
+          if (pastRequests.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.history_rounded, color: AppTheme.textMuted, size: 22),
+                  SizedBox(width: 12),
+                  Text('No past dental visits recorded.', style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+                ],
+              ),
+            )
+          else
+            ...pastRequests.map((req) {
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Row(
                   children: [
-                    Text('Past Visit: Sep 12, 2023', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark)),
-                    Text('Dental Filling & X-Ray • Completed', style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                    const Icon(Icons.history_rounded, color: AppTheme.primaryBlue, size: 24),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Completed Visit', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark)),
+                          Text('${req.problemCategory} • Completed', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
-              ],
-            ),
-          ),
+              );
+            }),
         ],
       ),
     );
