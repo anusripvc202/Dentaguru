@@ -1718,10 +1718,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 mainAxisSpacing: 12,
                 childAspectRatio: childRatio,
                 children: [
-                  const _KpiCard(
+                  _KpiCard(
                     title: 'Total Active Patients',
-                    value: '1,284',
-                    growth: '+12.4% growth',
+                    value: '${requests.map((r) => r.patientName).toSet().length}',
+                    growth: requests.isNotEmpty ? '+100% active' : 'Live Sync',
                     accentColor: AppTheme.primaryBlue,
                     icon: Icons.people_alt_rounded,
                   ),
@@ -1732,17 +1732,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     accentColor: const Color(0xFFD97706),
                     icon: Icons.pending_actions_rounded,
                   ),
-                  const _KpiCard(
-                    title: 'Total Revenue',
-                    value: '₹24,85,200',
-                    growth: '+15.3% growth',
+                  _KpiCard(
+                    title: 'Assigned Specialists',
+                    value: '${_problemService.allDoctors.length}',
+                    growth: 'Verified Doctors',
                     accentColor: const Color(0xFF10B981),
                     icon: Icons.account_balance_wallet_rounded,
                   ),
-                  const _KpiCard(
+                  _KpiCard(
                     title: 'Partner Clinics',
-                    value: '156',
-                    growth: '+11.9% expansion',
+                    value: '${_problemService.allDoctors.map((d) => d.clinicName).toSet().length}',
+                    growth: 'Network Clinics',
                     accentColor: const Color(0xFF8B5CF6),
                     icon: Icons.local_hospital_rounded,
                   ),

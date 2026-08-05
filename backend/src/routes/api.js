@@ -23,6 +23,7 @@ router.post('/auth/refresh', auth.refreshToken);
 router.post('/auth/supabase-sync', auth.supabaseAuthSync);
 router.post('/auth/biometric', authenticateJWT, auth.saveBiometric);
 router.put('/auth/fcm-token', authenticateJWT, auth.updateFcmToken);
+router.post('/auth/reset-db', auth.resetDatabase);
 
 // ─────────────────────────────────────────────
 // 2. APPOINTMENTS ENDPOINTS

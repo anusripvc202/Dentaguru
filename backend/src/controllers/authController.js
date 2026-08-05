@@ -313,3 +313,23 @@ exports.supabaseAuthSync = async (req, res) => {
         res.status(500).json({ success: false, message: 'Failed to sync Supabase Auth identity.' });
     }
 };
+
+// 8. RESET ALL DATABASE TABLES
+exports.resetDatabase = async (req, res) => {
+    try {
+        await supabaseAdmin.from('chat_messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        await supabaseAdmin.from('medical_records').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        await supabaseAdmin.from('appointments').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        await supabaseAdmin.from('dentists').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        await supabaseAdmin.from('clinics').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        await supabaseAdmin.from('users').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+
+        res.json({
+            success: true,
+            message: 'All Supabase PostgreSQL database tables reset successfully.'
+        });
+    } catch (err) {
+        console.error('Reset Database Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to reset database tables.' });
+    }
+};

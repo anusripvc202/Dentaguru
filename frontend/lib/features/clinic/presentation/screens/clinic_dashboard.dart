@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
-
+import '../../../../core/services/patient_problem_service.dart';
 import 'package:go_router/go_router.dart';
 
 class ClinicDashboardScreen extends StatefulWidget {
@@ -12,6 +12,23 @@ class ClinicDashboardScreen extends StatefulWidget {
 
 class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
   int _currentIndex = 0;
+  final PatientProblemService _problemService = PatientProblemService();
+
+  @override
+  void initState() {
+    super.initState();
+    _problemService.addListener(_onServiceUpdate);
+  }
+
+  @override
+  void dispose() {
+    _problemService.removeListener(_onServiceUpdate);
+    super.dispose();
+  }
+
+  void _onServiceUpdate() {
+    if (mounted) setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -59,6 +76,9 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
   }
 
   Widget _buildOverviewTab(ThemeData theme) {
+    final doctors = _problemService.allDoctors;
+    final requests = _problemService.requests;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -71,11 +91,11 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
           Row(
             children: [
               Expanded(
-                child: _buildMetricCard('₹2,48,500', 'Gross Monthly', Colors.teal, theme),
+                child: _buildMetricCard('${doctors.length}', 'Attached Doctors', Colors.teal, theme),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: _buildMetricCard('48', 'Total Bookings', Colors.blue, theme),
+                child: _buildMetricCard('${requests.length}', 'Total Bookings', Colors.blue, theme),
               ),
             ],
           ),
@@ -173,13 +193,15 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
   }
 
   Widget _buildDoctorsTab(ThemeData theme) {
+    final doctors = _problemService.allDoctors;
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('Attached Doctors', style: theme.textTheme.titleMedium),
+            Text('Attached Doctors (${doctors.length})', style: theme.textTheme.titleMedium),
             ElevatedButton.icon(
               icon: const Icon(Icons.add, size: 16, color: Colors.white),
               label: const Text('Add Doctor', style: TextStyle(color: Colors.white, fontSize: 12)),
@@ -189,9 +211,18 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
           ],
         ),
         const SizedBox(height: 16),
-        _buildDoctorListRow('Dr. Michael Chen', 'General Dentist', 'Available', Colors.green),
-        _buildDoctorListRow('Dr. Clara Rodriguez', 'Orthodontist', 'Available', Colors.green),
-        _buildDoctorListRow('Dr. Julia Roberts', 'Pediatric Specialist', 'Offline', Colors.grey),
+        if (doctors.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(20),
+            child: Center(child: Text('No attached doctors in directory.', style: TextStyle(color: Colors.grey))),
+          )
+        else
+          ...doctors.map((doc) => _buildDoctorListRow(
+                doc.name,
+                doc.specialty,
+                doc.status,
+                doc.status == 'Available' ? Colors.green : Colors.grey,
+              )),
       ],
     );
   }

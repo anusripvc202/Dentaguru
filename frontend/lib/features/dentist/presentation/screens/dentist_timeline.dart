@@ -408,21 +408,21 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 children: [
                   _buildQuickStatBox(
                     icon: Icons.groups_rounded,
-                    count: '12',
+                    count: '${requests.length}',
                     label: "Today's Queue",
                     accentColor: AppTheme.primaryBlue,
                   ),
                   const SizedBox(width: 10),
                   _buildQuickStatBox(
                     icon: Icons.receipt_long_rounded,
-                    count: '4',
-                    label: 'E-Prescriptions',
+                    count: '${requests.where((r) => r.status == 'Doctor Suggested').length}',
+                    label: 'Suggested',
                     accentColor: const Color(0xFF10B981),
                   ),
                   const SizedBox(width: 10),
                   _buildQuickStatBox(
                     icon: Icons.star_rounded,
-                    count: '98%',
+                    count: '${currentDoc?.rating ?? 5.0} ⭐',
                     label: 'Satisfaction',
                     accentColor: AppTheme.brandOrange,
                   ),
@@ -440,7 +440,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                     icon: Icons.receipt_long_rounded,
                     title: 'New E-Prescription',
                     color: const Color(0xFF10B981),
-                    onTap: () => _showPrescriptionModal(context, 'Sarah Jenkins'),
+                    onTap: () => _showPrescriptionModal(context, requests.isNotEmpty ? requests.first.patientName : 'Patient'),
                   ),
                   const SizedBox(width: 10),
                   _buildActionChip(
@@ -599,27 +599,30 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               const Text("Today's Patient Schedule", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
               const SizedBox(height: 12),
 
-              _buildTimelineNode(
-                time: '08:30 AM',
-                name: 'Eleanor Shellstrop',
-                procedure: 'Routine Cleaning & X-Ray Scan',
-                status: 'Completed',
-                statusColor: const Color(0xFF10B981),
-              ),
-              _buildTimelineNode(
-                time: '10:15 AM',
-                name: 'Chidi Anagonye',
-                procedure: 'Consultation: Wisdom Tooth Extraction',
-                status: 'In Chair',
-                statusColor: AppTheme.primaryBlue,
-              ),
-              _buildTimelineNode(
-                time: '01:15 PM',
-                name: 'Tahani Al-Jamil',
-                procedure: 'Emergency: Chipped Incisor Repair',
-                status: 'Waiting Room',
-                statusColor: AppTheme.brandOrange,
-              ),
+              if (requests.isEmpty)
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: const Color(0xFFEEF2F6)),
+                  ),
+                  child: const Center(
+                    child: Text('No scheduled appointments in queue for today.', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                  ),
+                )
+              else
+                Column(
+                  children: requests.map((req) {
+                    return _buildTimelineNode(
+                      time: 'Today, 2:30 PM',
+                      name: req.patientName,
+                      procedure: req.problemCategory,
+                      status: req.status == 'Doctor Suggested' ? 'Accepted' : 'Scheduled',
+                      statusColor: req.status == 'Doctor Suggested' ? const Color(0xFF10B981) : AppTheme.primaryBlue,
+                    );
+                  }).toList(),
+                ),
               const SizedBox(height: 24),
             ],
           ),
@@ -778,6 +781,9 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   // TAB 2: PATIENTS TAB
   // ==========================================
   Widget _buildPatientsTab() {
+    final requests = _patientService.requests;
+    final patient = _patientService.currentPatient;
+
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.all(16),
@@ -788,11 +794,30 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
           const SizedBox(height: 4),
           const Text('Access patient electronic dental records & X-rays', style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
           const SizedBox(height: 16),
-          _buildPatientListTile(name: 'Sarah Jenkins', age: '28 Yrs', blood: 'O+', issue: 'Lower Molar Cold Sensitivity'),
-          const SizedBox(height: 10),
-          _buildPatientListTile(name: 'Eleanor Shellstrop', age: '32 Yrs', blood: 'A+', issue: 'Aligner Track Inspection'),
-          const SizedBox(height: 10),
-          _buildPatientListTile(name: 'Chidi Anagonye', age: '34 Yrs', blood: 'B+', issue: 'Wisdom Teeth Extraction'),
+          if (requests.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: const Center(
+                child: Text('No patient records found in active queue.', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+              ),
+            )
+          else
+            ...requests.map((req) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _buildPatientListTile(
+                  name: req.patientName,
+                  age: '${patient.age.isNotEmpty ? patient.age : '28'} Yrs',
+                  blood: patient.bloodGroup.isNotEmpty ? patient.bloodGroup : 'O+',
+                  issue: req.problemCategory,
+                ),
+              );
+            }),
         ],
       ),
     );
@@ -834,40 +859,65 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   // TAB 3: PRESCRIPTIONS TAB
   // ==========================================
   Widget _buildPrescriptionsTab() {
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('E-Prescription Records', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
-          const SizedBox(height: 4),
-          const Text('Issued digital medication slips', style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
-            ),
-            child: const Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('Sarah Jenkins', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark)),
-                    Text('Oct 24, 2023', style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                const Text('💊 Amoxicillin 500mg • 1 Capsule Q8H • 7 Days', style: TextStyle(fontSize: 12, color: Color(0xFF10B981), fontWeight: FontWeight.bold)),
-              ],
-            ),
+    return FutureBuilder<List<dynamic>>(
+      future: ApiService().fetchMedicalRecords(),
+      builder: (context, snapshot) {
+        final records = (snapshot.data ?? []).where((r) => r['type'] == 'prescription').toList();
+
+        return SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('E-Prescription Records', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
+              const SizedBox(height: 4),
+              const Text('Issued digital medication slips', style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+              const SizedBox(height: 16),
+              if (records.isEmpty)
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: const Center(
+                    child: Text('No digital e-prescriptions issued yet.', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                  ),
+                )
+              else
+                ...records.map((rec) {
+                  final List items = rec['items'] is List ? rec['items'] : [];
+                  final medStr = items.map((i) => i['name'] ?? '').join(', ');
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(rec['doctorName'] ?? 'Attending Doctor', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark)),
+                            Text(rec['date'] ?? '', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text('💊 ${medStr.isNotEmpty ? medStr : 'Active Medication'}', style: const TextStyle(fontSize: 12, color: Color(0xFF10B981), fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  );
+                }),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
