@@ -523,6 +523,15 @@ class PatientProblemService extends ChangeNotifier {
     }
   }
 
+  void updateRequestStatus(String requestId, String newStatus) {
+    final index = _requests.indexWhere((r) => r.id == requestId);
+    if (index != -1) {
+      _requests[index].status = newStatus;
+      _saveToStorage();
+      notifyListeners();
+    }
+  }
+
   void removeDoctor(String doctorId) {
     _allDoctors.removeWhere((d) => d.id == doctorId);
     if (currentDoctor?.id == doctorId) {

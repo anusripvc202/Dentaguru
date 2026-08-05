@@ -678,24 +678,47 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                               ),
                               const SizedBox(width: 8),
                               Expanded(
-                                child: ElevatedButton.icon(
-                                  icon: const Icon(Icons.check_circle_rounded, size: 14),
-                                  label: const Text('Accept & Schedule', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: AppTheme.primaryBlue,
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(vertical: 10),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                  ),
-                                  onPressed: () {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text('✅ Accepted ${req.patientName}\'s consultation!'),
-                                        backgroundColor: const Color(0xFF10B981),
+                                child: (req.status == 'Confirmed' || req.status == 'Accepted')
+                                    ? Container(
+                                        padding: const EdgeInsets.symmetric(vertical: 10),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                                          borderRadius: BorderRadius.circular(10),
+                                          border: Border.all(color: const Color(0xFF10B981)),
+                                        ),
+                                        child: const Row(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            Icon(Icons.check_circle_rounded, size: 14, color: Color(0xFF10B981)),
+                                            SizedBox(width: 4),
+                                            Text(
+                                              'Accepted & Scheduled',
+                                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFF10B981)),
+                                            ),
+                                          ],
+                                        ),
+                                      )
+                                    : ElevatedButton.icon(
+                                        icon: const Icon(Icons.check_circle_rounded, size: 14),
+                                        label: const Text('Accept & Schedule', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: AppTheme.primaryBlue,
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(vertical: 10),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                        ),
+                                        onPressed: () {
+                                          setState(() {
+                                            _patientService.updateRequestStatus(req.id, 'Confirmed');
+                                          });
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(
+                                              content: Text('✅ Accepted & Scheduled ${req.patientName}\'s consultation!'),
+                                              backgroundColor: const Color(0xFF10B981),
+                                            ),
+                                          );
+                                        },
                                       ),
-                                    );
-                                  },
-                                ),
                               ),
                             ],
                           ),
@@ -725,12 +748,13 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               else
                 Column(
                   children: requests.map((req) {
+                    final isAccepted = req.status == 'Confirmed' || req.status == 'Accepted';
                     return _buildTimelineNode(
                       time: 'Today, 2:30 PM',
                       name: req.patientName,
                       procedure: req.problemCategory,
-                      status: req.status == 'Doctor Suggested' ? 'Accepted' : 'Scheduled',
-                      statusColor: req.status == 'Doctor Suggested' ? const Color(0xFF10B981) : AppTheme.primaryBlue,
+                      status: isAccepted ? 'Accepted' : 'Pending Acceptance',
+                      statusColor: isAccepted ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
                     );
                   }).toList(),
                 ),
