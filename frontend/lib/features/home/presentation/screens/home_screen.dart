@@ -317,21 +317,25 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
           const SizedBox(height: 18),
 
-          // Redesigned Horizontal Scrollable Role Selector Chips
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            child: Row(
-              children: [
-                _buildRolePillChip(index: 0, label: 'Overview', icon: Icons.stars_rounded),
-                const SizedBox(width: 8),
-                _buildRolePillChip(index: 1, label: 'For Patients', icon: Icons.person_rounded),
-                const SizedBox(width: 8),
-                _buildRolePillChip(index: 2, label: 'For Dentists', icon: Icons.medical_services_rounded),
-                const SizedBox(width: 8),
-                _buildRolePillChip(index: 3, label: 'AI Screening', icon: Icons.psychology_rounded),
-              ],
-            ),
+          // 2x2 Grid Layout for Role Chips (2 per row)
+          Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(child: _buildRolePillChip(index: 0, label: 'Overview', icon: Icons.stars_rounded)),
+                  const SizedBox(width: 8),
+                  Expanded(child: _buildRolePillChip(index: 1, label: 'For Patients', icon: Icons.person_rounded)),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(child: _buildRolePillChip(index: 2, label: 'For Dentists', icon: Icons.medical_services_rounded)),
+                  const SizedBox(width: 8),
+                  Expanded(child: _buildRolePillChip(index: 3, label: 'AI Screening', icon: Icons.psychology_rounded)),
+                ],
+              ),
+            ],
           ),
           const SizedBox(height: 18),
 
@@ -359,7 +363,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           color: isSelected ? AppTheme.primaryBlue : const Color(0xFFF1F5F9),
           borderRadius: BorderRadius.circular(14),
@@ -374,7 +378,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               : [],
         ),
         child: Row(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
               icon,
@@ -382,12 +386,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               color: isSelected ? Colors.white : AppTheme.textMedium,
             ),
             const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.bold,
-                color: isSelected ? Colors.white : AppTheme.textMedium,
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: isSelected ? Colors.white : AppTheme.textMedium,
+                ),
               ),
             ),
           ],
