@@ -50,20 +50,7 @@ exports.register = async (req, res) => {
                 ? licenseNumber.trim()
                 : `DEN-LIC-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-            try {
-                await Dentist.create({
-                    user_id: user.id,
-                    speciality: specialty || 'General Dentistry',
-                    license_number: licNum,
-                    availability_status: 'Available',
-                    rating: 5.0,
-                    reviews_count: 0
-                });
-                console.log(`✅ Dentist record created in 'dentists' table for user: ${user.name}`);
-            } catch (dErr) {
-                console.error('⚠️ Dentist Table Creation Warning:', dErr.message);
-            }
-
+            let clinicId = null;
             try {
                 const cName = clinicName && clinicName.trim() ? clinicName.trim() : `${user.name}'s Dental Practice`;
                 const cAddr = clinicAddress && clinicAddress.trim() ? clinicAddress.trim() : '123 Healthcare Blvd, Medical Hub, Suite 400';
@@ -75,7 +62,7 @@ exports.register = async (req, res) => {
                     { service: 'Tooth Extraction', fee: '$110' },
                     { service: 'Periodontics / Gum Care', fee: '$95' }
                 ];
-                await Clinic.create({
+                const clinic = await Clinic.create({
                     user_id: user.id,
                     clinic_name: cName,
                     location: cAddr,
@@ -84,9 +71,25 @@ exports.register = async (req, res) => {
                     reviews_count: 0,
                     pricing: defaultPricing
                 });
+                clinicId = clinic ? clinic.id : null;
                 console.log(`✅ Clinic record created in 'clinics' table for: ${cName}`);
             } catch (cErr) {
                 console.error('⚠️ Clinic Table Creation Warning:', cErr.message);
+            }
+
+            try {
+                await Dentist.create({
+                    user_id: user.id,
+                    clinic_id: clinicId,
+                    speciality: specialty || req.body.speciality || 'General Dentistry',
+                    license_number: licNum,
+                    availability_status: 'Available',
+                    rating: 5.0,
+                    reviews_count: 0
+                });
+                console.log(`✅ Dentist record created in 'dentists' table for user: ${user.name}`);
+            } catch (dErr) {
+                console.error('⚠️ Dentist Table Creation Warning:', dErr.message);
             }
         }
 

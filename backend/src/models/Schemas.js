@@ -217,15 +217,23 @@ const MedicalRecord = {
             }
         }
 
+        const diag = recordData.diagnosis || recordData.title || recordData.subtitle || 'Dental Consultation & Prescription';
+        const docName = recordData.doctor_name || recordData.doctorName || 'Attending Dentist';
+        const clinicName = recordData.clinic_name || recordData.clinicName || 'DentaGuru Practice';
+        const rxItems = recordData.prescriptions || recordData.items || recordData.details || [];
+
         const payload = {
             patient_id: targetPatientId,
-            type: recordData.type || 'prescription',
-            title: recordData.title || 'Digital Prescription Slip',
-            subtitle: recordData.subtitle || '',
-            doctor_name: recordData.doctor_name || recordData.doctorName || 'Attending Specialist',
-            clinic_name: recordData.clinic_name || recordData.clinicName || 'DentaGuru Practice',
-            date: recordData.date || new Date().toISOString(),
-            details: typeof recordData.details === 'string' ? recordData.details : JSON.stringify(recordData.details || recordData.items || [])
+            dentist_id: recordData.dentist_id || recordData.dentistId || null,
+            diagnosis: diag,
+            prescriptions: typeof rxItems === 'string' ? JSON.parse(rxItems) : rxItems,
+            notes: JSON.stringify({
+                type: recordData.type || 'prescription',
+                title: recordData.title || 'Digital Prescription Slip',
+                subtitle: recordData.subtitle || diag,
+                doctor_name: docName,
+                clinic_name: clinicName
+            })
         };
 
         const { data, error } = await supabaseAdmin.from('medical_records').insert(payload).select().single();
@@ -235,9 +243,8 @@ const MedicalRecord = {
 
     async find(query = {}) {
         let req = supabaseAdmin.from('medical_records').select('*');
-        if (query.patient_id) req = req.eq('patient_id', query.patient_id);
-        if (query.type) req = req.eq('type', query.type);
-        const { data, error } = await req;
+        if (query.patient_id || query.patientId) req = req.eq('patient_id', query.patient_id || query.patientId);
+        const { data, error } = await req.order('created_at', { ascending: false });
         if (error) throw error;
         return data || [];
     }
