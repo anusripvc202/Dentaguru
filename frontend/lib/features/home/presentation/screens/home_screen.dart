@@ -231,7 +231,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             // Pulsing Pill Tag
             ScaleTransition(
@@ -259,6 +259,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       child: Text(
                         'Next-Gen Dental Healthcare Platform',
                         overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
                         style: TextStyle(
                           color: AppTheme.brandOrange,
                           fontSize: 11,
@@ -274,6 +275,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
             const Text(
               'Modern Dental Care,\nSimplified for Everyone.',
+              textAlign: TextAlign.center,
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 26,
@@ -286,6 +288,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
             const Text(
               'DentaGuru connects patients, specialized dentists, and clinic teams into one intelligent platform. Experience AI dental triage, 1-tap booking, digital prescriptions, and 3D dental tracking.',
+              textAlign: TextAlign.center,
               style: TextStyle(
                 color: Color(0xFF94A3B8),
                 fontSize: 13,
@@ -296,6 +299,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
             // Action Buttons Responsive Wrap for All Mobiles
             Wrap(
+              alignment: WrapAlignment.center,
+              crossAxisAlignment: WrapCrossAlignment.center,
               spacing: 10,
               runSpacing: 10,
               children: [

@@ -176,4 +176,52 @@ class ApiService {
       return {'success': false, 'message': 'Failed to send chat message.'};
     }
   }
+
+  /// Fetch medical records and prescriptions from Supabase/Backend API
+  Future<List<dynamic>> fetchMedicalRecords({String? patientId}) async {
+    try {
+      final uri = Uri.parse(ApiConstants.records).replace(queryParameters: {
+        if (patientId != null && patientId.isNotEmpty) 'patientId': patientId,
+      });
+      final response = await http.get(uri, headers: _headers);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['records'] ?? [];
+      }
+    } catch (e) {
+      debugPrint('Fetch medical records error: $e');
+    }
+    return [];
+  }
+
+  /// Create a new medical record / prescription for a patient via Backend API
+  Future<Map<String, dynamic>> createMedicalRecord({
+    required String patientId,
+    required String type, // 'prescription', 'xray', 'chart'
+    required String title,
+    required String subtitle,
+    required String doctorName,
+    required String clinicName,
+    required List<Map<String, dynamic>> items,
+  }) async {
+    try {
+      final url = Uri.parse(ApiConstants.records);
+      final response = await http.post(
+        url,
+        headers: _headers,
+        body: jsonEncode({
+          'patientId': patientId,
+          'type': type,
+          'title': title,
+          'subtitle': subtitle,
+          'doctorName': doctorName,
+          'clinicName': clinicName,
+          'items': items,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to create medical record.'};
+    }
+  }
 }

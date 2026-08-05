@@ -67,13 +67,22 @@ exports.register = async (req, res) => {
             try {
                 const cName = clinicName && clinicName.trim() ? clinicName.trim() : `${user.name}'s Dental Practice`;
                 const cAddr = clinicAddress && clinicAddress.trim() ? clinicAddress.trim() : '123 Healthcare Blvd, Medical Hub, Suite 400';
+                const defaultPricing = req.body.pricing || [
+                    { service: 'General Consultation', fee: '$75' },
+                    { service: 'Tooth Decay / Cavity', fee: '$85' },
+                    { service: 'Root Canal', fee: '$180' },
+                    { service: 'Orthodontics', fee: '$200' },
+                    { service: 'Tooth Extraction', fee: '$110' },
+                    { service: 'Periodontics / Gum Care', fee: '$95' }
+                ];
                 await Clinic.create({
                     user_id: user.id,
                     clinic_name: cName,
                     location: cAddr,
                     verified: true,
                     rating: 5.0,
-                    reviews_count: 0
+                    reviews_count: 0,
+                    pricing: defaultPricing
                 });
                 console.log(`✅ Clinic record created in 'clinics' table for: ${cName}`);
             } catch (cErr) {

@@ -225,7 +225,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('Services Configure', style: theme.textTheme.titleMedium),
+            Text('Procedure Price List', style: theme.textTheme.titleMedium),
             IconButton(
               icon: const Icon(Icons.add_box_outlined, color: Color(0xFF0D9488)),
               onPressed: () {},
@@ -233,10 +233,12 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
           ],
         ),
         const SizedBox(height: 16),
-        _buildServicePricingRow('Routine Cleaning & Oral Checkup', '₹1,500'),
-        _buildServicePricingRow('Deep Cleaning & Scaling', '₹2,800'),
-        _buildServicePricingRow('Tooth Whitening', '₹12,000'),
-        _buildServicePricingRow('Root Canal Therapy', '₹8,500'),
+        _buildServicePricingRow('General Consultation & Checkup', '\$75'),
+        _buildServicePricingRow('Tooth Decay / Cavity Filling', '\$85'),
+        _buildServicePricingRow('Periodontics & Gum Care', '\$95'),
+        _buildServicePricingRow('Tooth Extraction Surgery', '\$110'),
+        _buildServicePricingRow('Root Canal Therapy (RCT)', '\$180'),
+        _buildServicePricingRow('Orthodontic Consultation & Braces', '\$200'),
       ],
     );
   }
@@ -247,7 +249,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
       child: ListTile(
         title: Text(service, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
         trailing: Text(price, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0D9488), fontSize: 16)),
-        subtitle: const Text('Duration: 45 Mins'),
+        subtitle: const Text('Duration: 45 Mins • Standard Practice Rate'),
       ),
     );
   }

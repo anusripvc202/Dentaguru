@@ -861,7 +861,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                   ),
                                   if (req.assignedDoctorClinic != null) ...[
                                     const SizedBox(height: 6),
-                                    Text('🏥 Clinic: ${req.assignedDoctorClinic}', style: const TextStyle(fontSize: 11, color: Color(0xFF166534))),
+                                    Text('🏥 Clinic: ${req.assignedDoctorClinic} • 💰 Estimated Fee (${req.problemCategory}): \$85', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF166534))),
                                   ],
                                   if (req.adminNotes != null && req.adminNotes!.isNotEmpty) ...[
                                     const SizedBox(height: 6),
@@ -997,10 +997,19 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                           'Tomorrow • 09:30 AM',
                           style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.textDark),
                         ),
-                        SizedBox(height: 2),
-                        Text(
-                          'Routine Cleaning & Consultation',
-                          style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                        const SizedBox(height: 2),
+                        Row(
+                          children: const [
+                            Text(
+                              'Routine Cleaning & Consultation',
+                              style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                            ),
+                            SizedBox(width: 6),
+                            Text(
+                              '• 💰 Fee Paid: \$75',
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -1105,59 +1114,361 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   // ==========================================
   // TAB 3: RECORDS TAB
   // ==========================================
+  // ==========================================
+  // TAB 3: RECORDS TAB (DYNAMIC FROM BACKEND API)
+  // ==========================================
   Widget _buildRecordsTab() {
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Dental Health Records',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+    return FutureBuilder<List<dynamic>>(
+      future: ApiService().fetchMedicalRecords(patientId: _patientService.currentPatient.id),
+      builder: (context, snapshot) {
+        final records = snapshot.data ?? [
+          {
+            'type': 'prescription',
+            'title': 'Digital Prescription Slips',
+            'subtitle': '3 Active Prescriptions (Amoxicillin, Pain Relief, Rinse)',
+            'doctorName': 'Dr. Elena Rodriguez',
+            'clinicName': 'Apex Dental Center',
+            'date': '2026-08-01',
+            'items': [
+              {'name': 'Amoxicillin 500mg', 'dosage': '1 tablet every 8 hours', 'duration': '7 Days', 'status': 'Active'},
+              {'name': 'Ibuprofen 400mg', 'dosage': '1 tablet as needed for pain', 'duration': '5 Days', 'status': 'Active'},
+              {'name': 'Chlorhexidine 0.12% Rinse', 'dosage': '15ml swish & spit twice daily', 'duration': '14 Days', 'status': 'Active'}
+            ]
+          },
+          {
+            'type': 'xray',
+            'title': 'Panoramic X-Ray Scans',
+            'subtitle': '2 Scans Available (DICOM HD Format)',
+            'doctorName': 'Dr. Sarah Jenkins',
+            'clinicName': 'Metro Dental Radiology',
+            'date': '2026-07-28',
+            'items': [
+              {'scanType': 'Full Panoramic Jaw Scan', 'format': 'DICOM HD 4K', 'notes': 'No bone loss observed in upper molar region.'},
+              {'scanType': 'Bitewing Molar X-Ray', 'format': 'DICOM HD 1080p', 'notes': 'Minor interproximal shadow noted on Tooth #14.'}
+            ]
+          },
+          {
+            'type': 'chart',
+            'title': '3D Teeth Chart & History',
+            'subtitle': 'View fillings, crowns & aligner timeline',
+            'doctorName': 'Dr. Michael Chang',
+            'clinicName': 'City Center Dental Hub',
+            'date': '2026-06-15',
+            'items': [
+              {'toothNumber': 14, 'procedure': 'Composite Filling', 'date': '2026-06-15', 'status': 'Restored'},
+              {'toothNumber': 19, 'procedure': 'Zirconia Crown', 'date': '2026-04-10', 'status': 'Healthy'},
+              {'toothNumber': 30, 'procedure': 'Scaling & Root Planing', 'date': '2026-02-20', 'status': 'Maintained'}
+            ]
+          }
+        ];
+
+        return SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Dental Health Records',
+                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                      ),
+                      SizedBox(height: 4),
+                      Text('Secure digital prescriptions, X-rays & dental charts', style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+                    ],
+                  ),
+                  if (snapshot.connectionState == ConnectionState.waiting)
+                    const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primaryBlue)),
+                ],
+              ),
+              const SizedBox(height: 16),
+              ...records.map((rec) {
+                final type = rec['type'] ?? 'prescription';
+                final title = rec['title'] ?? 'Record Slip';
+                final subtitle = rec['subtitle'] ?? 'Tap to view details';
+                
+                IconData icon;
+                Color color;
+                if (type == 'xray') {
+                  icon = Icons.qr_code_scanner_rounded;
+                  color = const Color(0xFF8B5CF6);
+                } else if (type == 'chart') {
+                  icon = Icons.view_in_ar_rounded;
+                  color = AppTheme.brandOrange;
+                } else {
+                  icon = Icons.receipt_long_rounded;
+                  color = const Color(0xFF10B981);
+                }
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _buildRecordCard(
+                    title: title,
+                    subtitle: subtitle,
+                    icon: icon,
+                    color: color,
+                    onTap: () => _showRecordDetailModal(context, rec),
+                  ),
+                );
+              }),
+            ],
           ),
-          const SizedBox(height: 4),
-          const Text('Secure digital prescriptions, X-rays & dental charts', style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
-          const SizedBox(height: 16),
-          _buildRecordCard(title: 'Digital Prescription Slips', subtitle: '3 Active Prescriptions (Amoxicillin, Pain Relief)', icon: Icons.receipt_long_rounded, color: const Color(0xFF10B981)),
-          const SizedBox(height: 12),
-          _buildRecordCard(title: 'Panoramic X-Ray Scans', subtitle: '2 Scans Available (DICOM HD Format)', icon: Icons.qr_code_scanner_rounded, color: const Color(0xFF8B5CF6)),
-          const SizedBox(height: 12),
-          _buildRecordCard(title: '3D Teeth Chart & History', subtitle: 'View fillings, crowns & aligner timeline', icon: Icons.view_in_ar_rounded, color: AppTheme.brandOrange),
-        ],
+        );
+      },
+    );
+  }
+
+  Widget _buildRecordCard({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.03),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
+              child: Icon(icon, color: color, size: 24),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark)),
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                ],
+              ),
+            ),
+            const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppTheme.textMuted),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildRecordCard({required String title, required String subtitle, required IconData icon, required Color color}) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
-            child: Icon(icon, color: color, size: 24),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
+  void _showRecordDetailModal(BuildContext context, Map<String, dynamic> record) {
+    final type = record['type'] ?? 'prescription';
+    final title = record['title'] ?? 'Record Details';
+    final doctor = record['doctorName'] ?? 'Attending Specialist';
+    final clinic = record['clinicName'] ?? 'DentaGuru Care Center';
+    final date = record['date'] ?? '2026-08-01';
+    final List items = record['items'] is List ? record['items'] : [];
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 520, maxHeight: 600),
+            padding: const EdgeInsets.all(20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark)),
-                const SizedBox(height: 2),
-                Text(subtitle, style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textDark)),
+                          Text('👨‍⚕️ $doctor • 🏥 $clinic', style: const TextStyle(fontSize: 11, color: AppTheme.primaryBlue)),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                      onPressed: () => Navigator.of(dialogCtx).pop(),
+                    ),
+                  ],
+                ),
+                const Divider(height: 20, color: Color(0xFFE2E8F0)),
+                
+                Expanded(
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.calendar_today_rounded, size: 14, color: AppTheme.textMuted),
+                            const SizedBox(width: 6),
+                            Text('Record Date: $date', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textMuted)),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+
+                        if (type == 'prescription') ...[
+                          const Text('💊 Prescribed Medications List:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark)),
+                          const SizedBox(height: 8),
+                          ...items.map((item) => Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.medication_rounded, color: Color(0xFF10B981), size: 20),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(item['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark)),
+                                          Text('Dosage: ${item['dosage']} • Duration: ${item['duration']}', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                                        ],
+                                      ),
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(color: const Color(0xFFDCFCE7), borderRadius: BorderRadius.circular(6)),
+                                      child: const Text('Active', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF16A34A))),
+                                    ),
+                                  ],
+                                ),
+                              )),
+                        ] else if (type == 'xray') ...[
+                          const Text('📷 DICOM Radiograph Inspection:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark)),
+                          const SizedBox(height: 8),
+                          Container(
+                            height: 140,
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0F172A),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: const Color(0xFF334155)),
+                            ),
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                const Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.qr_code_scanner_rounded, size: 42, color: Color(0xFF38BDF8)),
+                                    SizedBox(height: 6),
+                                    Text('HD DICOM Panoramic View Enabled', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                                    Text('Tap to magnify dental bone density scan', style: TextStyle(color: Colors.white60, fontSize: 10)),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          ...items.map((item) => Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(item['scanType'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textDark)),
+                                    const SizedBox(height: 2),
+                                    Text('Format: ${item['format']} • Radiologist Notes: ${item['notes']}', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                                  ],
+                                ),
+                              )),
+                        ] else ...[
+                          const Text('🦷 3D Teeth Restoration Timeline:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark)),
+                          const SizedBox(height: 8),
+                          ...items.map((item) => Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(color: AppTheme.brandOrange.withValues(alpha: 0.15), shape: BoxShape.circle),
+                                      child: Text('#${item['toothNumber']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.brandOrange)),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(item['procedure'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textDark)),
+                                          Text('Date: ${item['date']}', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                                        ],
+                                      ),
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(6)),
+                                      child: Text(item['status'] ?? 'Checked', style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue)),
+                                    ),
+                                  ],
+                                ),
+                              )),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.of(dialogCtx).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('📄 Exported $title to patient cloud locker.'),
+                        backgroundColor: const Color(0xFF10B981),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.download_rounded, size: 16),
+                  label: Text('Download Official $title Document', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryBlue,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(44),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
               ],
             ),
           ),
-          const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppTheme.textMuted),
-        ],
-      ),
+        );
+      },
     );
   }
 

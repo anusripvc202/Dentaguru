@@ -95,16 +95,22 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               return matchesSearch && matchesSpecialty;
             }).toList();
 
+            if (selectedDoctor == null && filteredDoctors.isNotEmpty) {
+              selectedDoctor = filteredDoctors.first;
+            }
+
             final clinicAddr = (selectedDoctor?.clinicAddress != null && selectedDoctor!.clinicAddress.trim().isNotEmpty)
                 ? selectedDoctor!.clinicAddress.trim()
                 : '123 Healthcare Blvd, Medical Hub, Suite 400';
             final doctorPhone = selectedDoctor?.phone ?? '+1 202 555 0100';
+            final caseFee = selectedDoctor?.getFeeForCategory(req.problemCategory) ?? '\$75';
             final waText = "🏥 *DentaGuru Clinical Recommendation*\n\n"
                 "Dear *${req.patientName}*,\n"
                 "Our Clinical Admin team has evaluated your reported problem:\n"
                 "📌 *Issue*: ${req.problemCategory} (${req.severity} Severity)\n\n"
                 "👨‍⚕️ *Recommended Doctor*: *${selectedDoctor?.name}*\n"
                 "🎓 *Specialty*: ${selectedDoctor?.specialty}\n"
+                "💰 *Estimated Fee (${req.problemCategory})*: $caseFee\n"
                 "🏥 *Clinic*: ${selectedDoctor?.clinicName}\n"
                 "📍 *Clinic Address*: $clinicAddr\n"
                 "📞 *Contact Phone*: $doctorPhone\n"
@@ -344,83 +350,121 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
                             // Doctors List
                             Expanded(
-                              child: ListView.builder(
-                                itemCount: filteredDoctors.length,
-                                itemBuilder: (context, idx) {
-                                  final doc = filteredDoctors[idx];
-                                  final isSelected = selectedDoctor?.id == doc.id;
-                                  final isSpecialtyMatch = req.problemCategory.toLowerCase().contains(doc.specialty.toLowerCase().split(' ').first);
-
-                                  return GestureDetector(
-                                    onTap: () => setModalState(() => selectedDoctor = doc),
-                                    child: Container(
-                                      margin: const EdgeInsets.only(bottom: 10),
-                                      padding: const EdgeInsets.all(12),
-                                      decoration: BoxDecoration(
-                                        color: isSelected ? const Color(0xFFEFF6FF) : Colors.white,
-                                        borderRadius: BorderRadius.circular(14),
-                                        border: Border.all(
-                                          color: isSelected ? AppTheme.primaryBlue : const Color(0xFFE2E8F0),
-                                          width: isSelected ? 2 : 1,
+                              child: filteredDoctors.isEmpty
+                                  ? Center(
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(16),
+                                        child: Column(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            const Icon(Icons.person_search_rounded, size: 40, color: AppTheme.textMuted),
+                                            const SizedBox(height: 8),
+                                            const Text(
+                                              'No Doctors Found',
+                                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            const Text(
+                                              'No doctor matches your filter or search criteria.',
+                                              textAlign: TextAlign.center,
+                                              style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                                            ),
+                                            const SizedBox(height: 12),
+                                            ElevatedButton.icon(
+                                              onPressed: () {
+                                                Navigator.of(dialogContext).pop();
+                                                _showRegisterDoctorModal(context);
+                                              },
+                                              icon: const Icon(Icons.person_add_rounded, size: 16),
+                                              label: const Text('Register Doctor Now', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: AppTheme.primaryBlue,
+                                                foregroundColor: Colors.white,
+                                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ),
-                                      child: Row(
-                                        children: [
-                                          Radio<String>(
-                                            value: doc.id,
-                                            groupValue: selectedDoctor?.id,
-                                            activeColor: AppTheme.primaryBlue,
-                                            onChanged: (val) => setModalState(() => selectedDoctor = doc),
-                                          ),
-                                          const SizedBox(width: 6),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                    )
+                                  : ListView.builder(
+                                      itemCount: filteredDoctors.length,
+                                      itemBuilder: (context, idx) {
+                                        final doc = filteredDoctors[idx];
+                                        final isSelected = selectedDoctor?.id == doc.id;
+                                        final isSpecialtyMatch = req.problemCategory.toLowerCase().contains(doc.specialty.toLowerCase().split(' ').first);
+
+                                        return GestureDetector(
+                                          onTap: () => setModalState(() => selectedDoctor = doc),
+                                          child: Container(
+                                            margin: const EdgeInsets.only(bottom: 10),
+                                            padding: const EdgeInsets.all(12),
+                                            decoration: BoxDecoration(
+                                              color: isSelected ? const Color(0xFFEFF6FF) : Colors.white,
+                                              borderRadius: BorderRadius.circular(14),
+                                              border: Border.all(
+                                                color: isSelected ? AppTheme.primaryBlue : const Color(0xFFE2E8F0),
+                                                width: isSelected ? 2 : 1,
+                                              ),
+                                            ),
+                                            child: Row(
                                               children: [
-                                                Row(
-                                                  children: [
-                                                    Expanded(
-                                                      child: Text(
-                                                        doc.name,
-                                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
+                                                Radio<String>(
+                                                  value: doc.id,
+                                                  groupValue: selectedDoctor?.id,
+                                                  activeColor: AppTheme.primaryBlue,
+                                                  onChanged: (val) => setModalState(() => selectedDoctor = doc),
+                                                ),
+                                                const SizedBox(width: 6),
+                                                Expanded(
+                                                  child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    children: [
+                                                      Row(
+                                                        children: [
+                                                          Expanded(
+                                                            child: Text(
+                                                              doc.name,
+                                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
+                                                              overflow: TextOverflow.ellipsis,
+                                                              maxLines: 1,
+                                                            ),
+                                                          ),
+                                                          if (isSpecialtyMatch) ...[
+                                                            const SizedBox(width: 4),
+                                                            Container(
+                                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                              decoration: BoxDecoration(
+                                                                color: const Color(0xFFDCFCE7),
+                                                                borderRadius: BorderRadius.circular(6),
+                                                              ),
+                                                              child: const Text('Matched Specialty', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF16A34A))),
+                                                            ),
+                                                          ],
+                                                        ],
+                                                      ),
+                                                      Text(
+                                                        '${doc.specialty} • ${doc.qualification}',
+                                                        style: const TextStyle(fontSize: 11, color: AppTheme.primaryBlue),
                                                         overflow: TextOverflow.ellipsis,
                                                         maxLines: 1,
                                                       ),
-                                                    ),
-                                                    if (isSpecialtyMatch) ...[
-                                                      const SizedBox(width: 4),
-                                                      Container(
-                                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                        decoration: BoxDecoration(
-                                                          color: const Color(0xFFDCFCE7),
-                                                          borderRadius: BorderRadius.circular(6),
-                                                        ),
-                                                        child: const Text('Matched Specialty', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF16A34A))),
+                                                      Text(
+                                                        '🏥 ${doc.clinicName} • 💰 ${doc.getFeeForCategory(req.problemCategory)} (${req.problemCategory}) • ⭐ ${doc.rating}',
+                                                        style: const TextStyle(fontSize: 10, color: AppTheme.textMuted),
+                                                        overflow: TextOverflow.ellipsis,
+                                                        maxLines: 1,
                                                       ),
                                                     ],
-                                                  ],
-                                                ),
-                                                Text(
-                                                  '${doc.specialty} • ${doc.qualification}',
-                                                  style: const TextStyle(fontSize: 11, color: AppTheme.primaryBlue),
-                                                  overflow: TextOverflow.ellipsis,
-                                                  maxLines: 1,
-                                                ),
-                                                Text(
-                                                  '🏥 ${doc.clinicName} • ⭐ ${doc.rating} (${doc.reviewCount} reviews)',
-                                                  style: const TextStyle(fontSize: 10, color: AppTheme.textMuted),
-                                                  overflow: TextOverflow.ellipsis,
-                                                  maxLines: 1,
+                                                  ),
                                                 ),
                                               ],
                                             ),
                                           ),
-                                        ],
-                                      ),
+                                        );
+                                      },
                                     ),
-                                  );
-                                },
-                              ),
                             ),
                             const SizedBox(height: 10),
 

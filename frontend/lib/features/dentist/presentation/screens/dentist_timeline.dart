@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
+import '../../../../core/services/api_service.dart';
 
 class DentistTimelineScreen extends StatefulWidget {
   const DentistTimelineScreen({super.key});
@@ -146,15 +147,38 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  onPressed: () {
-                    Navigator.of(dialogContext).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('💊 E-Prescription sent to $patientName!'),
-                        backgroundColor: const Color(0xFF10B981),
-                        duration: const Duration(seconds: 3),
-                      ),
+                  onPressed: () async {
+                    final medName = medController.text.trim();
+                    final dosage = dosageController.text.trim();
+                    final duration = durationController.text.trim();
+
+                    await ApiService().createMedicalRecord(
+                      patientId: _patientService.currentPatient.id,
+                      type: 'prescription',
+                      title: 'Digital Prescription Slips',
+                      subtitle: 'Active Prescription ($medName)',
+                      doctorName: _patientService.currentDoctor?.name ?? 'Dr. Elena Rodriguez',
+                      clinicName: _patientService.currentDoctor?.clinicName ?? 'Apex Dental Center',
+                      items: [
+                        {
+                          'name': medName.isNotEmpty ? medName : 'Amoxicillin 500mg',
+                          'dosage': dosage.isNotEmpty ? dosage : '1 Capsule every 8 hours after meals',
+                          'duration': duration.isNotEmpty ? duration : '7 Days',
+                          'status': 'Active',
+                        }
+                      ],
                     );
+
+                    if (context.mounted) {
+                      Navigator.of(dialogContext).pop();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('💊 Digital E-Prescription issued to $patientName! Live in Patient Health Locker.'),
+                          backgroundColor: const Color(0xFF10B981),
+                          duration: const Duration(seconds: 3),
+                        ),
+                      );
+                    }
                   },
                 ),
               ],

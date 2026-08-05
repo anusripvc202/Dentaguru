@@ -7,6 +7,7 @@ const appointments = require('../controllers/appointmentController');
 const clinics = require('../controllers/clinicController');
 const upload = require('../controllers/uploadController');
 const chat = require('../controllers/chatController');
+const records = require('../controllers/recordController');
 
 // Middlewares
 const { authenticateJWT, requireRole } = require('../middleware/auth');
@@ -50,5 +51,11 @@ router.post('/upload', authenticateJWT, upload.uploadFile);
 // ─────────────────────────────────────────────
 router.post('/chat/send', chat.sendMessage);
 router.get('/chat/messages', chat.getMessages);
+
+// ─────────────────────────────────────────────
+// 6. MEDICAL RECORDS & PRESCRIPTIONS ENDPOINTS
+// ─────────────────────────────────────────────
+router.get('/records', records.getPatientRecords);
+router.post('/records', records.createRecord);
 
 module.exports = router;

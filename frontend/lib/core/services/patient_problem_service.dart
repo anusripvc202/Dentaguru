@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'api_service.dart';
 
 /// Model representing a Doctor/Dentist registered in DentaGuru platform
 class DoctorModel {
@@ -21,6 +22,7 @@ class DoctorModel {
   final String licenseNumber;
   final Uint8List? photoBytes;
   final String clinicAddress;
+  final Map<String, String> procedureFees;
 
   DoctorModel({
     required this.id,
@@ -39,7 +41,29 @@ class DoctorModel {
     this.licenseNumber = 'DEN-LIC-REG',
     this.photoBytes,
     this.clinicAddress = '123 Healthcare Blvd, Medical Hub, Suite 400',
-  });
+    Map<String, String>? procedureFees,
+  }) : procedureFees = procedureFees ?? {
+          'General Consultation': consultationFee,
+          'Tooth Decay / Cavity': '\$85',
+          'Root Canal': '\$180',
+          'Orthodontics': '\$200',
+          'Tooth Extraction': '\$110',
+          'Periodontics / Gum Care': '\$95',
+        };
+
+  String getFeeForCategory(String category) {
+    if (procedureFees.containsKey(category)) {
+      return procedureFees[category]!;
+    }
+    final catLower = category.toLowerCase();
+    for (final entry in procedureFees.entries) {
+      final keyLower = entry.key.toLowerCase();
+      if (catLower.contains(keyLower) || keyLower.contains(catLower)) {
+        return entry.value;
+      }
+    }
+    return consultationFee;
+  }
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -57,6 +81,7 @@ class DoctorModel {
         'consultationFee': consultationFee,
         'licenseNumber': licenseNumber,
         'clinicAddress': clinicAddress,
+        'procedureFees': procedureFees,
         'photoBase64': photoBytes != null ? base64Encode(photoBytes!) : null,
       };
 
@@ -66,6 +91,10 @@ class DoctorModel {
       try {
         bytes = base64Decode(json['photoBase64']);
       } catch (_) {}
+    }
+    Map<String, String> pFees = {};
+    if (json['procedureFees'] != null && json['procedureFees'] is Map) {
+      (json['procedureFees'] as Map).forEach((k, v) => pFees[k.toString()] = v.toString());
     }
     return DoctorModel(
       id: json['id'] ?? '',
@@ -84,6 +113,7 @@ class DoctorModel {
       licenseNumber: json['licenseNumber'] ?? 'DEN-LIC-REG',
       photoBytes: bytes,
       clinicAddress: json['clinicAddress'] ?? '123 Healthcare Blvd, Medical Hub, Suite 400',
+      procedureFees: pFees.isNotEmpty ? pFees : null,
     );
   }
 }
@@ -279,9 +309,152 @@ class PatientProblemService extends ChangeNotifier {
         _allDoctors.addAll(dList.map((item) => DoctorModel.fromJson(item)));
       }
 
+      if (_allDoctors.isEmpty) {
+        _seedDefaultDoctors();
+      }
+
+      syncDoctorsFromApi();
+
       notifyListeners();
     } catch (e) {
       debugPrint('Error loading PatientProblemService state from storage: $e');
+    }
+  }
+
+  void _seedDefaultDoctors() {
+    _allDoctors.addAll([
+      DoctorModel(
+        id: 'DOC-101',
+        name: 'Dr. Sarah Jenkins',
+        specialty: 'Orthodontics & Braces',
+        qualification: 'BDS, MDS (Orthodontics)',
+        experienceYears: 8,
+        rating: 4.9,
+        reviewCount: 42,
+        clinicName: 'Apex Dental Care & Orthodontics',
+        phone: '+1 202 555 0142',
+        email: 'sarah.jenkins@dentaguru.com',
+        status: 'Available',
+        nextAvailableSlots: ['Today, 2:30 PM', 'Tomorrow, 10:00 AM'],
+        consultationFee: '\$85',
+        licenseNumber: 'DEN-LIC-88401',
+        clinicAddress: '450 Healthcare Blvd, Suite 201',
+      ),
+      DoctorModel(
+        id: 'DOC-102',
+        name: 'Dr. Michael Chang',
+        specialty: 'Endodontics & Root Canal',
+        qualification: 'BDS, MDS (Endodontics)',
+        experienceYears: 12,
+        rating: 4.85,
+        reviewCount: 58,
+        clinicName: 'Smile Dental Clinic',
+        phone: '+1 202 555 0198',
+        email: 'michael.chang@dentaguru.com',
+        status: 'Available',
+        nextAvailableSlots: ['Today, 4:00 PM', 'Tomorrow, 11:30 AM'],
+        consultationFee: '\$90',
+        licenseNumber: 'DEN-LIC-88402',
+        clinicAddress: '782 Medical Center Drive, Suite 104',
+      ),
+      DoctorModel(
+        id: 'DOC-103',
+        name: 'Dr. Elena Rostova',
+        specialty: 'General Dentistry & Preventive Care',
+        qualification: 'BDS',
+        experienceYears: 6,
+        rating: 5.0,
+        reviewCount: 31,
+        clinicName: 'City Center Dental Hub',
+        phone: '+1 202 555 0165',
+        email: 'elena.rostova@dentaguru.com',
+        status: 'Available',
+        nextAvailableSlots: ['Today, 3:00 PM', 'Tomorrow, 9:00 AM'],
+        consultationFee: '\$75',
+        licenseNumber: 'DEN-LIC-88403',
+        clinicAddress: '123 Healthcare Blvd, Medical Hub, Suite 400',
+      ),
+      DoctorModel(
+        id: 'DOC-104',
+        name: 'Dr. Marcus Vance',
+        specialty: 'Oral & Maxillofacial Surgery',
+        qualification: 'BDS, MDS (Oral Surgery)',
+        experienceYears: 15,
+        rating: 4.95,
+        reviewCount: 76,
+        clinicName: 'Metro Oral Surgery Center',
+        phone: '+1 202 555 0111',
+        email: 'marcus.vance@dentaguru.com',
+        status: 'In Consultation',
+        nextAvailableSlots: ['Tomorrow, 2:00 PM', 'Day after, 10:00 AM'],
+        consultationFee: '\$120',
+        licenseNumber: 'DEN-LIC-88404',
+        clinicAddress: '900 Surgical Pavilion, Suite 500',
+      ),
+      DoctorModel(
+        id: 'DOC-105',
+        name: 'Dr. Priya Sharma',
+        specialty: 'Periodontics & Gum Care',
+        qualification: 'BDS, MDS (Periodontics)',
+        experienceYears: 9,
+        rating: 4.75,
+        reviewCount: 29,
+        clinicName: 'Care Dental Studio',
+        phone: '+1 202 555 0177',
+        email: 'priya.sharma@dentaguru.com',
+        status: 'Available',
+        nextAvailableSlots: ['Today, 5:00 PM', 'Tomorrow, 1:00 PM'],
+        consultationFee: '\$80',
+        licenseNumber: 'DEN-LIC-88405',
+        clinicAddress: '310 Wellness Way, Suite 102',
+      ),
+    ]);
+    _saveToStorage();
+  }
+
+  Future<void> syncDoctorsFromApi() async {
+    try {
+      final apiDentists = await ApiService().fetchDentists();
+      if (apiDentists.isNotEmpty) {
+        bool addedAny = false;
+        for (final dMap in apiDentists) {
+          final id = dMap['id']?.toString() ?? dMap['_id']?.toString() ?? '';
+          final userObj = dMap['users'] ?? dMap['user'] ?? {};
+          final name = (userObj['name'] ?? dMap['name'] ?? 'Dentist').toString();
+          final email = (userObj['email'] ?? dMap['email'] ?? '').toString();
+          final phone = (userObj['phone'] ?? dMap['phone'] ?? '+1 202 555 0100').toString();
+          final specialty = (dMap['speciality'] ?? dMap['specialty'] ?? 'General Dentistry').toString();
+          final licNum = (dMap['license_number'] ?? dMap['licenseNumber'] ?? 'DEN-LIC-REG').toString();
+          
+          final formattedName = name.startsWith('Dr.') ? name : 'Dr. $name';
+
+          if (!_allDoctors.any((doc) => doc.id == id || (email.isNotEmpty && doc.email.toLowerCase() == email.toLowerCase()))) {
+            _allDoctors.insert(0, DoctorModel(
+              id: id.isNotEmpty ? id : 'DOC-${100 + _allDoctors.length + 1}',
+              name: formattedName,
+              specialty: specialty,
+              qualification: 'BDS, MDS',
+              experienceYears: 5,
+              rating: (dMap['rating'] ?? 5.0).toDouble(),
+              reviewCount: dMap['reviews_count'] ?? 1,
+              clinicName: 'DentaGuru Registered Clinic',
+              phone: phone,
+              email: email,
+              status: dMap['availability_status'] ?? 'Available',
+              nextAvailableSlots: ['Today, 2:00 PM', 'Tomorrow, 10:00 AM'],
+              consultationFee: '\$75',
+              licenseNumber: licNum,
+            ));
+            addedAny = true;
+          }
+        }
+        if (addedAny) {
+          _saveToStorage();
+          notifyListeners();
+        }
+      }
+    } catch (e) {
+      debugPrint('Sync doctors error: $e');
     }
   }
 
@@ -412,6 +585,25 @@ class PatientProblemService extends ChangeNotifier {
     _saveToStorage();
     notifyListeners();
     return newDoctor;
+  }
+
+  Future<void> resetToFreshState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('dentaguru_patient_profile');
+      await prefs.remove('dentaguru_current_doctor');
+      await prefs.remove('dentaguru_requests');
+      await prefs.remove('dentaguru_all_doctors');
+
+      currentPatient = PatientProfile();
+      currentDoctor = null;
+      _requests.clear();
+      _allDoctors.clear();
+      _seedDefaultDoctors();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Reset error: $e');
+    }
   }
 }
 

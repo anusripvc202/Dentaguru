@@ -24,4 +24,7 @@ class ApiConstants {
 
   // Chat Endpoints
   static const String chatSend = '$baseUrl/chat/send';
+
+  // Medical Records Endpoints
+  static const String records = '$baseUrl/records';
 }
