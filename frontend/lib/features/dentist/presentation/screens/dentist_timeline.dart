@@ -69,6 +69,83 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     if (mounted) setState(() {});
   }
 
+  void _showUpdateMyFeeAndSlotsDialog(BuildContext context) {
+    final currentDoc = _patientService.currentDoctor ?? _patientService.allDoctors.first;
+    final feeCtrl = TextEditingController(text: currentDoc.consultationFee);
+    final slotCtrl = TextEditingController(
+      text: currentDoc.nextAvailableSlots.isNotEmpty ? currentDoc.nextAvailableSlots.first : 'Today, 2:00 PM',
+    );
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Row(
+            children: [
+              Icon(Icons.edit_calendar_rounded, color: AppTheme.primaryBlue, size: 22),
+              SizedBox(width: 8),
+              Text('Update My Fee & Time Slots', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: feeCtrl,
+                decoration: InputDecoration(
+                  labelText: 'My Consultation Fee',
+                  hintText: 'e.g. \$85',
+                  prefixIcon: const Icon(Icons.payments_outlined),
+                  filled: true,
+                  fillColor: const Color(0xFFF8FAFC),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: slotCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Next Available Time Slot',
+                  hintText: 'e.g. Today, 4:00 PM',
+                  prefixIcon: const Icon(Icons.access_time_rounded),
+                  filled: true,
+                  fillColor: const Color(0xFFF8FAFC),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(dialogCtx).pop(), child: const Text('Cancel')),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.check_circle_rounded, size: 16),
+              label: const Text('Save & Publish', style: TextStyle(fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryBlue,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () {
+                _patientService.updateDoctorFeeAndSlots(
+                  doctorId: currentDoc.id,
+                  consultationFee: feeCtrl.text.trim(),
+                  availableSlot: slotCtrl.text.trim(),
+                );
+                Navigator.of(dialogCtx).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('🎉 Your fee is now ${feeCtrl.text.trim()} & slot updated to ${slotCtrl.text.trim()}!'),
+                    backgroundColor: const Color(0xFF10B981),
+                  ),
+                );
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   void _showPrescriptionModal(BuildContext context, String patientName) {
     final medController = TextEditingController(text: 'Amoxicillin 500mg');
     final dosageController = TextEditingController(text: '1 Capsule every 8 hours after meals');
@@ -417,6 +494,11 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                           ),
                         ],
                       ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.edit_calendar_rounded, color: Colors.white, size: 22),
+                      tooltip: 'Update Consultation Fee & Available Slots',
+                      onPressed: () => _showUpdateMyFeeAndSlotsDialog(context),
                     ),
                   ],
                 ),

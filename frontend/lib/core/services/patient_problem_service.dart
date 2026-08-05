@@ -607,6 +607,44 @@ class PatientProblemService extends ChangeNotifier {
     return newDoctor;
   }
 
+  void updateDoctorFeeAndSlots({
+    required String doctorId,
+    required String consultationFee,
+    required String availableSlot,
+    Map<String, String>? procedureFees,
+  }) {
+    final index = _allDoctors.indexWhere((d) => d.id == doctorId);
+    if (index != -1) {
+      final oldDoc = _allDoctors[index];
+      final updatedDoc = DoctorModel(
+        id: oldDoc.id,
+        name: oldDoc.name,
+        specialty: oldDoc.specialty,
+        qualification: oldDoc.qualification,
+        experienceYears: oldDoc.experienceYears,
+        rating: oldDoc.rating,
+        reviewCount: oldDoc.reviewCount,
+        clinicName: oldDoc.clinicName,
+        phone: oldDoc.phone,
+        email: oldDoc.email,
+        status: oldDoc.status,
+        nextAvailableSlots: [availableSlot, ...oldDoc.nextAvailableSlots.skip(1)],
+        consultationFee: consultationFee,
+        licenseNumber: oldDoc.licenseNumber,
+        photoBytes: oldDoc.photoBytes,
+        clinicAddress: oldDoc.clinicAddress,
+        procedureFees: procedureFees ?? oldDoc.procedureFees,
+      );
+
+      _allDoctors[index] = updatedDoc;
+      if (currentDoctor?.id == doctorId || currentDoctor == null) {
+        currentDoctor = updatedDoc;
+      }
+      _saveToStorage();
+      notifyListeners();
+    }
+  }
+
   Future<void> resetToFreshState() async {
     try {
       final prefs = await SharedPreferences.getInstance();

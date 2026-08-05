@@ -1400,6 +1400,74 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     );
   }
 
+  void _showEditDoctorFeeAndSlotsDialog(BuildContext context, DoctorModel doc) {
+    final feeCtrl = TextEditingController(text: doc.consultationFee);
+    final slotCtrl = TextEditingController(text: doc.nextAvailableSlots.isNotEmpty ? doc.nextAvailableSlots.first : 'Today, 2:00 PM');
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text('Edit Fee & Slots • ${doc.name}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: feeCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Standard Consultation Fee',
+                  hintText: 'e.g. \$85',
+                  prefixIcon: const Icon(Icons.payments_outlined),
+                  filled: true,
+                  fillColor: const Color(0xFFF8FAFC),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: slotCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Next Available Time Slot',
+                  hintText: 'e.g. Today, 3:30 PM',
+                  prefixIcon: const Icon(Icons.access_time_rounded),
+                  filled: true,
+                  fillColor: const Color(0xFFF8FAFC),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(dialogCtx).pop(), child: const Text('Cancel')),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.save_rounded, size: 16),
+              label: const Text('Update Fee & Slot', style: TextStyle(fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryBlue,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () {
+                _problemService.updateDoctorFeeAndSlots(
+                  doctorId: doc.id,
+                  consultationFee: feeCtrl.text.trim(),
+                  availableSlot: slotCtrl.text.trim(),
+                );
+                Navigator.of(dialogCtx).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('⚡ Updated ${doc.name}\'s fee to ${feeCtrl.text.trim()} & slot to ${slotCtrl.text.trim()}!'),
+                    backgroundColor: const Color(0xFF10B981),
+                  ),
+                );
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   // ==========================================
   // PANEL 2: MASTER DENTISTS DIRECTORY (ALL DOCTORS)
   // ==========================================
@@ -1646,18 +1714,39 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         ),
                         const Spacer(),
 
-                        ElevatedButton.icon(
-                          icon: const Icon(Icons.recommend_rounded, size: 14),
-                          label: const Text('Suggest Doctor to Patient Problem', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.primaryBlue,
-                            foregroundColor: Colors.white,
-                            minimumSize: const Size.fromHeight(38),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                          ),
-                          onPressed: pendingRequest != null
-                              ? () => _showAssignDoctorDialog(context, pendingRequest, preSelectedDoctor: doc)
-                              : null,
+                        Row(
+                          children: [
+                            Expanded(
+                              flex: 2,
+                              child: OutlinedButton.icon(
+                                icon: const Icon(Icons.edit_calendar_rounded, size: 14),
+                                label: const Text('Edit Fee & Slot', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                  side: const BorderSide(color: AppTheme.primaryBlue, width: 1.2),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                ),
+                                onPressed: () => _showEditDoctorFeeAndSlotsDialog(context, doc),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              flex: 3,
+                              child: ElevatedButton.icon(
+                                icon: const Icon(Icons.recommend_rounded, size: 14),
+                                label: const Text('Suggest Doctor', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppTheme.primaryBlue,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                ),
+                                onPressed: pendingRequest != null
+                                    ? () => _showAssignDoctorDialog(context, pendingRequest, preSelectedDoctor: doc)
+                                    : null,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
