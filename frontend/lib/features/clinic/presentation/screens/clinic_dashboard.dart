@@ -249,6 +249,53 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
     );
   }
 
+  final Map<String, String> _procedurePrices = {
+    'General Consultation & Checkup': '\$75',
+    'Tooth Decay / Cavity Filling': '\$85',
+    'Periodontics & Gum Care': '\$95',
+    'Tooth Extraction Surgery': '\$110',
+    'Root Canal Therapy (RCT)': '\$180',
+    'Orthodontic Consultation & Braces': '\$200',
+  };
+
+  void _showEditPriceDialog(String service, String currentPrice) {
+    final priceCtrl = TextEditingController(text: currentPrice);
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: Text('Edit Rate for $service', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          content: TextField(
+            controller: priceCtrl,
+            decoration: InputDecoration(
+              labelText: 'New Procedure Rate',
+              filled: true,
+              fillColor: const Color(0xFFF8FAFC),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(dialogCtx).pop(), child: const Text('Cancel')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D9488)),
+              onPressed: () {
+                setState(() {
+                  _procedurePrices[service] = priceCtrl.text.trim();
+                });
+                Navigator.of(dialogCtx).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('💰 Rate for $service updated to ${priceCtrl.text.trim()}!')),
+                );
+              },
+              child: const Text('Save Rate', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildServicesTab(ThemeData theme) {
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -264,12 +311,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
           ],
         ),
         const SizedBox(height: 16),
-        _buildServicePricingRow('General Consultation & Checkup', '\$75'),
-        _buildServicePricingRow('Tooth Decay / Cavity Filling', '\$85'),
-        _buildServicePricingRow('Periodontics & Gum Care', '\$95'),
-        _buildServicePricingRow('Tooth Extraction Surgery', '\$110'),
-        _buildServicePricingRow('Root Canal Therapy (RCT)', '\$180'),
-        _buildServicePricingRow('Orthodontic Consultation & Braces', '\$200'),
+        ..._procedurePrices.entries.map((entry) => _buildServicePricingRow(entry.key, entry.value)),
       ],
     );
   }
@@ -279,7 +321,17 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
       margin: const EdgeInsets.only(bottom: 12),
       child: ListTile(
         title: Text(service, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-        trailing: Text(price, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0D9488), fontSize: 16)),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(price, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0D9488), fontSize: 16)),
+            const SizedBox(width: 8),
+            IconButton(
+              icon: const Icon(Icons.edit_outlined, size: 18, color: Color(0xFF0D9488)),
+              onPressed: () => _showEditPriceDialog(service, price),
+            ),
+          ],
+        ),
         subtitle: const Text('Duration: 45 Mins • Standard Practice Rate'),
       ),
     );

@@ -1515,7 +1515,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   crossAxisCount: crossCount,
                   crossAxisSpacing: 14,
                   mainAxisSpacing: 14,
-                  mainAxisExtent: 260,
+                  mainAxisExtent: 310,
                 ),
                 itemBuilder: (context, index) {
                   final doc = doctors[index];
@@ -1588,7 +1588,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             ),
                           ],
                         ),
-                        const Divider(height: 16, color: Color(0xFFF1F5F9)),
+                        const Divider(height: 14, color: Color(0xFFF1F5F9)),
 
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1618,6 +1618,25 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             const Spacer(),
                             Text('Slots: ${doc.nextAvailableSlots.first}', style: const TextStyle(fontSize: 10, color: Color(0xFF10B981), fontWeight: FontWeight.w600)),
                           ],
+                        ),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 4,
+                          runSpacing: 4,
+                          children: doc.procedureFees.entries.take(4).map((entry) {
+                            return Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primaryBlue.withValues(alpha: 0.07),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: AppTheme.primaryBlue.withValues(alpha: 0.2)),
+                              ),
+                              child: Text(
+                                '${entry.key}: ${entry.value}',
+                                style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
+                              ),
+                            );
+                          }).toList(),
                         ),
                         const SizedBox(height: 4),
                         Text(
