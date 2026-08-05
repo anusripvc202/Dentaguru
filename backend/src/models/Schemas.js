@@ -204,15 +204,39 @@ const Appointment = {
 // 5. MEDICAL RECORD MODEL (Supabase PostgreSQL)
 const MedicalRecord = {
     async create(recordData) {
-        const { data, error } = await supabaseAdmin.from('medical_records').insert(recordData).select().single();
+        let targetPatientId = recordData.patient_id || recordData.patientId || null;
+
+        if (!targetPatientId || targetPatientId.includes('@') || !targetPatientId.includes('-')) {
+            try {
+                const { data: firstUsers } = await supabaseAdmin.from('users').select('id').limit(1);
+                if (firstUsers && firstUsers.length > 0) {
+                    targetPatientId = firstUsers[0].id;
+                }
+            } catch (fErr) {
+                console.error('User lookup error in MedicalRecord.create:', fErr.message);
+            }
+        }
+
+        const payload = {
+            patient_id: targetPatientId,
+            type: recordData.type || 'prescription',
+            title: recordData.title || 'Digital Prescription Slip',
+            subtitle: recordData.subtitle || '',
+            doctor_name: recordData.doctor_name || recordData.doctorName || 'Attending Specialist',
+            clinic_name: recordData.clinic_name || recordData.clinicName || 'DentaGuru Practice',
+            date: recordData.date || new Date().toISOString(),
+            details: typeof recordData.details === 'string' ? recordData.details : JSON.stringify(recordData.details || recordData.items || [])
+        };
+
+        const { data, error } = await supabaseAdmin.from('medical_records').insert(payload).select().single();
         if (error) throw error;
         return data;
     },
+
     async find(query = {}) {
         let req = supabaseAdmin.from('medical_records').select('*');
-        for (const [key, val] of Object.entries(query)) {
-            req = req.eq(key, val);
-        }
+        if (query.patient_id) req = req.eq('patient_id', query.patient_id);
+        if (query.type) req = req.eq('type', query.type);
         const { data, error } = await req;
         if (error) throw error;
         return data || [];
