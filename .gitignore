@@ -5,3 +5,8 @@ node_modules/
 Thumbs.db
 .env
 .idea/
+
+# Documentation files (Excluded from Git)
+DentaGuru_Complete_Documentation.md
+DentaGuru_Documentation.pdf
+generate_pdf.py
