@@ -199,12 +199,42 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           }
         }
 
-        if (_selectedRole == UserRole.patient) {
-          final userPhone = (userData['phone'] != null && userData['phone'].toString().isNotEmpty)
-              ? userData['phone'].toString()
-              : (_phoneController.text.trim().isNotEmpty
-                  ? _phoneController.text.trim()
-                  : (!email.contains('@') && email.isNotEmpty ? email : '9063663180'));
+        final String registeredRole = (userData['role'] ?? _roleName).toString().toLowerCase();
+
+        final userPhone = (userData['phone'] != null && userData['phone'].toString().isNotEmpty)
+            ? userData['phone'].toString()
+            : (_phoneController.text.trim().isNotEmpty
+                ? _phoneController.text.trim()
+                : (!email.contains('@') && email.isNotEmpty ? email : '9063663180'));
+
+        if (registeredRole.contains('dentist') || registeredRole.contains('doctor')) {
+          PatientProblemService().registerDoctor(
+            name: userData['name'] ?? 'Dr. Dentist',
+            email: userData['email'] ?? email,
+            phone: userPhone,
+            licenseNumber: 'DEN-LIC-REGISTERED',
+            specialty: 'General Dentistry',
+            clinicName: 'DentaGuru Care Center',
+            experienceYears: 5,
+            photoBytes: photoBytes,
+          );
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('🎉 Welcome back, ${userData['name'] ?? 'Doctor'}! Logging into Dentist Workspace...'),
+              backgroundColor: const Color(0xFF10B981),
+            ),
+          );
+          context.go('/dentist');
+        } else if (registeredRole.contains('admin')) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('🎉 Welcome back, ${userData['name'] ?? 'Admin'}! Logging into Admin Dashboard...'),
+              backgroundColor: const Color(0xFF6366F1),
+            ),
+          );
+          context.go('/admin');
+        } else {
+          // Patient Role
           PatientProblemService().updatePatientProfile(
             id: userData['id']?.toString() ?? '',
             name: userData['name'] ?? email.split('@').first,
@@ -216,26 +246,14 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             emergencyContact: userPhone,
             photoBytes: photoBytes,
           );
-        } else if (_selectedRole == UserRole.dentist) {
-          PatientProblemService().registerDoctor(
-            name: userData['name'] ?? 'Dr. Dentist',
-            email: userData['email'] ?? email,
-            phone: userData['phone'] ?? '+1 202 555 0100',
-            licenseNumber: 'DEN-LIC-REGISTERED',
-            specialty: 'General Dentistry',
-            clinicName: 'DentaGuru Care Center',
-            experienceYears: 5,
-            photoBytes: photoBytes,
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('🎉 Welcome back, ${userData['name'] ?? 'Patient'}! Logging into Patient Portal...'),
+              backgroundColor: const Color(0xFF10B981),
+            ),
           );
+          context.go('/patient');
         }
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('🎉 Welcome back, ${userData['name'] ?? _roleName}!'),
-            backgroundColor: const Color(0xFF10B981),
-          ),
-        );
-        context.go(_targetRoute);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
