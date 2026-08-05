@@ -1468,6 +1468,43 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     );
   }
 
+  void _confirmRemoveDoctor(BuildContext context, DoctorModel doc) {
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 24),
+              const SizedBox(width: 8),
+              Text('Remove ${doc.name}?', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ],
+          ),
+          content: Text('Are you sure you want to remove ${doc.name} (${doc.specialty}) from the platform directory?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(dialogCtx).pop(), child: const Text('Cancel')),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.delete_forever_rounded, size: 16),
+              label: const Text('Remove Doctor', style: TextStyle(fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+              onPressed: () {
+                _problemService.removeDoctor(doc.id);
+                Navigator.of(dialogCtx).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('🗑️ ${doc.name} removed from platform directory.'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   // ==========================================
   // PANEL 2: MASTER DENTISTS DIRECTORY (ALL DOCTORS)
   // ==========================================
@@ -1639,20 +1676,29 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 ],
                               ),
                             ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: isAvailable ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                doc.status,
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  color: isAvailable ? const Color(0xFF16A34A) : const Color(0xFFD97706),
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: isAvailable ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    doc.status,
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: isAvailable ? const Color(0xFF16A34A) : const Color(0xFFD97706),
+                                    ),
+                                  ),
                                 ),
-                              ),
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 18),
+                                  tooltip: 'Remove Doctor from Platform',
+                                  onPressed: () => _confirmRemoveDoctor(context, doc),
+                                ),
+                              ],
                             ),
                           ],
                         ),
@@ -2425,14 +2471,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     DataColumn(label: Text('Phone', style: TextStyle(fontWeight: FontWeight.bold))),
                     DataColumn(label: Text('Last Visit', style: TextStyle(fontWeight: FontWeight.bold))),
                     DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold))),
                   ],
                   rows: patientEntries.map((patient) {
                     final String name = patient['name'] ?? 'Patient';
                     final String age = patient['age'] ?? '28';
                     final String phone = patient['phone'] ?? '--';
+                    final String email = patient['email'] ?? '';
                     final String lastVisit = patient['lastVisit'] ?? 'Today';
                     final String status = patient['status'] ?? 'Active';
-                    return _buildDataRow(name, age, phone, lastVisit, status, const Color(0xFFDCFCE7), const Color(0xFF16A34A));
+                    return _buildDataRow(name, age, phone, email, lastVisit, status, const Color(0xFFDCFCE7), const Color(0xFF16A34A));
                   }).toList(),
                 ),
               ),
@@ -2442,7 +2490,47 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     );
   }
 
-  DataRow _buildDataRow(String name, String age, String phone, String lastVisit, String status, Color bg, Color text) {
+  void _confirmRemovePatient(BuildContext context, String email, String name) {
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 24),
+              const SizedBox(width: 8),
+              Text('Remove $name?', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ],
+          ),
+          content: Text('Are you sure you want to remove patient $name from the directory?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(dialogCtx).pop(), child: const Text('Cancel')),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.delete_forever_rounded, size: 16),
+              label: const Text('Remove Patient', style: TextStyle(fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+              onPressed: () {
+                setState(() {
+                  _adminPatientsList.removeWhere((p) => p['email'] == email || p['name'] == name);
+                });
+                _problemService.removePatient(email);
+                Navigator.of(dialogCtx).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('🗑️ Patient $name removed from directory.'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  DataRow _buildDataRow(String name, String age, String phone, String email, String lastVisit, String status, Color bg, Color text) {
     return DataRow(
       cells: [
         DataCell(
@@ -2466,6 +2554,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
             child: Text(status, style: TextStyle(color: text, fontSize: 10, fontWeight: FontWeight.bold)),
+          ),
+        ),
+        DataCell(
+          IconButton(
+            icon: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 18),
+            tooltip: 'Remove Patient',
+            onPressed: () => _confirmRemovePatient(context, email, name),
           ),
         ),
       ],

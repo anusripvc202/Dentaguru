@@ -608,6 +608,24 @@ class PatientProblemService extends ChangeNotifier {
     }
   }
 
+  void removeDoctor(String doctorId) {
+    _allDoctors.removeWhere((d) => d.id == doctorId);
+    if (currentDoctor?.id == doctorId) {
+      currentDoctor = _allDoctors.firstOrNull;
+    }
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void removePatient(String email) {
+    if (currentPatient.email == email) {
+      currentPatient = PatientProfile();
+    }
+    _requests.removeWhere((r) => r.patientName == currentPatient.name);
+    _saveToStorage();
+    notifyListeners();
+  }
+
   DoctorModel registerDoctor({
     required String name,
     required String email,
