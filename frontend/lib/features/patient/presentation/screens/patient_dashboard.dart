@@ -485,12 +485,6 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showLiveChatModal(context),
-        backgroundColor: AppTheme.primaryBlue,
-        icon: const Icon(Icons.chat_bubble_rounded, color: Colors.white, size: 20),
-        label: const Text('Live Chat', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-      ),
     );
   }
 
