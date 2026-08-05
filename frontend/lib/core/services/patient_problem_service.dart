@@ -331,107 +331,12 @@ class PatientProblemService extends ChangeNotifier {
         _allDoctors.addAll(dList.map((item) => DoctorModel.fromJson(item)));
       }
 
-      if (_allDoctors.isEmpty) {
-        _seedDefaultDoctors();
-      }
-
       syncDoctorsFromApi();
 
       notifyListeners();
     } catch (e) {
       debugPrint('Error loading PatientProblemService state from storage: $e');
     }
-  }
-
-  void _seedDefaultDoctors() {
-    _allDoctors.addAll([
-      DoctorModel(
-        id: 'DOC-101',
-        name: 'Dr. Sarah Jenkins',
-        specialty: 'Orthodontics & Braces',
-        qualification: 'BDS, MDS (Orthodontics)',
-        experienceYears: 8,
-        rating: 4.9,
-        reviewCount: 42,
-        clinicName: 'Apex Dental Care & Orthodontics',
-        phone: '+1 202 555 0142',
-        email: 'sarah.jenkins@dentaguru.com',
-        status: 'Available',
-        nextAvailableSlots: ['Today, 2:30 PM', 'Tomorrow, 10:00 AM'],
-        consultationFee: '\$85',
-        licenseNumber: 'DEN-LIC-88401',
-        clinicAddress: '450 Healthcare Blvd, Suite 201',
-      ),
-      DoctorModel(
-        id: 'DOC-102',
-        name: 'Dr. Michael Chang',
-        specialty: 'Endodontics & Root Canal',
-        qualification: 'BDS, MDS (Endodontics)',
-        experienceYears: 12,
-        rating: 4.85,
-        reviewCount: 58,
-        clinicName: 'Smile Dental Clinic',
-        phone: '+1 202 555 0198',
-        email: 'michael.chang@dentaguru.com',
-        status: 'Available',
-        nextAvailableSlots: ['Today, 4:00 PM', 'Tomorrow, 11:30 AM'],
-        consultationFee: '\$90',
-        licenseNumber: 'DEN-LIC-88402',
-        clinicAddress: '782 Medical Center Drive, Suite 104',
-      ),
-      DoctorModel(
-        id: 'DOC-103',
-        name: 'Dr. Elena Rostova',
-        specialty: 'General Dentistry & Preventive Care',
-        qualification: 'BDS',
-        experienceYears: 6,
-        rating: 5.0,
-        reviewCount: 31,
-        clinicName: 'City Center Dental Hub',
-        phone: '+1 202 555 0165',
-        email: 'elena.rostova@dentaguru.com',
-        status: 'Available',
-        nextAvailableSlots: ['Today, 3:00 PM', 'Tomorrow, 9:00 AM'],
-        consultationFee: '\$75',
-        licenseNumber: 'DEN-LIC-88403',
-        clinicAddress: '123 Healthcare Blvd, Medical Hub, Suite 400',
-      ),
-      DoctorModel(
-        id: 'DOC-104',
-        name: 'Dr. Marcus Vance',
-        specialty: 'Oral & Maxillofacial Surgery',
-        qualification: 'BDS, MDS (Oral Surgery)',
-        experienceYears: 15,
-        rating: 4.95,
-        reviewCount: 76,
-        clinicName: 'Metro Oral Surgery Center',
-        phone: '+1 202 555 0111',
-        email: 'marcus.vance@dentaguru.com',
-        status: 'In Consultation',
-        nextAvailableSlots: ['Tomorrow, 2:00 PM', 'Day after, 10:00 AM'],
-        consultationFee: '\$120',
-        licenseNumber: 'DEN-LIC-88404',
-        clinicAddress: '900 Surgical Pavilion, Suite 500',
-      ),
-      DoctorModel(
-        id: 'DOC-105',
-        name: 'Dr. Priya Sharma',
-        specialty: 'Periodontics & Gum Care',
-        qualification: 'BDS, MDS (Periodontics)',
-        experienceYears: 9,
-        rating: 4.75,
-        reviewCount: 29,
-        clinicName: 'Care Dental Studio',
-        phone: '+1 202 555 0177',
-        email: 'priya.sharma@dentaguru.com',
-        status: 'Available',
-        nextAvailableSlots: ['Today, 5:00 PM', 'Tomorrow, 1:00 PM'],
-        consultationFee: '\$80',
-        licenseNumber: 'DEN-LIC-88405',
-        clinicAddress: '310 Wellness Way, Suite 102',
-      ),
-    ]);
-    _saveToStorage();
   }
 
   Future<void> syncDoctorsFromApi() async {
@@ -733,7 +638,6 @@ class PatientProblemService extends ChangeNotifier {
       _requests.clear();
       _allDoctors.clear();
       _medicalRecords.clear();
-      _seedDefaultDoctors();
       notifyListeners();
     } catch (e) {
       debugPrint('Reset error: $e');
