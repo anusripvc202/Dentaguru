@@ -274,6 +274,17 @@ class PatientProblemService extends ChangeNotifier {
 
   List<PatientConsultationRequest> get requests => List.unmodifiable(_requests);
 
+  // List of Issued Medical Records / Prescriptions
+  final List<Map<String, dynamic>> _medicalRecords = [];
+
+  List<Map<String, dynamic>> get medicalRecords => List.unmodifiable(_medicalRecords);
+
+  void addMedicalRecord(Map<String, dynamic> record) {
+    _medicalRecords.insert(0, record);
+    _saveToStorage();
+    notifyListeners();
+  }
+
   // ----------------------------------------------------
   // Persistent SharedPreferences Storage Methods
   // ----------------------------------------------------
@@ -299,6 +310,14 @@ class PatientProblemService extends ChangeNotifier {
         final List list = jsonDecode(reqStr);
         _requests.clear();
         _requests.addAll(list.map((item) => PatientConsultationRequest.fromJson(item)));
+      }
+
+      // 4. Load Medical Records
+      final medStr = prefs.getString('dentaguru_medical_records');
+      if (medStr != null && medStr.isNotEmpty) {
+        final List list = jsonDecode(medStr);
+        _medicalRecords.clear();
+        _medicalRecords.addAll(List<Map<String, dynamic>>.from(list));
       }
 
       // 4. Load All Doctors Directory
@@ -467,6 +486,7 @@ class PatientProblemService extends ChangeNotifier {
       }
       await prefs.setString('dentaguru_requests', jsonEncode(_requests.map((r) => r.toJson()).toList()));
       await prefs.setString('dentaguru_all_doctors', jsonEncode(_allDoctors.map((d) => d.toJson()).toList()));
+      await prefs.setString('dentaguru_medical_records', jsonEncode(_medicalRecords));
     } catch (e) {
       debugPrint('Error saving PatientProblemService state to storage: $e');
     }
@@ -594,11 +614,13 @@ class PatientProblemService extends ChangeNotifier {
       await prefs.remove('dentaguru_current_doctor');
       await prefs.remove('dentaguru_requests');
       await prefs.remove('dentaguru_all_doctors');
+      await prefs.remove('dentaguru_medical_records');
 
       currentPatient = PatientProfile();
       currentDoctor = null;
       _requests.clear();
       _allDoctors.clear();
+      _medicalRecords.clear();
       _seedDefaultDoctors();
       notifyListeners();
     } catch (e) {

@@ -152,11 +152,31 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                     final dosage = dosageController.text.trim();
                     final duration = durationController.text.trim();
 
+                    final newRecord = {
+                      'id': 'REC-${DateTime.now().millisecondsSinceEpoch}',
+                      'type': 'prescription',
+                      'title': 'Digital Prescription Slips',
+                      'subtitle': 'Active Prescription (${medName.isNotEmpty ? medName : 'Amoxicillin 500mg'})',
+                      'doctorName': _patientService.currentDoctor?.name ?? 'Dr. Elena Rodriguez',
+                      'clinicName': _patientService.currentDoctor?.clinicName ?? 'Apex Dental Center',
+                      'date': DateTime.now().toString().split(' ').first,
+                      'items': [
+                        {
+                          'name': medName.isNotEmpty ? medName : 'Amoxicillin 500mg',
+                          'dosage': dosage.isNotEmpty ? dosage : '1 Capsule every 8 hours after meals',
+                          'duration': duration.isNotEmpty ? duration : '7 Days',
+                          'status': 'Active',
+                        }
+                      ],
+                    };
+
+                    _patientService.addMedicalRecord(newRecord);
+
                     await ApiService().createMedicalRecord(
                       patientId: _patientService.currentPatient.id,
                       type: 'prescription',
                       title: 'Digital Prescription Slips',
-                      subtitle: 'Active Prescription ($medName)',
+                      subtitle: 'Active Prescription (${medName.isNotEmpty ? medName : 'Amoxicillin 500mg'})',
                       doctorName: _patientService.currentDoctor?.name ?? 'Dr. Elena Rodriguez',
                       clinicName: _patientService.currentDoctor?.clinicName ?? 'Apex Dental Center',
                       items: [

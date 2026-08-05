@@ -1183,46 +1183,15 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     return FutureBuilder<List<dynamic>>(
       future: ApiService().fetchMedicalRecords(patientId: _patientService.currentPatient.id),
       builder: (context, snapshot) {
-        final records = snapshot.data ?? [
-          {
-            'type': 'prescription',
-            'title': 'Digital Prescription Slips',
-            'subtitle': '3 Active Prescriptions (Amoxicillin, Pain Relief, Rinse)',
-            'doctorName': 'Dr. Elena Rodriguez',
-            'clinicName': 'Apex Dental Center',
-            'date': '2026-08-01',
-            'items': [
-              {'name': 'Amoxicillin 500mg', 'dosage': '1 tablet every 8 hours', 'duration': '7 Days', 'status': 'Active'},
-              {'name': 'Ibuprofen 400mg', 'dosage': '1 tablet as needed for pain', 'duration': '5 Days', 'status': 'Active'},
-              {'name': 'Chlorhexidine 0.12% Rinse', 'dosage': '15ml swish & spit twice daily', 'duration': '14 Days', 'status': 'Active'}
-            ]
-          },
-          {
-            'type': 'xray',
-            'title': 'Panoramic X-Ray Scans',
-            'subtitle': '2 Scans Available (DICOM HD Format)',
-            'doctorName': 'Dr. Sarah Jenkins',
-            'clinicName': 'Metro Dental Radiology',
-            'date': '2026-07-28',
-            'items': [
-              {'scanType': 'Full Panoramic Jaw Scan', 'format': 'DICOM HD 4K', 'notes': 'No bone loss observed in upper molar region.'},
-              {'scanType': 'Bitewing Molar X-Ray', 'format': 'DICOM HD 1080p', 'notes': 'Minor interproximal shadow noted on Tooth #14.'}
-            ]
-          },
-          {
-            'type': 'chart',
-            'title': '3D Teeth Chart & History',
-            'subtitle': 'View fillings, crowns & aligner timeline',
-            'doctorName': 'Dr. Michael Chang',
-            'clinicName': 'City Center Dental Hub',
-            'date': '2026-06-15',
-            'items': [
-              {'toothNumber': 14, 'procedure': 'Composite Filling', 'date': '2026-06-15', 'status': 'Restored'},
-              {'toothNumber': 19, 'procedure': 'Zirconia Crown', 'date': '2026-04-10', 'status': 'Healthy'},
-              {'toothNumber': 30, 'procedure': 'Scaling & Root Planing', 'date': '2026-02-20', 'status': 'Maintained'}
-            ]
-          }
-        ];
+        final apiRecords = snapshot.data ?? [];
+        final localRecords = _patientService.medicalRecords;
+        
+        final combinedMap = <String, Map<String, dynamic>>{};
+        for (final item in [...localRecords, ...apiRecords]) {
+          final id = item['id']?.toString() ?? item['title']?.toString() ?? UniqueKey().toString();
+          combinedMap[id] = Map<String, dynamic>.from(item);
+        }
+        final records = combinedMap.values.toList();
 
         return SingleChildScrollView(
           physics: const BouncingScrollPhysics(),
@@ -1249,6 +1218,26 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                 ],
               ),
               const SizedBox(height: 16),
+              if (records.isEmpty)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: const Column(
+                    children: [
+                      Icon(Icons.folder_open_rounded, size: 40, color: AppTheme.textMuted),
+                      SizedBox(height: 10),
+                      Text('No Digital Records Issued Yet', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark)),
+                      SizedBox(height: 4),
+                      Text('Prescriptions and X-rays issued by your attending dentist will appear here live.', textAlign: TextAlign.center, style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                    ],
+                  ),
+                )
+              else
               ...records.map((rec) {
                 final type = rec['type'] ?? 'prescription';
                 final title = rec['title'] ?? 'Record Slip';
