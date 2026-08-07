@@ -295,8 +295,8 @@ class ApiService {
   /// Create a new appointment in Supabase
   Future<Map<String, dynamic>> createAppointment({
     required String patientId,
-    required String dentistId,
-    required String clinicId,
+    String dentistId = '',
+    String clinicId = '',
     required String date,
     required String timeSlot,
     required String treatment,

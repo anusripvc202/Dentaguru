@@ -178,8 +178,8 @@ class PatientProfile {
 /// Model representing a dental problem submitted by a patient for admin review
 class PatientConsultationRequest {
   final String id;
-  final String patientName;
-  final String patientPhone;
+  String patientName;
+  String patientPhone;
   final String problemCategory;
   final String problemDescription;
   final String severity; // 'Mild', 'Moderate', 'Severe'
