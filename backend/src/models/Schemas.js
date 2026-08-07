@@ -177,6 +177,7 @@ async function resolveUserUuid(input) {
     try {
         let user = await User.findOne({ email: str });
         if (!user) user = await User.findOne({ phone: str });
+        if (!user) user = await User.findOne({ name: str });
         if (user) return user.id;
 
         const { data: firstUsers } = await supabaseAdmin.from('users').select('id').limit(1);
@@ -193,6 +194,13 @@ async function resolveDentistUuid(input) {
     if (isUUID(str)) return str;
 
     try {
+        let user = await User.findOne({ name: str });
+        if (!user) user = await User.findOne({ email: str });
+        if (user) {
+            let d = await supabaseAdmin.from('dentists').select('*').eq('user_id', user.id).maybeSingle();
+            if (d && d.data) return d.data.id;
+        }
+
         const { data: dentists } = await supabaseAdmin.from('dentists').select('id').limit(1);
         if (dentists && dentists.length > 0) return dentists[0].id;
     } catch (e) {
@@ -207,6 +215,9 @@ async function resolveClinicUuid(input) {
     if (isUUID(str)) return str;
 
     try {
+        let c = await Clinic.findOne({ clinic_name: str });
+        if (c) return c.id;
+
         const { data: clinics } = await supabaseAdmin.from('clinics').select('id').limit(1);
         if (clinics && clinics.length > 0) return clinics[0].id;
     } catch (e) {
@@ -243,14 +254,27 @@ const Appointment = {
 
     async find(query = {}) {
         let req = supabaseAdmin.from('appointments').select('*, patient:users!patient_id(name, email, phone), clinic:clinics!clinic_id(clinic_name, location)');
-        if (query.patientId) req = req.eq('patient_id', query.patientId);
-        if (query.dentistId) req = req.eq('dentist_id', query.dentistId);
-        if (query.clinicId) req = req.eq('clinic_id', query.clinicId);
+        const pId = query.patientId || query.patient_id;
+        const dId = query.dentistId || query.dentist_id;
+        const cId = query.clinicId || query.clinic_id;
+
+        if (pId) {
+            const resolvedP = await resolveUserUuid(pId);
+            if (resolvedP) req = req.eq('patient_id', resolvedP);
+        }
+        if (dId) {
+            const resolvedD = await resolveDentistUuid(dId);
+            if (resolvedD) req = req.eq('dentist_id', resolvedD);
+        }
+        if (cId) {
+            const resolvedC = await resolveClinicUuid(cId);
+            if (resolvedC) req = req.eq('clinic_id', resolvedC);
+        }
 
         const { data, error } = await req.order('date', { ascending: true });
         if (error) {
             console.warn('⚠️ Appointment find warning, fallback to simple select:', error.message);
-            const simple = await supabaseAdmin.from('appointments').select('*');
+            const simple = await supabaseAdmin.from('appointments').select('*').order('date', { ascending: false });
             return simple.data || [];
         }
         return data || [];
@@ -304,7 +328,11 @@ const MedicalRecord = {
 
     async find(query = {}) {
         let req = supabaseAdmin.from('medical_records').select('*');
-        if (query.patient_id || query.patientId) req = req.eq('patient_id', query.patient_id || query.patientId);
+        const pId = query.patient_id || query.patientId;
+        if (pId) {
+            const resolvedP = await resolveUserUuid(pId);
+            if (resolvedP) req = req.eq('patient_id', resolvedP);
+        }
         const { data, error } = await req.order('created_at', { ascending: false });
         if (error) throw error;
         return data || [];
@@ -336,8 +364,13 @@ const ChatMessage = {
 
     async find(query = {}) {
         let req = supabaseAdmin.from('chat_messages').select('*');
-        for (const [key, val] of Object.entries(query)) {
-            req = req.eq(key, val);
+        if (query.room_id || query.roomId) {
+            req = req.eq('room_id', query.room_id || query.roomId);
+        }
+        const sId = query.sender_id || query.senderId;
+        if (sId) {
+            const resolvedS = await resolveUserUuid(sId);
+            if (resolvedS) req = req.eq('sender_id', resolvedS);
         }
         const { data, error } = await req.order('created_at', { ascending: true });
         if (error) throw error;

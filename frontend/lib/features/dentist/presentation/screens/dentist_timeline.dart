@@ -322,7 +322,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                     _patientService.addMedicalRecord(newRecord);
 
                     await ApiService().createMedicalRecord(
-                      patientId: _patientService.currentPatient.id,
+                      patientId: patientName.isNotEmpty ? patientName : _patientService.currentPatient.name,
                       type: 'prescription',
                       title: 'Digital Prescription Slips',
                       subtitle: 'Active Prescription (${medName.isNotEmpty ? medName : 'Amoxicillin 500mg'})',
