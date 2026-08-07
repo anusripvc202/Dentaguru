@@ -545,8 +545,6 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
         );
       },
     );
-  }     },
-    );
   }
 
   void _showNotificationsModal(BuildContext context, String role) {
