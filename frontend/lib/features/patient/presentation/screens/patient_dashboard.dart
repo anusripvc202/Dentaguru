@@ -5,6 +5,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
+import '../../../../core/widgets/products_dropdown_menu.dart';
 
 class PatientDashboardScreen extends StatefulWidget {
   const PatientDashboardScreen({super.key});
@@ -389,6 +390,83 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     );
   }
 
+  void _showNotificationsModal(BuildContext context, String role) {
+    final patient = _patientService.currentPatient;
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        final notifs = _patientService.appNotifications
+            .where((n) => n.recipientRole == role || n.recipientId == patient.name || n.recipientId == patient.id)
+            .toList();
+
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 440, maxHeight: 520),
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.notifications_active_rounded, color: AppTheme.primaryBlue, size: 22),
+                        SizedBox(width: 8),
+                        Text('Patient Notifications', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      ],
+                    ),
+                    IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(dialogCtx).pop()),
+                  ],
+                ),
+                const Divider(height: 20),
+                if (notifs.isEmpty)
+                  const Expanded(
+                    child: Center(
+                      child: Text('No new notifications.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    ),
+                  )
+                else
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: notifs.length,
+                      itemBuilder: (ctx, idx) {
+                        final n = notifs[idx];
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(n.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.primaryBlue)),
+                              const SizedBox(height: 2),
+                              Text(n.message, style: const TextStyle(fontSize: 11, color: AppTheme.textDark)),
+                              const SizedBox(height: 4),
+                              Text(
+                                '${n.timestamp.hour}:${n.timestamp.minute.toString().padLeft(2, '0')}',
+                                style: const TextStyle(fontSize: 9, color: Colors.grey),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final patient = _patientService.currentPatient;
@@ -402,13 +480,43 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
         automaticallyImplyLeading: false,
         title: const DentaGuruLogo(height: 38),
         actions: [
+          const Padding(
+            padding: EdgeInsets.only(right: 6),
+            child: ProductsDropdownMenu(),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: Row(
               children: [
-                IconButton(
-                  icon: const Icon(Icons.notifications_none_rounded, color: AppTheme.textDark, size: 24),
-                  onPressed: () {},
+                Builder(
+                  builder: (context) {
+                    final patientNotifs = _patientService.appNotifications
+                        .where((n) => n.recipientRole == 'Patient' || n.recipientId == patient.name || n.recipientId == patient.id)
+                        .toList();
+                    final unreadCount = patientNotifs.where((n) => !n.isRead).length;
+
+                    return Stack(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.notifications_none_rounded, color: AppTheme.textDark, size: 24),
+                          onPressed: () => _showNotificationsModal(context, 'Patient'),
+                        ),
+                        if (unreadCount > 0)
+                          Positioned(
+                            right: 6,
+                            top: 6,
+                            child: Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: const BoxDecoration(color: Color(0xFFEF4444), shape: BoxShape.circle),
+                              child: Text(
+                                '$unreadCount',
+                                style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
                 ),
                 const SizedBox(width: 4),
                 Container(
@@ -710,35 +818,49 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               ),
               const SizedBox(height: 12),
 
-              if (requests.isEmpty)
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: const Color(0xFFEEF2F6)),
-                  ),
-                  child: const Column(
-                    children: [
-                      Icon(Icons.check_circle_outline_rounded, color: Color(0xFF10B981), size: 36),
-                      SizedBox(height: 8),
-                      Text(
-                        'No Pending Dental Problems',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+              Builder(
+                builder: (context) {
+                  final myPatientRequests = requests.where((req) {
+                    if (patient.name.isNotEmpty && req.patientName.toLowerCase() == patient.name.toLowerCase()) return true;
+                    if (patient.id.isNotEmpty && req.id.contains(patient.id)) return true;
+                    return false;
+                  }).toList();
+
+                  if (myPatientRequests.isEmpty) {
+                    return Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: const Color(0xFFEEF2F6)),
                       ),
-                      SizedBox(height: 2),
-                      Text(
-                        'Tap the top banner whenever you experience dental pain or need a specialist.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                      child: const Column(
+                        children: [
+                          Icon(Icons.check_circle_outline_rounded, color: Color(0xFF10B981), size: 36),
+                          SizedBox(height: 8),
+                          Text(
+                            'No Pending Dental Problems',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            'Tap the top banner whenever you experience dental pain or need a specialist.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                )
-              else
-                Column(
-                  children: requests.map((req) {
-                    final isSuggested = req.status == 'Doctor Suggested';
+                    );
+                  }
+
+                  return Column(
+                    children: myPatientRequests.map((req) {
+                    final bool isDoctorAssigned = (req.assignedDoctorName != null && req.assignedDoctorName!.isNotEmpty) ||
+                        req.status == 'Doctor Suggested' ||
+                        req.status == 'Confirmed' ||
+                        req.status == 'Accepted';
+
                     return Container(
                       margin: const EdgeInsets.only(bottom: 14),
                       padding: const EdgeInsets.all(16),
@@ -746,12 +868,12 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(18),
                         border: Border.all(
-                          color: isSuggested ? const Color(0xFF10B981) : const Color(0xFFCBD5E1),
-                          width: isSuggested ? 1.8 : 1,
+                          color: isDoctorAssigned ? const Color(0xFF10B981) : const Color(0xFF0284C7),
+                          width: 1.5,
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: isSuggested ? const Color(0xFF10B981).withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.03),
+                            color: (isDoctorAssigned ? const Color(0xFF10B981) : const Color(0xFF0284C7)).withValues(alpha: 0.08),
                             blurRadius: 10,
                             offset: const Offset(0, 3),
                           ),
@@ -768,20 +890,26 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                 child: Text(
                                   req.problemCategory,
                                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark),
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
+                              const SizedBox(width: 8),
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                 decoration: BoxDecoration(
-                                  color: isSuggested ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
-                                  borderRadius: BorderRadius.circular(12),
+                                  color: isDoctorAssigned
+                                      ? const Color(0xFFFEF3C7)
+                                      : const Color(0xFFDBEAFE),
+                                  borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Text(
                                   req.status,
                                   style: TextStyle(
-                                    color: isSuggested ? const Color(0xFF16A34A) : const Color(0xFFD97706),
+                                    fontSize: 10,
                                     fontWeight: FontWeight.bold,
-                                    fontSize: 11,
+                                    color: isDoctorAssigned
+                                        ? const Color(0xFFD97706)
+                                        : AppTheme.primaryBlue,
                                   ),
                                 ),
                               ),
@@ -807,13 +935,13 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                 _buildProgressStep(title: 'Submitted', isDone: true),
                                 _buildProgressLine(isDone: true),
                                 _buildProgressStep(title: 'Admin Review', isDone: true),
-                                _buildProgressLine(isDone: isSuggested),
-                                _buildProgressStep(title: 'Doctor Assigned', isDone: isSuggested),
+                                _buildProgressLine(isDone: isDoctorAssigned),
+                                _buildProgressStep(title: 'Doctor Assigned', isDone: isDoctorAssigned),
                               ],
                             ),
                           ),
 
-                          if (isSuggested) ...[
+                          if (isDoctorAssigned) ...[
                             const SizedBox(height: 14),
                             Container(
                               padding: const EdgeInsets.all(14),
@@ -912,7 +1040,9 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                       ),
                     );
                   }).toList(),
-                ),
+                  );
+                },
+              ),
               const SizedBox(height: 16),
 
               // 5. Next Visit Card
@@ -955,7 +1085,9 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
 
   Widget _buildNextVisitCard() {
     final requests = _patientService.requests;
-    final assignedReq = requests.where((r) => r.assignedDoctorName != null && r.assignedDoctorName!.isNotEmpty).firstOrNull ?? requests.firstOrNull;
+    final patient = _patientService.currentPatient;
+    final myRequests = requests.where((r) => (patient.name.isNotEmpty && r.patientName.toLowerCase() == patient.name.toLowerCase()) || (patient.id.isNotEmpty && r.id.contains(patient.id))).toList();
+    final assignedReq = myRequests.where((r) => r.assignedDoctorName != null && r.assignedDoctorName!.isNotEmpty && (r.status == 'Confirmed' || r.status == 'Accepted')).firstOrNull;
 
     if (assignedReq == null) {
       return Container(

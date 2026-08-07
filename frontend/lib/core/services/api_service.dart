@@ -125,6 +125,37 @@ class ApiService {
     return [];
   }
 
+  /// Create/Register a new clinic in Supabase via Backend API
+  Future<Map<String, dynamic>> createClinicProfile({
+    required String clinicName,
+    required String location,
+    List<String>? services,
+    List<Map<String, dynamic>>? pricing,
+  }) async {
+    try {
+      final url = Uri.parse(ApiConstants.clinics);
+      final response = await http.post(
+        url,
+        headers: _headers,
+        body: jsonEncode({
+          'clinicName': clinicName,
+          'location': location,
+          if (services != null) 'services': services,
+          if (pricing != null) 'pricing': pricing,
+        }),
+      );
+      final data = jsonDecode(response.body);
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return {'success': true, 'clinic': data['clinic'], 'message': data['message']};
+      } else {
+        return {'success': false, 'message': data['message'] ?? 'Failed to create clinic.'};
+      }
+    } catch (e) {
+      debugPrint('Create clinic error: $e');
+      return {'success': false, 'message': 'Failed to connect to backend server.'};
+    }
+  }
+
   /// Create a new appointment in Supabase
   Future<Map<String, dynamic>> createAppointment({
     required String patientId,

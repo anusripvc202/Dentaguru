@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
+import '../../../../core/services/patient_problem_service.dart';
+
+import '../../../../core/widgets/products_dropdown_menu.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -82,6 +85,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ],
         ),
         actions: [
+          const Padding(
+            padding: EdgeInsets.only(right: 8),
+            child: ProductsDropdownMenu(),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: _AnimatedAppButton(
@@ -146,6 +153,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               _buildFooterCta(context),
 
               const SizedBox(height: 24),
+
+              // ------------------ 9. SINGLE LINE COMPANY FOOTER ------------------
+              _buildCompanyFooter(),
             ],
           ),
         ),
@@ -969,52 +979,60 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           const SizedBox(height: 12),
 
           // Testimonial Card
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFC),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                Row(
+          Builder(
+            builder: (context) {
+              final firstDoc = PatientProblemService().allDoctors.firstOrNull;
+              final docName = firstDoc?.name ?? 'Dr. Dental Specialist, BDS';
+              final docSpec = firstDoc?.specialty ?? 'Senior Dental Practitioner';
+
+              return Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    CircleAvatar(
-                      radius: 16,
-                      backgroundColor: AppTheme.primaryBlue,
-                      child: Text('DR', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
-                    ),
-                    SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Dr. Elena Rodriguez, DDS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark), overflow: TextOverflow.ellipsis),
-                          Text('Senior Orthodontist', style: TextStyle(fontSize: 10, color: AppTheme.textMuted), overflow: TextOverflow.ellipsis),
-                        ],
-                      ),
-                    ),
-                    SizedBox(width: 6),
                     Row(
-                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 14),
-                        Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 14),
-                        Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 14),
-                        Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 14),
-                        Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 14),
+                        const CircleAvatar(
+                          radius: 16,
+                          backgroundColor: AppTheme.primaryBlue,
+                          child: Text('DR', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(docName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark), overflow: TextOverflow.ellipsis),
+                              Text(docSpec, style: const TextStyle(fontSize: 10, color: AppTheme.textMuted), overflow: TextOverflow.ellipsis),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 14),
+                            Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 14),
+                            Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 14),
+                            Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 14),
+                            Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 14),
+                          ],
+                        ),
                       ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      '"DentaGuru has streamlined our dental clinic queue management and digital prescription history. Patients love the instant booking and AI pre-screening features!"',
+                      style: TextStyle(fontSize: 12, color: AppTheme.textMedium, fontStyle: FontStyle.italic, height: 1.3),
                     ),
                   ],
                 ),
-                SizedBox(height: 8),
-                Text(
-                  '"DentaGuru has streamlined our dental clinic queue management and digital prescription history. Patients love the instant booking and AI pre-screening features!"',
-                  style: TextStyle(fontSize: 12, color: AppTheme.textMedium, fontStyle: FontStyle.italic, height: 1.3),
-                ),
-              ],
-            ),
+              );
+            },
           ),
         ],
       ),
@@ -1048,6 +1066,45 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
           const SizedBox(height: 6),
         ],
+      ),
+    );
+  }
+
+  Widget _buildCompanyFooter() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+      decoration: const BoxDecoration(
+        color: Color(0xFF0F172A),
+      ),
+      child: Text.rich(
+        TextSpan(
+          text: 'Designed by ',
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+            color: Color(0xFF94A3B8),
+            letterSpacing: 0.4,
+          ),
+          children: [
+            TextSpan(
+              text: 'ThePatterns Company Pvt Ltd.',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: const Color(0xFF38BDF8),
+                letterSpacing: 0.5,
+                shadows: [
+                  Shadow(
+                    color: const Color(0xFF38BDF8).withValues(alpha: 0.3),
+                    blurRadius: 6,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        textAlign: TextAlign.center,
       ),
     );
   }

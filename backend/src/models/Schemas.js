@@ -70,33 +70,50 @@ const Clinic = {
     },
 
     async find(query = {}) {
-        let req = supabaseAdmin.from('clinics').select('*');
-        if (query.clinicName) {
-            req = req.ilike('clinic_name', `%${query.clinicName}%`);
+        try {
+            let req = supabaseAdmin.from('clinics').select('*');
+            if (query.clinicName) {
+                req = req.ilike('clinic_name', `%${query.clinicName}%`);
+            }
+            if (query.services) {
+                req = req.contains('services', [query.services]);
+            }
+            const { data, error } = await req.order('created_at', { ascending: false });
+            if (error) {
+                console.warn('⚠️ Clinic query error, falling back to simple select:', error.message);
+                const simple = await supabaseAdmin.from('clinics').select('*');
+                return simple.data || [];
+            }
+            return data || [];
+        } catch (e) {
+            console.warn('⚠️ Clinic query exception, falling back to simple select:', e.message);
+            const simple = await supabaseAdmin.from('clinics').select('*');
+            return simple.data || [];
         }
-        if (query.services) {
-            req = req.contains('services', [query.services]);
-        }
-        const { data, error } = await req.order('rating', { ascending: false });
-        if (error) throw error;
-        return data || [];
     },
 
     async create(clinicData) {
+        const rawUserId = clinicData.user_id || clinicData.userId;
+        const isUuid = rawUserId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawUserId.toString());
+        const validUserId = isUuid ? rawUserId.toString() : null;
+
         const payload = {
-            user_id: clinicData.user_id || clinicData.userId || null,
+            user_id: validUserId,
             clinic_name: clinicData.clinic_name || clinicData.clinicName || 'DentaGuru Care Center',
             location: clinicData.location || '123 Healthcare Blvd, Medical Hub, Suite 400',
             rating: clinicData.rating || 5.0,
             reviews_count: clinicData.reviews_count || clinicData.reviewsCount || 0,
             verified: clinicData.verified !== undefined ? clinicData.verified : true,
-            services: clinicData.services || [],
+            services: clinicData.services || ['General Dentistry', 'Gum Care', 'Root Canal'],
             pricing: clinicData.pricing || [],
             latitude: clinicData.latitude || clinicData.coordinates?.coordinates?.[1] || null,
             longitude: clinicData.longitude || clinicData.coordinates?.coordinates?.[0] || null
         };
         const { data, error } = await supabaseAdmin.from('clinics').insert(payload).select().single();
-        if (error) throw error;
+        if (error) {
+            console.error('❌ Supabase Clinic Insert Error:', error.message);
+            throw error;
+        }
         return data;
     }
 };
@@ -114,18 +131,37 @@ const Dentist = {
     },
 
     async find(query = {}) {
-        let req = supabaseAdmin.from('dentists').select('*, users(name, email, phone), clinics(clinic_name, location)');
-        for (const [key, val] of Object.entries(query)) {
-            req = req.eq(key, val);
+        try {
+            let req = supabaseAdmin.from('dentists').select('*, users(name, email, phone), clinics(clinic_name, location)');
+            for (const [key, val] of Object.entries(query)) {
+                req = req.eq(key, val);
+            }
+            const { data, error } = await req;
+            if (error) {
+                console.warn('⚠️ Dentist query join failed, falling back to simple select:', error.message);
+                const simple = await supabaseAdmin.from('dentists').select('*');
+                return simple.data || [];
+            }
+            return data || [];
+        } catch (e) {
+            console.warn('⚠️ Dentist query error, falling back to simple select:', e.message);
+            const simple = await supabaseAdmin.from('dentists').select('*');
+            return simple.data || [];
         }
-        const { data, error } = await req;
-        if (error) throw error;
-        return data || [];
     },
 
     async create(dentistData) {
-        const { data, error } = await supabaseAdmin.from('dentists').insert(dentistData).select().single();
-        if (error) throw error;
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const payload = {
+            ...dentistData,
+            user_id: (dentistData.user_id && uuidRegex.test(dentistData.user_id.toString())) ? dentistData.user_id.toString() : null,
+            clinic_id: (dentistData.clinic_id && uuidRegex.test(dentistData.clinic_id.toString())) ? dentistData.clinic_id.toString() : null,
+        };
+        const { data, error } = await supabaseAdmin.from('dentists').insert(payload).select().single();
+        if (error) {
+            console.error('❌ Supabase Dentist Insert Error:', error.message);
+            throw error;
+        }
         return data;
     }
 };

@@ -247,6 +247,103 @@ class PatientConsultationRequest {
 }
 
 /// Central state service for logged in patient, consultation requests, and doctor directory
+/// Model representing a Clinic registered in DentaGuru platform
+class ClinicModel {
+  final String id;
+  final String clinicName;
+  final String location;
+  final double rating;
+  final int reviewsCount;
+  final bool verified;
+  final List<String> services;
+  final List<Map<String, dynamic>> pricing;
+
+  ClinicModel({
+    required this.id,
+    required this.clinicName,
+    required this.location,
+    this.rating = 5.0,
+    this.reviewsCount = 0,
+    this.verified = true,
+    List<String>? services,
+    List<Map<String, dynamic>>? pricing,
+  })  : services = services ?? ['Teeth Cleaning', 'Root Canal', 'Orthodontics'],
+        pricing = pricing ?? [];
+
+  factory ClinicModel.fromJson(Map<String, dynamic> json) {
+    List<String> servList = [];
+    if (json['services'] is List) {
+      servList = (json['services'] as List).map((s) => s.toString()).toList();
+    }
+    List<Map<String, dynamic>> priceList = [];
+    if (json['pricing'] is List) {
+      priceList = (json['pricing'] as List).map((p) => p is Map<String, dynamic> ? p : <String, dynamic>{}).toList();
+    }
+    return ClinicModel(
+      id: (json['id'] ?? json['_id'] ?? '').toString(),
+      clinicName: (json['clinic_name'] ?? json['clinicName'] ?? 'DentaGuru Care Center').toString(),
+      location: (json['location'] ?? '123 Healthcare Blvd').toString(),
+      rating: (json['rating'] ?? 5.0).toDouble(),
+      reviewsCount: json['reviews_count'] ?? json['reviewsCount'] ?? 0,
+      verified: json['verified'] ?? true,
+      services: servList,
+      pricing: priceList,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'clinicName': clinicName,
+        'location': location,
+        'rating': rating,
+        'reviewsCount': reviewsCount,
+        'verified': verified,
+        'services': services,
+        'pricing': pricing,
+      };
+}
+
+/// Model representing an In-App Notification for Patient, Dentist, or Admin
+class AppNotificationModel {
+  final String id;
+  final String recipientRole; // 'Patient', 'Dentist', 'Admin'
+  final String recipientId;
+  final String title;
+  final String message;
+  final DateTime timestamp;
+  bool isRead;
+
+  AppNotificationModel({
+    required this.id,
+    required this.recipientRole,
+    required this.recipientId,
+    required this.title,
+    required this.message,
+    required this.timestamp,
+    this.isRead = false,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'recipientRole': recipientRole,
+        'recipientId': recipientId,
+        'title': title,
+        'message': message,
+        'timestamp': timestamp.toIso8601String(),
+        'isRead': isRead,
+      };
+
+  factory AppNotificationModel.fromJson(Map<String, dynamic> json) => AppNotificationModel(
+        id: json['id'] ?? '',
+        recipientRole: json['recipientRole'] ?? 'Patient',
+        recipientId: json['recipientId'] ?? '',
+        title: json['title'] ?? '',
+        message: json['message'] ?? '',
+        timestamp: json['timestamp'] != null ? DateTime.parse(json['timestamp']) : DateTime.now(),
+        isRead: json['isRead'] ?? false,
+      );
+}
+
 class PatientProblemService extends ChangeNotifier {
   static final PatientProblemService _instance = PatientProblemService._internal();
   factory PatientProblemService() => _instance;
@@ -269,10 +366,39 @@ class PatientProblemService extends ChangeNotifier {
 
   List<DoctorModel> get allDoctors => List.unmodifiable(_allDoctors);
 
+  // Directory of All Clinics in the Platform
+  final List<ClinicModel> _allClinics = [];
+
+  List<ClinicModel> get allClinics => List.unmodifiable(_allClinics);
+
   // List of Consultation Requests
   final List<PatientConsultationRequest> _requests = [];
 
   List<PatientConsultationRequest> get requests => List.unmodifiable(_requests);
+
+  // List of In-App Notifications
+  final List<AppNotificationModel> _appNotifications = [];
+
+  List<AppNotificationModel> get appNotifications => List.unmodifiable(_appNotifications);
+
+  void addNotification({
+    required String recipientRole,
+    required String recipientId,
+    required String title,
+    required String message,
+  }) {
+    final notif = AppNotificationModel(
+      id: 'NOTIF-${DateTime.now().millisecondsSinceEpoch}',
+      recipientRole: recipientRole,
+      recipientId: recipientId,
+      title: title,
+      message: message,
+      timestamp: DateTime.now(),
+    );
+    _appNotifications.insert(0, notif);
+    _saveToStorage();
+    notifyListeners();
+  }
 
   // List of Issued Medical Records / Prescriptions
   final List<Map<String, dynamic>> _medicalRecords = [];
@@ -320,17 +446,9 @@ class PatientProblemService extends ChangeNotifier {
         _medicalRecords.addAll(List<Map<String, dynamic>>.from(list));
       }
 
-      // 5. Sync live appointments from Supabase DB API
+      // 5. Sync live appointments, clinics, and doctors directly from Supabase DB API
       syncAppointmentsFromApi();
-
-      // 4. Load All Doctors Directory
-      final docListStr = prefs.getString('dentaguru_all_doctors');
-      if (docListStr != null && docListStr.isNotEmpty) {
-        final List dList = jsonDecode(docListStr);
-        _allDoctors.clear();
-        _allDoctors.addAll(dList.map((item) => DoctorModel.fromJson(item)));
-      }
-
+      syncClinicsFromApi();
       syncDoctorsFromApi();
 
       notifyListeners();
@@ -339,47 +457,82 @@ class PatientProblemService extends ChangeNotifier {
     }
   }
 
+  Future<void> syncClinicsFromApi() async {
+    try {
+      final list = await ApiService().fetchClinics();
+      _allClinics.clear();
+      if (list.isNotEmpty) {
+        for (final item in list) {
+          _allClinics.add(ClinicModel.fromJson(item));
+        }
+      }
+      _saveToStorage();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Sync clinics error: $e');
+    }
+  }
+
+  Future<bool> registerClinic({
+    required String clinicName,
+    required String location,
+    List<String>? services,
+    List<Map<String, dynamic>>? pricing,
+  }) async {
+    final res = await ApiService().createClinicProfile(
+      clinicName: clinicName,
+      location: location,
+      services: services,
+      pricing: pricing,
+    );
+
+    if (res['success'] == true) {
+      await syncClinicsFromApi();
+      return true;
+    }
+    return false;
+  }
+
   Future<void> syncDoctorsFromApi() async {
     try {
       final apiDentists = await ApiService().fetchDentists();
+      _allDoctors.clear();
       if (apiDentists.isNotEmpty) {
-        bool addedAny = false;
         for (final dMap in apiDentists) {
           final id = dMap['id']?.toString() ?? dMap['_id']?.toString() ?? '';
           final userObj = dMap['users'] ?? dMap['user'] ?? {};
+          final clinicObj = dMap['clinics'] ?? dMap['clinic'] ?? {};
           final name = (userObj['name'] ?? dMap['name'] ?? 'Dentist').toString();
           final email = (userObj['email'] ?? dMap['email'] ?? '').toString();
           final phone = (userObj['phone'] ?? dMap['phone'] ?? '+1 202 555 0100').toString();
           final specialty = (dMap['speciality'] ?? dMap['specialty'] ?? 'General Dentistry').toString();
           final licNum = (dMap['license_number'] ?? dMap['licenseNumber'] ?? 'DEN-LIC-REG').toString();
-          
+          final cName = (clinicObj['clinic_name'] ?? clinicObj['name'] ?? dMap['clinicName'] ?? 'DentaGuru Registered Clinic').toString();
+          final cLoc = (clinicObj['location'] ?? dMap['location'] ?? 'Healthcare Hub').toString();
+
           final formattedName = name.startsWith('Dr.') ? name : 'Dr. $name';
 
-          if (!_allDoctors.any((doc) => doc.id == id || (email.isNotEmpty && doc.email.toLowerCase() == email.toLowerCase()))) {
-            _allDoctors.insert(0, DoctorModel(
-              id: id.isNotEmpty ? id : 'DOC-${100 + _allDoctors.length + 1}',
-              name: formattedName,
-              specialty: specialty,
-              qualification: 'BDS, MDS',
-              experienceYears: 5,
-              rating: (dMap['rating'] ?? 5.0).toDouble(),
-              reviewCount: dMap['reviews_count'] ?? 1,
-              clinicName: 'DentaGuru Registered Clinic',
-              phone: phone,
-              email: email,
-              status: dMap['availability_status'] ?? 'Available',
-              nextAvailableSlots: ['Today, 2:00 PM', 'Tomorrow, 10:00 AM'],
-              consultationFee: '\$75',
-              licenseNumber: licNum,
-            ));
-            addedAny = true;
-          }
-        }
-        if (addedAny) {
-          _saveToStorage();
-          notifyListeners();
+          _allDoctors.add(DoctorModel(
+            id: id.isNotEmpty ? id : 'DOC-${100 + _allDoctors.length + 1}',
+            name: formattedName,
+            specialty: specialty,
+            qualification: 'BDS, MDS',
+            experienceYears: 5,
+            rating: (dMap['rating'] ?? 5.0).toDouble(),
+            reviewCount: dMap['reviews_count'] ?? 1,
+            clinicName: cName,
+            clinicAddress: cLoc,
+            phone: phone,
+            email: email,
+            status: dMap['availability_status'] ?? 'Available',
+            nextAvailableSlots: ['Today, 2:00 PM', 'Tomorrow, 10:00 AM'],
+            consultationFee: '\$75',
+            licenseNumber: licNum,
+          ));
         }
       }
+      _saveToStorage();
+      notifyListeners();
     } catch (e) {
       debugPrint('Sync doctors error: $e');
     }
@@ -388,8 +541,8 @@ class PatientProblemService extends ChangeNotifier {
   Future<void> syncAppointmentsFromApi() async {
     try {
       final list = await ApiService().fetchAppointments();
+      _requests.clear();
       if (list.isNotEmpty) {
-        bool addedAny = false;
         for (final item in list) {
           final reqId = item['_id'] ?? item['id'] ?? 'REQ-${item['patient_id']}-${DateTime.now().millisecondsSinceEpoch}';
           final rawP = (item['patient_name'] ?? item['patientName'] ?? item['patient_id'] ?? 'Patient').toString();
@@ -397,42 +550,41 @@ class PatientProblemService extends ChangeNotifier {
               ? (currentPatient.name.isNotEmpty ? currentPatient.name : 'Patient') 
               : rawP;
 
-          final rawD = (item['dentist_name'] ?? item['dentistName'] ?? item['dentist_id'] ?? 'Assigned Specialist').toString();
-          final docName = (rawD.contains('-') && rawD.length > 20) 
-              ? (currentDoctor?.name ?? 'Assigned Specialist') 
-              : rawD;
+          final rawD = (item['dentist_name'] ?? item['dentistName'] ?? item['dentist_id'] ?? '').toString();
+          String? assignedDocName;
+          if (rawD.isNotEmpty && !rawD.contains('-')) {
+            assignedDocName = rawD;
+          } else if (rawD.isNotEmpty) {
+            final matchedDoc = _allDoctors.firstWhere((d) => d.id == rawD, orElse: () => DoctorModel(id: '', name: '', specialty: '', qualification: '', experienceYears: 0, rating: 0, reviewCount: 0, clinicName: '', phone: '', email: '', status: '', nextAvailableSlots: [], consultationFee: ''));
+            if (matchedDoc.name.isNotEmpty) {
+              assignedDocName = matchedDoc.name;
+            }
+          }
 
           final clinic = item['clinic_id'] ?? 'DentaGuru Care Center';
           final treatment = item['treatment'] ?? 'Dental Consultation';
 
-          if (!_requests.any((r) => r.id == reqId || (r.patientName == pName && r.problemCategory == treatment))) {
-            _requests.insert(
-              0,
-              PatientConsultationRequest(
-                id: reqId.toString(),
-                patientName: pName,
-                patientPhone: '+12025550199',
-                problemCategory: treatment.toString(),
-                problemDescription: 'Scheduled consultation via DentaGuru DB',
-                severity: 'Moderate',
-                submittedAt: DateTime.now(),
-                status: 'Doctor Suggested',
-                assignedDoctorName: docName,
-                assignedDoctorSpecialty: 'Dental Specialist',
-                assignedDoctorClinic: clinic.toString(),
-                adminNotes: 'Restored from Supabase database record',
-                whatsappNotificationSent: true,
-              ),
-            );
-            addedAny = true;
-          }
-        }
-
-        if (addedAny) {
-          _saveToStorage();
-          notifyListeners();
+          _requests.add(
+            PatientConsultationRequest(
+              id: reqId.toString(),
+              patientName: pName,
+              patientPhone: '+12025550199',
+              problemCategory: treatment.toString(),
+              problemDescription: 'Scheduled consultation via DentaGuru DB',
+              severity: 'Moderate',
+              submittedAt: DateTime.now(),
+              status: assignedDocName != null ? 'Doctor Suggested' : 'Pending Admin Review',
+              assignedDoctorName: assignedDocName,
+              assignedDoctorSpecialty: 'Dental Specialist',
+              assignedDoctorClinic: clinic.toString(),
+              adminNotes: 'Restored from Supabase database record',
+              whatsappNotificationSent: true,
+            ),
+          );
         }
       }
+      _saveToStorage();
+      notifyListeners();
     } catch (e) {
       debugPrint('Sync appointments error: $e');
     }
@@ -450,6 +602,23 @@ class PatientProblemService extends ChangeNotifier {
       await prefs.setString('dentaguru_medical_records', jsonEncode(_medicalRecords));
     } catch (e) {
       debugPrint('Error saving PatientProblemService state to storage: $e');
+    }
+  }
+
+  Future<void> clearAllData() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear();
+      currentPatient = PatientProfile();
+      currentDoctor = null;
+      _allDoctors.clear();
+      _allClinics.clear();
+      _requests.clear();
+      _medicalRecords.clear();
+      _appNotifications.clear();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error clearing all local data: $e');
     }
   }
 
@@ -511,13 +680,72 @@ class PatientProblemService extends ChangeNotifier {
   }) {
     final index = _requests.indexWhere((r) => r.id == requestId);
     if (index != -1) {
-      _requests[index].status = 'Doctor Suggested';
-      _requests[index].assignedDoctorId = doctor.id;
-      _requests[index].assignedDoctorName = doctor.name;
-      _requests[index].assignedDoctorSpecialty = doctor.specialty;
-      _requests[index].assignedDoctorClinic = doctor.clinicName;
-      _requests[index].adminNotes = adminNotes;
-      _requests[index].whatsappNotificationSent = true;
+      final req = _requests[index];
+      req.status = 'Doctor Suggested';
+      req.assignedDoctorId = doctor.id;
+      req.assignedDoctorName = doctor.name;
+      req.assignedDoctorSpecialty = doctor.specialty;
+      req.assignedDoctorClinic = doctor.clinicName;
+      req.adminNotes = adminNotes;
+      req.whatsappNotificationSent = true;
+
+      // Dispatch Notification to Dentist
+      addNotification(
+        recipientRole: 'Dentist',
+        recipientId: doctor.id,
+        title: '🩺 New Patient Referral Assigned',
+        message: 'Admin suggested patient ${req.patientName} (${req.problemCategory}) to your workspace.',
+      );
+
+      _saveToStorage();
+      notifyListeners();
+    }
+  }
+
+  void acceptReferralByDentist(String requestId) {
+    final index = _requests.indexWhere((r) => r.id == requestId);
+    if (index != -1) {
+      final req = _requests[index];
+      req.status = 'Confirmed';
+
+      // Dispatch Notifications to Patient & Admin
+      addNotification(
+        recipientRole: 'Patient',
+        recipientId: req.patientName,
+        title: '🎉 Consultation Accepted!',
+        message: '${req.assignedDoctorName ?? "Your Doctor"} accepted your consultation for ${req.problemCategory}.',
+      );
+
+      addNotification(
+        recipientRole: 'Admin',
+        recipientId: 'ALL_ADMINS',
+        title: '✅ Doctor Accepted Referral',
+        message: '${req.assignedDoctorName ?? "Doctor"} accepted consultation for ${req.patientName}.',
+      );
+
+      _saveToStorage();
+      notifyListeners();
+    }
+  }
+
+  void declineReferralByDentist(String requestId) {
+    final index = _requests.indexWhere((r) => r.id == requestId);
+    if (index != -1) {
+      final req = _requests[index];
+      final oldDocName = req.assignedDoctorName ?? 'Doctor';
+      req.status = 'Pending Admin Review';
+      req.assignedDoctorId = null;
+      req.assignedDoctorName = null;
+      req.adminNotes = 'Declined by $oldDocName. Returned to pending review pool.';
+
+      // Dispatch Notification to Admin
+      addNotification(
+        recipientRole: 'Admin',
+        recipientId: 'ALL_ADMINS',
+        title: '⚠️ Doctor Declined Referral',
+        message: '$oldDocName declined consultation for ${req.patientName}. Returned to admin pool.',
+      );
+
       _saveToStorage();
       notifyListeners();
     }
@@ -590,6 +818,21 @@ class PatientProblemService extends ChangeNotifier {
 
     _allDoctors.insert(0, newDoctor);
     currentDoctor = newDoctor;
+
+    final cName = newDoctor.clinicName;
+    if (!_allClinics.any((c) => c.clinicName.toLowerCase() == cName.toLowerCase())) {
+      _allClinics.insert(
+        0,
+        ClinicModel(
+          id: 'CLN-${DateTime.now().millisecondsSinceEpoch}',
+          clinicName: cName,
+          location: clinicAddress.trim().isEmpty ? '123 Healthcare Blvd, Medical Hub, Suite 400' : clinicAddress.trim(),
+          verified: true,
+          services: [specialty, 'General Dentistry', 'Root Canal'],
+        ),
+      );
+    }
+
     _saveToStorage();
     notifyListeners();
     return newDoctor;

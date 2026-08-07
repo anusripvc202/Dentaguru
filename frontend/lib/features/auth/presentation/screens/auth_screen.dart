@@ -57,6 +57,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   final _experienceController = TextEditingController(text: '5');
   final _clinicAddressController = TextEditingController();
   String? _selectedSpecialty;
+  String? _selectedExistingClinic;
 
   // Role-Specific Fields - Admin
   final _adminEmployeeIdController = TextEditingController();
@@ -1013,10 +1014,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   flex: 3,
                   child: TextFormField(
                     controller: _clinicNameController,
+                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter clinic name' : null,
                     decoration: _buildInputDecoration(
-                      label: 'Clinic Name',
-                      hint: 'DentaGuru Care Center',
-                      icon: Icons.local_hospital_outlined,
+                      label: 'Clinic Name *',
+                      hint: 'e.g. Bright Smile Dental Practice',
+                      icon: Icons.domain_rounded,
                     ),
                   ),
                 ),
@@ -1038,9 +1040,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             const SizedBox(height: 12),
             TextFormField(
               controller: _clinicAddressController,
+              validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter clinic location / address' : null,
               decoration: _buildInputDecoration(
-                label: 'Clinic Physical Address',
-                hint: 'e.g. 123 Healthcare Blvd, Suite 400',
+                label: 'Clinic Location / Address *',
+                hint: 'e.g. 100 Feet Rd, Indiranagar, Bengaluru',
                 icon: Icons.location_on_outlined,
               ),
             ),

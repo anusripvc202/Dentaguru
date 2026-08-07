@@ -6,6 +6,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
+import '../../../../core/widgets/products_dropdown_menu.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -104,17 +105,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 : '123 Healthcare Blvd, Medical Hub, Suite 400';
             final doctorPhone = selectedDoctor?.phone ?? '+1 202 555 0100';
             final caseFee = selectedDoctor?.getFeeForCategory(req.problemCategory) ?? '\$75';
-            final waText = "🏥 *DentaGuru Clinical Recommendation*\n\n"
+            final waText = "*DentaGuru Clinical Recommendation*\n\n"
                 "Dear *${req.patientName}*,\n"
                 "Our Clinical Admin team has evaluated your reported problem:\n"
-                "📌 *Issue*: ${req.problemCategory} (${req.severity} Severity)\n\n"
-                "👨‍⚕️ *Recommended Doctor*: *${selectedDoctor?.name}*\n"
-                "🎓 *Specialty*: ${selectedDoctor?.specialty}\n"
-                "💰 *Estimated Fee (${req.problemCategory})*: $caseFee\n"
-                "🏥 *Clinic*: ${selectedDoctor?.clinicName}\n"
-                "📍 *Clinic Address*: $clinicAddr\n"
-                "📞 *Contact Phone*: $doctorPhone\n"
-                "💡 *Admin Guidance*: ${adminNotesController.text}";
+                "• *Issue*: ${req.problemCategory} (${req.severity} Severity)\n\n"
+                "• *Recommended Doctor*: *${selectedDoctor?.name}*\n"
+                "• *Specialty*: ${selectedDoctor?.specialty}\n"
+                "• *Estimated Fee (${req.problemCategory})*: $caseFee\n"
+                "• *Clinic*: ${selectedDoctor?.clinicName}\n"
+                "• *Clinic Address*: $clinicAddr\n"
+                "• *Contact Phone*: $doctorPhone\n"
+                "• *Admin Guidance*: ${adminNotesController.text}";
 
             return Dialog(
               insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
@@ -771,6 +772,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   elevation: 1,
                   title: const DentaGuruLogo(height: 30),
                   actions: [
+                    const Padding(
+                      padding: EdgeInsets.only(right: 4),
+                      child: ProductsDropdownMenu(),
+                    ),
                     IconButton(
                       icon: const Icon(Icons.logout_rounded, color: AppTheme.statusCancelText, size: 20),
                       tooltip: 'Log Out',
@@ -833,6 +838,37 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             ),
                             Row(
                               children: [
+                                Builder(
+                                  builder: (context) {
+                                    final adminNotifs = _problemService.appNotifications
+                                        .where((n) => n.recipientRole == 'Admin' || n.recipientId == 'ALL_ADMINS')
+                                        .toList();
+                                    final unreadCount = adminNotifs.where((n) => !n.isRead).length;
+
+                                    return Stack(
+                                      children: [
+                                        IconButton(
+                                          icon: const Icon(Icons.notifications_none_rounded, color: AppTheme.textDark, size: 22),
+                                          onPressed: () => _showNotificationsModal(context, 'Admin'),
+                                        ),
+                                        if (unreadCount > 0)
+                                          Positioned(
+                                            right: 6,
+                                            top: 6,
+                                            child: Container(
+                                              padding: const EdgeInsets.all(4),
+                                              decoration: const BoxDecoration(color: Color(0xFFEF4444), shape: BoxShape.circle),
+                                              child: Text(
+                                                '$unreadCount',
+                                                style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    );
+                                  },
+                                ),
+                                const SizedBox(width: 8),
                                 ScaleTransition(
                                   scale: _pulseScaleAnimation,
                                   child: Container(
@@ -1153,6 +1189,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     switch (_selectedNavIndex) {
       case 0:
         return _buildDashboardPanel();
+      case 1:
+        return _buildClinicsPanel();
       case 2:
         return _buildDentistsPanel();
       case 3:
@@ -1162,6 +1200,415 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
       default:
         return _buildDashboardPanel();
     }
+  }
+
+  // ==========================================
+  // PANEL 1 (NAV INDEX 1): CLINICS DIRECTORY
+  // ==========================================
+  Widget _buildClinicsPanel() {
+    final clinics = _problemService.allClinics;
+
+    return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '🏥 Partner Clinics Directory',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Manage registered dental practices & health hubs in Supabase',
+                      style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.add_location_alt_rounded, size: 16, color: Colors.white),
+                label: const Text('+ Register New Clinic', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0D9488),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () => _showRegisterClinicModal(context),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          if (clinics.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(32),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Column(
+                children: [
+                  const Icon(Icons.local_hospital_outlined, size: 48, color: Colors.grey),
+                  const SizedBox(height: 12),
+                  const Text('No Registered Clinics Found', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 4),
+                  const Text('Tap "+ Register New Clinic" to add your first clinic to Supabase.', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.add, size: 16),
+                    label: const Text('Add Clinic Now'),
+                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D9488)),
+                    onPressed: () => _showRegisterClinicModal(context),
+                  )
+                ],
+              ),
+            )
+          else
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final w = constraints.maxWidth;
+                final crossCount = w > 750 ? 2 : 1;
+                return GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: crossCount,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    mainAxisExtent: 180,
+                  ),
+                  itemCount: clinics.length,
+                  itemBuilder: (context, idx) {
+                    final clinic = clinics[idx];
+                    return Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        boxShadow: [
+                          BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 8, offset: const Offset(0, 2)),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.local_hospital_rounded, color: Color(0xFF0D9488), size: 22),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      clinic.clinicName,
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    Text(
+                                      '📍 ${clinic.location}',
+                                      style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (clinic.verified)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Text('VERIFIED', style: TextStyle(color: Color(0xFF10B981), fontSize: 10, fontWeight: FontWeight.bold)),
+                                ),
+                            ],
+                          ),
+                          const Divider(height: 20),
+                          const Text('Services Offered:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            children: clinic.services.map((serv) {
+                              return Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF1F5F9),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(serv, style: const TextStyle(fontSize: 10, color: AppTheme.textDark, fontWeight: FontWeight.w500)),
+                              );
+                            }).toList(),
+                          ),
+                          const Spacer(),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.star_rounded, size: 16, color: Color(0xFFF59E0B)),
+                                  const SizedBox(width: 4),
+                                  Text('${clinic.rating}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                  Text(' (${clinic.reviewsCount} reviews)', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                ],
+                              ),
+                              const Text('Live in Supabase DB', style: TextStyle(fontSize: 10, color: Color(0xFF0D9488), fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _showRegisterClinicModal(BuildContext context) {
+    final nameCtrl = TextEditingController();
+    final locationCtrl = TextEditingController();
+    final servicesCtrl = TextEditingController(text: 'Teeth Cleaning, Root Canal, Orthodontics, Dental Implants');
+    bool isSaving = false;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Dialog(
+              backgroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 480),
+                padding: const EdgeInsets.all(22),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(Icons.add_location_alt_rounded, color: Color(0xFF0D9488)),
+                          ),
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Register New Clinic', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark), overflow: TextOverflow.ellipsis),
+                                Text('Save clinic profile directly to Supabase', style: TextStyle(fontSize: 11, color: AppTheme.textMuted), overflow: TextOverflow.ellipsis),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const Divider(height: 24),
+                      TextField(
+                        controller: nameCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Clinic Name *',
+                          hintText: 'e.g. DentaGuru Smile Care Center',
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: locationCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Full Address / Location *',
+                          hintText: 'e.g. 100 Feet Rd, Indiranagar, Bengaluru',
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: servicesCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Services Offered (Comma separated)',
+                          hintText: 'Teeth Cleaning, Root Canal, Orthodontics',
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: () => Navigator.of(dialogContext).pop(),
+                            child: const Text('Cancel'),
+                          ),
+                          const SizedBox(width: 12),
+                          ElevatedButton.icon(
+                            icon: isSaving
+                                ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                : const Icon(Icons.check, size: 16, color: Colors.white),
+                            label: Text(isSaving ? 'Registering...' : 'Register Clinic', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF0D9488),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            onPressed: isSaving
+                                ? null
+                                : () async {
+                                    final name = nameCtrl.text.trim();
+                                    final loc = locationCtrl.text.trim();
+                                    if (name.isEmpty || loc.isEmpty) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('⚠️ Please fill in Clinic Name and Address.')),
+                                      );
+                                      return;
+                                    }
+                                    setModalState(() => isSaving = true);
+                                    final servList = servicesCtrl.text.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+
+                                    final success = await _problemService.registerClinic(
+                                      clinicName: name,
+                                      location: loc,
+                                      services: servList,
+                                    );
+
+                                    setModalState(() => isSaving = false);
+                                    if (!context.mounted) return;
+                                    Navigator.of(dialogContext).pop();
+
+                                    if (success) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('🎉 Clinic "$name" registered successfully in Supabase!'),
+                                          backgroundColor: const Color(0xFF10B981),
+                                        ),
+                                      );
+                                    } else {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('❌ Failed to save clinic to Supabase.'),
+                                          backgroundColor: Color(0xFFEF4444),
+                                        ),
+                                      );
+                                    }
+                                  },
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showNotificationsModal(BuildContext context, String role) {
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        final notifs = _problemService.appNotifications
+            .where((n) => n.recipientRole == role || n.recipientId == 'ALL_ADMINS')
+            .toList();
+
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 440, maxHeight: 520),
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.notifications_active_rounded, color: AppTheme.primaryBlue, size: 22),
+                        SizedBox(width: 8),
+                        Text('Admin System Notifications', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      ],
+                    ),
+                    IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(dialogCtx).pop()),
+                  ],
+                ),
+                const Divider(height: 20),
+                if (notifs.isEmpty)
+                  const Expanded(
+                    child: Center(
+                      child: Text('No system notifications.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    ),
+                  )
+                else
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: notifs.length,
+                      itemBuilder: (ctx, idx) {
+                        final n = notifs[idx];
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(n.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.primaryBlue)),
+                              const SizedBox(height: 2),
+                              Text(n.message, style: const TextStyle(fontSize: 11, color: AppTheme.textDark)),
+                              const SizedBox(height: 4),
+                              Text(
+                                '${n.timestamp.hour}:${n.timestamp.minute.toString().padLeft(2, '0')}',
+                                style: const TextStyle(fontSize: 9, color: Colors.grey),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   void _showRegisterDoctorModal(BuildContext context) {
@@ -1608,20 +2055,41 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
           const SizedBox(height: 12),
 
           // Grid of Doctors
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final crossCount = constraints.maxWidth > 750 ? 2 : 1;
+          if (doctors.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(32),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Column(
+                children: [
+                  const Icon(Icons.medical_services_outlined, size: 42, color: AppTheme.textMuted),
+                  const SizedBox(height: 10),
+                  const Text('No Doctors Registered Yet', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark)),
+                  const SizedBox(height: 4),
+                  const Text('Click "+ Register Doctor" above to onboard a dentist into Supabase database.',
+                      textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+                ],
+              ),
+            )
+          else
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final crossCount = constraints.maxWidth > 750 ? 2 : 1;
 
-              return GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: doctors.length,
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: crossCount,
-                  crossAxisSpacing: 14,
-                  mainAxisSpacing: 14,
-                  mainAxisExtent: 310,
-                ),
+                return GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: doctors.length,
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: crossCount,
+                    crossAxisSpacing: 14,
+                    mainAxisSpacing: 14,
+                    mainAxisExtent: 310,
+                  ),
                 itemBuilder: (context, index) {
                   final doc = doctors[index];
                   final isAvailable = doc.status == 'Available';
@@ -2019,7 +2487,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                             overflow: TextOverflow.ellipsis,
                                           ),
                                           Text(
-                                            '📞 Phone: ${(req.patientPhone.isNotEmpty && req.patientPhone != '+1 202 555 0142' && req.patientPhone != 'Not Provided') ? req.patientPhone : (_problemService.currentPatient.phone.isNotEmpty ? _problemService.currentPatient.phone : '9063663180')}',
+                                            '📞 Phone: ${req.patientPhone.isNotEmpty ? req.patientPhone : (_problemService.currentPatient.phone.isNotEmpty ? _problemService.currentPatient.phone : 'Not Provided')}',
                                             style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                             overflow: TextOverflow.ellipsis,
                                           ),

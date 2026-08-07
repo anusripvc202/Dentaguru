@@ -4,13 +4,16 @@ const { Clinic, Dentist } = require('../models/Schemas');
 exports.registerClinicProfile = async (req, res) => {
     const { clinicName, location, services, pricing, coordinates } = req.body;
     try {
-        let clinic = await Clinic.findOne({ user_id: req.user.id });
-        if (clinic) {
-            return res.status(400).json({ success: false, message: 'Clinic profile already exists.' });
+        const role = req.user?.role || '';
+        if (role !== 'SuperAdmin' && role !== 'Admin' && req.user?.id) {
+            const clinic = await Clinic.findOne({ user_id: req.user.id });
+            if (clinic) {
+                return res.status(400).json({ success: false, message: 'Clinic profile already exists.' });
+            }
         }
 
-        clinic = await Clinic.create({
-            userId: req.user.id,
+        const clinic = await Clinic.create({
+            userId: req.user?.id || null,
             clinicName,
             location,
             services,
