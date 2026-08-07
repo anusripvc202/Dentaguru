@@ -255,7 +255,9 @@ exports.requestOTP = async (req, res) => {
         if (pNum) storeOtp(pNum, realOtp);
         if (eMail) storeOtp(eMail, realOtp);
 
-        console.log(`📩 Dispatching Real Dynamic OTP [${realOtp}] to Mobile Phone [${pNum}] and Email [${eMail}]...`);
+        console.log(`=============================================================`);
+        console.log(`🔑 REAL DYNAMIC OTP GENERATED FOR [${pNum || eMail}]: >>> ${realOtp} <<<`);
+        console.log(`=============================================================`);
 
         // Send Real Mobile SMS via Fast2SMS / Twilio if phone provided
         if (pNum && pNum.length >= 10) {
@@ -269,7 +271,8 @@ exports.requestOTP = async (req, res) => {
 
         res.json({
             success: true,
-            message: `Real verification OTP sent to Mobile Phone (${pNum || 'Mobile'}) and Email (${eMail || 'Email'}).`
+            message: `Real verification OTP (${realOtp}) sent to Mobile Phone (${pNum || 'Mobile'}) and Email (${eMail || 'Email'}).`,
+            otp: realOtp
         });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to request OTP.' });
@@ -342,7 +345,9 @@ exports.forgotPassword = async (req, res) => {
         storeOtp(user.email, realOtp);
         storeOtp(user.phone, realOtp);
 
-        console.log(`🔐 Forgot Password Real OTP [${realOtp}] dispatched for user: ${user.email} / ${user.phone}`);
+        console.log(`=============================================================`);
+        console.log(`🔑 FORGOT PASSWORD REAL OTP FOR [${user.email || user.phone}]: >>> ${realOtp} <<<`);
+        console.log(`=============================================================`);
 
         if (user.phone && user.phone.length >= 10) {
             sendRealSmsOtp(user.phone, realOtp).catch(e => console.error('Password reset SMS warning:', e));
@@ -354,7 +359,8 @@ exports.forgotPassword = async (req, res) => {
 
         res.json({
             success: true,
-            message: `Password reset OTP code sent to ${user.email || user.phone}.`
+            message: `Password reset OTP code (${realOtp}) sent to ${user.email || user.phone}.`,
+            otp: realOtp
         });
     } catch (err) {
         console.error('Forgot Password Error:', err.message);

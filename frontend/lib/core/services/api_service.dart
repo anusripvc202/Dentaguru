@@ -142,7 +142,7 @@ class ApiService {
       ).timeout(const Duration(seconds: 8));
 
       final data = jsonDecode(response.body);
-      return {'success': response.statusCode == 200, 'message': data['message'] ?? 'OTP Code Sent'};
+      return {'success': response.statusCode == 200, 'message': data['message'] ?? 'OTP Code Sent', 'otp': data['otp']};
     } catch (e) {
       return {'success': false, 'message': 'Failed to request OTP. Ensure your device is online.'};
     }
@@ -179,6 +179,7 @@ class ApiService {
       return {
         'success': response.statusCode == 200,
         'message': data['message'] ?? 'Password reset code sent.',
+        'otp': data['otp'],
       };
     } catch (e) {
       return {'success': false, 'message': 'Failed to request password reset OTP.'};

@@ -419,11 +419,14 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       _isOtpSent = true;
     });
 
+    final String? liveOtp = res['otp']?.toString();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(res['message'] ?? '📩 OTP Verification Code sent to both Mobile Number & Email!'),
+        content: Text(liveOtp != null && liveOtp.isNotEmpty
+            ? '📩 OTP Verification Code: $liveOtp (Dispatched to Mobile Phone & Email)'
+            : (res['message'] ?? '📩 OTP Verification Code sent to both Mobile Number & Email!')),
         backgroundColor: const Color(0xFF10B981),
-        duration: const Duration(seconds: 4),
+        duration: const Duration(seconds: 8),
       ),
     );
   }
