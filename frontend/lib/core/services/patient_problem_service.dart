@@ -549,10 +549,17 @@ class PatientProblemService extends ChangeNotifier {
   Future<void> syncAppointmentsFromApi() async {
     try {
       final list = await ApiService().fetchAppointments();
-      _requests.clear();
+      
+      // Preserve existing pending requests so local submissions aren't wiped when appointments DB table is empty
+      final localPending = _requests.where((r) => r.status == 'Pending Admin Review' || r.status == 'Doctor Suggested').toList();
+      final mergedRequests = <PatientConsultationRequest>[...localPending];
+
       if (list.isNotEmpty) {
         for (final item in list) {
-          final reqId = item['_id'] ?? item['id'] ?? 'REQ-${item['patient_id']}-${DateTime.now().millisecondsSinceEpoch}';
+          final reqId = (item['_id'] ?? item['id'] ?? 'REQ-${item['patient_id']}-${DateTime.now().millisecondsSinceEpoch}').toString();
+          
+          if (mergedRequests.any((r) => r.id == reqId)) continue;
+
           final rawP = (item['patient_name'] ?? item['patientName'] ?? item['patient_id'] ?? 'Patient').toString();
           final pName = (rawP.contains('-') && rawP.length > 20) 
               ? (currentPatient.name.isNotEmpty ? currentPatient.name : 'Patient') 
@@ -571,26 +578,31 @@ class PatientProblemService extends ChangeNotifier {
 
           final clinic = item['clinic_id'] ?? 'DentaGuru Care Center';
           final treatment = item['treatment'] ?? 'Dental Consultation';
+          final slot = item['time_slot'] ?? item['timeSlot'];
 
-          _requests.add(
+          mergedRequests.add(
             PatientConsultationRequest(
-              id: reqId.toString(),
+              id: reqId,
               patientName: pName,
               patientPhone: '+12025550199',
               problemCategory: treatment.toString(),
               problemDescription: 'Scheduled consultation via DentaGuru DB',
               severity: 'Moderate',
               submittedAt: DateTime.now(),
-              status: assignedDocName != null ? 'Doctor Suggested' : 'Pending Admin Review',
+              status: 'Confirmed',
               assignedDoctorName: assignedDocName,
               assignedDoctorSpecialty: 'Dental Specialist',
               assignedDoctorClinic: clinic.toString(),
+              confirmedTimeSlot: slot?.toString(),
               adminNotes: 'Restored from Supabase database record',
               whatsappNotificationSent: true,
             ),
           );
         }
       }
+
+      _requests.clear();
+      _requests.addAll(mergedRequests);
       _saveToStorage();
       notifyListeners();
     } catch (e) {
