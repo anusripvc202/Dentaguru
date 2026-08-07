@@ -12,26 +12,26 @@ class ApiConstants {
   }
 
   // Authentication Endpoints
-  static const String login = '$baseUrl/auth/login';
-  static const String register = '$baseUrl/auth/register';
-  static const String requestOtp = '$baseUrl/auth/otp/request';
-  static const String verifyOtp = '$baseUrl/auth/otp/verify';
-  static const String fcmToken = '$baseUrl/auth/fcm-token';
-  static const String biometric = '$baseUrl/auth/biometric';
+  static String get login => '$baseUrl/auth/login';
+  static String get register => '$baseUrl/auth/register';
+  static String get requestOtp => '$baseUrl/auth/otp/request';
+  static String get verifyOtp => '$baseUrl/auth/otp/verify';
+  static String get fcmToken => '$baseUrl/auth/fcm-token';
+  static String get biometric => '$baseUrl/auth/biometric';
 
   // Appointments Endpoints
-  static const String appointments = '$baseUrl/appointments';
+  static String get appointments => '$baseUrl/appointments';
 
   // Clinic Profile Endpoints
-  static const String clinics = '$baseUrl/clinics';
+  static String get clinics => '$baseUrl/clinics';
 
   // AWS S3 Cloud Storage Endpoints
-  static const String upload = '$baseUrl/upload';
-  static const String signedUrl = '$baseUrl/upload/signed-url';
+  static String get upload => '$baseUrl/upload';
+  static String get signedUrl => '$baseUrl/upload/signed-url';
 
   // Chat Endpoints
-  static const String chatSend = '$baseUrl/chat/send';
+  static String get chatSend => '$baseUrl/chat/send';
 
   // Medical Records Endpoints
-  static const String records = '$baseUrl/records';
+  static String get records => '$baseUrl/records';
 }

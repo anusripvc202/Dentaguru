@@ -168,7 +168,7 @@ class FirebaseService {
       final authToken = await _secureStorage.read(key: 'auth_token');
       if (authToken == null) return;
 
-      const baseUrl = ApiConstants.baseUrl;
+      final baseUrl = ApiConstants.baseUrl;
 
       await http.put(
         Uri.parse('$baseUrl/auth/fcm-token'),
