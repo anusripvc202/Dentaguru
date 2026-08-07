@@ -550,7 +550,6 @@ class PatientProblemService extends ChangeNotifier {
     try {
       final list = await ApiService().fetchAppointments();
       
-      _requests.clear();
       if (list.isNotEmpty) {
         for (final item in list) {
           final reqId = (item['_id'] ?? item['id'] ?? 'REQ-${item['patient_id']}-${DateTime.now().millisecondsSinceEpoch}').toString();
@@ -575,24 +574,35 @@ class PatientProblemService extends ChangeNotifier {
           final treatment = item['treatment'] ?? 'Dental Consultation';
           final slot = item['time_slot'] ?? item['timeSlot'];
 
-          _requests.add(
-            PatientConsultationRequest(
-              id: reqId,
-              patientName: pName,
-              patientPhone: '+12025550199',
-              problemCategory: treatment.toString(),
-              problemDescription: 'Scheduled consultation via DentaGuru DB',
-              severity: 'Moderate',
-              submittedAt: DateTime.now(),
-              status: 'Confirmed',
-              assignedDoctorName: assignedDocName,
-              assignedDoctorSpecialty: 'Dental Specialist',
-              assignedDoctorClinic: clinic.toString(),
-              confirmedTimeSlot: slot?.toString(),
-              adminNotes: 'Restored from Supabase database record',
-              whatsappNotificationSent: true,
-            ),
-          );
+          final existingIndex = _requests.indexWhere((r) => r.id == reqId || r.patientName == pName);
+          if (existingIndex != -1) {
+            _requests[existingIndex].status = 'Confirmed';
+            if (slot != null && slot.toString().isNotEmpty) {
+              _requests[existingIndex].confirmedTimeSlot = slot.toString();
+            }
+            if (assignedDocName != null) {
+              _requests[existingIndex].assignedDoctorName = assignedDocName;
+            }
+          } else {
+            _requests.add(
+              PatientConsultationRequest(
+                id: reqId,
+                patientName: pName,
+                patientPhone: '+12025550199',
+                problemCategory: treatment.toString(),
+                problemDescription: 'Scheduled consultation via DentaGuru DB',
+                severity: 'Moderate',
+                submittedAt: DateTime.now(),
+                status: 'Confirmed',
+                assignedDoctorName: assignedDocName,
+                assignedDoctorSpecialty: 'Dental Specialist',
+                assignedDoctorClinic: clinic.toString(),
+                confirmedTimeSlot: slot?.toString(),
+                adminNotes: 'Restored from Supabase database record',
+                whatsappNotificationSent: true,
+              ),
+            );
+          }
         }
       }
 
