@@ -27,8 +27,9 @@ dependencies:
   # Biometric Auth Security
   local_auth: ^2.1.8
 
-  # Firebase — Push Notifications & Core
+  # Firebase — Push Notifications, Phone Auth & Core
   firebase_core: ^3.1.0
+  firebase_auth: ^5.1.0
   firebase_messaging: ^15.0.0
   flutter_local_notifications: ^17.0.0
 

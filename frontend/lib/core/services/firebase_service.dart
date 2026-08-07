@@ -1,4 +1,5 @@
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/foundation.dart';
@@ -34,7 +35,59 @@ const AndroidNotificationChannel _channel = AndroidNotificationChannel(
 /// and foreground/background notification handling.
 class FirebaseService {
   static FirebaseMessaging get _messaging => FirebaseMessaging.instance;
+  static final FirebaseAuth _auth = FirebaseAuth.instance;
   static const _secureStorage = FlutterSecureStorage();
+  static String? _verificationId;
+
+  /// Send Real SMS OTP via Firebase Phone Auth
+  static Future<void> sendFirebasePhoneOtp(
+    String phoneNumber, {
+    required Function(String verificationId) onCodeSent,
+    required Function(String error) onError,
+  }) async {
+    try {
+      final formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : '+91${phoneNumber.replaceAll(RegExp(r'[^0-9]'), '')}';
+
+      await _auth.verifyPhoneNumber(
+        phoneNumber: formattedPhone,
+        timeout: const Duration(seconds: 60),
+        verificationCompleted: (PhoneAuthCredential credential) async {
+          await _auth.signInWithCredential(credential);
+          debugPrint('✅ Firebase Auto Phone Verification Completed');
+        },
+        verificationFailed: (FirebaseAuthException e) {
+          debugPrint('❌ Firebase Phone Auth Error: ${e.message}');
+          onError(e.message ?? 'SMS Verification Failed');
+        },
+        codeSent: (String verificationId, int? resendToken) {
+          _verificationId = verificationId;
+          debugPrint('📩 Firebase SMS OTP Code sent to $formattedPhone');
+          onCodeSent(verificationId);
+        },
+        codeAutoRetrievalTimeout: (String verificationId) {
+          _verificationId = verificationId;
+        },
+      );
+    } catch (e) {
+      onError(e.toString());
+    }
+  }
+
+  /// Verify SMS OTP Code via Firebase Phone Auth
+  static Future<bool> verifyFirebaseOtp(String smsCode) async {
+    if (_verificationId == null) return false;
+    try {
+      final credential = PhoneAuthProvider.credential(
+        verificationId: _verificationId!,
+        smsCode: smsCode,
+      );
+      final userCredential = await _auth.signInWithCredential(credential);
+      return userCredential.user != null;
+    } catch (e) {
+      debugPrint('❌ Invalid Firebase SMS OTP Code: $e');
+      return false;
+    }
+  }
 
   /// Call this once in main() before runApp()
   static Future<void> initialize() async {
