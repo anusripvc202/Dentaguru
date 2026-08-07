@@ -550,15 +550,11 @@ class PatientProblemService extends ChangeNotifier {
     try {
       final list = await ApiService().fetchAppointments();
       
-      // Preserve all existing requests so local submissions and accepted cases aren't wiped out
-      final mergedRequests = <PatientConsultationRequest>[..._requests];
-
+      _requests.clear();
       if (list.isNotEmpty) {
         for (final item in list) {
           final reqId = (item['_id'] ?? item['id'] ?? 'REQ-${item['patient_id']}-${DateTime.now().millisecondsSinceEpoch}').toString();
           
-          if (mergedRequests.any((r) => r.id == reqId)) continue;
-
           final rawP = (item['patient_name'] ?? item['patientName'] ?? item['patient_id'] ?? 'Patient').toString();
           final pName = (rawP.contains('-') && rawP.length > 20) 
               ? (currentPatient.name.isNotEmpty ? currentPatient.name : 'Patient') 
@@ -579,7 +575,7 @@ class PatientProblemService extends ChangeNotifier {
           final treatment = item['treatment'] ?? 'Dental Consultation';
           final slot = item['time_slot'] ?? item['timeSlot'];
 
-          mergedRequests.add(
+          _requests.add(
             PatientConsultationRequest(
               id: reqId,
               patientName: pName,
@@ -600,8 +596,6 @@ class PatientProblemService extends ChangeNotifier {
         }
       }
 
-      _requests.clear();
-      _requests.addAll(mergedRequests);
       _saveToStorage();
       notifyListeners();
     } catch (e) {
