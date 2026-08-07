@@ -573,6 +573,172 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     );
   }
 
+  void _showForgotPasswordDialog(BuildContext context) {
+    final emailCtrl = TextEditingController(text: _loginEmailController.text.trim());
+    final otpCtrl = TextEditingController();
+    final newPassCtrl = TextEditingController();
+    bool codeSent = false;
+    bool isSubmitting = false;
+    String? dialogError;
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (stCtx, setModalState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: const Row(
+                children: [
+                  Icon(Icons.lock_reset_rounded, color: AppTheme.primaryBlue, size: 24),
+                  SizedBox(width: 8),
+                  Text('Reset Password', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (!codeSent) ...[
+                    const Text(
+                      'Enter your registered email address or phone number to receive a password reset OTP code.',
+                      style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: emailCtrl,
+                      decoration: InputDecoration(
+                        labelText: 'Registered Email or Phone',
+                        hintText: 'user@dentaguru.com',
+                        prefixIcon: const Icon(Icons.email_outlined, color: AppTheme.primaryBlue),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                  ] else ...[
+                    const Text(
+                      'Enter the 4-digit OTP code sent to your email/phone and set a new password.',
+                      style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: otpCtrl,
+                      keyboardType: TextInputType.number,
+                      maxLength: 4,
+                      decoration: InputDecoration(
+                        labelText: 'Enter OTP Code (8849)',
+                        hintText: '8849',
+                        counterText: '',
+                        prefixIcon: const Icon(Icons.key_rounded, color: Color(0xFF10B981)),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: newPassCtrl,
+                      obscureText: true,
+                      decoration: InputDecoration(
+                        labelText: 'Set New Password',
+                        hintText: '••••••••',
+                        prefixIcon: const Icon(Icons.lock_outline_rounded, color: AppTheme.primaryBlue),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                  ],
+                  if (dialogError != null) ...[
+                    const SizedBox(height: 8),
+                    Text(dialogError!, style: const TextStyle(color: Color(0xFFEF4444), fontSize: 11, fontWeight: FontWeight.bold)),
+                  ],
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogCtx).pop(),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryBlue,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: isSubmitting
+                      ? null
+                      : () async {
+                          final targetEmail = emailCtrl.text.trim();
+                          if (targetEmail.isEmpty) {
+                            setModalState(() => dialogError = 'Please enter your email or phone.');
+                            return;
+                          }
+
+                          if (!codeSent) {
+                            setModalState(() {
+                              isSubmitting = true;
+                              dialogError = null;
+                            });
+                            final res = await ApiService().forgotPassword(email: targetEmail);
+                            setModalState(() {
+                              isSubmitting = false;
+                              codeSent = true;
+                            });
+                            if (stCtx.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('📩 ${res['message'] ?? "OTP sent to email (Demo Code: 8849)"}'),
+                                  backgroundColor: const Color(0xFF10B981),
+                                ),
+                              );
+                            }
+                          } else {
+                            final code = otpCtrl.text.trim();
+                            final newPass = newPassCtrl.text.trim();
+                            if (code.isEmpty || newPass.isEmpty) {
+                              setModalState(() => dialogError = 'Please enter OTP code and set new password.');
+                              return;
+                            }
+
+                            setModalState(() {
+                              isSubmitting = true;
+                              dialogError = null;
+                            });
+
+                            final res = await ApiService().resetPassword(
+                              email: targetEmail,
+                              code: code,
+                              newPassword: newPass,
+                            );
+
+                            setModalState(() => isSubmitting = false);
+
+                            if (res['success'] == true) {
+                              _loginEmailController.text = targetEmail;
+                              _loginPasswordController.text = newPass;
+                              if (dialogCtx.mounted) Navigator.of(dialogCtx).pop();
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(res['message'] ?? '🎉 Password reset successfully in Supabase DB!'),
+                                    backgroundColor: const Color(0xFF10B981),
+                                    duration: const Duration(seconds: 4),
+                                  ),
+                                );
+                              }
+                            } else {
+                              setModalState(() => dialogError = res['message'] ?? 'Password reset failed.');
+                            }
+                          }
+                        },
+                  child: isSubmitting
+                      ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : Text(codeSent ? 'Reset & Save Password' : 'Send Reset OTP', style: const TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   void _autoFillDemo(UserRole role) {
     setState(() {
       _selectedRole = role;
@@ -901,7 +1067,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             Align(
               alignment: Alignment.centerRight,
               child: TextButton(
-                onPressed: () {},
+                onPressed: () => _showForgotPasswordDialog(context),
                 child: Text(
                   'Forgot Password?',
                   style: TextStyle(color: _accentColor, fontWeight: FontWeight.w600, fontSize: 12),

@@ -19,6 +19,8 @@ router.post('/auth/register', auth.register);
 router.post('/auth/login', auth.login);
 router.post('/auth/otp/request', auth.requestOTP);
 router.post('/auth/otp/verify', auth.verifyOTP);
+router.post('/auth/forgot-password', auth.forgotPassword);
+router.post('/auth/reset-password', auth.resetPassword);
 router.post('/auth/refresh', auth.refreshToken);
 router.post('/auth/supabase-sync', auth.supabaseAuthSync);
 router.post('/auth/biometric', authenticateJWT, auth.saveBiometric);

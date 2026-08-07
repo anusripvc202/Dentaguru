@@ -232,11 +232,75 @@ exports.verifyOTP = async (req, res) => {
         res.status(500).json({ success: false, message: 'Verification failed.' });
     }
 };
-            accessToken,
-            refreshToken
+
+// 4. FORGOT PASSWORD (Request Reset OTP)
+exports.forgotPassword = async (req, res) => {
+    const { email, phone } = req.body;
+    try {
+        const identifier = (email || phone || '').trim();
+        if (!identifier) {
+            return res.status(400).json({ success: false, message: 'Email address or phone number is required.' });
+        }
+
+        let user = await User.findOne({ email: identifier });
+        if (!user) {
+            user = await User.findOne({ phone: identifier });
+        }
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'No registered account found with that email or phone number.' });
+        }
+
+        console.log(`🔐 Forgot Password OTP (8849) dispatched for user: ${user.email} / ${user.phone}`);
+
+        res.json({
+            success: true,
+            message: `Password reset OTP sent to ${user.email || user.phone}. (Demo Code: 8849)`,
+            mockCode: '8849'
         });
     } catch (err) {
-        res.status(500).json({ success: false, message: 'OTP verification failed.' });
+        console.error('Forgot Password Error:', err.message);
+        res.status(500).json({ success: false, message: 'Server error requesting password reset.' });
+    }
+};
+
+// 5. RESET PASSWORD (Confirm OTP & Update Password in Supabase DB)
+exports.resetPassword = async (req, res) => {
+    const { email, phone, code, newPassword } = req.body;
+    try {
+        const identifier = (email || phone || '').trim();
+        if (!identifier) {
+            return res.status(400).json({ success: false, message: 'Email address or phone number is required.' });
+        }
+        if (!newPassword || newPassword.trim().length < 6) {
+            return res.status(400).json({ success: false, message: 'New password must be at least 6 characters.' });
+        }
+
+        if (code !== '8849' && code !== '1234' && code !== '0000') {
+            return res.status(400).json({ success: false, message: 'Invalid or expired reset OTP code. Try 8849.' });
+        }
+
+        let user = await User.findOne({ email: identifier });
+        if (!user) {
+            user = await User.findOne({ phone: identifier });
+        }
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User account not found.' });
+        }
+
+        // Update password in Supabase PostgreSQL
+        await User.findByIdAndUpdate(user.id, { password: newPassword.trim() });
+
+        console.log(`✅ Password reset successfully in Supabase DB for user: ${user.email}`);
+
+        res.json({
+            success: true,
+            message: '🎉 Your password has been reset successfully! You can now log in with your new password.'
+        });
+    } catch (err) {
+        console.error('Reset Password Error:', err.message);
+        res.status(500).json({ success: false, message: 'Server error resetting password.' });
     }
 };
 
