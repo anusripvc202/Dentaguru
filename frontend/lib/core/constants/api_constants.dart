@@ -1,8 +1,15 @@
+import 'package:flutter/foundation.dart';
+
 class ApiConstants {
   ApiConstants._();
 
-  /// Live 24/7 Express Backend API Base URL on Render
-  static const String baseUrl = 'https://dentaguru.onrender.com/api/v1';
+  /// Express Backend API Base URL (Localhost in dev/debug mode, Render in production)
+  static String get baseUrl {
+    if (kDebugMode) {
+      return 'http://localhost:5000/api/v1';
+    }
+    return 'https://dentaguru.onrender.com/api/v1';
+  }
 
   // Authentication Endpoints
   static const String login = '$baseUrl/auth/login';

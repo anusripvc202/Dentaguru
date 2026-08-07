@@ -468,8 +468,8 @@ class PatientProblemService extends ChangeNotifier {
   Future<void> syncClinicsFromApi() async {
     try {
       final list = await ApiService().fetchClinics();
-      _allClinics.clear();
       if (list.isNotEmpty) {
+        _allClinics.clear();
         for (final item in list) {
           _allClinics.add(ClinicModel.fromJson(item));
         }
@@ -504,8 +504,8 @@ class PatientProblemService extends ChangeNotifier {
   Future<void> syncDoctorsFromApi() async {
     try {
       final apiDentists = await ApiService().fetchDentists();
-      _allDoctors.clear();
       if (apiDentists.isNotEmpty) {
+        _allDoctors.clear();
         for (final dMap in apiDentists) {
           final id = dMap['id']?.toString() ?? dMap['_id']?.toString() ?? '';
           final userObj = dMap['users'] ?? dMap['user'] ?? {};
