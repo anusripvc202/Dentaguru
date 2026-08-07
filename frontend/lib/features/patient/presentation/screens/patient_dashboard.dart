@@ -260,6 +260,8 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
         return const _BrushingTimerModal();
       },
     );
+  }
+
   void _showChatModal(BuildContext context) {
     final patient = _patientService.currentPatient;
     final requests = _patientService.requests;
