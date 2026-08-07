@@ -969,7 +969,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                     ),
                                   ),
                                 ],
-                              ),                          ),
+                              ),
                           ],
                         ),
                       );
