@@ -597,7 +597,7 @@ class PatientProblemService extends ChangeNotifier {
               PatientConsultationRequest(
                 id: reqId,
                 patientName: pName,
-                patientPhone: pPhone.isNotEmpty ? pPhone : '+12025550199',
+                patientPhone: pPhone,
                 problemCategory: treatment.toString(),
                 problemDescription: 'Scheduled consultation via DentaGuru DB',
                 severity: 'Moderate',
