@@ -342,7 +342,31 @@ const MedicalRecord = {
 // 6. CHAT MESSAGE MODEL (Supabase PostgreSQL)
 const ChatMessage = {
     async create(messageData) {
-        const senderId = await resolveUserUuid(messageData.sender_id || messageData.senderId);
+        const rawSender = messageData.sender_id || messageData.senderId || '';
+        let senderId = null;
+
+        if (rawSender) {
+            const str = String(rawSender).trim();
+            if (isUUID(str)) {
+                senderId = str;
+            } else {
+                let user = await User.findOne({ email: str }) || await User.findOne({ name: str });
+                if (!user) {
+                    const lower = str.toLowerCase();
+                    if (lower.includes('doctor') || lower.includes('dentist') || lower.includes('dr')) {
+                        user = await User.findOne({ role: 'Dentist' });
+                    } else {
+                        user = await User.findOne({ role: 'Patient' });
+                    }
+                }
+                if (user) senderId = user.id;
+            }
+        }
+
+        if (!senderId) {
+            senderId = await resolveUserUuid(rawSender);
+        }
+
         const receiverId = await resolveUserUuid(messageData.receiver_id || messageData.receiverId);
 
         const payload = {
@@ -363,7 +387,7 @@ const ChatMessage = {
     },
 
     async find(query = {}) {
-        let req = supabaseAdmin.from('chat_messages').select('*');
+        let req = supabaseAdmin.from('chat_messages').select('*, sender:users!sender_id(name, email, role)');
         if (query.room_id || query.roomId) {
             req = req.eq('room_id', query.room_id || query.roomId);
         }
