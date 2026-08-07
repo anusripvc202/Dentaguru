@@ -327,8 +327,13 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                       child: Text('DR', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
                     ),
                     const SizedBox(width: 10),
-                    const Expanded(
-                      child: Text('Dr. Nikhil (Endodontics) - Online', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppTheme.textDark)),
+                    Expanded(
+                      child: Text(
+                        assignedReq != null && assignedReq.assignedDoctorName != null && assignedReq.assignedDoctorName!.isNotEmpty
+                            ? '${assignedReq.assignedDoctorName} - Online'
+                            : 'Assigned Dental Specialist - Online',
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppTheme.textDark),
+                      ),
                     ),
                     Container(
                       width: 8,
