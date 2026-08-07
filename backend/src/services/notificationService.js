@@ -53,10 +53,16 @@ const sendPushNotification = async (deviceToken, title, body, data = {}) => {
             Object.entries(data).map(([k, v]) => [k, String(v)])
         ),
         android: {
+            priority: 'high',
             notification: {
-                icon: 'ic_notification',
+                icon: 'ic_launcher',
                 color: '#0B41CD',
                 sound: 'default',
+                channelId: 'dentaguru_high_importance',
+                notificationPriority: 'PRIORITY_HIGH',
+                visibility: 'PUBLIC',
+                defaultSound: true,
+                defaultVibrateTimings: true,
             },
         },
         apns: {
@@ -64,6 +70,7 @@ const sendPushNotification = async (deviceToken, title, body, data = {}) => {
                 aps: {
                     sound: 'default',
                     badge: 1,
+                    contentAvailable: true,
                 },
             },
         },
