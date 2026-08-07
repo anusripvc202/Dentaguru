@@ -201,6 +201,44 @@ exports.login = async (req, res) => {
     }
 };
 
+// In-memory store for real active OTPs (Key: normalized phone or email, Value: { code, expiresAt })
+const activeOtpStore = new Map();
+
+function generateRandomOtp() {
+    return Math.floor(1000 + Math.random() * 9000).toString();
+}
+
+function storeOtp(identifier, code) {
+    if (!identifier) return;
+    const cleanKey = String(identifier).trim().toLowerCase();
+    activeOtpStore.set(cleanKey, {
+        code: String(code).trim(),
+        expiresAt: Date.now() + 10 * 60 * 1000 // 10 minutes expiry
+    });
+}
+
+function verifyStoredOtp(identifier, code) {
+    if (!code) return false;
+    const cleanCode = String(code).trim();
+    if (!identifier) return false;
+
+    const cleanKey = String(identifier).trim().toLowerCase();
+    const entry = activeOtpStore.get(cleanKey);
+    if (!entry) return false;
+
+    if (Date.now() > entry.expiresAt) {
+        activeOtpStore.delete(cleanKey);
+        return false;
+    }
+
+    if (entry.code === cleanCode) {
+        activeOtpStore.delete(cleanKey);
+        return true;
+    }
+
+    return false;
+}
+
 // 3. OTP VERIFICATION SERVICE (Mobile SMS & Email)
 exports.requestOTP = async (req, res) => {
     const { phone, email } = req.body;
@@ -208,22 +246,30 @@ exports.requestOTP = async (req, res) => {
         const pNum = phone ? phone.trim() : '';
         const eMail = email ? email.trim() : '';
 
-        console.log(`📩 Dispatching Dual OTP (8849) to Mobile Phone [${pNum}] and Email [${eMail}]...`);
+        if (!pNum && !eMail) {
+            return res.status(400).json({ success: false, message: 'Mobile phone number or email address is required.' });
+        }
+
+        const realOtp = generateRandomOtp();
+
+        if (pNum) storeOtp(pNum, realOtp);
+        if (eMail) storeOtp(eMail, realOtp);
+
+        console.log(`📩 Dispatching Real Dynamic OTP [${realOtp}] to Mobile Phone [${pNum}] and Email [${eMail}]...`);
 
         // Send Real Mobile SMS via Fast2SMS / Twilio if phone provided
         if (pNum && pNum.length >= 10) {
-            sendRealSmsOtp(pNum, '8849').catch(e => console.error('SMS send warning:', e));
+            sendRealSmsOtp(pNum, realOtp).catch(e => console.error('SMS send warning:', e));
         }
 
         // Send Real OTP Email via Nodemailer if email provided
         if (eMail && eMail.includes('@')) {
-            sendOtpEmail(eMail, '8849', false).catch(e => console.error('Email send warning:', e));
+            sendOtpEmail(eMail, realOtp, false).catch(e => console.error('Email send warning:', e));
         }
 
         res.json({
             success: true,
-            message: `OTP Code (8849) sent to Mobile Phone (${pNum || 'Mobile'}) and Email (${eMail || 'Email'}).`,
-            mockCode: '8849'
+            message: `Real verification OTP sent to Mobile Phone (${pNum || 'Mobile'}) and Email (${eMail || 'Email'}).`
         });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to request OTP.' });
@@ -233,12 +279,15 @@ exports.requestOTP = async (req, res) => {
 exports.verifyOTP = async (req, res) => {
     const { phone, email, code } = req.body;
     try {
-        if (code !== '8849' && code !== '1234' && code !== '0000') {
-            return res.status(400).json({ success: false, message: 'Invalid verification code. Try 8849.' });
-        }
-
         const pNum = phone ? phone.trim() : '';
         const eMail = email ? email.trim() : '';
+
+        const isValid = verifyStoredOtp(pNum, code) || verifyStoredOtp(eMail, code);
+
+        if (!isValid) {
+            return res.status(400).json({ success: false, message: 'Invalid or expired OTP code. Please enter the code sent to your email or phone.' });
+        }
+
         const user = (pNum ? await User.findOne({ phone: pNum }) : null) || (eMail ? await User.findOne({ email: eMail }) : null);
 
         if (user) {
@@ -289,20 +338,23 @@ exports.forgotPassword = async (req, res) => {
             return res.status(404).json({ success: false, message: 'No registered account found with that email or phone number.' });
         }
 
-        console.log(`🔐 Forgot Password OTP (8849) dispatched for user: ${user.email} / ${user.phone}`);
+        const realOtp = generateRandomOtp();
+        storeOtp(user.email, realOtp);
+        storeOtp(user.phone, realOtp);
+
+        console.log(`🔐 Forgot Password Real OTP [${realOtp}] dispatched for user: ${user.email} / ${user.phone}`);
 
         if (user.phone && user.phone.length >= 10) {
-            sendRealSmsOtp(user.phone, '8849').catch(e => console.error('Password reset SMS warning:', e));
+            sendRealSmsOtp(user.phone, realOtp).catch(e => console.error('Password reset SMS warning:', e));
         }
 
         if (user.email && user.email.includes('@')) {
-            sendOtpEmail(user.email, '8849', true).catch(e => console.error('Password reset email warning:', e));
+            sendOtpEmail(user.email, realOtp, true).catch(e => console.error('Password reset email warning:', e));
         }
 
         res.json({
             success: true,
-            message: `Password reset OTP (8849) sent to ${user.email || user.phone}.`,
-            mockCode: '8849'
+            message: `Password reset OTP code sent to ${user.email || user.phone}.`
         });
     } catch (err) {
         console.error('Forgot Password Error:', err.message);
@@ -322,8 +374,9 @@ exports.resetPassword = async (req, res) => {
             return res.status(400).json({ success: false, message: 'New password must be at least 6 characters.' });
         }
 
-        if (code !== '8849' && code !== '1234' && code !== '0000') {
-            return res.status(400).json({ success: false, message: 'Invalid or expired reset OTP code. Try 8849.' });
+        const isValid = verifyStoredOtp(identifier, code) || verifyStoredOtp(email, code) || verifyStoredOtp(phone, code);
+        if (!isValid) {
+            return res.status(400).json({ success: false, message: 'Invalid or expired reset OTP code.' });
         }
 
         let user = await User.findOne({ email: identifier });

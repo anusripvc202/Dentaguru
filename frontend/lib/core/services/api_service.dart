@@ -131,7 +131,7 @@ class ApiService {
     }
   }
 
-  /// Request Dual OTP Verification Code (Mobile SMS & Email)
+  /// Request Mobile & Email OTP Code
   Future<Map<String, dynamic>> requestOtp({required String phone, required String email}) async {
     try {
       final url = Uri.parse('${ApiConstants.baseUrl}/auth/otp/request');
@@ -142,9 +142,9 @@ class ApiService {
       ).timeout(const Duration(seconds: 8));
 
       final data = jsonDecode(response.body);
-      return {'success': response.statusCode == 200, 'message': data['message'] ?? 'OTP Sent', 'mockCode': data['mockCode'] ?? '8849'};
+      return {'success': response.statusCode == 200, 'message': data['message'] ?? 'OTP Code Sent'};
     } catch (e) {
-      return {'success': true, 'message': 'OTP sent to Mobile & Email (Demo Code: 8849)', 'mockCode': '8849'};
+      return {'success': false, 'message': 'Failed to request OTP. Ensure your device is online.'};
     }
   }
 
@@ -161,10 +161,7 @@ class ApiService {
       final data = jsonDecode(response.body);
       return {'success': response.statusCode == 200, 'message': data['message'] ?? 'OTP Verified'};
     } catch (e) {
-      if (code == '8849' || code == '1234' || code == '0000') {
-        return {'success': true, 'message': 'OTP Verified successfully.'};
-      }
-      return {'success': false, 'message': 'Invalid verification code. Try 8849.'};
+      return {'success': false, 'message': 'Failed to verify OTP code. Please try again.'};
     }
   }
 
@@ -182,10 +179,9 @@ class ApiService {
       return {
         'success': response.statusCode == 200,
         'message': data['message'] ?? 'Password reset code sent.',
-        'mockCode': data['mockCode'] ?? '8849'
       };
     } catch (e) {
-      return {'success': true, 'message': 'Password reset code sent to email (Demo Code: 8849)', 'mockCode': '8849'};
+      return {'success': false, 'message': 'Failed to request password reset OTP.'};
     }
   }
 
@@ -206,10 +202,7 @@ class ApiService {
       final data = jsonDecode(response.body);
       return {'success': response.statusCode == 200, 'message': data['message'] ?? 'Password reset successful.'};
     } catch (e) {
-      if (code == '8849' || code == '1234' || code == '0000') {
-        return {'success': true, 'message': '🎉 Your password has been reset successfully! You can now sign in.'};
-      }
-      return {'success': false, 'message': 'Invalid verification code. Try 8849.'};
+      return {'success': false, 'message': 'Failed to reset password. Please check your OTP code.'};
     }
   }
 

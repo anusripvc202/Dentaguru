@@ -421,7 +421,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('📩 OTP Verification Code sent to both Mobile Number & Email! (Demo Code: ${res['mockCode'] ?? '8849'})'),
+        content: Text(res['message'] ?? '📩 OTP Verification Code sent to both Mobile Number & Email!'),
         backgroundColor: const Color(0xFF10B981),
         duration: const Duration(seconds: 4),
       ),
@@ -448,7 +448,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     if (!mounted) return;
     setState(() => _isVerifyingOtp = false);
 
-    if (res['success'] == true || code == '8849' || code == '1234' || code == '0000') {
+    if (res['success'] == true) {
       setState(() {
         _isOtpVerified = true;
         _otpErrorMessage = null;
@@ -460,7 +460,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         ),
       );
     } else {
-      setState(() => _otpErrorMessage = res['message'] ?? 'Invalid OTP code. Try 8849.');
+      setState(() => _otpErrorMessage = res['message'] ?? 'Invalid or expired OTP code.');
     }
   }
 
@@ -469,74 +469,56 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       margin: const EdgeInsets.symmetric(vertical: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _isOtpVerified
-            ? const Color(0xFFDCFCE7)
-            : (_isOtpSent ? const Color(0xFFFEF3C7) : const Color(0xFFF8FAFC)),
+        color: const Color(0xFFF0FDF4),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: _isOtpVerified
-              ? const Color(0xFF16A34A)
-              : (_isOtpSent ? const Color(0xFFF59E0B) : const Color(0xFFCBD5E1)),
-          width: _isOtpVerified ? 1.5 : 1,
-        ),
+        border: Border.all(color: const Color(0xFF86EFAC)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(
-                _isOtpVerified
-                    ? Icons.verified_rounded
-                    : (_isOtpSent ? Icons.mark_email_read_rounded : Icons.security_rounded),
-                color: _isOtpVerified
-                    ? const Color(0xFF16A34A)
-                    : (_isOtpSent ? const Color(0xFFD97706) : AppTheme.primaryBlue),
-                size: 20,
-              ),
+              const Icon(Icons.mark_email_read_rounded, color: Color(0xFF16A34A), size: 20),
               const SizedBox(width: 8),
-              Expanded(
+              const Text(
+                'Security OTP Verification',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF166534)),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: _isOtpVerified ? const Color(0xFFDCF8C6) : const Color(0xFFFEF3C7),
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 child: Text(
-                  _isOtpVerified
-                      ? 'Mobile & Email OTP Verification Complete'
-                      : (_isOtpSent ? 'Enter 4-Digit OTP Code' : 'Dual OTP Verification Required'),
+                  _isOtpVerified ? 'VERIFIED ✓' : 'STEP 1 OF 2',
                   style: TextStyle(
+                    fontSize: 10,
                     fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                    color: _isOtpVerified
-                        ? const Color(0xFF15803D)
-                        : (_isOtpSent ? const Color(0xFFB45309) : AppTheme.textDark),
+                    color: _isOtpVerified ? const Color(0xFF15803D) : const Color(0xFFD97706),
                   ),
                 ),
               ),
-              if (_isOtpVerified)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF16A34A),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Text('VERIFIED', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10)),
-                ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
+          const Text(
+            'We dispatch a live 4-digit OTP code to both Mobile Phone SMS and Email Inbox for instant authentication.',
+            style: TextStyle(fontSize: 11, color: Color(0xFF166534)),
+          ),
+          const SizedBox(height: 12),
 
-          if (!_isOtpVerified && !_isOtpSent) ...[
-            const Text(
-              'A verification OTP code will be sent to both your Mobile Number & Email Address before activating account creation.',
-              style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
-            ),
-            const SizedBox(height: 10),
+          if (!_isOtpSent && !_isOtpVerified) ...[
             ElevatedButton.icon(
               icon: _isSendingOtp
                   ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Icon(Icons.mark_email_read_rounded, size: 16),
-              label: Text(_isSendingOtp ? 'Sending Dual OTP...' : 'Send OTP to Mobile & Email', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  : const Icon(Icons.send_to_mobile_rounded, size: 16),
+              label: Text(_isSendingOtp ? 'Sending OTP...' : 'Send OTP to Mobile & Email', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primaryBlue,
+                backgroundColor: const Color(0xFF16A34A),
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                minimumSize: const Size.fromHeight(40),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
               onPressed: _isSendingOtp ? null : _handleSendOtp,
@@ -550,7 +532,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     keyboardType: TextInputType.number,
                     maxLength: 4,
                     decoration: InputDecoration(
-                      hintText: 'Enter 4-digit code (8849)',
+                      hintText: 'Enter 4-digit OTP code',
                       counterText: '',
                       filled: true,
                       fillColor: Colors.white,
@@ -582,7 +564,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             const SizedBox(height: 6),
             InkWell(
               onTap: _handleSendOtp,
-              child: const Text('Didn\'t receive code? Resend OTP to Mobile & Email (Demo Code: 8849)', style: TextStyle(fontSize: 10, color: AppTheme.primaryBlue, fontWeight: FontWeight.bold, decoration: TextDecoration.underline)),
+              child: const Text('Didn\'t receive code? Resend OTP to Mobile & Email', style: TextStyle(fontSize: 10, color: AppTheme.primaryBlue, fontWeight: FontWeight.bold, decoration: TextDecoration.underline)),
             ),
           ] else ...[
             const Text(
@@ -647,8 +629,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                       keyboardType: TextInputType.number,
                       maxLength: 4,
                       decoration: InputDecoration(
-                        labelText: 'Enter OTP Code (8849)',
-                        hintText: '8849',
+                        labelText: 'Enter OTP Code',
+                        hintText: '1234',
                         counterText: '',
                         prefixIcon: const Icon(Icons.key_rounded, color: Color(0xFF10B981)),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -705,7 +687,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                             if (stCtx.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  content: Text('📩 ${res['message'] ?? "OTP sent to email (Demo Code: 8849)"}'),
+                                  content: Text('📩 ${res['message'] ?? "OTP sent to email/phone"}'),
                                   backgroundColor: const Color(0xFF10B981),
                                 ),
                               );
