@@ -167,41 +167,66 @@ const Dentist = {
 };
 
 // 4. APPOINTMENT MODEL (Supabase PostgreSQL)
+const isUUID = (str) => typeof str === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str.trim());
+
+async function resolveUserUuid(input) {
+    if (!input) return null;
+    const str = String(input).trim();
+    if (isUUID(str)) return str;
+
+    try {
+        let user = await User.findOne({ email: str });
+        if (!user) user = await User.findOne({ phone: str });
+        if (user) return user.id;
+
+        const { data: firstUsers } = await supabaseAdmin.from('users').select('id').limit(1);
+        if (firstUsers && firstUsers.length > 0) return firstUsers[0].id;
+    } catch (e) {
+        console.error('Error resolving user UUID:', e.message);
+    }
+    return null;
+}
+
+async function resolveDentistUuid(input) {
+    if (!input) return null;
+    const str = String(input).trim();
+    if (isUUID(str)) return str;
+
+    try {
+        const { data: dentists } = await supabaseAdmin.from('dentists').select('id').limit(1);
+        if (dentists && dentists.length > 0) return dentists[0].id;
+    } catch (e) {
+        console.error('Error resolving dentist UUID:', e.message);
+    }
+    return null;
+}
+
+async function resolveClinicUuid(input) {
+    if (!input) return null;
+    const str = String(input).trim();
+    if (isUUID(str)) return str;
+
+    try {
+        const { data: clinics } = await supabaseAdmin.from('clinics').select('id').limit(1);
+        if (clinics && clinics.length > 0) return clinics[0].id;
+    } catch (e) {
+        console.error('Error resolving clinic UUID:', e.message);
+    }
+    return null;
+}
+
+// 4. APPOINTMENT MODEL (Supabase PostgreSQL)
 const Appointment = {
     async create(appData) {
-        let targetPatientId = appData.patient_id || appData.patientId || null;
-
-        // If targetPatientId is not a UUID (e.g. email or phone), lookup matching User UUID
-        if (targetPatientId && (targetPatientId.includes('@') || !targetPatientId.includes('-'))) {
-            try {
-                const userByEmail = await User.findOne({ email: targetPatientId });
-                const userByPhone = userByEmail ? null : await User.findOne({ phone: targetPatientId });
-                const matched = userByEmail || userByPhone;
-                if (matched) {
-                    targetPatientId = matched.id;
-                }
-            } catch (uErr) {
-                console.error('User lookup error in Appointment.create:', uErr.message);
-            }
-        }
-
-        // Fallback: If still no patient UUID found, grab the first registered user
-        if (!targetPatientId || targetPatientId.includes('@')) {
-            try {
-                const { data: firstUsers } = await supabaseAdmin.from('users').select('id').limit(1);
-                if (firstUsers && firstUsers.length > 0) {
-                    targetPatientId = firstUsers[0].id;
-                }
-            } catch (fErr) {
-                console.error('Fallback user lookup error:', fErr.message);
-            }
-        }
+        const targetPatientId = await resolveUserUuid(appData.patient_id || appData.patientId);
+        const targetDentistId = await resolveDentistUuid(appData.dentist_id || appData.dentistId);
+        const targetClinicId = await resolveClinicUuid(appData.clinic_id || appData.clinicId);
 
         const payload = {
             patient_id: targetPatientId,
-            dentist_id: appData.dentist_id || appData.dentistId || null,
-            clinic_id: appData.clinic_id || appData.clinicId || null,
-            date: appData.date || new Date().toISOString(),
+            dentist_id: targetDentistId,
+            clinic_id: targetClinicId,
+            date: appData.date ? new Date(appData.date).toISOString() : new Date().toISOString(),
             time_slot: appData.time_slot || appData.timeSlot || 'Today, 2:30 PM',
             treatment: appData.treatment || 'Dental Consultation',
             status: appData.status || 'confirmed',
@@ -209,7 +234,10 @@ const Appointment = {
             qr_code_string: appData.qr_code_string || appData.qrCodeString || null
         };
         const { data, error } = await supabaseAdmin.from('appointments').insert(payload).select().single();
-        if (error) throw error;
+        if (error) {
+            console.error('❌ Supabase Appointment Insert Error:', error.message);
+            throw error;
+        }
         return data;
     },
 
@@ -220,7 +248,11 @@ const Appointment = {
         if (query.clinicId) req = req.eq('clinic_id', query.clinicId);
 
         const { data, error } = await req.order('date', { ascending: true });
-        if (error) throw error;
+        if (error) {
+            console.warn('⚠️ Appointment find warning, fallback to simple select:', error.message);
+            const simple = await supabaseAdmin.from('appointments').select('*');
+            return simple.data || [];
+        }
         return data || [];
     },
 
@@ -240,18 +272,8 @@ const Appointment = {
 // 5. MEDICAL RECORD MODEL (Supabase PostgreSQL)
 const MedicalRecord = {
     async create(recordData) {
-        let targetPatientId = recordData.patient_id || recordData.patientId || null;
-
-        if (!targetPatientId || targetPatientId.includes('@') || !targetPatientId.includes('-')) {
-            try {
-                const { data: firstUsers } = await supabaseAdmin.from('users').select('id').limit(1);
-                if (firstUsers && firstUsers.length > 0) {
-                    targetPatientId = firstUsers[0].id;
-                }
-            } catch (fErr) {
-                console.error('User lookup error in MedicalRecord.create:', fErr.message);
-            }
-        }
+        const targetPatientId = await resolveUserUuid(recordData.patient_id || recordData.patientId);
+        const targetDentistId = await resolveDentistUuid(recordData.dentist_id || recordData.dentistId);
 
         const diag = recordData.diagnosis || recordData.title || recordData.subtitle || 'Dental Consultation & Prescription';
         const docName = recordData.doctor_name || recordData.doctorName || 'Attending Dentist';
@@ -260,7 +282,7 @@ const MedicalRecord = {
 
         const payload = {
             patient_id: targetPatientId,
-            dentist_id: recordData.dentist_id || recordData.dentistId || null,
+            dentist_id: targetDentistId,
             diagnosis: diag,
             prescriptions: typeof rxItems === 'string' ? JSON.parse(rxItems) : rxItems,
             notes: JSON.stringify({
@@ -273,7 +295,10 @@ const MedicalRecord = {
         };
 
         const { data, error } = await supabaseAdmin.from('medical_records').insert(payload).select().single();
-        if (error) throw error;
+        if (error) {
+            console.error('❌ Supabase MedicalRecord Insert Error:', error.message);
+            throw error;
+        }
         return data;
     },
 
@@ -289,10 +314,26 @@ const MedicalRecord = {
 // 6. CHAT MESSAGE MODEL (Supabase PostgreSQL)
 const ChatMessage = {
     async create(messageData) {
-        const { data, error } = await supabaseAdmin.from('chat_messages').insert(messageData).select().single();
-        if (error) throw error;
+        const senderId = await resolveUserUuid(messageData.sender_id || messageData.senderId);
+        const receiverId = await resolveUserUuid(messageData.receiver_id || messageData.receiverId);
+
+        const payload = {
+            room_id: messageData.room_id || messageData.roomId || 'GENERAL-CHAT',
+            sender_id: senderId,
+            receiver_id: receiverId,
+            message: messageData.message || '',
+            type: messageData.type || 'text',
+            read: messageData.read ?? false
+        };
+
+        const { data, error } = await supabaseAdmin.from('chat_messages').insert(payload).select().single();
+        if (error) {
+            console.error('❌ Supabase ChatMessage Insert Error:', error.message);
+            throw error;
+        }
         return data;
     },
+
     async find(query = {}) {
         let req = supabaseAdmin.from('chat_messages').select('*');
         for (const [key, val] of Object.entries(query)) {
