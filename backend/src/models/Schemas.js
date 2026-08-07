@@ -399,6 +399,20 @@ const ChatMessage = {
         const { data, error } = await req.order('created_at', { ascending: true });
         if (error) throw error;
         return data || [];
+    },
+
+    async delete(query = {}) {
+        let req = supabaseAdmin.from('chat_messages').delete();
+        if (query.messageId || query.id) {
+            req = req.eq('id', query.messageId || query.id);
+        } else if (query.roomId || query.room_id) {
+            req = req.eq('room_id', query.roomId || query.room_id);
+        } else {
+            return false;
+        }
+        const { error } = await req;
+        if (error) throw error;
+        return true;
     }
 };
 

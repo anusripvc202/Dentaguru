@@ -54,6 +54,8 @@ router.post('/upload', authenticateJWT, upload.uploadFile);
 // ─────────────────────────────────────────────
 router.post('/chat/send', chat.sendMessage);
 router.get('/chat/messages', chat.getMessages);
+router.post('/chat/clear', chat.clearMessages);
+router.delete('/chat/clear', chat.clearMessages);
 
 // ─────────────────────────────────────────────
 // 6. MEDICAL RECORDS & PRESCRIPTIONS ENDPOINTS

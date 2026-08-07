@@ -43,3 +43,20 @@ exports.getMessages = async (req, res) => {
         res.status(500).json({ success: false, message: 'Failed to fetch chat messages from database.' });
     }
 };
+
+// 3. CLEAR CHAT MESSAGES FROM SUPABASE DATABASE
+exports.clearMessages = async (req, res) => {
+    const roomId = req.body?.roomId || req.query?.roomId;
+    const messageId = req.body?.messageId || req.query?.messageId;
+    try {
+        await ChatMessage.delete({ roomId, messageId });
+        console.log(`🗑️ Cleared chat messages for room "${roomId || messageId}"`);
+        res.json({
+            success: true,
+            message: 'Chat history cleared successfully.'
+        });
+    } catch (err) {
+        console.error('Clear Chat Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to clear chat history.' });
+    }
+};

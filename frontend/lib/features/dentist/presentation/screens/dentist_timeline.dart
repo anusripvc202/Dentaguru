@@ -434,11 +434,74 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                             ],
                           ),
                         ),
-                        const Icon(Icons.videocam_rounded, color: Colors.white, size: 22),
-                        const SizedBox(width: 16),
-                        const Icon(Icons.call_rounded, color: Colors.white, size: 20),
+                        const Icon(Icons.videocam_rounded, color: Colors.white, size: 20),
                         const SizedBox(width: 12),
-                        const Icon(Icons.more_vert_rounded, color: Colors.white, size: 20),
+                        IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          icon: const Icon(Icons.delete_outline_rounded, color: Colors.white, size: 20),
+                          tooltip: 'Clear Chat History',
+                          onPressed: () {
+                            showDialog(
+                              context: context,
+                              builder: (confirmCtx) => AlertDialog(
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                                title: const Row(
+                                  children: [
+                                    Icon(Icons.delete_forever_rounded, color: Color(0xFFEF4444)),
+                                    SizedBox(width: 8),
+                                    Text('Clear Chat History?', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                  ],
+                                ),
+                                content: const Text('This will permanently delete all messages in this conversation. Are you sure?'),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(confirmCtx), child: const Text('Cancel')),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444), foregroundColor: Colors.white),
+                                    onPressed: () async {
+                                      Navigator.pop(confirmCtx);
+                                      final ok = await ApiService().clearChatMessages(roomId: roomId);
+                                      if (ok) {
+                                        setModalState(() {});
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(content: Text('🗑️ Chat history cleared!'), backgroundColor: Color(0xFF10B981)),
+                                        );
+                                      }
+                                    },
+                                    child: const Text('Clear Chat', style: TextStyle(fontWeight: FontWeight.bold)),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(width: 10),
+                        PopupMenuButton<String>(
+                          icon: const Icon(Icons.more_vert_rounded, color: Colors.white, size: 20),
+                          onSelected: (val) async {
+                            if (val == 'clear') {
+                              final ok = await ApiService().clearChatMessages(roomId: roomId);
+                              if (ok) {
+                                setModalState(() {});
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('🗑️ Chat history cleared!'), backgroundColor: Color(0xFF10B981)),
+                                );
+                              }
+                            }
+                          },
+                          itemBuilder: (ctx) => [
+                            const PopupMenuItem(
+                              value: 'clear',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.delete_sweep_rounded, color: Color(0xFFEF4444), size: 18),
+                                  SizedBox(width: 8),
+                                  Text('Clear Chat History', style: TextStyle(fontSize: 13, color: Color(0xFFEF4444), fontWeight: FontWeight.bold)),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
                   ),
@@ -485,6 +548,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                               final m = msgs[index];
                               final text = (m['message'] ?? '').toString();
                               final mType = (m['type'] ?? '').toString();
+                              final msgId = (m['id'] ?? m['_id'] ?? '').toString();
                               final senderObj = m['sender'] ?? {};
                               final senderRole = (senderObj['role'] ?? '').toString();
                               final senderName = (senderObj['name'] ?? m['sender_id'] ?? m['senderId'] ?? '').toString();
@@ -501,46 +565,72 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
 
                               return Align(
                                 alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
-                                child: Container(
-                                  margin: const EdgeInsets.symmetric(vertical: 3),
-                                  padding: const EdgeInsets.fromLTRB(12, 8, 10, 6),
-                                  constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.76),
-                                  decoration: BoxDecoration(
-                                    color: isSentByMe ? const Color(0xFFDCF8C6) : Colors.white,
-                                    borderRadius: BorderRadius.circular(12).copyWith(
-                                      topRight: isSentByMe ? const Radius.circular(2) : const Radius.circular(12),
-                                      topLeft: isSentByMe ? const Radius.circular(12) : const Radius.circular(2),
-                                    ),
-                                    boxShadow: [
-                                      BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 3, offset: const Offset(0, 1)),
-                                    ],
-                                  ),
-                                  child: Wrap(
-                                    alignment: WrapAlignment.end,
-                                    crossAxisAlignment: WrapCrossAlignment.end,
-                                    children: [
-                                      Text(
-                                        text,
-                                        style: const TextStyle(fontSize: 14, color: Color(0xFF111B21), height: 1.3),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 4),
-                                        child: Row(
+                                child: GestureDetector(
+                                  onLongPress: () {
+                                    showModalBottomSheet(
+                                      context: context,
+                                      builder: (bCtx) => Container(
+                                        padding: const EdgeInsets.all(16),
+                                        child: Column(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            Text(
-                                              timeStr,
-                                              style: const TextStyle(fontSize: 10, color: Color(0xFF667781)),
+                                            ListTile(
+                                              leading: const Icon(Icons.delete_outline, color: Colors.red),
+                                              title: const Text('Delete Message'),
+                                              onTap: () async {
+                                                Navigator.pop(bCtx);
+                                                final ok = await ApiService().clearChatMessages(roomId: roomId, messageId: msgId);
+                                                if (ok) {
+                                                  setModalState(() {});
+                                                }
+                                              },
                                             ),
-                                            if (isSentByMe) ...[
-                                              const SizedBox(width: 3),
-                                              const Icon(Icons.done_all_rounded, size: 14, color: Color(0xFF34B7F1)),
-                                            ],
                                           ],
                                         ),
                                       ),
-                                    ],
+                                    );
+                                  },
+                                  child: Container(
+                                    margin: const EdgeInsets.symmetric(vertical: 3),
+                                    padding: const EdgeInsets.fromLTRB(12, 8, 10, 6),
+                                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.76),
+                                    decoration: BoxDecoration(
+                                      color: isSentByMe ? const Color(0xFFDCF8C6) : Colors.white,
+                                      borderRadius: BorderRadius.circular(12).copyWith(
+                                        topRight: isSentByMe ? const Radius.circular(2) : const Radius.circular(12),
+                                        topLeft: isSentByMe ? const Radius.circular(12) : const Radius.circular(2),
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 3, offset: const Offset(0, 1)),
+                                      ],
+                                    ),
+                                    child: Wrap(
+                                      alignment: WrapAlignment.end,
+                                      crossAxisAlignment: WrapCrossAlignment.end,
+                                      children: [
+                                        Text(
+                                          text,
+                                          style: const TextStyle(fontSize: 14, color: Color(0xFF111B21), height: 1.3),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Padding(
+                                          padding: const EdgeInsets.only(top: 4),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Text(
+                                                timeStr,
+                                                style: const TextStyle(fontSize: 10, color: Color(0xFF667781)),
+                                              ),
+                                              if (isSentByMe) ...[
+                                                const SizedBox(width: 3),
+                                                const Icon(Icons.done_all_rounded, size: 14, color: Color(0xFF34B7F1)),
+                                              ],
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               );

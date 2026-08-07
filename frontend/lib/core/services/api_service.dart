@@ -381,6 +381,28 @@ class ApiService {
     return [];
   }
 
+  /// Delete single message or clear all chat messages in a room
+  Future<bool> clearChatMessages({required String roomId, String? messageId}) async {
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/chat/clear');
+      final response = await http.post(
+        url,
+        headers: _headers,
+        body: jsonEncode({
+          'roomId': roomId,
+          if (messageId != null) 'messageId': messageId,
+        }),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['success'] == true;
+      }
+    } catch (e) {
+      debugPrint('Clear chat error: $e');
+    }
+    return false;
+  }
+
   /// Fetch medical records and prescriptions from Supabase/Backend API
   Future<List<dynamic>> fetchMedicalRecords({String? patientId}) async {
     try {
