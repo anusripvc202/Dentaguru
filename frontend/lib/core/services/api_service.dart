@@ -32,6 +32,19 @@ class ApiService {
     String? clinicAddress,
     String? profilePhoto,
   }) async {
+    final payload = jsonEncode({
+      'name': name,
+      'email': email,
+      'password': password,
+      'phone': phone,
+      'role': role,
+      if (specialty != null) 'specialty': specialty,
+      if (licenseNumber != null) 'licenseNumber': licenseNumber,
+      if (clinicName != null) 'clinicName': clinicName,
+      if (clinicAddress != null) 'clinicAddress': clinicAddress,
+      if (profilePhoto != null) 'profilePhoto': profilePhoto,
+    });
+
     try {
       final url = Uri.parse(ApiConstants.register);
       debugPrint('🌐 Sending Register Request to: $url');
@@ -39,19 +52,8 @@ class ApiService {
       final response = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'name': name,
-          'email': email,
-          'password': password,
-          'phone': phone,
-          'role': role,
-          if (specialty != null) 'specialty': specialty,
-          if (licenseNumber != null) 'licenseNumber': licenseNumber,
-          if (clinicName != null) 'clinicName': clinicName,
-          if (clinicAddress != null) 'clinicAddress': clinicAddress,
-          if (profilePhoto != null) 'profilePhoto': profilePhoto,
-        }),
-      );
+        body: payload,
+      ).timeout(const Duration(seconds: 10));
 
       final data = jsonDecode(response.body);
       if (response.statusCode == 200 || response.statusCode == 201) {
@@ -63,8 +65,25 @@ class ApiService {
         return {'success': false, 'message': data['message'] ?? 'Registration failed.'};
       }
     } catch (e) {
-      debugPrint('❌ API Register Error: $e');
-      return {'success': false, 'message': 'Could not connect to backend server.'};
+      debugPrint('⚠️ Primary Register URL error ($e). Retrying fallback to localhost:5000...');
+      try {
+        final fallbackUrl = Uri.parse('http://localhost:5000/api/v1/auth/register');
+        final response = await http.post(
+          fallbackUrl,
+          headers: {'Content-Type': 'application/json'},
+          body: payload,
+        );
+        final data = jsonDecode(response.body);
+        if (response.statusCode == 200 || response.statusCode == 201) {
+          if (data['accessToken'] != null) setAuthToken(data['accessToken']);
+          return {'success': true, 'data': data};
+        } else {
+          return {'success': false, 'message': data['message'] ?? 'Registration failed.'};
+        }
+      } catch (fErr) {
+        debugPrint('❌ Fallback Register Error: $fErr');
+        return {'success': false, 'message': 'Could not connect to backend server.'};
+      }
     }
   }
 
@@ -73,25 +92,41 @@ class ApiService {
     required String email,
     required String password,
   }) async {
+    final payload = jsonEncode({'email': email, 'password': password});
     try {
       final url = Uri.parse(ApiConstants.login);
       final response = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': email, 'password': password}),
-      );
+        body: payload,
+      ).timeout(const Duration(seconds: 10));
 
       final data = jsonDecode(response.body);
       if (response.statusCode == 200) {
-        if (data['accessToken'] != null) {
-          setAuthToken(data['accessToken']);
-        }
+        if (data['accessToken'] != null) setAuthToken(data['accessToken']);
         return {'success': true, 'data': data};
       } else {
         return {'success': false, 'message': data['message'] ?? 'Login failed.'};
       }
     } catch (e) {
-      return {'success': false, 'message': 'Could not connect to backend server.'};
+      debugPrint('⚠️ Primary Login URL error ($e). Retrying fallback to localhost:5000...');
+      try {
+        final fallbackUrl = Uri.parse('http://localhost:5000/api/v1/auth/login');
+        final response = await http.post(
+          fallbackUrl,
+          headers: {'Content-Type': 'application/json'},
+          body: payload,
+        );
+        final data = jsonDecode(response.body);
+        if (response.statusCode == 200) {
+          if (data['accessToken'] != null) setAuthToken(data['accessToken']);
+          return {'success': true, 'data': data};
+        } else {
+          return {'success': false, 'message': data['message'] ?? 'Login failed.'};
+        }
+      } catch (fErr) {
+        return {'success': false, 'message': 'Could not connect to backend server.'};
+      }
     }
   }
 
@@ -99,13 +134,22 @@ class ApiService {
   Future<List<dynamic>> fetchDentists() async {
     try {
       final url = Uri.parse('${ApiConstants.baseUrl}/dentists');
-      final response = await http.get(url, headers: _headers);
+      final response = await http.get(url, headers: _headers).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         return data['dentists'] ?? [];
       }
     } catch (e) {
-      debugPrint('Fetch dentists error: $e');
+      try {
+        final fallbackUrl = Uri.parse('http://localhost:5000/api/v1/dentists');
+        final response = await http.get(fallbackUrl, headers: _headers);
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          return data['dentists'] ?? [];
+        }
+      } catch (fErr) {
+        debugPrint('Fetch dentists fallback error: $fErr');
+      }
     }
     return [];
   }
@@ -114,13 +158,22 @@ class ApiService {
   Future<List<dynamic>> fetchClinics() async {
     try {
       final url = Uri.parse(ApiConstants.clinics);
-      final response = await http.get(url, headers: _headers);
+      final response = await http.get(url, headers: _headers).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         return data['clinics'] ?? [];
       }
     } catch (e) {
-      debugPrint('Fetch clinics error: $e');
+      try {
+        final fallbackUrl = Uri.parse('http://localhost:5000/api/v1/clinics');
+        final response = await http.get(fallbackUrl, headers: _headers);
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          return data['clinics'] ?? [];
+        }
+      } catch (fErr) {
+        debugPrint('Fetch clinics fallback error: $fErr');
+      }
     }
     return [];
   }
