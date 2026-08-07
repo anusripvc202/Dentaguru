@@ -99,8 +99,8 @@ const Clinic = {
 
         const payload = {
             user_id: validUserId,
-            clinic_name: clinicData.clinic_name || clinicData.clinicName || 'DentaGuru Care Center',
-            location: clinicData.location || '123 Healthcare Blvd, Medical Hub, Suite 400',
+            clinic_name: clinicData.clinic_name || clinicData.clinicName || '',
+            location: clinicData.location || '',
             rating: clinicData.rating || 5.0,
             reviews_count: clinicData.reviews_count || clinicData.reviewsCount || 0,
             verified: clinicData.verified !== undefined ? clinicData.verified : true,

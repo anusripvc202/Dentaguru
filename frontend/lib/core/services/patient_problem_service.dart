@@ -798,9 +798,9 @@ class PatientProblemService extends ChangeNotifier {
 
     final formattedName = name.trim().startsWith('Dr.') ? name.trim() : 'Dr. ${name.trim()}';
     final cleanLicense = licenseNumber.trim().isEmpty ? 'DEN-LIC-${DateTime.now().millisecondsSinceEpoch}' : licenseNumber.trim();
-    final cleanClinic = clinicName.trim().isEmpty ? 'DentaGuru Care Center' : clinicName.trim();
+    final cleanClinic = clinicName.trim();
     final cleanSpecialty = specialty.trim().isEmpty ? 'General Dentistry' : specialty.trim();
-    final cleanAddress = clinicAddress.trim().isEmpty ? '123 Healthcare Blvd, Medical Hub, Suite 400' : clinicAddress.trim();
+    final cleanAddress = clinicAddress.trim();
 
     final newDoctor = DoctorModel(
       id: 'DOC-${100 + _allDoctors.length + 1}',
@@ -810,7 +810,7 @@ class PatientProblemService extends ChangeNotifier {
       experienceYears: experienceYears <= 0 ? 5 : experienceYears,
       rating: 5.0,
       reviewCount: 1,
-      clinicName: cleanClinic,
+      clinicName: cleanClinic.isEmpty ? 'Independent Practice' : cleanClinic,
       phone: phone.trim().isEmpty ? '+1 202 555 0100' : phone.trim(),
       email: email.trim().isEmpty ? 'doctor@dentaguru.com' : email.trim(),
       status: 'Available',
@@ -826,7 +826,7 @@ class PatientProblemService extends ChangeNotifier {
     }
     currentDoctor = newDoctor;
 
-    if (!_allClinics.any((c) => c.clinicName.toLowerCase() == cleanClinic.toLowerCase())) {
+    if (cleanClinic.isNotEmpty && !_allClinics.any((c) => c.clinicName.toLowerCase() == cleanClinic.toLowerCase())) {
       _allClinics.insert(
         0,
         ClinicModel(

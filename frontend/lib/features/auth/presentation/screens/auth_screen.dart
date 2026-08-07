@@ -215,7 +215,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             phone: userPhone,
             licenseNumber: 'DEN-LIC-REGISTERED',
             specialty: 'General Dentistry',
-            clinicName: 'DentaGuru Care Center',
+            clinicName: userData['clinicName'] ?? '',
             experienceYears: 5,
             photoBytes: photoBytes,
           );

@@ -51,37 +51,40 @@ exports.register = async (req, res) => {
                 : `DEN-LIC-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
             let clinicId = null;
-            try {
-                const cName = clinicName && clinicName.trim() ? clinicName.trim() : `${user.name}'s Dental Practice`;
-                const cAddr = clinicAddress && clinicAddress.trim() ? clinicAddress.trim() : '123 Healthcare Blvd, Medical Hub, Suite 400';
-                
-                let clinic = await Clinic.findOne({ clinic_name: cName });
-                if (!clinic) {
-                    const defaultPricing = req.body.pricing || [
-                        { service: 'General Consultation', fee: '$75' },
-                        { service: 'Tooth Decay / Cavity', fee: '$85' },
-                        { service: 'Root Canal', fee: '$180' },
-                        { service: 'Orthodontics', fee: '$200' },
-                        { service: 'Tooth Extraction', fee: '$110' },
-                        { service: 'Periodontics / Gum Care', fee: '$95' }
-                    ];
-                    clinic = await Clinic.create({
-                        user_id: user.id,
-                        clinic_name: cName,
-                        location: cAddr,
-                        verified: true,
-                        rating: 5.0,
-                        reviews_count: 0,
-                        services: [specialty || 'General Dentistry', 'Root Canal', 'Orthodontics'],
-                        pricing: defaultPricing
-                    });
-                    console.log(`✅ New Clinic record created in 'clinics' table for: ${cName}`);
-                } else {
-                    console.log(`ℹ️ Existing Clinic record linked: ${cName}`);
+            const cName = clinicName && clinicName.trim() ? clinicName.trim() : '';
+            if (cName.length > 0) {
+                try {
+                    const cAddr = clinicAddress && clinicAddress.trim() ? clinicAddress.trim() : '';
+                    let clinic = await Clinic.findOne({ clinic_name: cName });
+                    if (!clinic) {
+                        const defaultPricing = req.body.pricing || [
+                            { service: 'General Consultation', fee: '$75' },
+                            { service: 'Tooth Decay / Cavity', fee: '$85' },
+                            { service: 'Root Canal', fee: '$180' },
+                            { service: 'Orthodontics', fee: '$200' },
+                            { service: 'Tooth Extraction', fee: '$110' },
+                            { service: 'Periodontics / Gum Care', fee: '$95' }
+                        ];
+                        clinic = await Clinic.create({
+                            user_id: user.id,
+                            clinic_name: cName,
+                            location: cAddr,
+                            verified: true,
+                            rating: 5.0,
+                            reviews_count: 0,
+                            services: [specialty || 'General Dentistry', 'Root Canal', 'Orthodontics'],
+                            pricing: defaultPricing
+                        });
+                        console.log(`✅ New Clinic record created in 'clinics' table for: ${cName}`);
+                    } else {
+                        console.log(`ℹ️ Existing Clinic record linked: ${cName}`);
+                    }
+                    clinicId = clinic ? clinic.id : null;
+                } catch (cErr) {
+                    console.error('⚠️ Clinic Table Creation Warning:', cErr.message);
                 }
-                clinicId = clinic ? clinic.id : null;
-            } catch (cErr) {
-                console.error('⚠️ Clinic Table Creation Warning:', cErr.message);
+            } else {
+                console.log(`ℹ️ No clinic name provided for dentist ${user.name}. Leaving clinic_id as NULL.`);
             }
 
             try {
