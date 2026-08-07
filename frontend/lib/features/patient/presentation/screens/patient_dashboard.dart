@@ -1168,9 +1168,11 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            'Today • 02:30 PM',
-                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                          Text(
+                            (assignedReq.confirmedTimeSlot != null && assignedReq.confirmedTimeSlot!.isNotEmpty)
+                                ? assignedReq.confirmedTimeSlot!
+                                : 'Today • 02:30 PM',
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.textDark),
                           ),
                           const SizedBox(height: 4),
                           Wrap(
