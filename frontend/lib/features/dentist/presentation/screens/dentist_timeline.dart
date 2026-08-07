@@ -145,6 +145,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         );
       },
     );
+  }
+
   void _showAcceptAndScheduleModal(BuildContext context, PatientConsultationRequest req) {
     final currentDoc = _patientService.currentDoctor;
     final defaultSlot = currentDoc?.nextAvailableSlots.isNotEmpty == true
@@ -685,6 +687,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                   final myAssigned = requests.where((req) {
                     if (req.assignedDoctorId != null && currentDoc != null && req.assignedDoctorId == currentDoc.id) return true;
                     if (req.assignedDoctorName != null && docNameClean.isNotEmpty && req.assignedDoctorName!.toLowerCase().contains(docNameClean)) return true;
+                    if (currentDoc == null && req.assignedDoctorName != null && req.assignedDoctorName!.isNotEmpty) return true;
                     return false;
                   }).toList();
 
@@ -788,6 +791,9 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                       return true;
                     }
                     if (req.assignedDoctorName != null && docNameClean.isNotEmpty && req.assignedDoctorName!.toLowerCase().contains(docNameClean)) {
+                      return true;
+                    }
+                    if (currentDoc == null && req.assignedDoctorName != null && req.assignedDoctorName!.isNotEmpty) {
                       return true;
                     }
                     return false;
