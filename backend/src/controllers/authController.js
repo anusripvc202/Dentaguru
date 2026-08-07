@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const { User, Dentist, Clinic, comparePassword } = require('../models/Schemas');
 const { supabase } = require('../config/supabase');
 const { sendOtpEmail } = require('../services/emailService');
+const { sendRealSmsOtp } = require('../services/smsService');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretjwtkey123';
 const REFRESH_SECRET = process.env.REFRESH_SECRET || 'supersecretrefreshkey456';
@@ -183,6 +184,11 @@ exports.requestOTP = async (req, res) => {
 
         console.log(`📩 Dispatching Dual OTP (8849) to Mobile Phone [${pNum}] and Email [${eMail}]...`);
 
+        // Send Real Mobile SMS via Fast2SMS / Twilio if phone provided
+        if (pNum && pNum.length >= 10) {
+            sendRealSmsOtp(pNum, '8849').catch(e => console.error('SMS send warning:', e));
+        }
+
         // Send Real OTP Email via Nodemailer if email provided
         if (eMail && eMail.includes('@')) {
             sendOtpEmail(eMail, '8849', false).catch(e => console.error('Email send warning:', e));
@@ -258,6 +264,10 @@ exports.forgotPassword = async (req, res) => {
         }
 
         console.log(`🔐 Forgot Password OTP (8849) dispatched for user: ${user.email} / ${user.phone}`);
+
+        if (user.phone && user.phone.length >= 10) {
+            sendRealSmsOtp(user.phone, '8849').catch(e => console.error('Password reset SMS warning:', e));
+        }
 
         if (user.email && user.email.includes('@')) {
             sendOtpEmail(user.email, '8849', true).catch(e => console.error('Password reset email warning:', e));
