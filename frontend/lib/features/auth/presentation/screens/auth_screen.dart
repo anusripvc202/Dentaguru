@@ -186,6 +186,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       final res = await ApiService().loginUser(
         email: email,
         password: password,
+        role: _roleName,
       );
 
       if (!mounted) return;
@@ -196,6 +197,29 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         final Map<String, dynamic> userData = (responseData['user'] is Map<String, dynamic>)
             ? responseData['user']
             : (res['user'] is Map<String, dynamic> ? res['user'] : {});
+
+        final String registeredRole = (userData['role'] ?? _roleName).toString().toLowerCase();
+
+        // ⛔ ENFORCE STRICT PORTAL ROLE MATCHING
+        final bool isSelAdmin = _selectedRole == UserRole.admin;
+        final bool isSelDentist = _selectedRole == UserRole.dentist;
+        final bool isSelPatient = _selectedRole == UserRole.patient;
+
+        final bool isRegAdmin = registeredRole.contains('admin');
+        final bool isRegDentist = registeredRole.contains('dentist') || registeredRole.contains('doctor');
+        final bool isRegPatient = registeredRole.contains('patient');
+
+        if ((isSelAdmin && !isRegAdmin) || (isSelDentist && !isRegDentist) || (isSelPatient && !isRegPatient)) {
+          final displayRole = userData['role'] ?? (isRegDentist ? 'Dentist' : (isRegAdmin ? 'Admin' : 'Patient'));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('⛔ Access Denied: This account is registered as a $displayRole. Please switch to the $displayRole tab to sign in.'),
+              backgroundColor: const Color(0xFFEF4444),
+              duration: const Duration(seconds: 4),
+            ),
+          );
+          return;
+        }
 
         final String? returnedPhoto = userData['profilePhoto'];
         Uint8List? photoBytes;
@@ -208,8 +232,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             debugPrint('❌ Error decoding returned user photo: $e');
           }
         }
-
-        final String registeredRole = (userData['role'] ?? _roleName).toString().toLowerCase();
 
         final userPhone = (userData['phone'] != null && userData['phone'].toString().isNotEmpty)
             ? userData['phone'].toString()

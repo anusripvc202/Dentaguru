@@ -132,7 +132,7 @@ exports.register = async (req, res) => {
 
 // 2. LOGIN
 exports.login = async (req, res) => {
-    const { email, password, fcmToken } = req.body;
+    const { email, password, role, fcmToken } = req.body;
     try {
         let user = await User.findOne({ email });
         if (!user) {
@@ -145,6 +145,32 @@ exports.login = async (req, res) => {
         const isMatch = await comparePassword(password, user.password);
         if (!isMatch) {
             return res.status(400).json({ success: false, message: 'Invalid credentials.' });
+        }
+
+        // Enforce Portal Role Matching
+        if (role && role.trim().length > 0) {
+            const requestedRole = role.trim().toLowerCase();
+            const userRole = (user.role || '').trim().toLowerCase();
+
+            const isReqAdmin = requestedRole.includes('admin');
+            const isReqDentist = requestedRole.includes('dentist') || requestedRole.includes('doctor');
+            const isReqPatient = requestedRole.includes('patient');
+
+            const isUserAdmin = userRole.includes('admin');
+            const isUserDentist = userRole.includes('dentist') || userRole.includes('doctor');
+            const isUserPatient = userRole.includes('patient');
+
+            let roleMismatch = false;
+            if (isReqAdmin && !isUserAdmin) roleMismatch = true;
+            if (isReqDentist && !isUserDentist) roleMismatch = true;
+            if (isReqPatient && !isUserPatient) roleMismatch = true;
+
+            if (roleMismatch) {
+                return res.status(403).json({
+                    success: false,
+                    message: `Access Denied: This account is registered as a ${user.role}. Please select the ${user.role} tab to sign in.`
+                });
+            }
         }
 
         const { accessToken, refreshToken } = generateTokens(user);

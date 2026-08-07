@@ -91,8 +91,9 @@ class ApiService {
   Future<Map<String, dynamic>> loginUser({
     required String email,
     required String password,
+    String? role,
   }) async {
-    final payload = jsonEncode({'email': email, 'password': password});
+    final payload = jsonEncode({'email': email, 'password': password, if (role != null) 'role': role});
     try {
       final url = Uri.parse(ApiConstants.login);
       final response = await http.post(
