@@ -996,7 +996,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
 
                   final acceptedForMe = requests.where((req) {
                     final bool isMine = (req.assignedDoctorId != null && currentDoc != null && req.assignedDoctorId == currentDoc.id) ||
-                        (req.assignedDoctorName != null && docNameClean.isNotEmpty && req.assignedDoctorName!.toLowerCase().contains(docNameClean));
+                        (req.assignedDoctorName != null && docNameClean.isNotEmpty && req.assignedDoctorName!.toLowerCase().contains(docNameClean)) ||
+                        (currentDoc == null && req.assignedDoctorName != null && req.assignedDoctorName!.isNotEmpty);
                     return isMine && (req.status == 'Confirmed' || req.status == 'Accepted');
                   }).toList();
 
@@ -1018,7 +1019,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                   return Column(
                     children: acceptedForMe.map((req) {
                       return _buildTimelineNode(
-                        time: 'Today, 2:30 PM',
+                        time: req.confirmedTimeSlot ?? 'Today, 2:30 PM',
                         name: req.patientName,
                         procedure: req.problemCategory,
                         status: 'Accepted',

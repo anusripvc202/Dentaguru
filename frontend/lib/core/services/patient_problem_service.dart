@@ -550,9 +550,8 @@ class PatientProblemService extends ChangeNotifier {
     try {
       final list = await ApiService().fetchAppointments();
       
-      // Preserve existing pending requests so local submissions aren't wiped when appointments DB table is empty
-      final localPending = _requests.where((r) => r.status == 'Pending Admin Review' || r.status == 'Doctor Suggested').toList();
-      final mergedRequests = <PatientConsultationRequest>[...localPending];
+      // Preserve all existing requests so local submissions and accepted cases aren't wiped out
+      final mergedRequests = <PatientConsultationRequest>[..._requests];
 
       if (list.isNotEmpty) {
         for (final item in list) {
