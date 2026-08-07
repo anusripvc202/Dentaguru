@@ -358,6 +358,170 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     );
   }
 
+  void _showDoctorChatModal(BuildContext context, String patientName) {
+    final doctor = _patientService.currentDoctor;
+    final roomId = 'PATIENT-${patientName.isNotEmpty ? patientName.toUpperCase().replaceAll(' ', '_') : 'GUEST'}';
+    final msgController = TextEditingController();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (modalContext) {
+        return StatefulBuilder(
+          builder: (stCtx, setModalState) {
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.8,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(modalContext).viewInsets.bottom + 20,
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      const CircleAvatar(
+                        backgroundColor: Color(0xFF10B981),
+                        child: Icon(Icons.person_rounded, color: Colors.white, size: 20),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Patient Chat: $patientName',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark),
+                            ),
+                            const Text('Live 2-Way Patient Consultation Chat', style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 20),
+                        onPressed: () => Navigator.of(modalContext).pop(),
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 24),
+
+                  // Live Chat Thread Messages
+                  Expanded(
+                    child: FutureBuilder<List<dynamic>>(
+                      future: ApiService().fetchChatMessages(roomId: roomId),
+                      builder: (fbCtx, snapshot) {
+                        final msgs = snapshot.data ?? [];
+                        if (snapshot.connectionState == ConnectionState.waiting && msgs.isEmpty) {
+                          return const Center(child: CircularProgressIndicator());
+                        }
+                        if (msgs.isEmpty) {
+                          return const Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.chat_bubble_outline_rounded, color: AppTheme.textMuted, size: 40),
+                                SizedBox(height: 8),
+                                Text('No patient messages yet.', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                              ],
+                            ),
+                          );
+                        }
+
+                        return ListView.builder(
+                          itemCount: msgs.length,
+                          itemBuilder: (itemCtx, index) {
+                            final m = msgs[index];
+                            final text = (m['message'] ?? '').toString();
+                            final sender = (m['sender_id'] ?? m['senderId'] ?? '').toString();
+                            final isDoctorSender = sender.contains('Dr.') || sender.contains(doctor?.name ?? 'Doctor') || sender.toLowerCase().contains('dentist');
+
+                            return Align(
+                              alignment: isDoctorSender ? Alignment.centerRight : Alignment.centerLeft,
+                              child: Container(
+                                margin: const EdgeInsets.symmetric(vertical: 4),
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+                                decoration: BoxDecoration(
+                                  color: isDoctorSender ? const Color(0xFF10B981) : const Color(0xFFF1F5F9),
+                                  borderRadius: BorderRadius.circular(16).copyWith(
+                                    bottomRight: isDoctorSender ? const Radius.circular(0) : const Radius.circular(16),
+                                    bottomLeft: isDoctorSender ? const Radius.circular(16) : const Radius.circular(0),
+                                  ),
+                                ),
+                                child: Text(
+                                  text,
+                                  style: TextStyle(
+                                    color: isDoctorSender ? Colors.white : AppTheme.textDark,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: msgController,
+                          decoration: InputDecoration(
+                            hintText: 'Type doctor reply to $patientName...',
+                            hintStyle: const TextStyle(fontSize: 13, color: AppTheme.textMuted),
+                            filled: true,
+                            fillColor: const Color(0xFFF8FAFC),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      FloatingActionButton.small(
+                        backgroundColor: const Color(0xFF10B981),
+                        elevation: 1,
+                        onPressed: () async {
+                          final text = msgController.text.trim();
+                          if (text.isEmpty) return;
+                          msgController.clear();
+
+                          await ApiService().sendMessage(
+                            senderId: doctor?.name ?? 'Dr. Dentist',
+                            message: text,
+                            roomId: roomId,
+                          );
+
+                          _patientService.addNotification(
+                            recipientRole: 'Patient',
+                            recipientId: patientName,
+                            title: '💬 Doctor Replied',
+                            message: '${doctor?.name ?? "Doctor"}: "$text"',
+                          );
+
+                          setModalState(() {});
+                        },
+                        child: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   void _showNotificationsModal(BuildContext context, String role) {
     showDialog(
       context: context,
@@ -917,6 +1081,18 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                       ),
                                       onPressed: () => _showPrescriptionModal(context, req.patientName),
                                     ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  OutlinedButton.icon(
+                                    icon: const Icon(Icons.chat_bubble_outline_rounded, size: 14),
+                                    label: const Text('Chat', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: AppTheme.primaryBlue,
+                                      side: const BorderSide(color: AppTheme.primaryBlue),
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                    ),
+                                    onPressed: () => _showDoctorChatModal(context, req.patientName),
                                   ),
                                   const SizedBox(width: 8),
                                   Container(

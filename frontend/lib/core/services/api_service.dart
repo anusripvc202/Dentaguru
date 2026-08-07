@@ -344,6 +344,7 @@ class ApiService {
     required String senderId,
     required String message,
     required String roomId,
+    String? receiverId,
   }) async {
     try {
       final url = Uri.parse(ApiConstants.chatSend);
@@ -354,12 +355,28 @@ class ApiService {
           'senderId': senderId,
           'message': message,
           'roomId': roomId,
+          if (receiverId != null) 'receiverId': receiverId,
         }),
       );
       return jsonDecode(response.body);
     } catch (e) {
       return {'success': false, 'message': 'Failed to send chat message.'};
     }
+  }
+
+  /// Fetch chat messages thread from Supabase/Backend API
+  Future<List<dynamic>> fetchChatMessages({required String roomId}) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/chat/messages').replace(queryParameters: {'roomId': roomId});
+      final response = await http.get(uri, headers: _headers);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['messages'] ?? [];
+      }
+    } catch (e) {
+      debugPrint('Fetch chat messages error: $e');
+    }
+    return [];
   }
 
   /// Fetch medical records and prescriptions from Supabase/Backend API

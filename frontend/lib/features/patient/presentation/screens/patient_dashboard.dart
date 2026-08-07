@@ -262,134 +262,175 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     );
   }
 
-  void _showLiveChatModal(BuildContext context) {
-    final msgController = TextEditingController();
+  void _showChatModal(BuildContext context) {
     final patient = _patientService.currentPatient;
+    final requests = _patientService.requests;
+    final assignedReq = requests.firstWhere(
+      (r) => r.assignedDoctorName != null && r.assignedDoctorName!.isNotEmpty,
+      orElse: () => requests.isNotEmpty ? requests.first : PatientConsultationRequest(
+        id: '', patientName: '', patientPhone: '', problemCategory: '', problemDescription: '', severity: '', submittedAt: DateTime.now()
+      ),
+    );
+
+    final roomId = 'PATIENT-${patient.name.isNotEmpty ? patient.name.toUpperCase().replaceAll(' ', '_') : 'GUEST'}';
+    final msgController = TextEditingController();
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
+      backgroundColor: Colors.transparent,
       builder: (modalContext) {
-        return Padding(
-          padding: EdgeInsets.only(
-            left: 20,
-            right: 20,
-            top: 20,
-            bottom: MediaQuery.of(modalContext).viewInsets.bottom + 20,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
+        return StatefulBuilder(
+          builder: (stCtx, setModalState) {
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.8,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(modalContext).viewInsets.bottom + 20,
+              ),
+              child: Column(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryBlue.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(Icons.chat_rounded, color: AppTheme.primaryBlue, size: 24),
+                  Row(
+                    children: [
+                      const CircleAvatar(
+                        backgroundColor: AppTheme.primaryBlue,
+                        child: Icon(Icons.support_agent_rounded, color: Colors.white, size: 20),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              assignedReq.assignedDoctorName != null && assignedReq.assignedDoctorName!.isNotEmpty
+                                  ? assignedReq.assignedDoctorName!
+                                  : 'Dental Specialist Consultation',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark),
+                            ),
+                            const Text('Live 2-Way Doctor Messaging', style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 20),
+                        onPressed: () => Navigator.of(modalContext).pop(),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 12),
+                  const Divider(height: 24),
+                  
+                  // Live Chat Thread Messages
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: const [
-                        Text('Live Doctor Consultation Chat', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textDark)),
-                        Text('Send a message to your assigned dentist or admin', style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
-                      ],
+                    child: FutureBuilder<List<dynamic>>(
+                      future: ApiService().fetchChatMessages(roomId: roomId),
+                      builder: (fbCtx, snapshot) {
+                        final msgs = snapshot.data ?? [];
+                        if (snapshot.connectionState == ConnectionState.waiting && msgs.isEmpty) {
+                          return const Center(child: CircularProgressIndicator());
+                        }
+                        if (msgs.isEmpty) {
+                          return const Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.chat_bubble_outline_rounded, color: AppTheme.textMuted, size: 40),
+                                SizedBox(height: 8),
+                                Text('No messages yet. Type a message below to start chatting with your doctor!', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                              ],
+                            ),
+                          );
+                        }
+
+                        return ListView.builder(
+                          itemCount: msgs.length,
+                          itemBuilder: (itemCtx, index) {
+                            final m = msgs[index];
+                            final text = (m['message'] ?? '').toString();
+                            final sender = (m['sender_id'] ?? m['senderId'] ?? '').toString();
+                            final isPatientSender = sender.contains(patient.name) || sender.contains(patient.id) || sender.contains(patient.email) || sender.toLowerCase().contains('patient');
+
+                            return Align(
+                              alignment: isPatientSender ? Alignment.centerRight : Alignment.centerLeft,
+                              child: Container(
+                                margin: const EdgeInsets.symmetric(vertical: 4),
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+                                decoration: BoxDecoration(
+                                  color: isPatientSender ? AppTheme.primaryBlue : const Color(0xFFF1F5F9),
+                                  borderRadius: BorderRadius.circular(16).copyWith(
+                                    bottomRight: isPatientSender ? const Radius.circular(0) : const Radius.circular(16),
+                                    bottomLeft: isPatientSender ? const Radius.circular(16) : const Radius.circular(0),
+                                  ),
+                                ),
+                                child: Text(
+                                  text,
+                                  style: TextStyle(
+                                    color: isPatientSender ? Colors.white : AppTheme.textDark,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        );
+                      },
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded, size: 20),
-                    onPressed: () => Navigator.of(modalContext).pop(),
+
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: msgController,
+                          decoration: InputDecoration(
+                            hintText: 'Type your message to doctor...',
+                            hintStyle: const TextStyle(fontSize: 13, color: AppTheme.textMuted),
+                            filled: true,
+                            fillColor: const Color(0xFFF8FAFC),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      FloatingActionButton.small(
+                        backgroundColor: AppTheme.primaryBlue,
+                        elevation: 1,
+                        onPressed: () async {
+                          final text = msgController.text.trim();
+                          if (text.isEmpty) return;
+                          msgController.clear();
+
+                          await ApiService().sendMessage(
+                            senderId: patient.name.isNotEmpty ? patient.name : 'Patient',
+                            message: text,
+                            roomId: roomId,
+                          );
+
+                          _patientService.addNotification(
+                            recipientRole: 'Dentist',
+                            recipientId: assignedReq.assignedDoctorName ?? 'ALL_DENTISTS',
+                            title: '💬 New Patient Message',
+                            message: '${patient.name}: "$text"',
+                          );
+
+                          setModalState(() {});
+                        },
+                        child: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
+                      ),
+                    ],
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF8FAFC),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: const Color(0xFFE2E8F0)),
-                ),
-                child: Row(
-                  children: [
-                    const CircleAvatar(
-                      radius: 14,
-                      backgroundColor: AppTheme.primaryBlue,
-                      child: Text('DR', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        assignedReq != null && assignedReq.assignedDoctorName != null && assignedReq.assignedDoctorName!.isNotEmpty
-                            ? '${assignedReq.assignedDoctorName} - Online'
-                            : 'Assigned Dental Specialist - Online',
-                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppTheme.textDark),
-                      ),
-                    ),
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(color: Color(0xFF10B981), shape: BoxShape.circle),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: msgController,
-                maxLines: 3,
-                decoration: InputDecoration(
-                  hintText: 'Type your question or medical inquiry...',
-                  hintStyle: const TextStyle(fontSize: 13, color: AppTheme.textMuted),
-                  filled: true,
-                  fillColor: const Color(0xFFF8FAFC),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
-                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppTheme.primaryBlue, width: 2)),
-                ),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: () async {
-                  final text = msgController.text.trim();
-                  if (text.isEmpty) return;
-
-                  Navigator.of(modalContext).pop();
-
-                  // 🌐 Post chat message to Supabase backend!
-                  final pId = patient.id.isNotEmpty ? patient.id : patient.email;
-                  await ApiService().sendMessage(
-                    senderId: pId,
-                    message: text,
-                    roomId: 'PATIENT-${patient.name.toUpperCase()}',
-                  );
-
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('✅ Chat message sent to doctor! ("$text")')),
-                    );
-                  }
-                },
-                icon: const Icon(Icons.send_rounded, size: 18),
-                label: const Text('Send Message to Doctor', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primaryBlue,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
