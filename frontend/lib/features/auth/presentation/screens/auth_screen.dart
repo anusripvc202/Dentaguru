@@ -738,7 +738,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
-                                    content: Text(res['message'] ?? '🎉 Password reset successfully in Supabase DB!'),
+                                    content: Text(res['message'] ?? '🎉 Password reset successfully!'),
                                     backgroundColor: const Color(0xFF10B981),
                                     duration: const Duration(seconds: 4),
                                   ),

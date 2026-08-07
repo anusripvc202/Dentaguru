@@ -1228,7 +1228,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     ),
                     SizedBox(height: 2),
                     Text(
-                      'Manage registered dental practices & health hubs in Supabase',
+                      'Manage registered dental practices & health hubs',
                       style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1263,7 +1263,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   const SizedBox(height: 12),
                   const Text('No Registered Clinics Found', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   const SizedBox(height: 4),
-                  const Text('Tap "+ Register New Clinic" to add your first clinic to Supabase.', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  const Text('Tap "+ Register New Clinic" to add your first clinic practice.', style: TextStyle(fontSize: 12, color: Colors.grey)),
                   const SizedBox(height: 16),
                   ElevatedButton.icon(
                     icon: const Icon(Icons.add, size: 16),
@@ -1372,7 +1372,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   Text(' (${clinic.reviewsCount} reviews)', style: const TextStyle(fontSize: 11, color: Colors.grey)),
                                 ],
                               ),
-                              const Text('Live in Supabase DB', style: TextStyle(fontSize: 10, color: Color(0xFF0D9488), fontWeight: FontWeight.bold)),
+                              const Text('Verified Practice', style: TextStyle(fontSize: 10, color: Color(0xFF0D9488), fontWeight: FontWeight.bold)),
                             ],
                           ),
                         ],
@@ -1425,7 +1425,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text('Register New Clinic', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark), overflow: TextOverflow.ellipsis),
-                                Text('Save clinic profile directly to Supabase', style: TextStyle(fontSize: 11, color: AppTheme.textMuted), overflow: TextOverflow.ellipsis),
+                                Text('Create new clinical practice profile', style: TextStyle(fontSize: 11, color: AppTheme.textMuted), overflow: TextOverflow.ellipsis),
                               ],
                             ),
                           ),
@@ -1436,7 +1436,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         controller: nameCtrl,
                         decoration: InputDecoration(
                           labelText: 'Clinic Name *',
-                          hintText: 'e.g. DentaGuru Smile Care Center',
+                          hintText: 'e.g. City Dental Care Center',
                           filled: true,
                           fillColor: const Color(0xFFF8FAFC),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -1509,14 +1509,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     if (success) {
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         SnackBar(
-                                          content: Text('🎉 Clinic "$name" registered successfully in Supabase!'),
+                                          content: Text('🎉 Clinic "$name" registered successfully!'),
                                           backgroundColor: const Color(0xFF10B981),
                                         ),
                                       );
                                     } else {
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         const SnackBar(
-                                          content: Text('❌ Failed to save clinic to Supabase.'),
+                                          content: Text('❌ Failed to save clinic profile.'),
                                           backgroundColor: Color(0xFFEF4444),
                                         ),
                                       );
@@ -2070,7 +2070,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   const SizedBox(height: 10),
                   const Text('No Doctors Registered Yet', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark)),
                   const SizedBox(height: 4),
-                  const Text('Click "+ Register Doctor" above to onboard a dentist into Supabase database.',
+                  const Text('Click "+ Register Doctor" above to onboard a dentist into the platform.',
                       textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
                 ],
               ),
@@ -2801,7 +2801,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 const SizedBox(height: 18),
                 ElevatedButton.icon(
                   icon: const Icon(Icons.cloud_upload_rounded, size: 18),
-                  label: const Text('Register & Save Patient in Supabase', style: TextStyle(fontWeight: FontWeight.bold)),
+                  label: const Text('Register & Save Patient Profile', style: TextStyle(fontWeight: FontWeight.bold)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.primaryBlue,
                     foregroundColor: Colors.white,
@@ -2850,9 +2850,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text(res['success'] == true
-                              ? '🎉 Registered $name in Supabase Database!'
-                              : '🎉 Patient $name registered!'),
+                          content: Text('🎉 Registered $name successfully!'),
                           backgroundColor: const Color(0xFF10B981),
                         ),
                       );
@@ -2929,7 +2927,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   const SizedBox(height: 10),
                   const Text('No Registered Patients Found', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark)),
                   const SizedBox(height: 4),
-                  const Text('Click "+ Add Patient" above to register a patient directly into Supabase database.',
+                  const Text('Click "+ Add Patient" above to register a patient directly into the platform.',
                       textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
                 ],
               ),

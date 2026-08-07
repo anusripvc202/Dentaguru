@@ -205,7 +205,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('🎉 Accepted ${req.patientName}\'s consultation for $chosenSlot! Saved to Supabase DB.'),
+                      content: Text('🎉 Accepted ${req.patientName}\'s consultation for $chosenSlot!'),
                       backgroundColor: const Color(0xFF10B981),
                     ),
                   );
@@ -307,7 +307,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                       'title': 'Digital Prescription Slips',
                       'subtitle': 'Active Prescription (${medName.isNotEmpty ? medName : 'Amoxicillin 500mg'})',
                       'doctorName': _patientService.currentDoctor?.name ?? 'Dentist Practitioner',
-                      'clinicName': _patientService.currentDoctor?.clinicName ?? 'DentaGuru Clinic',
+                      'clinicName': _patientService.currentDoctor?.clinicName ?? '',
                       'date': DateTime.now().toString().split(' ').first,
                       'items': [
                         {
@@ -327,7 +327,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                       title: 'Digital Prescription Slips',
                       subtitle: 'Active Prescription (${medName.isNotEmpty ? medName : 'Amoxicillin 500mg'})',
                       doctorName: _patientService.currentDoctor?.name ?? 'Dentist Practitioner',
-                      clinicName: _patientService.currentDoctor?.clinicName ?? 'DentaGuru Clinic',
+                      clinicName: _patientService.currentDoctor?.clinicName ?? '',
                       items: [
                         {
                           'name': medName.isNotEmpty ? medName : 'Amoxicillin 500mg',

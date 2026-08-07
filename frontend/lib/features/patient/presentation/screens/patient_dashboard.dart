@@ -1185,7 +1185,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                       ),
                                     ],
                                   ),
-                                  if (req.assignedDoctorClinic != null) ...[
+                                  if (req.assignedDoctorClinic != null && req.assignedDoctorClinic!.trim().isNotEmpty) ...[
                                     const SizedBox(height: 6),
                                     Text('🏥 Clinic: ${req.assignedDoctorClinic} • 💰 Estimated Fee (${req.problemCategory}): \$85', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF166534))),
                                   ],
@@ -1333,7 +1333,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     }
 
     final docName = assignedReq.assignedDoctorName ?? 'Attending Specialist';
-    final clinicName = assignedReq.assignedDoctorClinic ?? 'DentaGuru Care Center';
+    final clinicName = assignedReq.assignedDoctorClinic ?? '';
     final isConfirmed = assignedReq.status == 'Doctor Suggested' || assignedReq.status == 'Confirmed';
 
     return Container(
@@ -1439,12 +1439,14 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
                         overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        clinicName,
-                        style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                      if (clinicName.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          clinicName,
+                          style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -1682,7 +1684,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     final type = record['type'] ?? 'prescription';
     final title = record['title'] ?? 'Record Details';
     final doctor = record['doctorName'] ?? 'Attending Specialist';
-    final clinic = record['clinicName'] ?? 'DentaGuru Care Center';
+    final clinic = (record['clinicName'] ?? record['clinic_name'] ?? '').toString();
     final date = record['date'] ?? '2026-08-01';
     final List items = record['items'] is List ? record['items'] : [];
 

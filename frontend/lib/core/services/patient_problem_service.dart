@@ -515,7 +515,7 @@ class PatientProblemService extends ChangeNotifier {
           final phone = (userObj['phone'] ?? dMap['phone'] ?? '+1 202 555 0100').toString();
           final specialty = (dMap['speciality'] ?? dMap['specialty'] ?? 'General Dentistry').toString();
           final licNum = (dMap['license_number'] ?? dMap['licenseNumber'] ?? 'DEN-LIC-REG').toString();
-          final cName = (clinicObj['clinic_name'] ?? clinicObj['name'] ?? dMap['clinicName'] ?? 'DentaGuru Registered Clinic').toString();
+          final cName = (clinicObj['clinic_name'] ?? clinicObj['name'] ?? dMap['clinicName'] ?? '').toString();
           final cLoc = (clinicObj['location'] ?? dMap['location'] ?? 'Healthcare Hub').toString();
 
           final formattedName = name.startsWith('Dr.') ? name : 'Dr. $name';
@@ -573,7 +573,8 @@ class PatientProblemService extends ChangeNotifier {
             }
           }
 
-          final clinic = item['clinic_id'] ?? 'DentaGuru Care Center';
+          final clinicObj = item['clinic'] ?? {};
+          final clinic = (clinicObj['clinic_name'] ?? clinicObj['name'] ?? item['clinic_name'] ?? item['clinicName'] ?? '').toString();
           final treatment = item['treatment'] ?? 'Dental Consultation';
           final slot = item['time_slot'] ?? item['timeSlot'];
 
@@ -592,6 +593,9 @@ class PatientProblemService extends ChangeNotifier {
             if (assignedDocName != null) {
               _requests[existingIndex].assignedDoctorName = assignedDocName;
             }
+            if (clinic.isNotEmpty) {
+              _requests[existingIndex].assignedDoctorClinic = clinic;
+            }
           } else {
             _requests.add(
               PatientConsultationRequest(
@@ -599,15 +603,15 @@ class PatientProblemService extends ChangeNotifier {
                 patientName: pName,
                 patientPhone: pPhone,
                 problemCategory: treatment.toString(),
-                problemDescription: 'Scheduled consultation via DentaGuru DB',
+                problemDescription: 'Scheduled dental consultation',
                 severity: 'Moderate',
                 submittedAt: DateTime.now(),
                 status: 'Confirmed',
                 assignedDoctorName: assignedDocName,
                 assignedDoctorSpecialty: 'Dental Specialist',
-                assignedDoctorClinic: clinic.toString(),
+                assignedDoctorClinic: clinic.isNotEmpty ? clinic : null,
                 confirmedTimeSlot: slot?.toString(),
-                adminNotes: 'Restored from Supabase database record',
+                adminNotes: 'Confirmed consultation record',
                 whatsappNotificationSent: true,
               ),
             );
