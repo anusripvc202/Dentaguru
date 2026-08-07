@@ -1096,7 +1096,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                       side: const BorderSide(color: Color(0xFF16A34A), width: 1.5),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                     ),
-                                    onPressed: () => _showLiveChatModal(context),
+                                    onPressed: () => _showChatModal(context),
                                   ),
                                 ],
                               ),
