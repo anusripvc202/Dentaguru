@@ -878,7 +878,9 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                               const SizedBox(height: 6),
                               Text('📝 Admin Note: ${req.adminNotes}', style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: AppTheme.textMuted)),
                             ],
-                            const S                             if (isConfirmed) ...[
+                            const SizedBox(height: 12),
+
+                            if (isConfirmed) ...[
                               if (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.isNotEmpty) ...[
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
