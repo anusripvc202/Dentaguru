@@ -51,7 +51,7 @@ const getTransporter = async () => {
  * Send an OTP Verification Email to user's inbox
  */
 const sendOtpEmail = async (toEmail, otpCode, isReset = false) => {
-    if (!toEmail || !toEmail.contains('@')) return { success: false, reason: 'Invalid Email' };
+    if (!toEmail || !toEmail.includes('@')) return { success: false, reason: 'Invalid Email' };
 
     try {
         const mailTransporter = await getTransporter();
