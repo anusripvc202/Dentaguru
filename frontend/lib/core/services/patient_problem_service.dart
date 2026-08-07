@@ -685,13 +685,13 @@ class PatientProblemService extends ChangeNotifier {
     notifyListeners();
   }
 
-  void submitProblem({
+  Future<void> submitProblem({
     required String problemCategory,
     required String problemDescription,
     required String severity,
-  }) {
+  }) async {
     final newReq = PatientConsultationRequest(
-      id: 'PR-${900 + _requests.length + 1}',
+      id: 'PR-${DateTime.now().millisecondsSinceEpoch}',
       patientName: currentPatient.name,
       patientPhone: currentPatient.phone,
       problemCategory: problemCategory,
@@ -703,6 +703,19 @@ class PatientProblemService extends ChangeNotifier {
     _requests.insert(0, newReq);
     _saveToStorage();
     notifyListeners();
+
+    // 🌐 Save immediately to Supabase PostgreSQL database table ('appointments')
+    try {
+      await ApiService().createAppointment(
+        patientId: currentPatient.name.isNotEmpty ? currentPatient.name : 'Patient',
+        treatment: problemCategory,
+        timeSlot: 'Pending Doctor Confirmation',
+        date: DateTime.now().toIso8601String(),
+      );
+      await syncAppointmentsFromApi();
+    } catch (e) {
+      debugPrint('Error saving appointment to Supabase DB in submitProblem: $e');
+    }
   }
 
   void assignDoctorToRequest({
