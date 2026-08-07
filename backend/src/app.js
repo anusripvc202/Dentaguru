@@ -6,6 +6,9 @@ const apiRoutes = require('./routes/api');
 
 const app = express();
 
+// Trust proxy for reverse proxy platforms like Render/Vercel
+app.set('trust proxy', 1);
+
 // ─────────────────────────────────────────────
 // 1. CORS & PARSING MIDDLEWARE
 // ─────────────────────────────────────────────
@@ -24,10 +27,10 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // ─────────────────────────────────────────────
 app.use(helmet({ crossOriginResourcePolicy: false }));
 
-// Force HTTPS in production
+// Force HTTPS in production when header is present
 if (process.env.NODE_ENV === 'production') {
     app.use((req, res, next) => {
-        if (req.headers['x-forwarded-proto'] !== 'https') {
+        if (req.headers['x-forwarded-proto'] && req.headers['x-forwarded-proto'] !== 'https') {
             return res.redirect(301, `https://${req.headers.host}${req.url}`);
         }
         next();
