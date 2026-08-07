@@ -371,14 +371,13 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   }
 
   Future<void> _handleSendOtp() async {
-    final phone = _phoneController.text.trim().isNotEmpty 
-        ? _phoneController.text.trim() 
-        : _emailController.text.trim();
+    final phone = _phoneController.text.trim();
+    final email = _emailController.text.trim();
 
-    if (phone.isEmpty) {
+    if (phone.isEmpty && email.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('⚠️ Please enter a phone number or email to receive OTP.'),
+          content: Text('⚠️ Please enter your Phone Number or Email Address to receive OTP.'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -390,7 +389,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       _otpErrorMessage = null;
     });
 
-    final res = await ApiService().requestOtp(phone);
+    final res = await ApiService().requestOtp(phone: phone, email: email);
 
     if (!mounted) return;
     setState(() {
@@ -400,7 +399,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('📩 OTP Verification Code sent! (Demo Code: ${res['mockCode'] ?? '8849'})'),
+        content: Text('📩 OTP Verification Code sent to both Mobile Number & Email! (Demo Code: ${res['mockCode'] ?? '8849'})'),
         backgroundColor: const Color(0xFF10B981),
         duration: const Duration(seconds: 4),
       ),
@@ -419,11 +418,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       _otpErrorMessage = null;
     });
 
-    final phone = _phoneController.text.trim().isNotEmpty 
-        ? _phoneController.text.trim() 
-        : _emailController.text.trim();
+    final phone = _phoneController.text.trim();
+    final email = _emailController.text.trim();
 
-    final res = await ApiService().verifyOtp(phone, code);
+    final res = await ApiService().verifyOtp(phone: phone, email: email, code: code);
 
     if (!mounted) return;
     setState(() => _isVerifyingOtp = false);
@@ -435,7 +433,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('🎉 OTP Verified successfully! "Create Account" button is now ACTIVE.'),
+          content: Text('🎉 Dual OTP Verified! Mobile & Email confirmed. "Create Account" button is now ACTIVE.'),
           backgroundColor: Color(0xFF10B981),
         ),
       );
@@ -478,8 +476,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               Expanded(
                 child: Text(
                   _isOtpVerified
-                      ? 'Mobile OTP Verification Complete'
-                      : (_isOtpSent ? 'Enter 4-Digit OTP Code' : 'Mobile OTP Verification Required'),
+                      ? 'Mobile & Email OTP Verification Complete'
+                      : (_isOtpSent ? 'Enter 4-Digit OTP Code' : 'Dual OTP Verification Required'),
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 13,
@@ -504,15 +502,15 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
           if (!_isOtpVerified && !_isOtpSent) ...[
             const Text(
-              'Verify your phone number with an OTP code before completing account registration.',
+              'A verification OTP code will be sent to both your Mobile Number & Email Address before activating account creation.',
               style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
             ),
             const SizedBox(height: 10),
             ElevatedButton.icon(
               icon: _isSendingOtp
                   ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Icon(Icons.send_rounded, size: 16),
-              label: Text(_isSendingOtp ? 'Sending OTP...' : 'Send OTP Verification Code', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  : const Icon(Icons.mark_email_read_rounded, size: 16),
+              label: Text(_isSendingOtp ? 'Sending Dual OTP...' : 'Send OTP to Mobile & Email', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.primaryBlue,
                 foregroundColor: Colors.white,
@@ -562,11 +560,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             const SizedBox(height: 6),
             InkWell(
               onTap: _handleSendOtp,
-              child: const Text('Didn\'t receive code? Resend OTP (Demo Code: 8849)', style: TextStyle(fontSize: 10, color: AppTheme.primaryBlue, fontWeight: FontWeight.bold, decoration: TextDecoration.underline)),
+              child: const Text('Didn\'t receive code? Resend OTP to Mobile & Email (Demo Code: 8849)', style: TextStyle(fontSize: 10, color: AppTheme.primaryBlue, fontWeight: FontWeight.bold, decoration: TextDecoration.underline)),
             ),
           ] else ...[
             const Text(
-              'Identity verified via mobile SMS OTP. You may now click Create Account below.',
+              'Identity verified via Mobile SMS & Email OTP. Click Create Account below to finish.',
               style: TextStyle(fontSize: 11, color: Color(0xFF15803D), fontWeight: FontWeight.w600),
             ),
           ],
