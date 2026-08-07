@@ -515,7 +515,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                 padding: const EdgeInsets.symmetric(vertical: 6),
                                 child: Row(
                                   mainAxisAlignment: isDoctorSender ? MainAxisAlignment.end : MainAxisAlignment.start,
-                                  crossAxisAlignment: CrossAlignment.end,
+                                  crossAxisAlignment: CrossAxisAlignment.end,
                                   children: [
                                     if (!isDoctorSender) ...[
                                       CircleAvatar(
@@ -555,7 +555,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                           border: isDoctorSender ? null : Border.all(color: const Color(0xFFE2E8F0)),
                                         ),
                                         child: Column(
-                                          crossAxisAlignment: isDoctorSender ? CrossAlignment.end : CrossAlignment.start,
+                                          crossAxisAlignment: isDoctorSender ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                                           children: [
                                             Text(
                                               isDoctorSender ? (doctor?.name ?? 'Dr. Dentist') : patientName,

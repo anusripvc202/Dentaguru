@@ -428,7 +428,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                 padding: const EdgeInsets.symmetric(vertical: 6),
                                 child: Row(
                                   mainAxisAlignment: isPatientSender ? MainAxisAlignment.end : MainAxisAlignment.start,
-                                  crossAxisAlignment: CrossAlignment.end,
+                                  crossAxisAlignment: CrossAxisAlignment.end,
                                   children: [
                                     if (!isPatientSender) ...[
                                       const CircleAvatar(
@@ -465,7 +465,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                           border: isPatientSender ? null : Border.all(color: const Color(0xFFE2E8F0)),
                                         ),
                                         child: Column(
-                                          crossAxisAlignment: isPatientSender ? CrossAlignment.end : CrossAlignment.start,
+                                          crossAxisAlignment: isPatientSender ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                                           children: [
                                             Text(
                                               isPatientSender ? patient.name : docName,
