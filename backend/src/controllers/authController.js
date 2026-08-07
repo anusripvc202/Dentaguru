@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { User, Dentist, comparePassword } = require('../models/Schemas');
+const { User, Dentist, Clinic, comparePassword } = require('../models/Schemas');
 const { supabase } = require('../config/supabase');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretjwtkey123';
@@ -54,25 +54,32 @@ exports.register = async (req, res) => {
             try {
                 const cName = clinicName && clinicName.trim() ? clinicName.trim() : `${user.name}'s Dental Practice`;
                 const cAddr = clinicAddress && clinicAddress.trim() ? clinicAddress.trim() : '123 Healthcare Blvd, Medical Hub, Suite 400';
-                const defaultPricing = req.body.pricing || [
-                    { service: 'General Consultation', fee: '$75' },
-                    { service: 'Tooth Decay / Cavity', fee: '$85' },
-                    { service: 'Root Canal', fee: '$180' },
-                    { service: 'Orthodontics', fee: '$200' },
-                    { service: 'Tooth Extraction', fee: '$110' },
-                    { service: 'Periodontics / Gum Care', fee: '$95' }
-                ];
-                const clinic = await Clinic.create({
-                    user_id: user.id,
-                    clinic_name: cName,
-                    location: cAddr,
-                    verified: true,
-                    rating: 5.0,
-                    reviews_count: 0,
-                    pricing: defaultPricing
-                });
+                
+                let clinic = await Clinic.findOne({ clinic_name: cName });
+                if (!clinic) {
+                    const defaultPricing = req.body.pricing || [
+                        { service: 'General Consultation', fee: '$75' },
+                        { service: 'Tooth Decay / Cavity', fee: '$85' },
+                        { service: 'Root Canal', fee: '$180' },
+                        { service: 'Orthodontics', fee: '$200' },
+                        { service: 'Tooth Extraction', fee: '$110' },
+                        { service: 'Periodontics / Gum Care', fee: '$95' }
+                    ];
+                    clinic = await Clinic.create({
+                        user_id: user.id,
+                        clinic_name: cName,
+                        location: cAddr,
+                        verified: true,
+                        rating: 5.0,
+                        reviews_count: 0,
+                        services: [specialty || 'General Dentistry', 'Root Canal', 'Orthodontics'],
+                        pricing: defaultPricing
+                    });
+                    console.log(`✅ New Clinic record created in 'clinics' table for: ${cName}`);
+                } else {
+                    console.log(`ℹ️ Existing Clinic record linked: ${cName}`);
+                }
                 clinicId = clinic ? clinic.id : null;
-                console.log(`✅ Clinic record created in 'clinics' table for: ${cName}`);
             } catch (cErr) {
                 console.error('⚠️ Clinic Table Creation Warning:', cErr.message);
             }

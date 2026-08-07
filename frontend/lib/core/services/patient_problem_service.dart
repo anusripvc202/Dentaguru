@@ -797,44 +797,71 @@ class PatientProblemService extends ChangeNotifier {
     final cachedPhoto = photoBytes ?? _userPhotoCache[email.trim().toLowerCase()];
 
     final formattedName = name.trim().startsWith('Dr.') ? name.trim() : 'Dr. ${name.trim()}';
+    final cleanLicense = licenseNumber.trim().isEmpty ? 'DEN-LIC-${DateTime.now().millisecondsSinceEpoch}' : licenseNumber.trim();
+    final cleanClinic = clinicName.trim().isEmpty ? 'DentaGuru Care Center' : clinicName.trim();
+    final cleanSpecialty = specialty.trim().isEmpty ? 'General Dentistry' : specialty.trim();
+    final cleanAddress = clinicAddress.trim().isEmpty ? '123 Healthcare Blvd, Medical Hub, Suite 400' : clinicAddress.trim();
+
     final newDoctor = DoctorModel(
       id: 'DOC-${100 + _allDoctors.length + 1}',
       name: formattedName.isEmpty ? 'Dr. New Dentist' : formattedName,
-      specialty: specialty.trim().isEmpty ? 'General Dentistry' : specialty.trim(),
+      specialty: cleanSpecialty,
       qualification: qualification.trim().isEmpty ? 'BDS, MDS' : qualification.trim(),
       experienceYears: experienceYears <= 0 ? 5 : experienceYears,
       rating: 5.0,
       reviewCount: 1,
-      clinicName: clinicName.trim().isEmpty ? 'DentaGuru Care Center' : clinicName.trim(),
+      clinicName: cleanClinic,
       phone: phone.trim().isEmpty ? '+1 202 555 0100' : phone.trim(),
       email: email.trim().isEmpty ? 'doctor@dentaguru.com' : email.trim(),
       status: 'Available',
       nextAvailableSlots: ['Today, 2:00 PM', 'Tomorrow, 10:00 AM'],
       consultationFee: consultationFee.trim().isEmpty ? '\$75' : consultationFee.trim(),
-      licenseNumber: licenseNumber.trim().isEmpty ? 'DEN-REG-AUTO' : licenseNumber.trim(),
+      licenseNumber: cleanLicense,
       photoBytes: cachedPhoto,
-      clinicAddress: clinicAddress.trim().isEmpty ? '123 Healthcare Blvd, Medical Hub, Suite 400' : clinicAddress.trim(),
+      clinicAddress: cleanAddress,
     );
 
-    _allDoctors.insert(0, newDoctor);
+    if (!_allDoctors.any((d) => d.email.toLowerCase() == newDoctor.email.toLowerCase())) {
+      _allDoctors.insert(0, newDoctor);
+    }
     currentDoctor = newDoctor;
 
-    final cName = newDoctor.clinicName;
-    if (!_allClinics.any((c) => c.clinicName.toLowerCase() == cName.toLowerCase())) {
+    if (!_allClinics.any((c) => c.clinicName.toLowerCase() == cleanClinic.toLowerCase())) {
       _allClinics.insert(
         0,
         ClinicModel(
           id: 'CLN-${DateTime.now().millisecondsSinceEpoch}',
-          clinicName: cName,
-          location: clinicAddress.trim().isEmpty ? '123 Healthcare Blvd, Medical Hub, Suite 400' : clinicAddress.trim(),
+          clinicName: cleanClinic,
+          location: cleanAddress,
           verified: true,
-          services: [specialty, 'General Dentistry', 'Root Canal'],
+          services: [cleanSpecialty, 'General Dentistry', 'Root Canal'],
         ),
       );
     }
 
     _saveToStorage();
     notifyListeners();
+
+    // End-to-end Real-Time Persistence into Supabase ('users', 'clinics', 'dentists')
+    ApiService().registerUser(
+      name: formattedName,
+      email: email.trim().isEmpty ? 'doctor_${DateTime.now().millisecondsSinceEpoch}@dentaguru.com' : email.trim(),
+      password: 'Password123!',
+      phone: phone.trim().isEmpty ? '+91${DateTime.now().millisecondsSinceEpoch.toString().substring(3)}' : phone.trim(),
+      role: 'Dentist',
+      specialty: cleanSpecialty,
+      licenseNumber: cleanLicense,
+      clinicName: cleanClinic,
+      clinicAddress: cleanAddress,
+    ).then((res) {
+      if (res['success'] == true) {
+        syncClinicsFromApi();
+        syncDoctorsFromApi();
+      }
+    }).catchError((e) {
+      debugPrint('Error syncing registered doctor/clinic to Supabase: $e');
+    });
+
     return newDoctor;
   }
 
