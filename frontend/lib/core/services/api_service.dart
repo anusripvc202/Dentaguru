@@ -345,6 +345,7 @@ class ApiService {
     required String message,
     required String roomId,
     String? receiverId,
+    String? type,
   }) async {
     try {
       final url = Uri.parse(ApiConstants.chatSend);
@@ -355,6 +356,7 @@ class ApiService {
           'senderId': senderId,
           'message': message,
           'roomId': roomId,
+          if (type != null) 'type': type,
           if (receiverId != null) 'receiverId': receiverId,
         }),
       );

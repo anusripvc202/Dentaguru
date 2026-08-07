@@ -2,14 +2,18 @@ const { ChatMessage } = require('../models/Schemas');
 
 // 1. SEND CHAT MESSAGE (Saved to Supabase 'chat_messages' table)
 exports.sendMessage = async (req, res) => {
-    const { roomId, senderId, receiverId, message, type } = req.body;
+    const { roomId, senderId, receiverId, message, type, senderRole } = req.body;
     try {
+        const sStr = String(senderId || '').toLowerCase();
+        const isDoc = type === 'doctor' || senderRole === 'Dentist' || sStr.startsWith('dr.') || sStr.includes('doctor') || sStr.includes('dentist');
+        const msgType = isDoc ? 'doctor' : (type === 'patient' ? 'patient' : 'text');
+
         const chat = await ChatMessage.create({
             room_id: roomId || 'GENERAL-CHAT',
             sender_id: senderId || (req.user ? req.user.id : null),
             receiver_id: receiverId || null,
             message: message || '',
-            type: type || 'text'
+            type: msgType
         });
 
         console.log(`💬 Chat message saved in Supabase 'chat_messages' table: "${message}"`);

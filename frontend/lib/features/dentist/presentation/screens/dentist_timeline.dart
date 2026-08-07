@@ -358,9 +358,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     );
   }
 
-  void _showDoctorChatModal(BuildContext context, String patientName) {
+  void _showDoctorChatModal(BuildContext context, String patientName, String roomId) {
     final doctor = _patientService.currentDoctor;
-    final roomId = 'PATIENT-${patientName.isNotEmpty ? patientName.toUpperCase().replaceAll(' ', '_') : 'GUEST'}';
     final msgController = TextEditingController();
 
     showModalBottomSheet(
@@ -371,222 +370,178 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         return StatefulBuilder(
           builder: (stCtx, setModalState) {
             return Container(
-              height: MediaQuery.of(context).size.height * 0.85,
+              height: MediaQuery.of(context).size.height * 0.9,
               decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-                boxShadow: [
-                  BoxShadow(color: Colors.black26, blurRadius: 25, offset: Offset(0, -5)),
-                ],
+                color: Color(0xFFE5DDD5),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
               ),
               child: Column(
                 children: [
-                  // 🌟 Sleek Emerald Gradient Header Bar
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                     decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [Color(0xFF064E3B), Color(0xFF059669), Color(0xFF10B981)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+                      color: Color(0xFF075E54),
+                      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
                     ),
                     child: Row(
                       children: [
+                        IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 22),
+                          onPressed: () => Navigator.of(modalContext).pop(),
+                        ),
+                        const SizedBox(width: 8),
                         Stack(
                           children: [
                             CircleAvatar(
-                              radius: 22,
+                              radius: 18,
                               backgroundColor: Colors.white.withValues(alpha: 0.2),
                               child: Text(
                                 patientName.isNotEmpty ? patientName[0].toUpperCase() : 'P',
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
                               ),
                             ),
                             Positioned(
                               right: 0,
                               bottom: 0,
                               child: Container(
-                                width: 12,
-                                height: 12,
+                                width: 10,
+                                height: 10,
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF34D399),
+                                  color: const Color(0xFF25D366),
                                   shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.white, width: 2),
+                                  border: Border.all(color: const Color(0xFF075E54), width: 1.5),
                                 ),
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(width: 14),
+                        const SizedBox(width: 10),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                patientName.isNotEmpty ? patientName : 'Patient Consultation',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
+                                patientName.isNotEmpty ? patientName : 'Patient',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white),
+                                overflow: TextOverflow.ellipsis,
                               ),
-                              const SizedBox(height: 2),
-                              Row(
-                                children: const [
-                                  Icon(Icons.shield_outlined, color: Color(0xFFA7F3D0), size: 12),
-                                  SizedBox(width: 4),
-                                  Text(
-                                    'Encrypted 2-Way Patient Chat',
-                                    style: TextStyle(fontSize: 11, color: Color(0xFFA7F3D0), fontWeight: FontWeight.w500),
-                                  ),
-                                ],
+                              const Text(
+                                'online',
+                                style: TextStyle(fontSize: 11, color: Color(0xFFB9E5E1), fontWeight: FontWeight.w400),
                               ),
                             ],
                           ),
                         ),
-                        IconButton(
-                          icon: Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), shape: BoxShape.circle),
-                            child: const Icon(Icons.close_rounded, color: Colors.white, size: 18),
-                          ),
-                          onPressed: () => Navigator.of(modalContext).pop(),
-                        ),
+                        const Icon(Icons.videocam_rounded, color: Colors.white, size: 22),
+                        const SizedBox(width: 16),
+                        const Icon(Icons.call_rounded, color: Colors.white, size: 20),
+                        const SizedBox(width: 12),
+                        const Icon(Icons.more_vert_rounded, color: Colors.white, size: 20),
                       ],
                     ),
                   ),
-
-                  // 💬 Live Chat Messages Thread
                   Expanded(
                     child: Container(
-                      color: const Color(0xFFF8FAFC),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFE5DDD5),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       child: FutureBuilder<List<dynamic>>(
                         future: ApiService().fetchChatMessages(roomId: roomId),
                         builder: (fbCtx, snapshot) {
                           final msgs = snapshot.data ?? [];
                           if (snapshot.connectionState == ConnectionState.waiting && msgs.isEmpty) {
-                            return const Center(child: CircularProgressIndicator(color: Color(0xFF10B981)));
+                            return const Center(child: CircularProgressIndicator(color: Color(0xFF075E54)));
                           }
                           if (msgs.isEmpty) {
                             return Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.all(16),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF10B981).withValues(alpha: 0.1),
-                                      shape: BoxShape.circle,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFFF5C4),
+                                  borderRadius: BorderRadius.circular(10),
+                                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4)],
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.lock_rounded, size: 14, color: Color(0xFF856404)),
+                                    SizedBox(width: 6),
+                                    Text(
+                                      'Messages are end-to-end encrypted.',
+                                      style: TextStyle(fontSize: 11, color: Color(0xFF856404), fontWeight: FontWeight.w500),
                                     ),
-                                    child: const Icon(Icons.chat_bubble_outline_rounded, color: Color(0xFF10B981), size: 36),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Text(
-                                    'No messages from $patientName yet.',
-                                    style: const TextStyle(color: AppTheme.textDark, fontWeight: FontWeight.bold, fontSize: 14),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  const Text(
-                                    'Send a welcome message or dental advice below!',
-                                    style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             );
                           }
-
                           return ListView.builder(
                             itemCount: msgs.length,
-                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            padding: const EdgeInsets.symmetric(vertical: 6),
                             itemBuilder: (itemCtx, index) {
                               final m = msgs[index];
                               final text = (m['message'] ?? '').toString();
+                              final mType = (m['type'] ?? '').toString();
                               final senderObj = m['sender'] ?? {};
                               final senderRole = (senderObj['role'] ?? '').toString();
                               final senderName = (senderObj['name'] ?? m['sender_id'] ?? m['senderId'] ?? '').toString();
-                              
-                              // Determine if Doctor or Patient sent this message
-                              final isDoctorSender = senderRole == 'Dentist' ||
-                                  senderName.startsWith('Dr.') ||
-                                  senderName.contains(doctor?.name ?? 'Dentist') ||
-                                  senderName.toLowerCase().contains('doctor') ||
-                                  senderName.toLowerCase().contains('dentist');
+                              final createdAt = m['created_at'] != null ? DateTime.tryParse(m['created_at'].toString()) : null;
 
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 6),
-                                child: Row(
-                                  mainAxisAlignment: isDoctorSender ? MainAxisAlignment.end : MainAxisAlignment.start,
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    if (!isDoctorSender) ...[
-                                      CircleAvatar(
-                                        radius: 14,
-                                        backgroundColor: const Color(0xFF64748B),
-                                        child: Text(
-                                          patientName.isNotEmpty ? patientName[0].toUpperCase() : 'P',
-                                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-                                        ),
+                              final String timeStr = createdAt != null 
+                                  ? '${createdAt.hour > 12 ? createdAt.hour - 12 : (createdAt.hour == 0 ? 12 : createdAt.hour)}:${createdAt.minute.toString().padLeft(2, '0')} ${createdAt.hour >= 12 ? 'PM' : 'AM'}'
+                                  : 'Just now';
+
+                              final bool isSentByMe = mType == 'doctor' ||
+                                  senderRole == 'Dentist' ||
+                                  senderName.startsWith('Dr.') ||
+                                  (doctor?.name != null && doctor!.name.isNotEmpty && senderName.contains(doctor.name));
+
+                              return Align(
+                                alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
+                                child: Container(
+                                  margin: const EdgeInsets.symmetric(vertical: 3),
+                                  padding: const EdgeInsets.fromLTRB(12, 8, 10, 6),
+                                  constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.76),
+                                  decoration: BoxDecoration(
+                                    color: isSentByMe ? const Color(0xFFDCF8C6) : Colors.white,
+                                    borderRadius: BorderRadius.circular(12).copyWith(
+                                      topRight: isSentByMe ? const Radius.circular(2) : const Radius.circular(12),
+                                      topLeft: isSentByMe ? const Radius.circular(12) : const Radius.circular(2),
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 3, offset: const Offset(0, 1)),
+                                    ],
+                                  ),
+                                  child: Wrap(
+                                    alignment: WrapAlignment.end,
+                                    crossAxisAlignment: WrapCrossAlignment.bottom,
+                                    children: [
+                                      Text(
+                                        text,
+                                        style: const TextStyle(fontSize: 14, color: Color(0xFF111B21), height: 1.3),
                                       ),
                                       const SizedBox(width: 8),
-                                    ],
-                                    Flexible(
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
-                                        decoration: BoxDecoration(
-                                          gradient: isDoctorSender
-                                              ? const LinearGradient(
-                                                  colors: [Color(0xFF059669), Color(0xFF10B981)],
-                                                  begin: Alignment.topLeft,
-                                                  end: Alignment.bottomRight,
-                                                )
-                                              : null,
-                                          color: isDoctorSender ? null : Colors.white,
-                                          borderRadius: BorderRadius.circular(18).copyWith(
-                                            bottomRight: isDoctorSender ? const Radius.circular(2) : const Radius.circular(18),
-                                            bottomLeft: isDoctorSender ? const Radius.circular(18) : const Radius.circular(2),
-                                          ),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: isDoctorSender ? const Color(0xFF10B981).withValues(alpha: 0.2) : Colors.black.withValues(alpha: 0.04),
-                                              blurRadius: 8,
-                                              offset: const Offset(0, 2),
-                                            ),
-                                          ],
-                                          border: isDoctorSender ? null : Border.all(color: const Color(0xFFE2E8F0)),
-                                        ),
-                                        child: Column(
-                                          crossAxisAlignment: isDoctorSender ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 4),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
                                           children: [
                                             Text(
-                                              isDoctorSender ? (doctor?.name ?? 'Dr. Dentist') : patientName,
-                                              style: TextStyle(
-                                                fontSize: 10,
-                                                fontWeight: FontWeight.bold,
-                                                color: isDoctorSender ? const Color(0xFFA7F3D0) : const Color(0xFF64748B),
-                                              ),
+                                              timeStr,
+                                              style: const TextStyle(fontSize: 10, color: Color(0xFF667781)),
                                             ),
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              text,
-                                              style: TextStyle(
-                                                color: isDoctorSender ? Colors.white : AppTheme.textDark,
-                                                fontSize: 13.5,
-                                                height: 1.3,
-                                              ),
-                                            ),
+                                            if (isSentByMe) ...[
+                                              const SizedBox(width: 3),
+                                              const Icon(Icons.done_all_rounded, size: 14, color: Color(0xFF34B7F1)),
+                                            ],
                                           ],
                                         ),
                                       ),
-                                    ),
-                                    if (isDoctorSender) ...[
-                                      const SizedBox(width: 8),
-                                      const CircleAvatar(
-                                        radius: 14,
-                                        backgroundColor: Color(0xFF10B981),
-                                        child: Icon(Icons.medical_services_rounded, color: Colors.white, size: 12),
-                                      ),
                                     ],
-                                  ],
+                                  ),
                                 ),
                               );
                             },
@@ -595,53 +550,42 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                       ),
                     ),
                   ),
-
-                  // ✍️ Input Bar
                   Container(
                     padding: EdgeInsets.only(
-                      left: 16,
-                      right: 16,
-                      top: 12,
-                      bottom: MediaQuery.of(modalContext).viewInsets.bottom + 16,
+                      left: 8,
+                      right: 8,
+                      top: 8,
+                      bottom: MediaQuery.of(modalContext).viewInsets.bottom + 8,
                     ),
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
-                    ),
+                    color: const Color(0xFFF0F2F5),
                     child: Row(
                       children: [
+                        const Icon(Icons.sentiment_satisfied_alt_rounded, color: Color(0xFF54656F), size: 24),
+                        const SizedBox(width: 8),
+                        const Icon(Icons.attach_file_rounded, color: Color(0xFF54656F), size: 22),
+                        const SizedBox(width: 8),
                         Expanded(
-                          child: TextField(
-                            controller: msgController,
-                            decoration: InputDecoration(
-                              hintText: 'Type doctor reply to $patientName...',
-                              hintStyle: const TextStyle(fontSize: 13, color: AppTheme.textMuted),
-                              filled: true,
-                              fillColor: const Color(0xFFF8FAFC),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(24),
-                                borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(24),
+                            ),
+                            child: TextField(
+                              controller: msgController,
+                              style: const TextStyle(fontSize: 14, color: Color(0xFF111B21)),
+                              decoration: const InputDecoration(
+                                hintText: 'Message',
+                                hintStyle: TextStyle(fontSize: 14, color: Color(0xFF8696A0)),
+                                border: InputBorder.none,
+                                contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                               ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(24),
-                                borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(24),
-                                borderSide: const BorderSide(color: Color(0xFF10B981), width: 2),
-                              ),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                             ),
                           ),
                         ),
-                        const SizedBox(width: 10),
-                        Container(
-                          decoration: const BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [Color(0xFF059669), Color(0xFF10B981)],
-                            ),
-                            shape: BoxShape.circle,
-                          ),
+                        const SizedBox(width: 8),
+                        CircleAvatar(
+                          radius: 20,
+                          backgroundColor: const Color(0xFF075E54),
                           child: IconButton(
                             icon: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
                             onPressed: () async {
@@ -649,18 +593,19 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                               if (text.isEmpty) return;
                               msgController.clear();
 
-                              final docSender = (doctor?.name.isNotEmpty == true) ? doctor!.name : 'Dr. Dentist';
+                              final dSender = doctor?.name ?? 'Doctor';
                               await ApiService().sendMessage(
-                                senderId: docSender,
+                                senderId: dSender,
                                 message: text,
                                 roomId: roomId,
+                                type: 'doctor',
                               );
 
                               _patientService.addNotification(
                                 recipientRole: 'Patient',
                                 recipientId: patientName,
-                                title: '💬 Doctor Replied',
-                                message: '$docSender: "$text"',
+                                title: '💬 Doctor Reply',
+                                message: '$dSender: "$text"',
                               );
 
                               setModalState(() {});
@@ -1249,7 +1194,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                     ),
-                                    onPressed: () => _showDoctorChatModal(context, req.patientName),
+                                    onPressed: () {
+                                      final rId = 'PATIENT-${req.patientName.isNotEmpty ? req.patientName.toUpperCase().replaceAll(' ', '_') : 'GUEST'}';
+                                      _showDoctorChatModal(context, req.patientName, rId);
+                                    },
                                   ),
                                   const SizedBox(width: 8),
                                   Container(
