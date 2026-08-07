@@ -554,10 +554,13 @@ class PatientProblemService extends ChangeNotifier {
         for (final item in list) {
           final reqId = (item['_id'] ?? item['id'] ?? 'REQ-${item['patient_id']}-${DateTime.now().millisecondsSinceEpoch}').toString();
           
-          final rawP = (item['patient_name'] ?? item['patientName'] ?? item['patient_id'] ?? 'Patient').toString();
-          final pName = (rawP.contains('-') && rawP.length > 20) 
-              ? (currentPatient.name.isNotEmpty ? currentPatient.name : 'Patient') 
-              : rawP;
+          final patientObj = item['patient'] ?? item['users'] ?? {};
+          final String rawPName = (patientObj['name'] ?? item['patient_name'] ?? item['patientName'] ?? '').toString();
+          final String pName = (rawPName.isNotEmpty && rawPName != 'Patient') 
+              ? rawPName 
+              : (currentPatient.name.isNotEmpty ? currentPatient.name : 'Patient Consultation');
+
+          final String pPhone = (patientObj['phone'] ?? item['phone'] ?? (currentPatient.phone.isNotEmpty ? currentPatient.phone : '')).toString();
 
           final rawD = (item['dentist_name'] ?? item['dentistName'] ?? item['dentist_id'] ?? '').toString();
           String? assignedDocName;
@@ -577,6 +580,12 @@ class PatientProblemService extends ChangeNotifier {
           final existingIndex = _requests.indexWhere((r) => r.id == reqId || r.patientName == pName);
           if (existingIndex != -1) {
             _requests[existingIndex].status = 'Confirmed';
+            if (pName != 'Patient Consultation') {
+              _requests[existingIndex].patientName = pName;
+            }
+            if (pPhone.isNotEmpty) {
+              _requests[existingIndex].patientPhone = pPhone;
+            }
             if (slot != null && slot.toString().isNotEmpty) {
               _requests[existingIndex].confirmedTimeSlot = slot.toString();
             }
@@ -588,7 +597,7 @@ class PatientProblemService extends ChangeNotifier {
               PatientConsultationRequest(
                 id: reqId,
                 patientName: pName,
-                patientPhone: '+12025550199',
+                patientPhone: pPhone.isNotEmpty ? pPhone : '+12025550199',
                 problemCategory: treatment.toString(),
                 problemDescription: 'Scheduled consultation via DentaGuru DB',
                 severity: 'Moderate',
