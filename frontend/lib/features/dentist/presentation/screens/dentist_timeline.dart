@@ -517,7 +517,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                   ),
                                   child: Wrap(
                                     alignment: WrapAlignment.end,
-                                    crossAxisAlignment: WrapCrossAlignment.bottom,
+                                    crossAxisAlignment: WrapCrossAlignment.end,
                                     children: [
                                       Text(
                                         text,

@@ -440,7 +440,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                   ),
                                   child: Wrap(
                                     alignment: WrapAlignment.end,
-                                    crossAxisAlignment: WrapCrossAlignment.bottom,
+                                    crossAxisAlignment: WrapCrossAlignment.end,
                                     children: [
                                       Text(
                                         text,
