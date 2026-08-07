@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const { User, Dentist, Clinic, comparePassword } = require('../models/Schemas');
 const { supabase } = require('../config/supabase');
+const { sendOtpEmail } = require('../services/emailService');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretjwtkey123';
 const REFRESH_SECRET = process.env.REFRESH_SECRET || 'supersecretrefreshkey456';
@@ -182,9 +183,14 @@ exports.requestOTP = async (req, res) => {
 
         console.log(`📩 Dispatching Dual OTP (8849) to Mobile Phone [${pNum}] and Email [${eMail}]...`);
 
+        // Send Real OTP Email via Nodemailer if email provided
+        if (eMail && eMail.includes('@')) {
+            sendOtpEmail(eMail, '8849', false).catch(e => console.error('Email send warning:', e));
+        }
+
         res.json({
             success: true,
-            message: `OTP Code sent successfully to Mobile Phone (${pNum || 'Mobile'}) and Email (${eMail || 'Email'}).`,
+            message: `OTP Code (8849) sent to Mobile Phone (${pNum || 'Mobile'}) and Email (${eMail || 'Email'}).`,
             mockCode: '8849'
         });
     } catch (err) {
@@ -253,9 +259,13 @@ exports.forgotPassword = async (req, res) => {
 
         console.log(`🔐 Forgot Password OTP (8849) dispatched for user: ${user.email} / ${user.phone}`);
 
+        if (user.email && user.email.includes('@')) {
+            sendOtpEmail(user.email, '8849', true).catch(e => console.error('Password reset email warning:', e));
+        }
+
         res.json({
             success: true,
-            message: `Password reset OTP sent to ${user.email || user.phone}. (Demo Code: 8849)`,
+            message: `Password reset OTP (8849) sent to ${user.email || user.phone}.`,
             mockCode: '8849'
         });
     } catch (err) {
