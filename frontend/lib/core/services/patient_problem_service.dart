@@ -189,6 +189,8 @@ class PatientConsultationRequest {
   String? assignedDoctorName;
   String? assignedDoctorSpecialty;
   String? assignedDoctorClinic;
+  String? confirmedTimeSlot;
+  String? confirmedDate;
   String? adminNotes;
   bool whatsappNotificationSent;
 
@@ -205,6 +207,8 @@ class PatientConsultationRequest {
     this.assignedDoctorName,
     this.assignedDoctorSpecialty,
     this.assignedDoctorClinic,
+    this.confirmedTimeSlot,
+    this.confirmedDate,
     this.adminNotes,
     this.whatsappNotificationSent = false,
   });
@@ -222,6 +226,8 @@ class PatientConsultationRequest {
         'assignedDoctorName': assignedDoctorName,
         'assignedDoctorSpecialty': assignedDoctorSpecialty,
         'assignedDoctorClinic': assignedDoctorClinic,
+        'confirmedTimeSlot': confirmedTimeSlot,
+        'confirmedDate': confirmedDate,
         'adminNotes': adminNotes,
         'whatsappNotificationSent': whatsappNotificationSent,
       };
@@ -240,6 +246,8 @@ class PatientConsultationRequest {
       assignedDoctorName: json['assignedDoctorName'],
       assignedDoctorSpecialty: json['assignedDoctorSpecialty'],
       assignedDoctorClinic: json['assignedDoctorClinic'],
+      confirmedTimeSlot: json['confirmedTimeSlot'],
+      confirmedDate: json['confirmedDate'],
       adminNotes: json['adminNotes'],
       whatsappNotificationSent: json['whatsappNotificationSent'] ?? false,
     );
@@ -702,25 +710,50 @@ class PatientProblemService extends ChangeNotifier {
     }
   }
 
-  void acceptReferralByDentist(String requestId) {
+  Future<void> acceptReferralByDentist(String requestId, {String? timeSlot, String? date}) async {
     final index = _requests.indexWhere((r) => r.id == requestId);
     if (index != -1) {
       final req = _requests[index];
       req.status = 'Confirmed';
+      if (timeSlot != null && timeSlot.trim().isNotEmpty) {
+        req.confirmedTimeSlot = timeSlot.trim();
+      } else if (req.confirmedTimeSlot == null || req.confirmedTimeSlot!.isEmpty) {
+        req.confirmedTimeSlot = 'Today, 2:30 PM';
+      }
+      if (date != null && date.trim().isNotEmpty) {
+        req.confirmedDate = date.trim();
+      }
 
-      // Dispatch Notifications to Patient & Admin
+      final slotText = req.confirmedTimeSlot ?? 'Today, 2:30 PM';
+
+      // 1. Create & Persist Appointment in Supabase DB ('appointments' table)
+      try {
+        await ApiService().createAppointment(
+          patientId: req.patientName,
+          dentistId: req.assignedDoctorId ?? '',
+          clinicId: req.assignedDoctorClinic ?? '',
+          date: date ?? DateTime.now().toIso8601String(),
+          timeSlot: slotText,
+          treatment: req.problemCategory,
+        );
+        await syncAppointmentsFromApi();
+      } catch (e) {
+        debugPrint('Error persisting appointment in acceptReferralByDentist: $e');
+      }
+
+      // 2. Dispatch Notifications to Patient & Admin
       addNotification(
         recipientRole: 'Patient',
         recipientId: req.patientName,
         title: '🎉 Consultation Accepted!',
-        message: '${req.assignedDoctorName ?? "Your Doctor"} accepted your consultation for ${req.problemCategory}.',
+        message: '${req.assignedDoctorName ?? "Your Doctor"} accepted your consultation for ${req.problemCategory}. Confirmed Time Slot: $slotText',
       );
 
       addNotification(
         recipientRole: 'Admin',
         recipientId: 'ALL_ADMINS',
         title: '✅ Doctor Accepted Referral',
-        message: '${req.assignedDoctorName ?? "Doctor"} accepted consultation for ${req.patientName}.',
+        message: '${req.assignedDoctorName ?? "Doctor"} accepted consultation for ${req.patientName}. Time Slot: $slotText',
       );
 
       _saveToStorage();

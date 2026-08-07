@@ -985,6 +985,24 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                     const SizedBox(height: 6),
                                     Text('🏥 Clinic: ${req.assignedDoctorClinic} • 💰 Estimated Fee (${req.problemCategory}): \$85', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF166534))),
                                   ],
+                                  if (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.isNotEmpty) ...[
+                                    const SizedBox(height: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFDCFCE7),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: const Color(0xFF86EFAC)),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          const Icon(Icons.access_time_filled_rounded, size: 15, color: Color(0xFF15803D)),
+                                          const SizedBox(width: 6),
+                                          Text('Confirmed Time Slot: ${req.confirmedTimeSlot}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF15803D))),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                   if (req.adminNotes != null && req.adminNotes!.isNotEmpty) ...[
                                     const SizedBox(height: 6),
                                     Container(

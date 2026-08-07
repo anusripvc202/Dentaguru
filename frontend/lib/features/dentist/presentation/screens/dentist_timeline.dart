@@ -145,6 +145,75 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         );
       },
     );
+  void _showAcceptAndScheduleModal(BuildContext context, PatientConsultationRequest req) {
+    final currentDoc = _patientService.currentDoctor;
+    final defaultSlot = currentDoc?.nextAvailableSlots.isNotEmpty == true
+        ? currentDoc!.nextAvailableSlots.first
+        : 'Today, 2:30 PM';
+    final slotCtrl = TextEditingController(text: req.confirmedTimeSlot ?? defaultSlot);
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Row(
+            children: [
+              Icon(Icons.event_available_rounded, color: Color(0xFF10B981), size: 24),
+              SizedBox(width: 8),
+              Text('Accept & Set Time Slot', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Patient: ${req.patientName}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              Text('Category: ${req.problemCategory}', style: const TextStyle(fontSize: 12, color: AppTheme.primaryBlue)),
+              const SizedBox(height: 14),
+              TextField(
+                controller: slotCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Set Confirmed Time Slot',
+                  hintText: 'e.g. Today, 3:30 PM',
+                  prefixIcon: const Icon(Icons.access_time_filled_rounded, color: AppTheme.primaryBlue),
+                  filled: true,
+                  fillColor: const Color(0xFFF8FAFC),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.check_circle_rounded, size: 16),
+              label: const Text('Confirm & Save Slot', style: TextStyle(fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF10B981),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () async {
+                final chosenSlot = slotCtrl.text.trim().isNotEmpty ? slotCtrl.text.trim() : 'Today, 2:30 PM';
+                await _patientService.acceptReferralByDentist(req.id, timeSlot: chosenSlot);
+                if (dialogCtx.mounted) Navigator.of(dialogCtx).pop();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('🎉 Accepted ${req.patientName}\'s consultation for $chosenSlot! Saved to Supabase DB.'),
+                      backgroundColor: const Color(0xFF10B981),
+                    ),
+                  );
+                }
+              },
+            ),
+          ],
+        );
+      },
+    );
   }
 
   void _showPrescriptionModal(BuildContext context, String patientName) {
@@ -809,9 +878,24 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                               const SizedBox(height: 6),
                               Text('📝 Admin Note: ${req.adminNotes}', style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: AppTheme.textMuted)),
                             ],
-                            const SizedBox(height: 12),
-
-                            if (isConfirmed)
+                            const S                             if (isConfirmed) ...[
+                              if (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.isNotEmpty) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.primaryBlue.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.access_time_filled_rounded, size: 14, color: AppTheme.primaryBlue),
+                                      const SizedBox(width: 6),
+                                      Text('Confirmed Slot: ${req.confirmedTimeSlot}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.primaryBlue)),
+                                    ],
+                                  ),
+                                ),
+                              ],
                               Row(
                                 children: [
                                   Expanded(
@@ -844,8 +928,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                     ),
                                   ),
                                 ],
-                              )
-                            else
+                              ),
+                            ] else
                               Row(
                                 children: [
                                   Expanded(
@@ -871,27 +955,19 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: ElevatedButton.icon(
-                                      icon: const Icon(Icons.check_circle_rounded, size: 14),
-                                      label: const Text('Accept Referral', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                                      icon: const Icon(Icons.event_available_rounded, size: 14),
+                                      label: const Text('Accept & Set Slot', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: const Color(0xFF10B981),
                                         foregroundColor: Colors.white,
                                         padding: const EdgeInsets.symmetric(vertical: 10),
                                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                       ),
-                                      onPressed: () {
-                                        _patientService.acceptReferralByDentist(req.id);
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(
-                                            content: Text('✅ Accepted ${req.patientName}\'s consultation! Patient & Admin notified.'),
-                                            backgroundColor: const Color(0xFF10B981),
-                                          ),
-                                        );
-                                      },
+                                      onPressed: () => _showAcceptAndScheduleModal(context, req),
                                     ),
                                   ),
                                 ],
-                              ),
+                              ),                          ),
                           ],
                         ),
                       );

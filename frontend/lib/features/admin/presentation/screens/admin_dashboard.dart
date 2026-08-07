@@ -2553,10 +2553,22 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                         const Icon(Icons.verified_user_rounded, color: Color(0xFF16A34A), size: 16),
                                         const SizedBox(width: 8),
                                         Expanded(
-                                          child: Text(
-                                            'Assigned: ${req.assignedDoctorName} (${req.assignedDoctorSpecialty})',
-                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFF14532D)),
-                                            overflow: TextOverflow.ellipsis,
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                'Assigned: ${req.assignedDoctorName} (${req.assignedDoctorSpecialty})',
+                                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFF14532D)),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                              if (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.isNotEmpty) ...[
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  '⏰ Time Slot: ${req.confirmedTimeSlot}',
+                                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.primaryBlue),
+                                                ),
+                                              ],
+                                            ],
                                           ),
                                         ),
                                       ],
