@@ -412,6 +412,14 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       _otpErrorMessage = null;
     });
 
+    // Send Email OTP via Backend Nodemailer API simultaneously
+    if (email.isNotEmpty) {
+      ApiService().requestOtp(phone: phone, email: email).catchError((e) {
+        debugPrint('⚠️ Backend Email OTP dispatch warning: $e');
+        return <String, dynamic>{};
+      });
+    }
+
     if (phone.isNotEmpty) {
       await FirebaseService.sendFirebasePhoneOtp(
         phone,
@@ -425,7 +433,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         },
         onError: (errMessage) async {
           debugPrint('⚠️ Firebase Phone Auth warning ($errMessage), falling back to API OTP...');
-          await ApiService().requestOtp(phone: phone, email: email);
+          if (email.isEmpty) {
+            await ApiService().requestOtp(phone: phone, email: email);
+          }
           if (!mounted) return;
           setState(() {
             _isSendingOtp = false;
@@ -435,7 +445,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         },
       );
     } else {
-      await ApiService().requestOtp(phone: phone, email: email);
       if (!mounted) return;
       setState(() {
         _isSendingOtp = false;
