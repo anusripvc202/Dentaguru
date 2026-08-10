@@ -271,8 +271,7 @@ exports.requestOTP = async (req, res) => {
 
         res.json({
             success: true,
-            message: `Real verification OTP (${realOtp}) sent to Mobile Phone (${pNum || 'Mobile'}) and Email (${eMail || 'Email'}).`,
-            otp: realOtp
+            message: `Verification OTP code sent to Mobile Phone (${pNum || 'Mobile'}) and Email (${eMail || 'Email'}).`
         });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to request OTP.' });
@@ -359,8 +358,7 @@ exports.forgotPassword = async (req, res) => {
 
         res.json({
             success: true,
-            message: `Password reset OTP code (${realOtp}) sent to ${user.email || user.phone}.`,
-            otp: realOtp
+            message: `Password reset OTP code sent to ${user.email || user.phone}.`
         });
     } catch (err) {
         console.error('Forgot Password Error:', err.message);

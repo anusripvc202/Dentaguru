@@ -17,6 +17,7 @@ class DoctorModel {
   final String phone;
   final String email;
   final String status; // 'Available', 'In Consultation', 'On Leave'
+  final String verificationStatus; // 'VERIFIED', 'PENDING_VERIFICATION', 'REJECTED', 'SUSPENDED'
   final List<String> nextAvailableSlots;
   final String consultationFee;
   final String licenseNumber;
@@ -36,6 +37,7 @@ class DoctorModel {
     required this.phone,
     required this.email,
     required this.status,
+    this.verificationStatus = 'VERIFIED',
     required this.nextAvailableSlots,
     required this.consultationFee,
     this.licenseNumber = 'DEN-LIC-REG',
@@ -77,6 +79,7 @@ class DoctorModel {
         'phone': phone,
         'email': email,
         'status': status,
+        'verificationStatus': verificationStatus,
         'nextAvailableSlots': nextAvailableSlots,
         'consultationFee': consultationFee,
         'licenseNumber': licenseNumber,
@@ -108,6 +111,7 @@ class DoctorModel {
       phone: json['phone'] ?? '',
       email: json['email'] ?? '',
       status: json['status'] ?? 'Available',
+      verificationStatus: json['verification_status'] ?? json['verificationStatus'] ?? 'VERIFIED',
       nextAvailableSlots: List<String>.from(json['nextAvailableSlots'] ?? []),
       consultationFee: json['consultationFee'] ?? '\$75',
       licenseNumber: json['licenseNumber'] ?? 'DEN-LIC-REG',
@@ -182,9 +186,12 @@ class PatientConsultationRequest {
   String patientPhone;
   final String problemCategory;
   final String problemDescription;
+  final String symptoms;
+  final String preferredLocation;
+  final List<String> attachments;
   final String severity; // 'Mild', 'Moderate', 'Severe'
   final DateTime submittedAt;
-  String status; // 'Pending Admin Review', 'Doctor Suggested', 'Confirmed'
+  String status; // 'PENDING_ADMIN_REVIEW', 'DENTIST_SUGGESTED', 'APPOINTMENT_REQUESTED', 'CONFIRMED', 'REJECTED', 'RESCHEDULED', 'COMPLETED'
   String? assignedDoctorId;
   String? assignedDoctorName;
   String? assignedDoctorSpecialty;
@@ -200,9 +207,12 @@ class PatientConsultationRequest {
     required this.patientPhone,
     required this.problemCategory,
     required this.problemDescription,
+    this.symptoms = '',
+    this.preferredLocation = '',
+    this.attachments = const [],
     required this.severity,
     required this.submittedAt,
-    this.status = 'Pending Admin Review',
+    this.status = 'PENDING_ADMIN_REVIEW',
     this.assignedDoctorId,
     this.assignedDoctorName,
     this.assignedDoctorSpecialty,
@@ -219,6 +229,9 @@ class PatientConsultationRequest {
         'patientPhone': patientPhone,
         'problemCategory': problemCategory,
         'problemDescription': problemDescription,
+        'symptoms': symptoms,
+        'preferredLocation': preferredLocation,
+        'attachments': attachments,
         'severity': severity,
         'submittedAt': submittedAt.toIso8601String(),
         'status': status,
@@ -234,21 +247,30 @@ class PatientConsultationRequest {
 
   factory PatientConsultationRequest.fromJson(Map<String, dynamic> json) {
     return PatientConsultationRequest(
-      id: json['id'] ?? '',
-      patientName: json['patientName'] ?? '',
-      patientPhone: json['patientPhone'] ?? '',
-      problemCategory: json['problemCategory'] ?? '',
-      problemDescription: json['problemDescription'] ?? '',
+      id: (json['id'] ?? json['_id'] ?? '').toString(),
+      patientName: json['patientName'] ?? json['patient_name'] ?? '',
+      patientPhone: json['patientPhone'] ?? json['patient_phone'] ?? '',
+      problemCategory: json['problemCategory'] ?? json['problem_category'] ?? '',
+      problemDescription: json['problemDescription'] ?? json['problem_description'] ?? '',
+      symptoms: json['symptoms'] ?? '',
+      preferredLocation: json['preferredLocation'] ?? json['preferred_location'] ?? '',
+      attachments: List<String>.from(json['attachments'] ?? []),
       severity: json['severity'] ?? 'Moderate',
-      submittedAt: json['submittedAt'] != null ? DateTime.parse(json['submittedAt']) : DateTime.now(),
-      status: json['status'] ?? 'Pending Admin Review',
-      assignedDoctorId: json['assignedDoctorId'],
-      assignedDoctorName: json['assignedDoctorName'],
-      assignedDoctorSpecialty: json['assignedDoctorSpecialty'],
-      assignedDoctorClinic: json['assignedDoctorClinic'],
+      submittedAt: json['submittedAt'] != null 
+          ? DateTime.parse(json['submittedAt']) 
+          : (json['created_at'] != null ? DateTime.parse(json['created_at']) : DateTime.now()),
+      status: json['status'] ?? 'PENDING_ADMIN_REVIEW',
+      assignedDoctorId: (json['assignedDoctorId'] ?? json['suggested_dentist_id'])?.toString(),
+      assignedDoctorName: (() {
+        final dName = json['assignedDoctorName'] ?? json['suggested_dentist']?['users']?['name'];
+        if (dName == null || dName.toString() == 'null' || dName.toString().trim().isEmpty) return null;
+        return dName.toString().trim();
+      })(),
+      assignedDoctorSpecialty: json['assignedDoctorSpecialty'] ?? json['suggested_dentist']?['speciality'],
+      assignedDoctorClinic: json['assignedDoctorClinic'] ?? json['suggested_dentist']?['clinics']?['clinic_name'],
       confirmedTimeSlot: json['confirmedTimeSlot'],
       confirmedDate: json['confirmedDate'],
-      adminNotes: json['adminNotes'],
+      adminNotes: json['adminNotes'] ?? json['admin_notes'],
       whatsappNotificationSent: json['whatsappNotificationSent'] ?? false,
     );
   }
@@ -263,6 +285,7 @@ class ClinicModel {
   final double rating;
   final int reviewsCount;
   final bool verified;
+  final String verificationStatus; // 'VERIFIED', 'PENDING_VERIFICATION', 'REJECTED', 'SUSPENDED'
   final List<String> services;
   final List<Map<String, dynamic>> pricing;
 
@@ -273,6 +296,7 @@ class ClinicModel {
     this.rating = 5.0,
     this.reviewsCount = 0,
     this.verified = true,
+    this.verificationStatus = 'VERIFIED',
     List<String>? services,
     List<Map<String, dynamic>>? pricing,
   })  : services = services ?? ['Teeth Cleaning', 'Root Canal', 'Orthodontics'],
@@ -294,6 +318,7 @@ class ClinicModel {
       rating: (json['rating'] ?? 5.0).toDouble(),
       reviewsCount: json['reviews_count'] ?? json['reviewsCount'] ?? 0,
       verified: json['verified'] ?? true,
+      verificationStatus: json['verification_status'] ?? json['verificationStatus'] ?? 'VERIFIED',
       services: servList,
       pricing: priceList,
     );
@@ -306,6 +331,7 @@ class ClinicModel {
         'rating': rating,
         'reviewsCount': reviewsCount,
         'verified': verified,
+        'verificationStatus': verificationStatus,
         'services': services,
         'pricing': pricing,
       };
@@ -578,25 +604,25 @@ class PatientProblemService extends ChangeNotifier {
           final treatment = item['treatment'] ?? 'Dental Consultation';
           final slot = item['time_slot'] ?? item['timeSlot'];
 
-          final existingIndex = _requests.indexWhere((r) => r.id == reqId || r.patientName == pName);
+          final existingIndex = _requests.indexWhere((r) => r.id == reqId || (r.patientName == pName && r.assignedDoctorName != null));
           if (existingIndex != -1) {
-            _requests[existingIndex].status = 'Confirmed';
             if (pName != 'Patient Consultation') {
               _requests[existingIndex].patientName = pName;
             }
             if (pPhone.isNotEmpty) {
               _requests[existingIndex].patientPhone = pPhone;
             }
-            if (slot != null && slot.toString().isNotEmpty) {
+            if (slot != null && slot.toString().isNotEmpty && slot.toString() != 'Pending Review') {
               _requests[existingIndex].confirmedTimeSlot = slot.toString();
             }
-            if (assignedDocName != null) {
+            if (assignedDocName != null && assignedDocName.isNotEmpty && assignedDocName != 'null') {
               _requests[existingIndex].assignedDoctorName = assignedDocName;
+              _requests[existingIndex].status = 'Confirmed';
             }
             if (clinic.isNotEmpty) {
               _requests[existingIndex].assignedDoctorClinic = clinic;
             }
-          } else {
+          } else if (assignedDocName != null && assignedDocName.isNotEmpty && assignedDocName != 'null') {
             _requests.add(
               PatientConsultationRequest(
                 id: reqId,
@@ -693,6 +719,9 @@ class PatientProblemService extends ChangeNotifier {
     required String problemCategory,
     required String problemDescription,
     required String severity,
+    String symptoms = '',
+    String preferredLocation = '',
+    List<String> attachments = const [],
   }) async {
     final newReq = PatientConsultationRequest(
       id: 'PR-${DateTime.now().millisecondsSinceEpoch}',
@@ -700,27 +729,32 @@ class PatientProblemService extends ChangeNotifier {
       patientPhone: currentPatient.phone,
       problemCategory: problemCategory,
       problemDescription: problemDescription,
+      symptoms: symptoms,
+      preferredLocation: preferredLocation,
+      attachments: attachments,
       severity: severity,
       submittedAt: DateTime.now(),
-      status: 'Pending Admin Review',
+      status: 'PENDING_ADMIN_REVIEW',
     );
     _requests.insert(0, newReq);
     _saveToStorage();
     notifyListeners();
 
-    // 🌐 Save immediately to Supabase PostgreSQL database table ('appointments')
+    // 🌐 Save immediately to Supabase PostgreSQL database table ('patient_problem_requests')
     try {
-      await ApiService().createAppointment(
-        patientId: currentPatient.name.isNotEmpty ? currentPatient.name : 'Patient',
-        treatment: problemCategory,
-        timeSlot: 'Pending Doctor Confirmation',
-        date: DateTime.now().toIso8601String(),
+      await ApiService().createProblemRequest(
+        problemCategory: problemCategory,
+        problemDescription: problemDescription,
+        symptoms: symptoms,
+        preferredLocation: preferredLocation,
+        attachments: attachments,
       );
       await syncAppointmentsFromApi();
     } catch (e) {
-      debugPrint('Error saving appointment to Supabase DB in submitProblem: $e');
+      debugPrint('Error saving problem request to Supabase DB: $e');
     }
   }
+
 
   void assignDoctorToRequest({
     required String requestId,

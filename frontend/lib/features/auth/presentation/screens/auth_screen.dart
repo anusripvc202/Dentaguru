@@ -7,6 +7,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/services/patient_problem_service.dart';
+import '../../../../core/services/firebase_service.dart';
 
 /// Role enum for authentication
 enum UserRole { patient, dentist, admin }
@@ -411,30 +412,43 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       _otpErrorMessage = null;
     });
 
-    final res = await ApiService().requestOtp(phone: phone, email: email);
-
-    if (!mounted) return;
-    setState(() {
-      _isSendingOtp = false;
-      _isOtpSent = true;
-    });
-
-    final String? liveOtp = res['otp']?.toString();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(liveOtp != null && liveOtp.isNotEmpty
-            ? '📩 OTP Verification Code: $liveOtp (Dispatched to Mobile Phone & Email)'
-            : (res['message'] ?? '📩 OTP Verification Code sent to both Mobile Number & Email!')),
-        backgroundColor: const Color(0xFF10B981),
-        duration: const Duration(seconds: 8),
-      ),
-    );
+    if (phone.isNotEmpty) {
+      await FirebaseService.sendFirebasePhoneOtp(
+        phone,
+        onCodeSent: (verId) {
+          if (!mounted) return;
+          setState(() {
+            _isSendingOtp = false;
+            _isOtpSent = true;
+            _otpController.clear();
+          });
+        },
+        onError: (errMessage) async {
+          debugPrint('⚠️ Firebase Phone Auth warning ($errMessage), falling back to API OTP...');
+          await ApiService().requestOtp(phone: phone, email: email);
+          if (!mounted) return;
+          setState(() {
+            _isSendingOtp = false;
+            _isOtpSent = true;
+            _otpController.clear();
+          });
+        },
+      );
+    } else {
+      await ApiService().requestOtp(phone: phone, email: email);
+      if (!mounted) return;
+      setState(() {
+        _isSendingOtp = false;
+        _isOtpSent = true;
+        _otpController.clear();
+      });
+    }
   }
 
   Future<void> _handleVerifyOtp() async {
     final code = _otpController.text.trim();
     if (code.isEmpty) {
-      setState(() => _otpErrorMessage = 'Please enter 4-digit OTP code');
+      setState(() => _otpErrorMessage = 'Please enter OTP code');
       return;
     }
 
@@ -446,24 +460,32 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     final phone = _phoneController.text.trim();
     final email = _emailController.text.trim();
 
-    final res = await ApiService().verifyOtp(phone: phone, email: email, code: code);
+    bool verified = false;
+    if (phone.isNotEmpty) {
+      verified = await FirebaseService.verifyFirebaseOtp(code);
+    }
+
+    if (!verified) {
+      final res = await ApiService().verifyOtp(phone: phone, email: email, code: code);
+      verified = res['success'] == true;
+    }
 
     if (!mounted) return;
     setState(() => _isVerifyingOtp = false);
 
-    if (res['success'] == true) {
+    if (verified) {
       setState(() {
         _isOtpVerified = true;
         _otpErrorMessage = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('🎉 Dual OTP Verified! Mobile & Email confirmed. "Create Account" button is now ACTIVE.'),
+          content: Text('🎉 Firebase Phone OTP Verified! Mobile & Email confirmed. "Create Account" button is now ACTIVE.'),
           backgroundColor: Color(0xFF10B981),
         ),
       );
     } else {
-      setState(() => _otpErrorMessage = res['message'] ?? 'Invalid or expired OTP code.');
+      setState(() => _otpErrorMessage = 'Invalid or expired OTP code. Please check SMS or Email.');
     }
   }
 
@@ -527,6 +549,27 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               onPressed: _isSendingOtp ? null : _handleSendOtp,
             ),
           ] else if (!_isOtpVerified && _isOtpSent) ...[
+            Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFDCFCE7),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFF86EFAC)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.mark_email_read_rounded, color: Color(0xFF15803D), size: 16),
+                  SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'OTP verification code has been dispatched to your Mobile SMS & Email Inbox.',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF15803D), fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
             Row(
               children: [
                 Expanded(
@@ -682,19 +725,12 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                               isSubmitting = true;
                               dialogError = null;
                             });
-                            final res = await ApiService().forgotPassword(email: targetEmail);
+                            await ApiService().forgotPassword(email: targetEmail);
                             setModalState(() {
                               isSubmitting = false;
                               codeSent = true;
+                              otpCtrl.clear();
                             });
-                            if (stCtx.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('📩 ${res['message'] ?? "OTP sent to email/phone"}'),
-                                  backgroundColor: const Color(0xFF10B981),
-                                ),
-                              );
-                            }
                           } else {
                             final code = otpCtrl.text.trim();
                             final newPass = newPassCtrl.text.trim();

@@ -444,4 +444,174 @@ class ApiService {
       return {'success': false, 'message': 'Failed to create medical record.'};
     }
   }
+
+  /// Patient: Create a new Dental Problem Request
+  Future<Map<String, dynamic>> createProblemRequest({
+    required String problemCategory,
+    required String problemDescription,
+    String? symptoms,
+    String? preferredLocation,
+    List<String>? attachments,
+  }) async {
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/patient/problem-requests');
+      final response = await http.post(
+        url,
+        headers: _headers,
+        body: jsonEncode({
+          'problemCategory': problemCategory,
+          'problemDescription': problemDescription,
+          if (symptoms != null) 'symptoms': symptoms,
+          if (preferredLocation != null) 'preferredLocation': preferredLocation,
+          if (attachments != null) 'attachments': attachments,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to submit problem request.'};
+    }
+  }
+
+  /// Patient: Fetch own Dental Problem Requests
+  Future<List<dynamic>> fetchPatientProblemRequests() async {
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/patient/problem-requests');
+      final response = await http.get(url, headers: _headers);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['requests'] ?? [];
+      }
+    } catch (e) {
+      debugPrint('Fetch patient problem requests error: $e');
+    }
+    return [];
+  }
+
+  /// Admin: Fetch all Dental Problem Requests
+  Future<List<dynamic>> fetchAdminProblemRequests({String? status}) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/admin/problem-requests').replace(queryParameters: {
+        if (status != null && status.isNotEmpty) 'status': status,
+      });
+      final response = await http.get(uri, headers: _headers);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['requests'] ?? [];
+      }
+    } catch (e) {
+      debugPrint('Fetch admin problem requests error: $e');
+    }
+    return [];
+  }
+
+  /// Admin: Suggest / Assign Dentist to a Patient Request
+  Future<Map<String, dynamic>> suggestDentist({
+    required String requestId,
+    required String dentistId,
+    String? notes,
+  }) async {
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/admin/problem-requests/$requestId/suggest-dentist');
+      final response = await http.post(
+        url,
+        headers: _headers,
+        body: jsonEncode({
+          'dentistId': dentistId,
+          if (notes != null) 'notes': notes,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to suggest dentist.'};
+    }
+  }
+
+  /// Dentist: Accept Appointment Request [PENDING -> CONFIRMED]
+  Future<Map<String, dynamic>> acceptAppointment(String appointmentId) async {
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/appointments/$appointmentId/accept');
+      final response = await http.patch(url, headers: _headers);
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to accept appointment.'};
+    }
+  }
+
+  /// Dentist: Reject Appointment Request [PENDING -> REJECTED]
+  Future<Map<String, dynamic>> rejectAppointment(String appointmentId, {String? reason}) async {
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/appointments/$appointmentId/reject');
+      final response = await http.patch(
+        url,
+        headers: _headers,
+        body: jsonEncode({if (reason != null) 'reason': reason}),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to reject appointment.'};
+    }
+  }
+
+  /// Dentist: Complete Consultation [CONFIRMED -> COMPLETED]
+  Future<Map<String, dynamic>> completeConsultation({
+    required String appointmentId,
+    String? symptoms,
+    String? diagnosis,
+    String? treatmentNotes,
+    String? treatmentPlan,
+    String? followUpDate,
+    List<Map<String, dynamic>>? prescriptions,
+    List<String>? attachments,
+  }) async {
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/appointments/$appointmentId/complete');
+      final response = await http.patch(
+        url,
+        headers: _headers,
+        body: jsonEncode({
+          if (symptoms != null) 'symptoms': symptoms,
+          if (diagnosis != null) 'diagnosis': diagnosis,
+          if (treatmentNotes != null) 'treatmentNotes': treatmentNotes,
+          if (treatmentPlan != null) 'treatmentPlan': treatmentPlan,
+          if (followUpDate != null) 'followUpDate': followUpDate,
+          if (prescriptions != null) 'prescriptions': prescriptions,
+          if (attachments != null) 'attachments': attachments,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to complete consultation.'};
+    }
+  }
+
+  /// Admin: Verify Dentist Status
+  Future<Map<String, dynamic>> verifyDentist(String dentistId, String status, {String? notes}) async {
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/admin/dentists/$dentistId/verify');
+      final response = await http.patch(
+        url,
+        headers: _headers,
+        body: jsonEncode({'status': status, if (notes != null) 'notes': notes}),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to update dentist verification status.'};
+    }
+  }
+
+  /// Admin: Verify Clinic Status
+  Future<Map<String, dynamic>> verifyClinic(String clinicId, String status, {String? notes}) async {
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/admin/clinics/$clinicId/verify');
+      final response = await http.patch(
+        url,
+        headers: _headers,
+        body: jsonEncode({'status': status, if (notes != null) 'notes': notes}),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to update clinic verification status.'};
+    }
+  }
 }
+

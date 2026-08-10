@@ -27,10 +27,13 @@ CREATE TABLE IF NOT EXISTS public.clinics (
     latitude NUMERIC,
     longitude NUMERIC,
     verified BOOLEAN DEFAULT false,
+    verification_status VARCHAR(50) DEFAULT 'PENDING_VERIFICATION',
     plan VARCHAR(50) DEFAULT 'Standard',
     active_slots TEXT[] DEFAULT '{}',
     services TEXT[] DEFAULT '{}',
     pricing JSONB DEFAULT '[]',
+    branches JSONB DEFAULT '[]',
+    working_hours JSONB DEFAULT '{}',
     rating NUMERIC DEFAULT 0,
     reviews_count INTEGER DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -44,45 +47,79 @@ CREATE TABLE IF NOT EXISTS public.dentists (
     clinic_id UUID REFERENCES public.clinics(id) ON DELETE CASCADE,
     speciality VARCHAR(255) NOT NULL,
     license_number VARCHAR(100) UNIQUE NOT NULL,
+    experience_years INTEGER DEFAULT 5,
+    qualifications VARCHAR(255) DEFAULT 'BDS, MDS',
     availability_status VARCHAR(50) DEFAULT 'Available',
+    verification_status VARCHAR(50) DEFAULT 'PENDING_VERIFICATION',
     rating NUMERIC DEFAULT 0,
     reviews_count INTEGER DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 4. APPOINTMENTS TABLE
+-- 4. PATIENT PROBLEM REQUESTS TABLE
+CREATE TABLE IF NOT EXISTS public.patient_problem_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    patient_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+    problem_category VARCHAR(255) NOT NULL,
+    problem_description TEXT NOT NULL,
+    symptoms TEXT,
+    preferred_location VARCHAR(255),
+    attachments JSONB DEFAULT '[]',
+    status VARCHAR(50) DEFAULT 'PENDING_ADMIN_REVIEW',
+    suggested_dentist_id UUID REFERENCES public.dentists(id) ON DELETE SET NULL,
+    admin_notes TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 5. DENTIST SUGGESTIONS TABLE
+CREATE TABLE IF NOT EXISTS public.dentist_suggestions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    request_id UUID REFERENCES public.patient_problem_requests(id) ON DELETE CASCADE,
+    patient_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+    admin_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+    dentist_id UUID REFERENCES public.dentists(id) ON DELETE CASCADE,
+    suggested_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(50) DEFAULT 'SUGGESTED',
+    notes TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 6. APPOINTMENTS TABLE
 CREATE TABLE IF NOT EXISTS public.appointments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    request_id UUID REFERENCES public.patient_problem_requests(id) ON DELETE SET NULL,
     patient_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
     dentist_id UUID REFERENCES public.dentists(id) ON DELETE CASCADE,
     clinic_id UUID REFERENCES public.clinics(id) ON DELETE CASCADE,
     date TIMESTAMP WITH TIME ZONE NOT NULL,
     time_slot VARCHAR(50) NOT NULL,
     treatment VARCHAR(255) NOT NULL,
-    status VARCHAR(50) DEFAULT 'pending',
-    payment_status VARCHAR(50) DEFAULT 'unpaid',
-    payment_id VARCHAR(255),
+    status VARCHAR(50) DEFAULT 'PENDING',
     qr_code_string TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 5. MEDICAL RECORDS TABLE
+-- 7. MEDICAL RECORDS TABLE
 CREATE TABLE IF NOT EXISTS public.medical_records (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     patient_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
     dentist_id UUID REFERENCES public.dentists(id) ON DELETE CASCADE,
+    appointment_id UUID REFERENCES public.appointments(id) ON DELETE SET NULL,
     diagnosis TEXT NOT NULL,
+    symptoms TEXT,
+    treatment TEXT,
     notes TEXT,
     prescriptions JSONB DEFAULT '[]',
-    xray_urls TEXT[] DEFAULT '{}',
-    lab_report_urls TEXT[] DEFAULT '{}',
+    attachments JSONB DEFAULT '[]',
+    follow_up_date TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 6. CHAT MESSAGES TABLE
+-- 8. CHAT MESSAGES TABLE
 CREATE TABLE IF NOT EXISTS public.chat_messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     room_id VARCHAR(255) NOT NULL,
@@ -95,13 +132,28 @@ CREATE TABLE IF NOT EXISTS public.chat_messages (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 9. NOTIFICATIONS TABLE
+CREATE TABLE IF NOT EXISTS public.notifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    recipient_role VARCHAR(50) NOT NULL,
+    recipient_id VARCHAR(255) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    message TEXT NOT NULL,
+    type VARCHAR(50) DEFAULT 'general',
+    read BOOLEAN DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Enable Row Level Security (RLS)
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.clinics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.dentists ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.patient_problem_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.dentist_suggestions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.appointments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.medical_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 
 -- Allow Service Role Access
 DO $$ 
@@ -115,6 +167,12 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow All Dentists') THEN
         CREATE POLICY "Allow All Dentists" ON public.dentists FOR ALL USING (true);
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow All Problem Requests') THEN
+        CREATE POLICY "Allow All Problem Requests" ON public.patient_problem_requests FOR ALL USING (true);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow All Dentist Suggestions') THEN
+        CREATE POLICY "Allow All Dentist Suggestions" ON public.dentist_suggestions FOR ALL USING (true);
+    END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow All Appointments') THEN
         CREATE POLICY "Allow All Appointments" ON public.appointments FOR ALL USING (true);
     END IF;
@@ -124,4 +182,8 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow All Chat Messages') THEN
         CREATE POLICY "Allow All Chat Messages" ON public.chat_messages FOR ALL USING (true);
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow All Notifications') THEN
+        CREATE POLICY "Allow All Notifications" ON public.notifications FOR ALL USING (true);
+    END IF;
 END $$;
+

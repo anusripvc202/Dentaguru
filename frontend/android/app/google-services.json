@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "653454456380",
+    "project_id": "dentaguru-6d0a0",
+    "storage_bucket": "dentaguru-6d0a0.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:653454456380:android:5d3a32eaa156d75470b539",
+        "android_client_info": {
+          "package_name": "com.example.dentaguru"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDjEzfTtXBriBVD86yBfX5SN29K4oQm7Ns"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

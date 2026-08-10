@@ -221,18 +221,6 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                           severity: selectedSeverity,
                         );
 
-                        // 🌐 Automatically upload record to Supabase 'appointments' table!
-                        final pId = _patientService.currentPatient.id.isNotEmpty
-                            ? _patientService.currentPatient.id
-                            : _patientService.currentPatient.email;
-                        ApiService().createAppointment(
-                          patientId: pId,
-                          dentistId: '',
-                          clinicId: '',
-                          date: DateTime.now().toIso8601String(),
-                          timeSlot: 'Pending Review',
-                          treatment: '$selectedCategory: ${descriptionController.text.trim()}',
-                        );
                         Navigator.of(dialogContext).pop();
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
@@ -1104,10 +1092,13 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
 
                   return Column(
                     children: myPatientRequests.map((req) {
-                    final bool isDoctorAssigned = (req.assignedDoctorName != null && req.assignedDoctorName!.isNotEmpty) ||
+                    final bool isDoctorAssigned = req.assignedDoctorName != null &&
+                        req.assignedDoctorName!.isNotEmpty &&
+                        req.assignedDoctorName != 'null' &&
+                        req.assignedDoctorName != 'None';
+                    final bool isAdminReviewed = isDoctorAssigned ||
                         req.status == 'Doctor Suggested' ||
-                        req.status == 'Confirmed' ||
-                        req.status == 'Accepted';
+                        req.status == 'DENTIST_SUGGESTED';
 
                     return Container(
                       margin: const EdgeInsets.only(bottom: 14),
@@ -1151,7 +1142,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Text(
-                                  req.status,
+                                  isDoctorAssigned ? req.status : 'Pending Admin Review',
                                   style: TextStyle(
                                     fontSize: 10,
                                     fontWeight: FontWeight.bold,
@@ -1181,8 +1172,8 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                               mainAxisAlignment: MainAxisAlignment.spaceAround,
                               children: [
                                 _buildProgressStep(title: 'Submitted', isDone: true),
-                                _buildProgressLine(isDone: true),
-                                _buildProgressStep(title: 'Admin Review', isDone: true),
+                                _buildProgressLine(isDone: isAdminReviewed),
+                                _buildProgressStep(title: 'Admin Review', isDone: isAdminReviewed),
                                 _buildProgressLine(isDone: isDoctorAssigned),
                                 _buildProgressStep(title: 'Doctor Assigned', isDone: isDoctorAssigned),
                               ],
@@ -1297,6 +1288,38 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                     ),
                                     onPressed: () => _showChatModal(context),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ] else ...[
+                            const SizedBox(height: 12),
+                            Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF0F9FF),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: const Color(0xFFBAE6FD), width: 1.2),
+                              ),
+                              child: const Row(
+                                children: [
+                                  Icon(Icons.hourglass_top_rounded, color: Color(0xFF0284C7), size: 22),
+                                  SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Awaiting Admin Specialist Recommendation',
+                                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0369A1)),
+                                        ),
+                                        SizedBox(height: 2),
+                                        Text(
+                                          'Your symptoms have been submitted to Admin. A specialized doctor will be recommended shortly.',
+                                          style: TextStyle(fontSize: 11, color: Color(0xFF0284C7), height: 1.3),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ],
                               ),

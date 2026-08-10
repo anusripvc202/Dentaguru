@@ -416,6 +416,140 @@ const ChatMessage = {
     }
 };
 
+// 7. PATIENT PROBLEM REQUEST MODEL (Supabase PostgreSQL)
+const PatientProblemRequest = {
+    async create(reqData) {
+        const patientId = await resolveUserUuid(reqData.patient_id || reqData.patientId);
+        const payload = {
+            patient_id: patientId,
+            problem_category: reqData.problem_category || reqData.problemCategory || 'General Dental Problem',
+            problem_description: reqData.problem_description || reqData.problemDescription || '',
+            symptoms: reqData.symptoms || '',
+            preferred_location: reqData.preferred_location || reqData.preferredLocation || null,
+            attachments: reqData.attachments || [],
+            status: reqData.status || 'PENDING_ADMIN_REVIEW',
+            admin_notes: reqData.admin_notes || reqData.adminNotes || null
+        };
+        const { data, error } = await supabaseAdmin.from('patient_problem_requests').insert(payload).select().single();
+        if (error) {
+            console.error('❌ Supabase PatientProblemRequest Insert Error:', error.message);
+            throw error;
+        }
+        return data;
+    },
+
+    async find(query = {}) {
+        let req = supabaseAdmin.from('patient_problem_requests').select('*, patient:users!patient_id(name, email, phone), suggested_dentist:dentists!suggested_dentist_id(*, users(name, phone, email), clinics(clinic_name, location))');
+        if (query.status) {
+            req = req.eq('status', query.status);
+        }
+        if (query.patient_id || query.patientId) {
+            const pId = await resolveUserUuid(query.patient_id || query.patientId);
+            if (pId) req = req.eq('patient_id', pId);
+        }
+        const { data, error } = await req.order('created_at', { ascending: false });
+        if (error) {
+            console.warn('⚠️ Problem requests query error, falling back to simple select:', error.message);
+            const simple = await supabaseAdmin.from('patient_problem_requests').select('*').order('created_at', { ascending: false });
+            return simple.data || [];
+        }
+        return data || [];
+    },
+
+    async findById(id) {
+        const { data, error } = await supabaseAdmin.from('patient_problem_requests').select('*, patient:users!patient_id(name, email, phone), suggested_dentist:dentists!suggested_dentist_id(*, users(name, phone, email), clinics(clinic_name, location))').eq('id', id).maybeSingle();
+        if (error || !data) {
+            const simple = await supabaseAdmin.from('patient_problem_requests').select('*').eq('id', id).maybeSingle();
+            return simple.data || null;
+        }
+        return data;
+    },
+
+    async findByIdAndUpdate(id, updateData) {
+        const { data, error } = await supabaseAdmin.from('patient_problem_requests').update(updateData).eq('id', id).select().single();
+        if (error) throw error;
+        return data;
+    }
+};
+
+// 8. DENTIST SUGGESTION MODEL (Supabase PostgreSQL)
+const DentistSuggestion = {
+    async create(suggestionData) {
+        const requestId = suggestionData.request_id || suggestionData.requestId;
+        const patientId = await resolveUserUuid(suggestionData.patient_id || suggestionData.patientId);
+        const adminId = await resolveUserUuid(suggestionData.admin_id || suggestionData.adminId);
+        const dentistId = await resolveDentistUuid(suggestionData.dentist_id || suggestionData.dentistId);
+
+        const payload = {
+            request_id: requestId,
+            patient_id: patientId,
+            admin_id: adminId,
+            dentist_id: dentistId,
+            status: suggestionData.status || 'SUGGESTED',
+            notes: suggestionData.notes || null
+        };
+        const { data, error } = await supabaseAdmin.from('dentist_suggestions').insert(payload).select().single();
+        if (error) {
+            console.error('❌ Supabase DentistSuggestion Insert Error:', error.message);
+            throw error;
+        }
+        return data;
+    },
+
+    async find(query = {}) {
+        let req = supabaseAdmin.from('dentist_suggestions').select('*, dentist:dentists!dentist_id(*, users(name, phone, email), clinics(clinic_name, location))');
+        if (query.patient_id || query.patientId) {
+            const pId = await resolveUserUuid(query.patient_id || query.patientId);
+            if (pId) req = req.eq('patient_id', pId);
+        }
+        if (query.request_id || query.requestId) {
+            req = req.eq('request_id', query.request_id || query.requestId);
+        }
+        const { data, error } = await req.order('created_at', { ascending: false });
+        if (error) throw error;
+        return data || [];
+    }
+};
+
+// 9. NOTIFICATION MODEL (Supabase PostgreSQL)
+const Notification = {
+    async create(notifData) {
+        const payload = {
+            recipient_role: notifData.recipient_role || notifData.recipientRole || 'Patient',
+            recipient_id: notifData.recipient_id || notifData.recipientId || 'ALL',
+            title: notifData.title || '',
+            message: notifData.message || '',
+            type: notifData.type || 'general',
+            read: notifData.read ?? false
+        };
+        const { data, error } = await supabaseAdmin.from('notifications').insert(payload).select().single();
+        if (error) {
+            console.error('❌ Supabase Notification Insert Error:', error.message);
+            throw error;
+        }
+        return data;
+    },
+
+    async find(query = {}) {
+        let req = supabaseAdmin.from('notifications').select('*');
+        if (query.recipient_role || query.recipientRole) {
+            req = req.eq('recipient_role', query.recipient_role || query.recipientRole);
+        }
+        if (query.recipient_id || query.recipientId) {
+            req = req.or(`recipient_id.eq.${query.recipient_id || query.recipientId},recipient_id.eq.ALL`);
+        }
+        const { data, error } = await req.order('created_at', { ascending: false });
+        if (error) throw error;
+        return data || [];
+    },
+
+    async markAsRead(id) {
+        const { data, error } = await supabaseAdmin.from('notifications').update({ read: true }).eq('id', id).select().single();
+        if (error) throw error;
+        return data;
+    }
+};
+
 module.exports = {
     User,
     Clinic,
@@ -423,5 +557,9 @@ module.exports = {
     Appointment,
     MedicalRecord,
     ChatMessage,
+    PatientProblemRequest,
+    DentistSuggestion,
+    Notification,
     comparePassword
 };
+
