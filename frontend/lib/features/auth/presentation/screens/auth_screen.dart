@@ -976,7 +976,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                         indicatorSize: TabBarIndicatorSize.tab,
                         tabs: const [
                           Tab(text: 'Sign In'),
-                          Tab(text: 'Register Account'),
+                          Tab(text: 'Register'),
                         ],
                       ),
                     ),
@@ -1455,6 +1455,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               initialValue: _selectedSpecialty,
+              isExpanded: true,
               decoration: _buildInputDecoration(
                 label: 'Dental Specialization',
                 hint: 'Select Specialty',
@@ -1469,7 +1470,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 'General Dentistry',
                 'Prosthodontics',
               ].map((sp) {
-                return DropdownMenuItem(value: sp, child: Text(sp, style: const TextStyle(fontSize: 13)));
+                return DropdownMenuItem(value: sp, child: Text(sp, style: const TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis));
               }).toList(),
               onChanged: (val) => setState(() => _selectedSpecialty = val ?? 'General Dentistry'),
             ),
