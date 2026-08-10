@@ -3,12 +3,17 @@ import 'package:flutter/foundation.dart';
 class ApiConstants {
   ApiConstants._();
 
-  /// Express Backend API Base URL (Localhost in dev/debug mode, Render in production)
+  /// Live 24/7 Render Express Backend API URL (Connected to Supabase PostgreSQL)
+  static const String liveBackendUrl = 'https://dentaguru-backend.onrender.com/api/v1';
+
+  /// Express Backend API Base URL
+  /// - Web local debug uses http://localhost:5000/api/v1
+  /// - Mobile apps (Android/iOS) & Production use live 24/7 Render server
   static String get baseUrl {
-    if (kDebugMode) {
+    if (kIsWeb && kDebugMode) {
       return 'http://localhost:5000/api/v1';
     }
-    return 'https://dentaguru.onrender.com/api/v1';
+    return liveBackendUrl;
   }
 
   // Authentication Endpoints
