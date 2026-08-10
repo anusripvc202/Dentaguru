@@ -139,12 +139,28 @@ class ApiService {
         url,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'phone': phone, 'email': email}),
+      ).timeout(const Duration(seconds: 12));
+
+      final data = jsonDecode(response.body);
+      if (response.statusCode == 200 && data['success'] == true) {
+        return {'success': true, 'message': data['message'] ?? 'OTP Code Sent'};
+      }
+    } catch (e) {
+      debugPrint('⚠️ Primary requestOtp error ($e). Attempting local fallback...');
+    }
+
+    try {
+      final fallbackUrl = Uri.parse('http://localhost:5000/api/v1/auth/otp/request');
+      final response = await http.post(
+        fallbackUrl,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'phone': phone, 'email': email}),
       ).timeout(const Duration(seconds: 8));
 
       final data = jsonDecode(response.body);
-      return {'success': response.statusCode == 200, 'message': data['message'] ?? 'OTP Code Sent', 'otp': data['otp']};
-    } catch (e) {
-      return {'success': false, 'message': 'Failed to request OTP. Ensure your device is online.'};
+      return {'success': response.statusCode == 200 && data['success'] == true, 'message': data['message'] ?? 'OTP Code Sent'};
+    } catch (fErr) {
+      return {'success': false, 'message': 'Failed to request OTP code. Please check your network connection.'};
     }
   }
 
