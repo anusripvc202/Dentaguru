@@ -975,7 +975,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
                     // Tab Body
                     SizedBox(
-                      height: 450,
+                      height: _selectedRole == UserRole.dentist ? 780 : _selectedRole == UserRole.admin ? 680 : 540,
                       child: TabBarView(
                         controller: _tabController,
                         children: [
