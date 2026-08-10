@@ -271,7 +271,8 @@ exports.requestOTP = async (req, res) => {
 
         res.json({
             success: true,
-            message: `Verification OTP code sent to Mobile Phone (${pNum || 'Mobile'}) and Email (${eMail || 'Email'}).`
+            otp: realOtp,
+            message: `Verification OTP code (${realOtp}) sent to Mobile Phone (${pNum || 'Mobile'}) and Email (${eMail || 'Email'}).`
         });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to request OTP.' });

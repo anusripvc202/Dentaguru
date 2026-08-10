@@ -75,6 +75,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   bool _isVerifyingOtp = false;
   final _otpController = TextEditingController();
   String? _otpErrorMessage;
+  String? _receivedOtp;
 
   @override
   void initState() {
@@ -416,6 +417,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     if (email.isNotEmpty) {
       try {
         final emailRes = await ApiService().requestOtp(phone: phone, email: email);
+        if (emailRes['otp'] != null) {
+          _receivedOtp = emailRes['otp'].toString();
+          _otpController.text = _receivedOtp!;
+        }
         debugPrint('📩 Backend Email OTP API response: $emailRes');
       } catch (e) {
         debugPrint('⚠️ Backend Email OTP dispatch warning: $e');
@@ -569,14 +574,16 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: const Color(0xFF86EFAC)),
               ),
-              child: const Row(
+              child: Row(
                 children: [
-                  Icon(Icons.mark_email_read_rounded, color: Color(0xFF15803D), size: 16),
-                  SizedBox(width: 6),
+                  const Icon(Icons.mark_email_read_rounded, color: Color(0xFF15803D), size: 16),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      'OTP verification code has been dispatched to your Mobile SMS & Email Inbox.',
-                      style: TextStyle(fontSize: 11, color: Color(0xFF15803D), fontWeight: FontWeight.w600),
+                      _receivedOtp != null
+                          ? '🔑 Security OTP Code: [ $_receivedOtp ] (Dispatched to Email & SMS)'
+                          : 'OTP verification code has been dispatched to your Mobile SMS & Email Inbox.',
+                      style: const TextStyle(fontSize: 11, color: Color(0xFF15803D), fontWeight: FontWeight.bold),
                     ),
                   ),
                 ],
