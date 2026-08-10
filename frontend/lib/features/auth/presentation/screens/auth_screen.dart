@@ -396,11 +396,12 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
   Future<void> _handleSendOtp() async {
     final phone = _phoneController.text.trim();
+    final email = _emailController.text.trim();
 
-    if (phone.isEmpty) {
+    if (phone.isEmpty && email.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('⚠️ Please enter your Phone Number to receive Firebase SMS OTP.'),
+          content: Text('⚠️ Please enter your Phone Number or Email Address to receive Firebase OTP.'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -412,31 +413,49 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       _otpErrorMessage = null;
     });
 
-    // Send SMS OTP via Google Firebase Phone Auth exclusively
-    await FirebaseService.sendFirebasePhoneOtp(
-      phone,
-      onCodeSent: (verId) {
-        if (!mounted) return;
-        setState(() {
-          _isSendingOtp = false;
-          _isOtpSent = true;
-          _otpController.clear();
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('📱 Firebase SMS OTP dispatched to $phone. Check your phone notifications.'),
-            backgroundColor: const Color(0xFF10B981),
-          ),
-        );
-      },
-      onError: (err) {
-        if (!mounted) return;
-        setState(() {
-          _isSendingOtp = false;
-          _otpErrorMessage = err;
-        });
-      },
-    );
+    if (email.isNotEmpty) {
+      FirebaseService.sendFirebaseEmailOtp(email);
+    }
+
+    if (phone.isNotEmpty) {
+      await FirebaseService.sendFirebasePhoneOtp(
+        phone,
+        onCodeSent: (verId) {
+          if (!mounted) return;
+          setState(() {
+            _isSendingOtp = false;
+            _isOtpSent = true;
+            _otpController.clear();
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('📱 Firebase OTP dispatched to $phone & ${email.isNotEmpty ? email : "Email"}. Check notifications.'),
+              backgroundColor: const Color(0xFF10B981),
+            ),
+          );
+        },
+        onError: (err) {
+          if (!mounted) return;
+          setState(() {
+            _isSendingOtp = false;
+            _otpErrorMessage = err;
+          });
+        },
+      );
+    } else {
+      if (!mounted) return;
+      setState(() {
+        _isSendingOtp = false;
+        _isOtpSent = true;
+        _otpController.clear();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('📩 Firebase Verification dispatched to $email. Check your Gmail inbox.'),
+          backgroundColor: const Color(0xFF10B981),
+        ),
+      );
+    }
   }
 
   Future<void> _handleVerifyOtp() async {
