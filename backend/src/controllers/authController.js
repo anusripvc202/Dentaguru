@@ -269,14 +269,17 @@ exports.requestOTP = async (req, res) => {
             sendRealSmsOtp(pNum, realOtp).catch(e => console.error('SMS send warning:', e));
         }
 
-        // Send Real OTP Email via Nodemailer if email provided
+        let emailResult = { success: true };
         if (eMail && eMail.includes('@')) {
-            sendOtpEmail(eMail, realOtp, false).catch(e => console.error('Email send warning:', e));
+            emailResult = await sendOtpEmail(eMail, realOtp, false);
+            console.log('📩 Nodemailer email dispatch result:', emailResult);
         }
 
         res.json({
-            success: true,
-            message: `Verification OTP code has been dispatched to your Mobile Phone (${pNum || 'Mobile'}) and Email (${eMail || 'Email'}).`
+            success: emailResult.success !== false,
+            message: emailResult.success !== false
+                ? `Verification OTP code has been dispatched to your Mobile Phone (${pNum || 'Mobile'}) and Email (${eMail || 'Email'}).`
+                : `Email Dispatch Warning: ${emailResult.error || 'Check server logs'}`
         });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to request OTP.' });
