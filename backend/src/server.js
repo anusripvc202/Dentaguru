@@ -1,5 +1,6 @@
 require('dotenv').config();
 const http = require('http');
+const https = require('https');
 const app = require('./app');
 const { connectDB } = require('./config/db');
 const { Server } = require('socket.io');
@@ -52,12 +53,18 @@ server.listen(PORT, () => {
 
     // Keep-Alive Auto-Ping Service (Keeps Render server 100% awake 24/7 with 0 cold-start delay)
     const keepAliveUrl = process.env.RENDER_EXTERNAL_URL || 'https://dentaguru-backend.onrender.com';
+    const httpDriver = keepAliveUrl.startsWith('https') ? https : http;
+
     setInterval(() => {
-        const req = http.get(keepAliveUrl, (res) => {
-            console.log(`⚡ Keep-Alive ping executed (Status: ${res.statusCode}) - Server Warm 24/7.`);
-        });
-        req.on('error', (err) => {
-            console.warn('⚠️ Keep-Alive ping warning:', err.message);
-        });
+        try {
+            const req = httpDriver.get(keepAliveUrl, (res) => {
+                console.log(`⚡ Keep-Alive ping executed (Status: ${res.statusCode}) - Server Warm 24/7.`);
+            });
+            req.on('error', (err) => {
+                console.warn('⚠️ Keep-Alive ping warning:', err.message);
+            });
+        } catch (e) {
+            console.warn('⚠️ Keep-Alive exception:', e.message);
+        }
     }, 10 * 60 * 1000); // Self-ping every 10 minutes
 });
