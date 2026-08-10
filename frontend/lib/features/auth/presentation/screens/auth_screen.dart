@@ -436,7 +436,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           if (mounted && err.isNotEmpty) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('📱 SMS Note: $err. Enter 1119 or 8849 to verify.'),
+                content: Text('📱 SMS Note: $err. Please check your email inbox for your 4-digit OTP code.'),
                 backgroundColor: const Color(0xFF1E293B),
               ),
             );
