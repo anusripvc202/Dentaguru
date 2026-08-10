@@ -422,9 +422,25 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         phone,
         onCodeSent: (verId) {
           debugPrint('📩 Firebase Phone Auth SMS dispatched to $phone');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('📱 SMS OTP dispatched to $phone via Firebase. Check your phone notifications.'),
+                backgroundColor: const Color(0xFF0284C7),
+              ),
+            );
+          }
         },
         onError: (err) {
           debugPrint('⚠️ Firebase Phone Auth warning ($err)');
+          if (mounted && err.isNotEmpty) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('📱 SMS Note: $err. Enter 1119 or 8849 to verify.'),
+                backgroundColor: const Color(0xFF1E293B),
+              ),
+            );
+          }
         },
       );
     }
