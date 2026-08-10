@@ -6,6 +6,11 @@ Thumbs.db
 .env
 .idea/
 
+# Large binary files
+*.apk
+app-debug.apk
+backend/data/
+
 # Documentation files (Excluded from Git)
 DentaGuru_Complete_Documentation.md
 DentaGuru_Documentation.pdf
