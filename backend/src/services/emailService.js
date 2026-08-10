@@ -85,6 +85,39 @@ const sendViaResendApi = async (toEmail, subject, html) => {
     }
 };
 
+const sendViaBrevoApi = async (toEmail, subject, html) => {
+    const brevoKey = (process.env.BREVO_API_KEY || '').trim();
+    if (!brevoKey) return null;
+
+    try {
+        const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+            method: 'POST',
+            headers: {
+                'accept': 'application/json',
+                'api-key': brevoKey,
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                sender: { name: 'DentaGuru Healthcare', email: process.env.GMAIL_USER || 'anusripvc202@gmail.com' },
+                to: [{ email: toEmail }],
+                subject,
+                htmlContent: html,
+            }),
+        });
+        const data = await response.json();
+        if (response.ok) {
+            console.log(`✅ Brevo HTTP API Email dispatched to [${toEmail}] (ID: ${data.messageId})`);
+            return { success: true, messageId: data.messageId };
+        } else {
+            console.warn('⚠️ Brevo HTTP API warning:', data);
+            return null;
+        }
+    } catch (e) {
+        console.warn('⚠️ Brevo HTTP API exception:', e.message);
+        return null;
+    }
+};
+
 /**
  * Send an OTP Verification Email to user's inbox
  */
@@ -107,7 +140,11 @@ const sendOtpEmail = async (toEmail, otpCode, isReset = false) => {
         </div>
     `;
 
-    // 1. Try Resend HTTP API over Port 443 (Unblocked on all cloud providers)
+    // 1. Try Brevo (Sendinblue) HTTP API over Port 443 (Sends to ANY email domain)
+    const brevoRes = await sendViaBrevoApi(toEmail, subject, html);
+    if (brevoRes) return brevoRes;
+
+    // 2. Try Resend HTTP API over Port 443
     const resendRes = await sendViaResendApi(toEmail, subject, html);
     if (resendRes) return resendRes;
 
