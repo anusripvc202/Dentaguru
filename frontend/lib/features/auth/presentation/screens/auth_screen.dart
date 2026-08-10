@@ -396,12 +396,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
   Future<void> _handleSendOtp() async {
     final phone = _phoneController.text.trim();
-    final email = _emailController.text.trim();
 
-    if (phone.isEmpty && email.isEmpty) {
+    if (phone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('⚠️ Please enter your Phone Number or Email Address to receive OTP.'),
+          content: Text('⚠️ Please enter your Phone Number to receive Firebase SMS OTP.'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -413,63 +412,37 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       _otpErrorMessage = null;
     });
 
-    // 1. Request unified 4-digit OTP via Backend API (sends Email via Nodemailer & SMS)
-    final res = await ApiService().requestOtp(phone: phone, email: email);
-
-    // 2. Also trigger Firebase Phone Auth if phone number provided
-    if (phone.isNotEmpty) {
-      FirebaseService.sendFirebasePhoneOtp(
-        phone,
-        onCodeSent: (verId) {
-          debugPrint('📩 Firebase Phone Auth SMS dispatched to $phone');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('📱 SMS OTP dispatched to $phone via Firebase. Check your phone notifications.'),
-                backgroundColor: const Color(0xFF0284C7),
-              ),
-            );
-          }
-        },
-        onError: (err) {
-          debugPrint('⚠️ Firebase Phone Auth warning ($err)');
-          if (mounted && err.isNotEmpty) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('📱 SMS Note: $err. Please check your email inbox for your 4-digit OTP code.'),
-                backgroundColor: const Color(0xFF1E293B),
-              ),
-            );
-          }
-        },
-      );
-    }
-
-    if (!mounted) return;
-    setState(() {
-      _isSendingOtp = false;
-      _isOtpSent = true;
-      _otpController.clear();
-    });
-
-    if (res['success'] == true) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('📩 OTP Verification Code sent to ${email.isNotEmpty ? email : phone}. Please check your Inbox.'),
-          backgroundColor: const Color(0xFF10B981),
-        ),
-      );
-    } else {
-      setState(() {
-        _otpErrorMessage = res['message'] ?? 'Failed to send OTP code. Please check internet connection.';
-      });
-    }
+    // Send SMS OTP via Google Firebase Phone Auth exclusively
+    await FirebaseService.sendFirebasePhoneOtp(
+      phone,
+      onCodeSent: (verId) {
+        if (!mounted) return;
+        setState(() {
+          _isSendingOtp = false;
+          _isOtpSent = true;
+          _otpController.clear();
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('📱 Firebase SMS OTP dispatched to $phone. Check your phone notifications.'),
+            backgroundColor: const Color(0xFF10B981),
+          ),
+        );
+      },
+      onError: (err) {
+        if (!mounted) return;
+        setState(() {
+          _isSendingOtp = false;
+          _otpErrorMessage = err;
+        });
+      },
+    );
   }
 
   Future<void> _handleVerifyOtp() async {
     final code = _otpController.text.trim();
     if (code.isEmpty) {
-      setState(() => _otpErrorMessage = 'Please enter OTP code');
+      setState(() => _otpErrorMessage = 'Please enter Firebase SMS OTP code');
       return;
     }
 
@@ -478,18 +451,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       _otpErrorMessage = null;
     });
 
-    final phone = _phoneController.text.trim();
-    final email = _emailController.text.trim();
-
-    bool verified = false;
-    if (phone.isNotEmpty) {
-      verified = await FirebaseService.verifyFirebaseOtp(code);
-    }
-
-    if (!verified) {
-      final res = await ApiService().verifyOtp(phone: phone, email: email, code: code);
-      verified = res['success'] == true;
-    }
+    final verified = await FirebaseService.verifyFirebaseOtp(code);
 
     if (!mounted) return;
     setState(() => _isVerifyingOtp = false);
@@ -501,12 +463,12 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('🎉 Firebase Phone OTP Verified! Mobile & Email confirmed. "Create Account" button is now ACTIVE.'),
+          content: Text('🎉 Firebase Phone OTP Verified! "Create Account" button is now ACTIVE.'),
           backgroundColor: Color(0xFF10B981),
         ),
       );
     } else {
-      setState(() => _otpErrorMessage = 'Invalid or expired OTP code. Please check SMS or Email.');
+      setState(() => _otpErrorMessage = 'Invalid or expired Firebase SMS OTP code.');
     }
   }
 
