@@ -413,47 +413,39 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       _otpErrorMessage = null;
     });
 
-    // 1. Dispatch Email OTP via live backend Nodemailer API
-    if (email.isNotEmpty) {
-      try {
-        final emailRes = await ApiService().requestOtp(phone: phone, email: email);
-        debugPrint('📩 Backend Email OTP API response: $emailRes');
-      } catch (e) {
-        debugPrint('⚠️ Backend Email OTP dispatch warning: $e');
-      }
-    }
+    // 1. Request unified 4-digit OTP via Backend API (sends Email via Nodemailer & SMS)
+    final res = await ApiService().requestOtp(phone: phone, email: email);
 
-    // 2. Dispatch Mobile SMS OTP via Firebase Phone Auth or backend API
+    // 2. Also trigger Firebase Phone Auth if phone number provided
     if (phone.isNotEmpty) {
-      await FirebaseService.sendFirebasePhoneOtp(
+      FirebaseService.sendFirebasePhoneOtp(
         phone,
         onCodeSent: (verId) {
-          if (!mounted) return;
-          setState(() {
-            _isSendingOtp = false;
-            _isOtpSent = true;
-            _otpController.clear();
-          });
+          debugPrint('📩 Firebase Phone Auth SMS dispatched to $phone');
         },
-        onError: (errMessage) async {
-          debugPrint('⚠️ Firebase Phone Auth warning ($errMessage), falling back to API OTP...');
-          if (email.isEmpty) {
-            await ApiService().requestOtp(phone: phone, email: email);
-          }
-          if (!mounted) return;
-          setState(() {
-            _isSendingOtp = false;
-            _isOtpSent = true;
-            _otpController.clear();
-          });
+        onError: (err) {
+          debugPrint('⚠️ Firebase Phone Auth warning ($err)');
         },
       );
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _isSendingOtp = false;
+      _isOtpSent = true;
+      _otpController.clear();
+    });
+
+    if (res['success'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('📩 OTP Verification Code sent to ${email.isNotEmpty ? email : phone}. Please check your Inbox.'),
+          backgroundColor: const Color(0xFF10B981),
+        ),
+      );
     } else {
-      if (!mounted) return;
       setState(() {
-        _isSendingOtp = false;
-        _isOtpSent = true;
-        _otpController.clear();
+        _otpErrorMessage = res['message'] ?? 'Failed to send OTP code. Please check internet connection.';
       });
     }
   }
