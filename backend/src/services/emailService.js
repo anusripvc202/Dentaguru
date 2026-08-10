@@ -119,8 +119,11 @@ const sendOtpEmail = async (toEmail, otpCode, isReset = false) => {
         const mailTransporter = await getTransporter();
         if (!mailTransporter) return { success: false, reason: 'No transporter' };
 
+        const senderAddress = (process.env.GMAIL_USER || '').trim() || 'anusripvc202@gmail.com';
+        const fromHeader = `"DentaGuru Security" <${senderAddress}>`;
+
         const info = await mailTransporter.sendMail({
-            from: process.env.EMAIL_FROM || '"DentaGuru Security" <no-reply@dentaguru.com>',
+            from: fromHeader,
             to: toEmail,
             subject,
             html,
