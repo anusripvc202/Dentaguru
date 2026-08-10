@@ -4,49 +4,52 @@ const nodemailer = require('nodemailer');
 let transporter;
 
 const getTransporter = async () => {
-    if (transporter) return transporter;
+    const gmailUser = (process.env.GMAIL_USER || '').trim();
+    const gmailPass = (process.env.GMAIL_APP_PASSWORD || '').trim();
 
-    if (process.env.SMTP_HOST && process.env.SMTP_USER) {
-        transporter = nodemailer.createTransport({
-            host: process.env.SMTP_HOST,
-            port: parseInt(process.env.SMTP_PORT || '587'),
-            secure: process.env.SMTP_SECURE === 'true',
-            auth: {
-                user: process.env.SMTP_USER,
-                pass: process.env.SMTP_PASS,
-            },
-        });
-        console.log('✅ Nodemailer initialized with custom SMTP server.');
-    } else if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
-        transporter = nodemailer.createTransport({
+    if (gmailUser && gmailPass) {
+        return nodemailer.createTransport({
             host: 'smtp.gmail.com',
             port: 465,
             secure: true,
             auth: {
-                user: process.env.GMAIL_USER.trim(),
-                pass: process.env.GMAIL_APP_PASSWORD.trim(),
+                user: gmailUser,
+                pass: gmailPass,
+            },
+            tls: {
+                rejectUnauthorized: false
+            }
+        });
+    }
+
+    if (process.env.SMTP_HOST && process.env.SMTP_USER) {
+        return nodemailer.createTransport({
+            host: process.env.SMTP_HOST.trim(),
+            port: parseInt(process.env.SMTP_PORT || '587'),
+            secure: process.env.SMTP_SECURE === 'true',
+            auth: {
+                user: process.env.SMTP_USER.trim(),
+                pass: process.env.SMTP_PASS.trim(),
             },
         });
-        console.log('✅ Nodemailer initialized with Gmail SSL SMTP server (smtp.gmail.com:465).');
-    } else {
-        // Fallback to auto-created Ethereal test account for real-time inbox testing
-        try {
-            const testAccount = await nodemailer.createTestAccount();
-            transporter = nodemailer.createTransport({
-                host: 'smtp.ethereal.email',
-                port: 587,
-                secure: false,
-                auth: {
-                    user: testAccount.user,
-                    pass: testAccount.pass,
-                },
-            });
-            console.log('ℹ️ Nodemailer initialized with Ethereal Test SMTP service.');
-        } catch (err) {
-            console.warn('⚠️ Could not initialize Ethereal SMTP transporter:', err.message);
-        }
     }
-    return transporter;
+
+    // Fallback to auto-created Ethereal test account for real-time inbox testing
+    try {
+        const testAccount = await nodemailer.createTestAccount();
+        return nodemailer.createTransport({
+            host: 'smtp.ethereal.email',
+            port: 587,
+            secure: false,
+            auth: {
+                user: testAccount.user,
+                pass: testAccount.pass,
+            },
+        });
+    } catch (err) {
+        console.warn('⚠️ Could not initialize Ethereal SMTP transporter:', err.message);
+        return null;
+    }
 };
 
 /**
