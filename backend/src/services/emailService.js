@@ -9,10 +9,7 @@ const getTransporter = async () => {
 
     if (gmailUser && gmailPass) {
         return nodemailer.createTransport({
-            host: 'smtp.gmail.com',
-            port: 587,
-            secure: false,
-            requireTLS: true,
+            service: 'gmail',
             auth: {
                 user: gmailUser,
                 pass: gmailPass,
@@ -20,9 +17,9 @@ const getTransporter = async () => {
             tls: {
                 rejectUnauthorized: false
             },
-            connectionTimeout: 10000,
-            greetingTimeout: 10000,
-            socketTimeout: 10000,
+            connectionTimeout: 15000,
+            greetingTimeout: 15000,
+            socketTimeout: 15000,
         });
     }
 
