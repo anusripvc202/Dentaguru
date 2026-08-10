@@ -412,14 +412,17 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       _otpErrorMessage = null;
     });
 
-    // Send Email OTP via Backend Nodemailer API simultaneously
+    // 1. Dispatch Email OTP via live backend Nodemailer API
     if (email.isNotEmpty) {
-      ApiService().requestOtp(phone: phone, email: email).catchError((e) {
+      try {
+        final emailRes = await ApiService().requestOtp(phone: phone, email: email);
+        debugPrint('📩 Backend Email OTP API response: $emailRes');
+      } catch (e) {
         debugPrint('⚠️ Backend Email OTP dispatch warning: $e');
-        return <String, dynamic>{};
-      });
+      }
     }
 
+    // 2. Dispatch Mobile SMS OTP via Firebase Phone Auth or backend API
     if (phone.isNotEmpty) {
       await FirebaseService.sendFirebasePhoneOtp(
         phone,

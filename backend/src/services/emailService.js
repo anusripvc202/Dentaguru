@@ -19,13 +19,15 @@ const getTransporter = async () => {
         console.log('✅ Nodemailer initialized with custom SMTP server.');
     } else if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
         transporter = nodemailer.createTransport({
-            service: 'gmail',
+            host: 'smtp.gmail.com',
+            port: 465,
+            secure: true,
             auth: {
-                user: process.env.GMAIL_USER,
-                pass: process.env.GMAIL_APP_PASSWORD,
+                user: process.env.GMAIL_USER.trim(),
+                pass: process.env.GMAIL_APP_PASSWORD.trim(),
             },
         });
-        console.log('✅ Nodemailer initialized with Gmail service.');
+        console.log('✅ Nodemailer initialized with Gmail SSL SMTP server (smtp.gmail.com:465).');
     } else {
         // Fallback to auto-created Ethereal test account for real-time inbox testing
         try {
