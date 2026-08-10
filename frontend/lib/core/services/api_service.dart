@@ -139,7 +139,7 @@ class ApiService {
         url,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'phone': phone, 'email': email}),
-      ).timeout(const Duration(seconds: 12));
+      ).timeout(const Duration(seconds: 35));
 
       final data = jsonDecode(response.body);
       if (response.statusCode == 200 && data['success'] == true) {
@@ -155,7 +155,7 @@ class ApiService {
         fallbackUrl,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'phone': phone, 'email': email}),
-      ).timeout(const Duration(seconds: 8));
+      ).timeout(const Duration(seconds: 15));
 
       final data = jsonDecode(response.body);
       return {'success': response.statusCode == 200 && data['success'] == true, 'message': data['message'] ?? 'OTP Code Sent'};

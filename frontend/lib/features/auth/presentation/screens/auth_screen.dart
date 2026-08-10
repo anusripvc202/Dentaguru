@@ -524,23 +524,25 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         children: [
           Row(
             children: [
-              const Icon(Icons.mark_email_read_rounded, color: Color(0xFF16A34A), size: 20),
-              const SizedBox(width: 8),
-              const Text(
-                'Security OTP Verification',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF166534)),
+              const Icon(Icons.mark_email_read_rounded, color: Color(0xFF16A34A), size: 18),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Security OTP Verification',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF166534)),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              const Spacer(),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: _isOtpVerified ? const Color(0xFFDCF8C6) : const Color(0xFFFEF3C7),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
                   _isOtpVerified ? 'VERIFIED ✓' : 'STEP 1 OF 2',
                   style: TextStyle(
-                    fontSize: 10,
+                    fontSize: 9,
                     fontWeight: FontWeight.bold,
                     color: _isOtpVerified ? const Color(0xFF15803D) : const Color(0xFFD97706),
                   ),
@@ -594,33 +596,37 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             Row(
               children: [
                 Expanded(
+                  flex: 3,
                   child: TextField(
                     controller: _otpController,
                     keyboardType: TextInputType.number,
                     maxLength: 4,
                     decoration: InputDecoration(
-                      hintText: 'Enter 4-digit OTP code',
+                      hintText: '4-digit OTP',
                       counterText: '',
                       filled: true,
                       fillColor: Colors.white,
                       isDense: true,
-                      contentPadding: const EdgeInsets.all(12),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF10B981),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                const SizedBox(width: 6),
+                Expanded(
+                  flex: 2,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF10B981),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: _isVerifyingOtp ? null : _handleVerifyOtp,
+                    child: _isVerifyingOtp
+                        ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Text('Verify', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                   ),
-                  onPressed: _isVerifyingOtp ? null : _handleVerifyOtp,
-                  child: _isVerifyingOtp
-                      ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : const Text('Verify OTP', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                 ),
               ],
             ),
@@ -830,15 +836,18 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           onPressed: () => context.go('/'),
           tooltip: 'Back to Home Page',
         ),
-        title: Row(
-          children: [
-            const DentaGuruLogo(height: 32),
-            const SizedBox(width: 10),
-            Text(
-              '$_roleName Portal Authentication',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textDark),
-            ),
-          ],
+        title: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              const DentaGuruLogo(height: 26),
+              const SizedBox(width: 6),
+              Text(
+                '$_roleName Portal Authentication',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+              ),
+            ],
+          ),
         ),
       ),
       body: Center(
