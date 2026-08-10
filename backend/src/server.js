@@ -49,4 +49,15 @@ io.on('connection', (socket) => {
 // Start Server listening
 server.listen(PORT, () => {
     console.log(`Denta Guru API server running on port: ${PORT}`);
+
+    // Keep-Alive Auto-Ping Service (Keeps Render server 100% awake 24/7 with 0 cold-start delay)
+    const keepAliveUrl = process.env.RENDER_EXTERNAL_URL || 'https://dentaguru-backend.onrender.com';
+    setInterval(() => {
+        const req = http.get(keepAliveUrl, (res) => {
+            console.log(`⚡ Keep-Alive ping executed (Status: ${res.statusCode}) - Server Warm 24/7.`);
+        });
+        req.on('error', (err) => {
+            console.warn('⚠️ Keep-Alive ping warning:', err.message);
+        });
+    }, 10 * 60 * 1000); // Self-ping every 10 minutes
 });
