@@ -1,4 +1,4 @@
-name: DentaGuru Build & Distribution Pipeline
+name: DentaGuru Build & Test Pipeline
 
 on:
   push:
@@ -6,15 +6,10 @@ on:
       - main
       - master
   workflow_dispatch:
-    inputs:
-      release_notes:
-        description: 'Release notes for testers'
-        required: false
-        default: 'Automated test build distribution via GitHub Actions'
 
 jobs:
   build-and-test:
-    name: Build Android APK & Run Test Suite
+    name: Build Android APK & Verify Tests
     runs-on: ubuntu-latest
 
     steps:
@@ -38,7 +33,7 @@ jobs:
           cd frontend
           flutter pub get
 
-      - name: 5. Run Flutter Unit & Widget Tests
+      - name: 5. Run Flutter Tests
         run: |
           cd frontend
           flutter test
@@ -47,12 +42,3 @@ jobs:
         run: |
           cd frontend
           flutter build apk --debug
-
-      - name: 7. Distribute APK via Firebase App Distribution (Optional)
-        if: "${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}" != ''
-        continue-on-error: true
-        uses: w9jds/firebase-action@v11.16.0
-        with:
-          args: appdistribution:distribute frontend/build/app/outputs/flutter-apk/app-debug.apk --app "${{ secrets.FIREBASE_APP_ID_ANDROID || '1:653454456380:android:5d3a32eaa156d75470b539' }}" --release-notes "${{ github.event.inputs.release_notes || 'Automated build from commit ' }}${{ github.sha }}"
-        env:
-          GCP_SA_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}
