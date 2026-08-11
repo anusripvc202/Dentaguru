@@ -14,9 +14,6 @@ class ApiConstants {
   /// - Web local debug uses http://localhost:5000/api/v1
   /// - Mobile apps (Android/iOS) & Production use live 24/7 Render server
   static String get baseUrl {
-    if (kIsWeb && kDebugMode) {
-      return 'http://localhost:5000/api/v1';
-    }
     return liveBackendUrl;
   }
 
