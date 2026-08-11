@@ -45,7 +45,8 @@ jobs:
           flutter build apk --release --no-tree-shake-icons
 
       - name: 6. Distribute APK via Firebase App Distribution
-        if: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY != '' }}
+        if: "${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}" != ''
+        continue-on-error: true
         uses: w9jds/firebase-action@v11.16.0
         with:
           args: appdistribution:distribute frontend/build/app/outputs/flutter-apk/app-release.apk --app "${{ secrets.FIREBASE_APP_ID_ANDROID || '1:653454456380:android:5d3a32eaa156d75470b539' }}" --release-notes "${{ github.event.inputs.release_notes || 'Automated build from commit ' }}${{ github.sha }}"
