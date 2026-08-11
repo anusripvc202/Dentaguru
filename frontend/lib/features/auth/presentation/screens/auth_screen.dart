@@ -186,6 +186,18 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     final email = _loginEmailController.text.trim();
     final password = _loginPasswordController.text.trim();
 
+    if (_selectedRole == UserRole.admin && email.toLowerCase() != 'anusripvc202@gmail.com') {
+      setState(() => _isLoggingIn = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('⛔ Access Denied: Only the primary administrator email (anusripvc202@gmail.com) is authorized for Admin access.'),
+          backgroundColor: Color(0xFFEF4444),
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
     try {
       final res = await ApiService().loginUser(
         email: email,
@@ -321,6 +333,18 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     final email = _emailController.text.trim();
     final phone = _phoneController.text.trim();
     final password = _passwordController.text.trim();
+
+    if (_selectedRole == UserRole.admin && email.toLowerCase() != 'anusripvc202@gmail.com') {
+      setState(() => _isRegistering = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('⛔ Access Denied: Only the primary administrator email (anusripvc202@gmail.com) is authorized to register as Admin.'),
+          backgroundColor: Color(0xFFEF4444),
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
 
     String? photoBase64;
     if (_pickedImageBytes != null) {

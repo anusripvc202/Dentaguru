@@ -26,6 +26,16 @@ const generateTokens = (user) => {
 exports.register = async (req, res) => {
     const { name, email, password, phone, role, fcmToken, specialty, licenseNumber, clinicName, clinicAddress, profilePhoto } = req.body;
     try {
+        const normalizedRole = (role || 'Patient').toString().trim();
+        const normalizedEmail = (email || '').toString().trim().toLowerCase();
+
+        if (normalizedRole.toLowerCase() === 'admin' && normalizedEmail !== 'anusripvc202@gmail.com') {
+            return res.status(403).json({
+                success: false,
+                message: 'Access Denied: Only the primary administrator email (anusripvc202@gmail.com) is authorized for Admin access.'
+            });
+        }
+
         const existingEmail = await User.findOne({ email });
         if (existingEmail) {
             return res.status(400).json({ success: false, message: 'Email already registered.' });
@@ -145,6 +155,15 @@ exports.login = async (req, res) => {
         const isMatch = await comparePassword(password, user.password);
         if (!isMatch) {
             return res.status(400).json({ success: false, message: 'Invalid credentials.' });
+        }
+
+        // Enforce Unique Primary Admin Email Authorization
+        const normalizedUserEmail = (user.email || '').toString().trim().toLowerCase();
+        if ((role && role.toLowerCase().includes('admin') || user.role.toLowerCase().includes('admin')) && normalizedUserEmail !== 'anusripvc202@gmail.com') {
+            return res.status(403).json({
+                success: false,
+                message: 'Access Denied: Only the primary administrator email (anusripvc202@gmail.com) is authorized for Admin access.'
+            });
         }
 
         // Enforce Portal Role Matching
