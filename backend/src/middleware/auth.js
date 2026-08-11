@@ -58,10 +58,13 @@ const optionalAuth = async (req, res, next) => {
         try {
             const { data: { user }, error } = await supabase.auth.getUser(token);
             if (!error && user) {
+                let dbUser = null;
+                try { dbUser = await User.findById(user.id); } catch (_) {}
                 req.user = {
                     id: user.id,
                     email: user.email,
-                    role: user.user_metadata?.role || 'patient',
+                    name: dbUser?.name || user.user_metadata?.name || user.email.split('@')[0],
+                    role: dbUser?.role || user.user_metadata?.role || 'Patient',
                     user_metadata: user.user_metadata
                 };
                 return next();
