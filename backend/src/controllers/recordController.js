@@ -4,7 +4,22 @@ const { MedicalRecord } = require('../models/Schemas');
 exports.getPatientRecords = async (req, res) => {
     const { patientId } = req.query;
     try {
-        const query = patientId ? { patient_id: patientId } : {};
+        let query = {};
+        const targetId = patientId || (req.user ? req.user.id : null);
+        if (targetId) {
+            const user = await User.findById(targetId);
+            const possibleIds = [targetId];
+            if (user && user.name) possibleIds.push(user.name);
+            if (user && user.email) possibleIds.push(user.email);
+            if (req.user && req.user.id && !possibleIds.includes(req.user.id)) possibleIds.push(req.user.id);
+            query.patient_id = { $in: possibleIds };
+        } else if (req.user) {
+            const user = await User.findById(req.user.id);
+            const possibleIds = [req.user.id];
+            if (user && user.name) possibleIds.push(user.name);
+            if (user && user.email) possibleIds.push(user.email);
+            query.patient_id = { $in: possibleIds };
+        }
         const records = await MedicalRecord.find(query);
 
         const formatted = records.map(r => {

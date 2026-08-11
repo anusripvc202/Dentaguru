@@ -61,14 +61,25 @@ exports.getAppointments = async (req, res) => {
         if (status) query.status = status;
 
         if (req.user) {
-            if (req.user.role === 'Patient') {
-                query.patient_id = req.user.id;
-            } else if (req.user.role === 'Dentist') {
+            const user = await User.findById(req.user.id);
+            if (req.user.role === 'Patient' || (user && user.role === 'Patient')) {
+                if (!patientId) {
+                    const possibleIds = [req.user.id];
+                    if (user && user.name) possibleIds.push(user.name);
+                    if (user && user.email) possibleIds.push(user.email);
+                    query.patient_id = { $in: possibleIds };
+                }
+            } else if (req.user.role === 'Dentist' || (user && user.role === 'Dentist')) {
                 const dentist = await Dentist.findOne({ user_id: req.user.id });
-                if (dentist) query.dentist_id = dentist.id;
-            } else if (req.user.role === 'Clinic') {
+                if (dentist) {
+                    const possibleDocIds = [dentist.id, req.user.id];
+                    if (dentist.name) possibleDocIds.push(dentist.name);
+                    if (user && user.name) possibleDocIds.push(user.name);
+                    query.dentist_id = { $in: possibleDocIds };
+                }
+            } else if (req.user.role === 'Clinic' || (user && user.role === 'Clinic')) {
                 const clinic = await Clinic.findOne({ user_id: req.user.id });
-                if (clinic) query.clinic_id = clinic.id;
+                if (clinic) query.clinic_id = { $in: [clinic.id, req.user.id, clinic.clinic_name] };
             }
         }
 

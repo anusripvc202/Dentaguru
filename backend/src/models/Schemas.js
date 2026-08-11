@@ -171,6 +171,14 @@ const isUUID = (str) => typeof str === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-
 
 async function resolveUserUuid(input) {
     if (!input) return null;
+    if (typeof input === 'object' && input.$in && Array.isArray(input.$in)) {
+        const uuids = [];
+        for (const item of input.$in) {
+            const res = await resolveUserUuid(item);
+            if (res && !uuids.includes(res)) uuids.push(res);
+        }
+        return uuids;
+    }
     const str = String(input).trim();
     if (isUUID(str)) return str;
 
@@ -179,9 +187,6 @@ async function resolveUserUuid(input) {
         if (!user) user = await User.findOne({ phone: str });
         if (!user) user = await User.findOne({ name: str });
         if (user) return user.id;
-
-        const { data: firstUsers } = await supabaseAdmin.from('users').select('id').limit(1);
-        if (firstUsers && firstUsers.length > 0) return firstUsers[0].id;
     } catch (e) {
         console.error('Error resolving user UUID:', e.message);
     }
@@ -190,6 +195,14 @@ async function resolveUserUuid(input) {
 
 async function resolveDentistUuid(input) {
     if (!input) return null;
+    if (typeof input === 'object' && input.$in && Array.isArray(input.$in)) {
+        const uuids = [];
+        for (const item of input.$in) {
+            const res = await resolveDentistUuid(item);
+            if (res && !uuids.includes(res)) uuids.push(res);
+        }
+        return uuids;
+    }
     const str = String(input).trim();
     if (isUUID(str)) return str;
 
@@ -260,15 +273,25 @@ const Appointment = {
 
         if (pId) {
             const resolvedP = await resolveUserUuid(pId);
-            if (resolvedP) req = req.eq('patient_id', resolvedP);
+            if (Array.isArray(resolvedP) && resolvedP.length > 0) {
+                req = req.in('patient_id', resolvedP);
+            } else if (typeof resolvedP === 'string' && resolvedP.length > 0) {
+                req = req.eq('patient_id', resolvedP);
+            }
         }
         if (dId) {
             const resolvedD = await resolveDentistUuid(dId);
-            if (resolvedD) req = req.eq('dentist_id', resolvedD);
+            if (Array.isArray(resolvedD) && resolvedD.length > 0) {
+                req = req.in('dentist_id', resolvedD);
+            } else if (typeof resolvedD === 'string' && resolvedD.length > 0) {
+                req = req.eq('dentist_id', resolvedD);
+            }
         }
         if (cId) {
             const resolvedC = await resolveClinicUuid(cId);
-            if (resolvedC) req = req.eq('clinic_id', resolvedC);
+            if (typeof resolvedC === 'string' && resolvedC.length > 0) {
+                req = req.eq('clinic_id', resolvedC);
+            }
         }
 
         const { data, error } = await req.order('date', { ascending: true });
@@ -331,7 +354,11 @@ const MedicalRecord = {
         const pId = query.patient_id || query.patientId;
         if (pId) {
             const resolvedP = await resolveUserUuid(pId);
-            if (resolvedP) req = req.eq('patient_id', resolvedP);
+            if (Array.isArray(resolvedP) && resolvedP.length > 0) {
+                req = req.in('patient_id', resolvedP);
+            } else if (typeof resolvedP === 'string' && resolvedP.length > 0) {
+                req = req.eq('patient_id', resolvedP);
+            }
         }
         const { data, error } = await req.order('created_at', { ascending: false });
         if (error) throw error;
@@ -394,7 +421,7 @@ const ChatMessage = {
         const sId = query.sender_id || query.senderId;
         if (sId) {
             const resolvedS = await resolveUserUuid(sId);
-            if (resolvedS) req = req.eq('sender_id', resolvedS);
+            if (typeof resolvedS === 'string' && resolvedS.length > 0) req = req.eq('sender_id', resolvedS);
         }
         const { data, error } = await req.order('created_at', { ascending: true });
         if (error) throw error;
@@ -445,7 +472,11 @@ const PatientProblemRequest = {
         }
         if (query.patient_id || query.patientId) {
             const pId = await resolveUserUuid(query.patient_id || query.patientId);
-            if (pId) req = req.eq('patient_id', pId);
+            if (Array.isArray(pId) && pId.length > 0) {
+                req = req.in('patient_id', pId);
+            } else if (typeof pId === 'string' && pId.length > 0) {
+                req = req.eq('patient_id', pId);
+            }
         }
         const { data, error } = await req.order('created_at', { ascending: false });
         if (error) {
