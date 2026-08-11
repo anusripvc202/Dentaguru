@@ -1567,12 +1567,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.notifications_active_rounded, color: AppTheme.primaryBlue, size: 22),
-                        SizedBox(width: 8),
-                        Text('Admin System Notifications', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      ],
+                    const Expanded(
+                      child: Row(
+                        children: [
+                          Icon(Icons.notifications_active_rounded, color: AppTheme.primaryBlue, size: 22),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Admin System Notifications',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                     IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(dialogCtx).pop()),
                   ],

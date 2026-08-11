@@ -694,12 +694,20 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.notifications_active_rounded, color: AppTheme.primaryBlue, size: 22),
-                        SizedBox(width: 8),
-                        Text('Patient Notifications', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      ],
+                    const Expanded(
+                      child: Row(
+                        children: [
+                          Icon(Icons.notifications_active_rounded, color: AppTheme.primaryBlue, size: 22),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Patient Notifications',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                     IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(dialogCtx).pop()),
                   ],

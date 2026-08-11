@@ -754,12 +754,20 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.notifications_active_rounded, color: AppTheme.primaryBlue, size: 22),
-                        SizedBox(width: 8),
-                        Text('In-App Notifications', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      ],
+                    const Expanded(
+                      child: Row(
+                        children: [
+                          Icon(Icons.notifications_active_rounded, color: AppTheme.primaryBlue, size: 22),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'In-App Notifications',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                     IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(dialogCtx).pop()),
                   ],
@@ -1285,90 +1293,117 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                               Row(
                                 children: [
                                   Expanded(
-                                    child: ElevatedButton.icon(
-                                      icon: const Icon(Icons.receipt_long_rounded, size: 14),
-                                      label: const Text('Issue E-Prescription', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: const Color(0xFF10B981),
-                                        foregroundColor: Colors.white,
-                                        padding: const EdgeInsets.symmetric(vertical: 10),
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                    child: SizedBox(
+                                      height: 42,
+                                      child: ElevatedButton.icon(
+                                        icon: const Icon(Icons.receipt_long_rounded, size: 14),
+                                        label: const Text('Issue E-Prescription', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10.5), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: const Color(0xFF10B981),
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                        ),
+                                        onPressed: () => _showPrescriptionModal(context, req.patientName),
                                       ),
-                                      onPressed: () => _showPrescriptionModal(context, req.patientName),
                                     ),
                                   ),
                                   const SizedBox(width: 8),
-                                  OutlinedButton.icon(
-                                    icon: const Icon(Icons.chat_bubble_outline_rounded, size: 14),
-                                    label: const Text('Chat', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: AppTheme.primaryBlue,
-                                      side: const BorderSide(color: AppTheme.primaryBlue),
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                  Expanded(
+                                    child: SizedBox(
+                                      height: 42,
+                                      child: OutlinedButton.icon(
+                                        icon: const Icon(Icons.chat_bubble_outline_rounded, size: 14),
+                                        label: const Text('Chat', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: AppTheme.primaryBlue,
+                                          side: const BorderSide(color: AppTheme.primaryBlue),
+                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                        ),
+                                        onPressed: () {
+                                          final rId = 'PATIENT-${req.patientName.isNotEmpty ? req.patientName.toUpperCase().replaceAll(' ', '_') : 'GUEST'}';
+                                          _showDoctorChatModal(context, req.patientName, rId);
+                                        },
+                                      ),
                                     ),
-                                    onPressed: () {
-                                      final rId = 'PATIENT-${req.patientName.isNotEmpty ? req.patientName.toUpperCase().replaceAll(' ', '_') : 'GUEST'}';
-                                      _showDoctorChatModal(context, req.patientName, rId);
-                                    },
                                   ),
                                   const SizedBox(width: 8),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF10B981).withValues(alpha: 0.12),
-                                      borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(color: const Color(0xFF10B981)),
-                                    ),
-                                    child: const Row(
-                                      children: [
-                                        Icon(Icons.check_circle_rounded, size: 14, color: Color(0xFF10B981)),
-                                        SizedBox(width: 4),
-                                        Text('Accepted', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFF10B981))),
-                                      ],
+                                  Expanded(
+                                    child: Container(
+                                      height: 42,
+                                      alignment: Alignment.center,
+                                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(color: const Color(0xFF10B981)),
+                                      ),
+                                      child: const Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 14),
+                                          SizedBox(width: 4),
+                                          Expanded(
+                                            child: Text(
+                                              'Accepted',
+                                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
+                                              textAlign: TextAlign.center,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ],
                               ),
-                            ] else
+                            ] else ...[
                               Row(
                                 children: [
                                   Expanded(
-                                    child: OutlinedButton.icon(
-                                      icon: const Icon(Icons.close_rounded, size: 14, color: Color(0xFFEF4444)),
-                                      label: const Text('Decline Referral', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFFEF4444))),
-                                      style: OutlinedButton.styleFrom(
-                                        side: const BorderSide(color: Color(0xFFEF4444)),
-                                        padding: const EdgeInsets.symmetric(vertical: 10),
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                    child: SizedBox(
+                                      height: 42,
+                                      child: OutlinedButton.icon(
+                                        icon: const Icon(Icons.close_rounded, size: 14, color: Color(0xFFEF4444)),
+                                        label: const Text('Decline Referral', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10.5, color: Color(0xFFEF4444)), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                        style: OutlinedButton.styleFrom(
+                                          side: const BorderSide(color: Color(0xFFEF4444)),
+                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                        ),
+                                        onPressed: () {
+                                          _patientService.declineReferralByDentist(req.id);
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(
+                                              content: Text('⚠️ Declined referral for ${req.patientName}. Returned to Admin pool.'),
+                                              backgroundColor: const Color(0xFFEF4444),
+                                            ),
+                                          );
+                                        },
                                       ),
-                                      onPressed: () {
-                                        _patientService.declineReferralByDentist(req.id);
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(
-                                            content: Text('⚠️ Declined referral for ${req.patientName}. Returned to Admin pool.'),
-                                            backgroundColor: const Color(0xFFEF4444),
-                                          ),
-                                        );
-                                      },
                                     ),
                                   ),
                                   const SizedBox(width: 8),
                                   Expanded(
-                                    child: ElevatedButton.icon(
-                                      icon: const Icon(Icons.event_available_rounded, size: 14),
-                                      label: const Text('Accept & Set Slot', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: const Color(0xFF10B981),
-                                        foregroundColor: Colors.white,
-                                        padding: const EdgeInsets.symmetric(vertical: 10),
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                    child: SizedBox(
+                                      height: 42,
+                                      child: ElevatedButton.icon(
+                                        icon: const Icon(Icons.event_available_rounded, size: 14),
+                                        label: const Text('Accept & Set Slot', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10.5), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: const Color(0xFF10B981),
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                        ),
+                                        onPressed: () => _showAcceptAndScheduleModal(context, req),
                                       ),
-                                      onPressed: () => _showAcceptAndScheduleModal(context, req),
                                     ),
                                   ),
                                 ],
                               ),
+                            ],
                           ],
                         ),
                       );
@@ -1438,7 +1473,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   }) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.all(14),
+        height: 98,
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
@@ -1453,24 +1489,27 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(7),
               decoration: BoxDecoration(
                 color: accentColor.withValues(alpha: 0.12),
                 shape: BoxShape.circle,
               ),
-              child: Icon(icon, color: accentColor, size: 18),
+              child: Icon(icon, color: accentColor, size: 17),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 6),
             Text(
               count,
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: accentColor),
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: accentColor),
             ),
             const SizedBox(height: 2),
             Text(
               label,
-              style: const TextStyle(fontSize: 10, color: AppTheme.textMuted, fontWeight: FontWeight.w600),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 9.5, color: AppTheme.textMuted, fontWeight: FontWeight.w600, height: 1.1),
             ),
           ],
         ),
@@ -1488,7 +1527,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
       child: GestureDetector(
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 14),
+          height: 92,
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(16),
@@ -1502,6 +1542,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
             ],
           ),
           child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
                 padding: const EdgeInsets.all(8),
@@ -1511,11 +1552,16 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 ),
                 child: Icon(icon, color: color, size: 18),
               ),
-              const SizedBox(height: 6),
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+              const SizedBox(height: 4),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, height: 1.1, color: AppTheme.textDark),
+                ),
               ),
             ],
           ),
