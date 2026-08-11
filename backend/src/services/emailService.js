@@ -62,8 +62,8 @@ const sendViaResendApi = (toEmail, subject, html, apiKey) => {
 };
 
 const getTransporter = async () => {
-    const gmailUser = (process.env.GMAIL_USER || '').trim();
-    const gmailPass = (process.env.GMAIL_APP_PASSWORD || '').trim();
+    const gmailUser = (process.env.GMAIL_USER || 'anusripvc202@gmail.com').trim();
+    const gmailPass = (process.env.GMAIL_APP_PASSWORD || 'vxrqzpifcemgshkh').trim();
 
     if (gmailUser && gmailPass) {
         return nodemailer.createTransport({
