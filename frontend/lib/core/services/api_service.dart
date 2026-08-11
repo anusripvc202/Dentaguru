@@ -586,6 +586,21 @@ class ApiService {
     return [];
   }
 
+  /// Admin/All: Fetch all registered Patients directly from Supabase DB
+  Future<List<dynamic>> fetchPatients() async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/admin/patients');
+      final response = await http.get(uri, headers: _headers);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['patients'] ?? [];
+      }
+    } catch (e) {
+      debugPrint('Fetch patients error: $e');
+    }
+    return [];
+  }
+
   /// Admin: Suggest / Assign Dentist to a Patient Request
   Future<Map<String, dynamic>> suggestDentist({
     required String requestId,

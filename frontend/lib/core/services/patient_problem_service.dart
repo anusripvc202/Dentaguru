@@ -445,6 +445,11 @@ class PatientProblemService extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Master Registered Patients List from Supabase DB
+  final List<PatientProfile> _allPatients = [];
+
+  List<PatientProfile> get allPatients => List.unmodifiable(_allPatients);
+
   // ----------------------------------------------------
   // Persistent SharedPreferences Storage Methods
   // ----------------------------------------------------
@@ -480,7 +485,15 @@ class PatientProblemService extends ChangeNotifier {
         _medicalRecords.addAll(List<Map<String, dynamic>>.from(list));
       }
 
-      // 5. Sync live appointments, clinics, doctors, records, and requests directly from Supabase DB API
+      // 5. Load Master Patients List
+      final patStr = prefs.getString('dentaguru_all_patients');
+      if (patStr != null && patStr.isNotEmpty) {
+        final List list = jsonDecode(patStr);
+        _allPatients.clear();
+        _allPatients.addAll(list.map((item) => PatientProfile.fromJson(item)));
+      }
+
+      // 6. Sync live patients, appointments, clinics, doctors, records, and requests directly from Supabase DB API
       syncAllDataFromApi();
 
       notifyListeners();
@@ -491,6 +504,7 @@ class PatientProblemService extends ChangeNotifier {
 
   Future<void> syncAllDataFromApi() async {
     try {
+      await syncPatientsFromApi();
       await syncClinicsFromApi();
       await syncDoctorsFromApi();
       await syncAppointmentsFromApi();
@@ -498,6 +512,34 @@ class PatientProblemService extends ChangeNotifier {
       await syncMedicalRecordsFromApi();
     } catch (e) {
       debugPrint('Error in syncAllDataFromApi: $e');
+    }
+  }
+
+  Future<void> syncPatientsFromApi() async {
+    try {
+      final list = await ApiService().fetchPatients();
+      if (list.isNotEmpty) {
+        _allPatients.clear();
+        for (final item in list) {
+          final id = (item['id'] ?? '').toString();
+          final name = (item['name'] ?? 'Patient').toString();
+          final email = (item['email'] ?? '').toString();
+          final phone = (item['phone'] ?? '').toString();
+          final age = (item['age'] ?? '28').toString();
+
+          _allPatients.add(PatientProfile(
+            id: id,
+            name: name,
+            email: email,
+            phone: phone,
+            age: age,
+          ));
+        }
+      }
+      _saveToStorage();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Sync patients error: $e');
     }
   }
 
@@ -748,6 +790,7 @@ class PatientProblemService extends ChangeNotifier {
       }
       await prefs.setString('dentaguru_requests', jsonEncode(_requests.map((r) => r.toJson()).toList()));
       await prefs.setString('dentaguru_all_doctors', jsonEncode(_allDoctors.map((d) => d.toJson()).toList()));
+      await prefs.setString('dentaguru_all_patients', jsonEncode(_allPatients.map((p) => p.toJson()).toList()));
       await prefs.setString('dentaguru_medical_records', jsonEncode(_medicalRecords));
     } catch (e) {
       debugPrint('Error saving PatientProblemService state to storage: $e');
@@ -761,6 +804,7 @@ class PatientProblemService extends ChangeNotifier {
       currentPatient = PatientProfile();
       currentDoctor = null;
       _allDoctors.clear();
+      _allPatients.clear();
       _allClinics.clear();
       _requests.clear();
       _medicalRecords.clear();

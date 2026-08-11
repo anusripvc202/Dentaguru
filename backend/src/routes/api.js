@@ -38,6 +38,8 @@ router.get('/patient/suggested-dentists', optionalAuth, problemRequests.getSugge
 
 router.get('/admin/problem-requests', optionalAuth, problemRequests.getAdminProblemRequests);
 router.post('/admin/problem-requests/:id/suggest-dentist', optionalAuth, problemRequests.suggestDentist);
+router.get('/admin/patients', optionalAuth, auth.getPatients);
+router.get('/patients', optionalAuth, auth.getPatients);
 
 // ─────────────────────────────────────────────
 // 3. ADMIN VERIFICATION ENDPOINTS

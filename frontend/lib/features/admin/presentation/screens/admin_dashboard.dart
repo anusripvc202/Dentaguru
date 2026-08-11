@@ -2836,7 +2836,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     final age = ageCtrl.text.trim().isEmpty ? '28' : ageCtrl.text.trim();
                     final pass = passwordCtrl.text.trim().isEmpty ? 'Password123!' : passwordCtrl.text.trim();
 
-                    final res = await ApiService().registerUser(
+                    await ApiService().registerUser(
                       name: name,
                       email: email,
                       password: pass,
@@ -2844,26 +2844,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                       role: 'Patient',
                     );
 
-                    setState(() {
-                      _adminPatientsList.insert(0, {
-                        'name': name,
-                        'age': age,
-                        'phone': phone,
-                        'email': email,
-                        'lastVisit': 'Just now',
-                        'status': 'Active',
-                      });
-                    });
-
-                    _problemService.updatePatientProfile(
-                      name: name,
-                      email: email,
-                      phone: phone,
-                      age: age,
-                      gender: 'Female',
-                      bloodGroup: 'O Positive (O+)',
-                      emergencyContact: phone,
-                    );
+                    await _problemService.syncPatientsFromApi();
 
                     if (dialogContext.mounted) {
                       Navigator.of(dialogContext).pop();
@@ -2890,17 +2871,31 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   // PANEL 2: PATIENTS MANAGEMENT DATA TABLE
   // ==========================================
   Widget _buildPatientsPanel() {
-    final patientEntries = List<Map<String, String>>.from(_adminPatientsList);
-    
-    // Check logged in patient
+    final List<PatientProfile> allPatientsFromDb = _problemService.allPatients;
+    final List<Map<String, String>> patientEntries = [];
+
+    for (final p in allPatientsFromDb) {
+      if (p.name.isNotEmpty) {
+        patientEntries.add({
+          'name': p.name,
+          'age': p.age.isNotEmpty ? p.age : '28',
+          'phone': p.phone.isNotEmpty ? p.phone : '--',
+          'email': p.email,
+          'lastVisit': 'Active',
+          'status': 'Active',
+        });
+      }
+    }
+
+    // Check logged in current patient if not present
     if (_problemService.currentPatient.name.isNotEmpty &&
         !patientEntries.any((p) => p['email'] == _problemService.currentPatient.email)) {
       patientEntries.add({
         'name': _problemService.currentPatient.name,
-        'age': _problemService.currentPatient.age,
+        'age': _problemService.currentPatient.age.isNotEmpty ? _problemService.currentPatient.age : '28',
         'phone': _problemService.currentPatient.phone,
         'email': _problemService.currentPatient.email,
-        'lastVisit': 'Today',
+        'lastVisit': 'Active',
         'status': 'Active',
       });
     }

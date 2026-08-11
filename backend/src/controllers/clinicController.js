@@ -58,8 +58,37 @@ exports.getClinicDentists = async (req, res) => {
 exports.getAllDentists = async (req, res) => {
     try {
         const dentists = await Dentist.find();
+        const { User } = require('../models/Schemas');
+        const dentistUsers = await User.find({ role: 'Dentist' });
+        
+        const existingEmails = new Set(dentists.map(d => (d.email || d.users?.email || '').toLowerCase()));
+        
+        for (const u of dentistUsers) {
+            const emailClean = (u.email || '').toLowerCase();
+            if (emailClean && !existingEmails.has(emailClean)) {
+                dentists.push({
+                    id: u.id,
+                    name: u.name.startsWith('Dr.') ? u.name : `Dr. ${u.name}`,
+                    speciality: u.specialty || 'General Dentistry',
+                    specialty: u.specialty || 'General Dentistry',
+                    qualification: 'BDS, MDS',
+                    experienceYears: 5,
+                    rating: 5.0,
+                    reviews_count: 1,
+                    clinicName: u.clinic_name || 'DentaGuru Practice',
+                    phone: u.phone || '',
+                    email: u.email || '',
+                    availability_status: 'Available',
+                    license_number: 'DEN-LIC-REG',
+                    users: { name: u.name, email: u.email, phone: u.phone }
+                });
+                existingEmails.add(emailClean);
+            }
+        }
+
         res.json({ success: true, count: dentists.length, dentists });
     } catch (err) {
+        console.error('Get All Dentists Error:', err.message);
         res.status(500).json({ success: false, message: 'Failed to fetch all dentists.' });
     }
 };

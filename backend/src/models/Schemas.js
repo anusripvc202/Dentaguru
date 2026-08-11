@@ -24,6 +24,31 @@ const User = {
         return data;
     },
 
+    async find(query = {}) {
+        try {
+            let req = supabaseAdmin.from('users').select('*');
+            if (query.role) {
+                req = req.ilike('role', query.role);
+            }
+            for (const [key, val] of Object.entries(query)) {
+                if (key !== 'role') {
+                    req = req.eq(key, val);
+                }
+            }
+            const { data, error } = await req.order('created_at', { ascending: false });
+            if (error) {
+                console.warn('⚠️ User find query error, falling back to simple select:', error.message);
+                const simple = await supabaseAdmin.from('users').select('*');
+                return simple.data || [];
+            }
+            return data || [];
+        } catch (e) {
+            console.warn('⚠️ User find exception, falling back to simple select:', e.message);
+            const simple = await supabaseAdmin.from('users').select('*');
+            return simple.data || [];
+        }
+    },
+
     async findById(id) {
         const { data, error } = await supabaseAdmin.from('users').select('*').eq('id', id).single();
         if (error) return null;

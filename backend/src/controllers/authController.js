@@ -562,3 +562,50 @@ exports.resetDatabase = async (req, res) => {
         res.status(500).json({ success: false, message: 'Failed to reset database tables.' });
     }
 };
+
+// 9. GET ALL PATIENTS / USERS FROM SUPABASE DB
+exports.getPatients = async (req, res) => {
+    try {
+        const dbPatients = await User.find({ role: 'Patient' });
+        const patientMap = new Map();
+        
+        for (const p of dbPatients) {
+            patientMap.set(p.id, {
+                id: p.id,
+                name: p.name,
+                email: p.email,
+                phone: p.phone || '',
+                role: p.role,
+                created_at: p.created_at
+            });
+        }
+        
+        // Merge patients from consultation requests to ensure zero data omission
+        try {
+            const reqs = await PatientProblemRequest.find({});
+            for (const r of reqs) {
+                const pId = r.patient_id || r.patient?.id || r.id;
+                const pName = r.patient?.name || r.patientName;
+                const pEmail = r.patient?.email || r.patientEmail || `${pName?.toLowerCase().replace(/\s+/g, '')}@patient.org`;
+                const pPhone = r.patient?.phone || r.patientPhone || '';
+                
+                if (pName && !Array.from(patientMap.values()).some(p => p.name.toLowerCase() === pName.toLowerCase() || (p.email && p.email.toLowerCase() === pEmail.toLowerCase()))) {
+                    patientMap.set(pId, {
+                        id: pId,
+                        name: pName,
+                        email: pEmail,
+                        phone: pPhone,
+                        role: 'Patient',
+                        created_at: r.created_at
+                    });
+                }
+            }
+        } catch (_) {}
+
+        const resultList = Array.from(patientMap.values());
+        res.json({ success: true, count: resultList.length, patients: resultList });
+    } catch (err) {
+        console.error('Get Patients Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to fetch patients.' });
+    }
+};
