@@ -52,10 +52,10 @@ server.listen(PORT, () => {
     console.log(`Denta Guru API server running on port: ${PORT}`);
 
     // Keep-Alive Auto-Ping Service (Keeps Render server 100% awake 24/7 with 0 cold-start delay)
-    const keepAliveUrl = process.env.RENDER_EXTERNAL_URL || 'https://dentaguru-backend.onrender.com';
+    const keepAliveUrl = 'https://dentaguru-backend.onrender.com/api/v1/clinics';
     const httpDriver = keepAliveUrl.startsWith('https') ? https : http;
 
-    setInterval(() => {
+    const pingServer = () => {
         try {
             const req = httpDriver.get(keepAliveUrl, (res) => {
                 console.log(`⚡ Keep-Alive ping executed (Status: ${res.statusCode}) - Server Warm 24/7.`);
@@ -66,5 +66,9 @@ server.listen(PORT, () => {
         } catch (e) {
             console.warn('⚠️ Keep-Alive exception:', e.message);
         }
-    }, 10 * 60 * 1000); // Self-ping every 10 minutes
+    };
+
+    // Ping immediately on launch, then every 3 minutes
+    setTimeout(pingServer, 5000);
+    setInterval(pingServer, 3 * 60 * 1000);
 });
