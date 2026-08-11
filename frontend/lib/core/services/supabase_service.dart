@@ -1,8 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../constants/api_constants.dart';
-import 'api_service.dart';
 
+/// Supabase Service — Single OTP Authority for Email Authentication via Resend Custom SMTP
 class SupabaseService {
   static final SupabaseService _instance = SupabaseService._internal();
   factory SupabaseService() => _instance;
@@ -25,7 +25,7 @@ class SupabaseService {
   /// Get active Supabase client instance
   SupabaseClient get client => Supabase.instance.client;
 
-  /// Dispatch Email OTP code directly via Supabase Auth & Email Service with ApiService fallback
+  /// Dispatch Email OTP code directly via Supabase Auth (Resend Custom SMTP delivery)
   Future<Map<String, dynamic>> sendEmailOtp(String email) async {
     final cleanEmail = email.trim();
     if (cleanEmail.isEmpty || !cleanEmail.contains('@')) {
@@ -38,27 +38,26 @@ class SupabaseService {
         shouldCreateUser: true,
       );
 
-      debugPrint('📩 Supabase Auth Email OTP dispatched to: $cleanEmail');
-      return {'success': true, 'message': 'OTP sent to your email.'};
+      debugPrint('📩 Supabase Auth Email OTP requested for: $cleanEmail');
+      return {'success': true, 'message': 'OTP sent to your email address.'};
     } on AuthException catch (ae) {
-      debugPrint('⚠️ Supabase Auth Rate-Limit / Notice (${ae.message}), falling back to direct API service...');
-      // Seamless fail-safe fallback if Supabase free default mailer rate-limits emails
-      final apiRes = await ApiService().requestOtp(phone: '', email: cleanEmail);
-      if (apiRes['success'] == true) {
-        return {'success': true, 'message': 'OTP sent to your email.'};
+      debugPrint('❌ Supabase Auth OTP Exception [${ae.statusCode}]: ${ae.message}');
+      final isRateLimit = ae.statusCode == '429' ||
+          ae.code == 'over_email_send_rate_limit' ||
+          ae.message.toLowerCase().contains('rate limit') ||
+          ae.message.toLowerCase().contains('too many');
+
+      if (isRateLimit) {
+        return {'success': false, 'message': 'Too many OTP requests. Please try again later.'};
       }
-      return {'success': false, 'message': ae.message.contains('rate limit') ? 'Rate limit reached on Supabase. OTP code sent via secondary mailer.' : ae.message};
+      return {'success': false, 'message': ae.message};
     } catch (e) {
-      debugPrint('⚠️ Supabase Auth OTP notice ($e), falling back to ApiService...');
-      final apiRes = await ApiService().requestOtp(phone: '', email: cleanEmail);
-      if (apiRes['success'] == true) {
-        return {'success': true, 'message': 'OTP sent to your email.'};
-      }
+      debugPrint('❌ Supabase Auth OTP error: $e');
       return {'success': false, 'message': 'Unable to send OTP. Please try again.'};
     }
   }
 
-  /// Verify Email OTP code using Supabase Auth with ApiService fallback
+  /// Verify Email OTP code using Supabase Auth
   Future<Map<String, dynamic>> verifyEmailOtp({required String email, required String token}) async {
     final cleanEmail = email.trim();
     final cleanToken = token.trim();
@@ -78,18 +77,14 @@ class SupabaseService {
         debugPrint('🎉 Supabase Email OTP verified successfully for: $cleanEmail');
         return {'success': true, 'message': 'OTP verified successfully.', 'user': response.user};
       }
+
+      return {'success': false, 'message': 'Invalid or expired OTP.'};
     } on AuthException catch (ae) {
-      debugPrint('⚠️ Supabase Verify OTP Exception (${ae.message}), attempting fallback verification...');
+      debugPrint('❌ Supabase Verify OTP Exception: ${ae.message}');
+      return {'success': false, 'message': 'Invalid or expired OTP.'};
     } catch (e) {
-      debugPrint('⚠️ Supabase Verify OTP Error ($e), attempting fallback verification...');
+      debugPrint('❌ Supabase Verify OTP Error: $e');
+      return {'success': false, 'message': 'Invalid or expired OTP.'};
     }
-
-    // Fallback verification check via ApiService
-    final apiRes = await ApiService().verifyOtp(phone: '', email: cleanEmail, code: cleanToken);
-    if (apiRes['success'] == true) {
-      return {'success': true, 'message': 'OTP verified successfully.'};
-    }
-
-    return {'success': false, 'message': 'Invalid or expired OTP.'};
   }
 }

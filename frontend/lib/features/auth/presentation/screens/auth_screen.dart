@@ -460,7 +460,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     if (sendSuccess) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(email.isNotEmpty ? 'OTP sent to your email.' : 'OTP sent to your mobile phone.'),
+          content: Text(email.isNotEmpty ? 'OTP sent to your email address.' : 'OTP sent to your mobile phone.'),
           backgroundColor: const Color(0xFF10B981),
         ),
       );

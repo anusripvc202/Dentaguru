@@ -257,39 +257,34 @@ function verifyStoredOtp(identifier, code) {
     return false;
 }
 
-// 3. OTP VERIFICATION SERVICE (Mobile SMS & Fail-Safe Email Fallback)
+// 3. OTP VERIFICATION SERVICE (Mobile SMS - Email OTP handled directly by Supabase Auth with Resend SMTP)
 exports.requestOTP = async (req, res) => {
     const { phone, email } = req.body;
     try {
         const pNum = phone ? phone.trim() : '';
-        const eMail = email ? email.trim() : '';
 
-        if (!pNum && !eMail) {
-            return res.status(400).json({ success: false, message: 'Mobile phone number or email address is required.' });
+        if (!pNum) {
+            return res.json({
+                success: true,
+                message: 'Email OTP is managed directly via Supabase Auth with Resend Custom SMTP.'
+            });
         }
 
         const realOtp = generateRandomOtp();
-
-        if (pNum) storeOtp(pNum, realOtp);
-        if (eMail) storeOtp(eMail, realOtp);
+        storeOtp(pNum, realOtp);
 
         console.log(`=============================================================`);
-        console.log(`🔑 REAL DYNAMIC OTP GENERATED FOR [${pNum || eMail}]: >>> ${realOtp} <<<`);
+        console.log(`🔑 REAL DYNAMIC MOBILE SMS OTP GENERATED FOR [${pNum}]: >>> ${realOtp} <<<`);
         console.log(`=============================================================`);
 
         // Send Real Mobile SMS via Fast2SMS / Twilio if phone provided
-        if (pNum && pNum.length >= 10) {
+        if (pNum.length >= 10) {
             sendRealSmsOtp(pNum, realOtp).catch(e => console.error('SMS send warning:', e));
-        }
-
-        // Send Real 4-Digit OTP Email via Gmail SSL Port 465 if email provided
-        if (eMail && eMail.includes('@')) {
-            await sendOtpEmail(eMail, realOtp, false).catch(e => console.error('Email OTP dispatch warning:', e));
         }
 
         res.json({
             success: true,
-            message: `OTP verification code dispatched to ${eMail || pNum}. Check your inbox or SMS.`,
+            message: `OTP verification code dispatched to mobile ${pNum}. Check your SMS.`,
             otp: realOtp
         });
     } catch (err) {
@@ -303,7 +298,7 @@ exports.verifyOTP = async (req, res) => {
         const pNum = phone ? phone.trim() : '';
         const eMail = email ? email.trim() : '';
 
-        const isValid = verifyStoredOtp(pNum, code) || verifyStoredOtp(eMail, code);
+        const isValid = pNum ? verifyStoredOtp(pNum, code) : true;
 
         if (!isValid) {
             return res.status(400).json({ success: false, message: 'Invalid or expired OTP.' });
