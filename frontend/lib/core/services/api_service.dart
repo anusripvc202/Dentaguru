@@ -133,6 +133,7 @@ class ApiService {
   }
 
   static String? _lastGeneratedOtp;
+  static String? get lastGeneratedOtp => _lastGeneratedOtp;
 
   /// Request Mobile & Email OTP Code
   Future<Map<String, dynamic>> requestOtp({required String phone, required String email}) async {

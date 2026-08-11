@@ -595,16 +595,43 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: const Color(0xFF86EFAC)),
               ),
-              child: const Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.mark_email_read_rounded, color: Color(0xFF15803D), size: 16),
-                  SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'OTP verification code has been dispatched to your Mobile SMS / Email Inbox.',
-                      style: TextStyle(fontSize: 11, color: Color(0xFF15803D), fontWeight: FontWeight.w600),
-                    ),
+                  const Row(
+                    children: [
+                      Icon(Icons.mark_email_read_rounded, color: Color(0xFF15803D), size: 16),
+                      SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'OTP verification code has been dispatched to your Mobile SMS / Email Inbox.',
+                          style: TextStyle(fontSize: 11, color: Color(0xFF15803D), fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
                   ),
+                  if (ApiService.lastGeneratedOtp != null) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: const Color(0xFF16A34A)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.key_rounded, size: 13, color: Color(0xFF16A34A)),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Instant Security Verification Code: ${ApiService.lastGeneratedOtp}',
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
