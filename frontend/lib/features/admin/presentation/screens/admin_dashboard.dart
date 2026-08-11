@@ -105,17 +105,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 : '123 Healthcare Blvd, Medical Hub, Suite 400';
             final doctorPhone = selectedDoctor?.phone ?? '+1 202 555 0100';
             final caseFee = selectedDoctor?.getFeeForCategory(req.problemCategory) ?? '\$75';
-            final waText = "*DentaGuru Clinical Recommendation*\n\n"
-                "Dear *${req.patientName}*,\n"
-                "Our Clinical Admin team has evaluated your reported problem:\n"
-                "• *Issue*: ${req.problemCategory} (${req.severity} Severity)\n\n"
-                "• *Recommended Doctor*: *${selectedDoctor?.name}*\n"
-                "• *Specialty*: ${selectedDoctor?.specialty}\n"
-                "• *Estimated Fee (${req.problemCategory})*: $caseFee\n"
-                "• *Clinic*: ${selectedDoctor?.clinicName}\n"
-                "• *Clinic Address*: $clinicAddr\n"
-                "• *Contact Phone*: $doctorPhone\n"
-                "• *Admin Guidance*: ${adminNotesController.text}";
+            final waText = "🏥 *DentaGuru Clinical Recommendation*\n\n"
+                "Dear *${req.patientName}*,\n\n"
+                "Our Clinical Admin team has reviewed your reported symptoms:\n"
+                "📌 *Issue*: ${req.problemCategory} (${req.severity} Severity)\n\n"
+                "👨‍⚕️ *Recommended Doctor*: *${selectedDoctor?.name}*\n"
+                "🎓 *Specialty*: ${selectedDoctor?.specialty}\n"
+                "💳 *Estimated Fee*: $caseFee\n"
+                "🏥 *Clinic*: ${selectedDoctor?.clinicName}\n"
+                "📍 *Address*: $clinicAddr\n"
+                "📞 *Doctor Contact*: $doctorPhone\n\n"
+                "💬 *Admin Guidance*: ${adminNotesController.text.trim().isEmpty ? 'Recommended for specialized clinical evaluation and care.' : adminNotesController.text.trim()}\n\n"
+                "Please open your DentaGuru App to confirm your consultation slot.";
 
             return Dialog(
               insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
@@ -628,7 +629,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                       padding: const EdgeInsets.all(12),
                                       child: Text(
                                         waText,
-                                        style: const TextStyle(fontSize: 11, color: Color(0xFF14532D), height: 1.4, fontFamily: 'monospace'),
+                                        style: const TextStyle(fontSize: 11.5, color: Color(0xFF14532D), height: 1.45),
                                       ),
                                     ),
                                   ],
@@ -671,9 +672,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                           adminNotes: adminNotesController.text.trim(),
                                         );
 
-                                        final cleanPhone = req.patientPhone.replaceAll(RegExp(r'[^0-9]'), '');
-                                        final waUrl = Uri.parse(cleanPhone.isNotEmpty
-                                            ? "https://wa.me/$cleanPhone?text=${Uri.encodeComponent(waText)}"
+                                        String rawPhone = req.patientPhone.replaceAll(RegExp(r'[^0-9]'), '');
+                                        if (rawPhone.startsWith('0') && rawPhone.length == 11) {
+                                          rawPhone = '91${rawPhone.substring(1)}';
+                                        } else if (rawPhone.length == 10) {
+                                          rawPhone = '91$rawPhone';
+                                        }
+
+                                        final waUrl = Uri.parse(rawPhone.isNotEmpty
+                                            ? "https://wa.me/$rawPhone?text=${Uri.encodeComponent(waText)}"
                                             : "https://wa.me/?text=${Uri.encodeComponent(waText)}");
                                         try {
                                           await launchUrl(waUrl, mode: LaunchMode.externalApplication);

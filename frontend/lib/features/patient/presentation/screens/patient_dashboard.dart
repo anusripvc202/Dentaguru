@@ -1194,20 +1194,25 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
 
                           // 3-Step Progress Tracker for Patient
                           Container(
+                            width: double.infinity,
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                             decoration: BoxDecoration(
                               color: const Color(0xFFF8FAFC),
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceAround,
-                              children: [
-                                _buildProgressStep(title: 'Submitted', isDone: true),
-                                _buildProgressLine(isDone: isAdminReviewed),
-                                _buildProgressStep(title: 'Admin Review', isDone: isAdminReviewed),
-                                _buildProgressLine(isDone: isDoctorAssigned),
-                                _buildProgressStep(title: 'Doctor Assigned', isDone: isDoctorAssigned),
-                              ],
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.center,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                                children: [
+                                  _buildProgressStep(title: 'Submitted', isDone: true),
+                                  _buildProgressLine(isDone: isAdminReviewed),
+                                  _buildProgressStep(title: 'Admin Review', isDone: isAdminReviewed),
+                                  _buildProgressLine(isDone: isDoctorAssigned),
+                                  _buildProgressStep(title: 'Doctor Assigned', isDone: isDoctorAssigned),
+                                ],
+                              ),
                             ),
                           ),
 
@@ -2087,7 +2092,8 @@ class _AnimatedPatientActionTileState extends State<_AnimatedPatientActionTile> 
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOutCubic,
-            padding: const EdgeInsets.symmetric(vertical: 14),
+            height: 92,
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
             decoration: BoxDecoration(
               color: _isHovered ? widget.color.withValues(alpha: 0.04) : Colors.white,
               borderRadius: BorderRadius.circular(16),
@@ -2104,17 +2110,18 @@ class _AnimatedPatientActionTileState extends State<_AnimatedPatientActionTile> 
               ],
             ),
             child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.all(10),
+                  padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
                     color: widget.color.withValues(alpha: _isHovered ? 0.22 : 0.12),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(widget.icon, color: widget.color, size: 20),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 2),
                   child: Text(
