@@ -2833,7 +2833,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     final name = nameCtrl.text.trim().isEmpty ? 'New Patient' : nameCtrl.text.trim();
                     final email = emailCtrl.text.trim().isEmpty ? 'patient_${DateTime.now().millisecondsSinceEpoch}@dentaguru.com' : emailCtrl.text.trim();
                     final phone = phoneCtrl.text.trim().isEmpty ? '+12025550000' : phoneCtrl.text.trim();
-                    final age = ageCtrl.text.trim().isEmpty ? '28' : ageCtrl.text.trim();
                     final pass = passwordCtrl.text.trim().isEmpty ? 'Password123!' : passwordCtrl.text.trim();
 
                     await ApiService().registerUser(
@@ -2875,16 +2874,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     final List<Map<String, String>> patientEntries = [];
 
     for (final p in allPatientsFromDb) {
-      if (p.name.isNotEmpty) {
-        patientEntries.add({
-          'name': p.name,
-          'age': p.age.isNotEmpty ? p.age : '28',
-          'phone': p.phone.isNotEmpty ? p.phone : '--',
-          'email': p.email,
-          'lastVisit': 'Active',
-          'status': 'Active',
-        });
-      }
+      final displayName = p.name.isNotEmpty
+          ? p.name
+          : (p.email.isNotEmpty ? p.email.split('@').first : 'Patient');
+
+      patientEntries.add({
+        'name': displayName,
+        'age': p.age.isNotEmpty ? p.age : '28',
+        'phone': p.phone.isNotEmpty ? p.phone : '--',
+        'email': p.email,
+        'lastVisit': 'Active',
+        'status': 'Active',
+      });
     }
 
     // Check logged in current patient if not present

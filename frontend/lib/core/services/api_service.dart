@@ -558,13 +558,25 @@ class ApiService {
       final uri = Uri.parse('${ApiConstants.baseUrl}/patient/problem-requests').replace(queryParameters: {
         if (patientId != null && patientId.isNotEmpty) 'patientId': patientId,
       });
-      final response = await http.get(uri, headers: _headers);
+      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        return data['requests'] ?? [];
+        final list = data['requests'] ?? [];
+        if (list is List && list.isNotEmpty) return list;
       }
     } catch (e) {
       debugPrint('Fetch patient problem requests error: $e');
+    }
+    // Direct 24/7 Supabase Cloud Fallback
+    try {
+      var query = Supabase.instance.client.from('patient_problem_requests').select('*');
+      if (patientId != null && patientId.isNotEmpty) {
+        query = query.eq('patient_id', patientId);
+      }
+      final res = await query.order('created_at', ascending: false);
+      if (res.isNotEmpty) return res;
+    } catch (e) {
+      debugPrint('Supabase direct fetch patient problem requests error: $e');
     }
     return [];
   }
@@ -575,13 +587,25 @@ class ApiService {
       final uri = Uri.parse('${ApiConstants.baseUrl}/admin/problem-requests').replace(queryParameters: {
         if (status != null && status.isNotEmpty) 'status': status,
       });
-      final response = await http.get(uri, headers: _headers);
+      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        return data['requests'] ?? [];
+        final list = data['requests'] ?? [];
+        if (list is List && list.isNotEmpty) return list;
       }
     } catch (e) {
       debugPrint('Fetch admin problem requests error: $e');
+    }
+    // Direct 24/7 Supabase Cloud Fallback
+    try {
+      var query = Supabase.instance.client.from('patient_problem_requests').select('*');
+      if (status != null && status.isNotEmpty) {
+        query = query.eq('status', status);
+      }
+      final res = await query.order('created_at', ascending: false);
+      if (res.isNotEmpty) return res;
+    } catch (e) {
+      debugPrint('Supabase direct fetch admin problem requests error: $e');
     }
     return [];
   }
@@ -590,13 +614,29 @@ class ApiService {
   Future<List<dynamic>> fetchPatients() async {
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}/admin/patients');
-      final response = await http.get(uri, headers: _headers);
+      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        return data['patients'] ?? [];
+        final list = data['patients'] ?? [];
+        if (list is List && list.isNotEmpty) {
+          return list;
+        }
       }
     } catch (e) {
       debugPrint('Fetch patients error: $e');
+    }
+    // Direct 24/7 Supabase Cloud Fallback
+    try {
+      final res = await Supabase.instance.client
+          .from('users')
+          .select('id, name, email, phone, role, created_at')
+          .ilike('role', 'Patient')
+          .order('created_at', ascending: false);
+      if (res.isNotEmpty) {
+        return res;
+      }
+    } catch (e) {
+      debugPrint('Supabase direct fetch patients error: $e');
     }
     return [];
   }

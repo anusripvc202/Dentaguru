@@ -39,13 +39,21 @@ const User = {
             if (error) {
                 console.warn('⚠️ User find query error, falling back to simple select:', error.message);
                 const simple = await supabaseAdmin.from('users').select('*');
-                return simple.data || [];
+                let result = simple.data || [];
+                if (query.role) {
+                    result = result.filter(u => u.role && u.role.toLowerCase() === query.role.toLowerCase());
+                }
+                return result;
             }
             return data || [];
         } catch (e) {
             console.warn('⚠️ User find exception, falling back to simple select:', e.message);
             const simple = await supabaseAdmin.from('users').select('*');
-            return simple.data || [];
+            let result = simple.data || [];
+            if (query.role) {
+                result = result.filter(u => u.role && u.role.toLowerCase() === query.role.toLowerCase());
+            }
+            return result;
         }
     },
 

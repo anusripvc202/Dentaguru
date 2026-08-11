@@ -522,10 +522,17 @@ class PatientProblemService extends ChangeNotifier {
         _allPatients.clear();
         for (final item in list) {
           final id = (item['id'] ?? '').toString();
-          final name = (item['name'] ?? 'Patient').toString();
-          final email = (item['email'] ?? '').toString();
-          final phone = (item['phone'] ?? '').toString();
+          String name = (item['name'] ?? '').toString().trim();
+          final email = (item['email'] ?? '').toString().trim();
+          final phone = (item['phone'] ?? '').toString().trim();
           final age = (item['age'] ?? '28').toString();
+
+          if (name.isEmpty && email.isNotEmpty) {
+            name = email.split('@').first;
+          }
+          if (name.isEmpty) {
+            name = 'Patient';
+          }
 
           _allPatients.add(PatientProfile(
             id: id,

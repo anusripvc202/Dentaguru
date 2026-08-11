@@ -48,8 +48,9 @@ io.on('connection', (socket) => {
 });
 
 // Start Server listening
-server.listen(PORT, () => {
-    console.log(`Denta Guru API server running on port: ${PORT}`);
+const HOST = '0.0.0.0';
+server.listen(PORT, HOST, () => {
+    console.log(`Denta Guru API server running on ${HOST}:${PORT}`);
 
     // Keep-Alive Auto-Ping Service (Keeps Render server 100% awake 24/7 with 0 cold-start delay)
     const keepAliveUrl = 'https://dentaguru-backend.onrender.com/api/v1/clinics';

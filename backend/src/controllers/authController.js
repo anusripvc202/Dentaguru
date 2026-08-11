@@ -570,12 +570,16 @@ exports.getPatients = async (req, res) => {
         const patientMap = new Map();
         
         for (const p of dbPatients) {
+            const pName = p.name && p.name.trim().length > 0
+                ? p.name.trim()
+                : (p.email ? p.email.split('@')[0] : 'Patient');
+
             patientMap.set(p.id, {
                 id: p.id,
-                name: p.name,
+                name: pName,
                 email: p.email,
                 phone: p.phone || '',
-                role: p.role,
+                role: p.role || 'Patient',
                 created_at: p.created_at
             });
         }
@@ -585,11 +589,11 @@ exports.getPatients = async (req, res) => {
             const reqs = await PatientProblemRequest.find({});
             for (const r of reqs) {
                 const pId = r.patient_id || r.patient?.id || r.id;
-                const pName = r.patient?.name || r.patientName;
+                const pName = r.patient?.name || r.patientName || (r.patientEmail ? r.patientEmail.split('@')[0] : 'Patient');
                 const pEmail = r.patient?.email || r.patientEmail || `${pName?.toLowerCase().replace(/\s+/g, '')}@patient.org`;
                 const pPhone = r.patient?.phone || r.patientPhone || '';
                 
-                if (pName && !Array.from(patientMap.values()).some(p => p.name.toLowerCase() === pName.toLowerCase() || (p.email && p.email.toLowerCase() === pEmail.toLowerCase()))) {
+                if (pId && !patientMap.has(pId)) {
                     patientMap.set(pId, {
                         id: pId,
                         name: pName,
@@ -609,3 +613,4 @@ exports.getPatients = async (req, res) => {
         res.status(500).json({ success: false, message: 'Failed to fetch patients.' });
     }
 };
+
