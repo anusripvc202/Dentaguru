@@ -645,6 +645,44 @@ class PatientProblemService extends ChangeNotifier {
         }
       }
 
+      // Fetch Patient Problem Requests from backend API
+      try {
+        final problemReqs = await ApiService().fetchPatientProblemRequests();
+        if (problemReqs.isNotEmpty) {
+          for (final pr in problemReqs) {
+            final prId = (pr['_id'] ?? pr['id'] ?? '').toString();
+            if (prId.isEmpty) continue;
+            final category = (pr['problem_category'] ?? pr['problemCategory'] ?? 'Dental Issue').toString();
+            final desc = (pr['problem_description'] ?? pr['problemDescription'] ?? '').toString();
+            final status = (pr['status'] ?? 'PENDING_ADMIN_REVIEW').toString();
+            final severity = (pr['severity'] ?? 'Moderate').toString();
+
+            final existingIdx = _requests.indexWhere((r) => r.id == prId);
+            if (existingIdx != -1) {
+              _requests[existingIdx].status = status;
+              if (pr['admin_notes'] != null) _requests[existingIdx].adminNotes = pr['admin_notes'].toString();
+            } else {
+              _requests.insert(
+                0,
+                PatientConsultationRequest(
+                  id: prId,
+                  patientName: currentPatient.name.isNotEmpty ? currentPatient.name : 'Patient',
+                  patientPhone: currentPatient.phone,
+                  problemCategory: category,
+                  problemDescription: desc,
+                  severity: severity,
+                  submittedAt: DateTime.now(),
+                  status: status,
+                  adminNotes: pr['admin_notes']?.toString(),
+                ),
+              );
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('Sync problem requests error: $e');
+      }
+
       _saveToStorage();
       notifyListeners();
     } catch (e) {

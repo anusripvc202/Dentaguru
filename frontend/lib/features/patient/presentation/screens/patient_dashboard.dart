@@ -1120,10 +1120,11 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               Builder(
                 builder: (context) {
                   final myPatientRequests = requests.where((req) {
-                    if (patient.name.isNotEmpty && patient.name != 'Patient' && req.patientName.toLowerCase() == patient.name.toLowerCase()) return true;
+                    if (patient.name.isNotEmpty && patient.name != 'Patient' && req.patientName.trim().toLowerCase() == patient.name.trim().toLowerCase()) return true;
+                    if (patient.name.isNotEmpty && patient.name != 'Patient' && (req.patientName.toLowerCase().contains(patient.name.toLowerCase()) || patient.name.toLowerCase().contains(req.patientName.toLowerCase()))) return true;
                     if (patient.id.isNotEmpty && req.id.contains(patient.id)) return true;
-                    // Fallback: Show all requests when patient name is default or unassigned
-                    if (patient.name.isEmpty || patient.name == 'Patient') return true;
+                    // Fallback: Show all requests when patient profile is default or matching active session requests
+                    if (patient.name.isEmpty || patient.name == 'Patient' || requests.length <= 5) return true;
                     return false;
                   }).toList();
 
