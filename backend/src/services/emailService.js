@@ -140,14 +140,7 @@ const sendOtpEmail = async (toEmail, otpCode, isPasswordReset = false) => {
         </div>
     `;
 
-    // 1. Primary Attempt: Resend HTTPS API (Instant Delivery)
-    const resendKey = (process.env.RESEND_API_KEY || '').trim();
-    if (resendKey && resendKey.startsWith('re_')) {
-        const resendResult = await sendViaResendApi(toEmail, subject, html, resendKey);
-        if (resendResult.success) {
-            return { success: true, messageId: resendResult.messageId, otp: otpCode };
-        }
-    }
+    // Direct Gmail SMTP Port 465 SSL Delivery (Delivers to ANY recipient email worldwide)
 
     // 2. Secondary Attempt: Nodemailer SMTP (Gmail / Custom SMTP / Ethereal)
     try {
