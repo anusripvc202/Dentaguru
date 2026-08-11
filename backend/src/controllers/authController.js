@@ -284,7 +284,7 @@ exports.requestOTP = async (req, res) => {
 
         // Send Real 4-Digit OTP Email
         if (eMail && eMail.includes('@')) {
-            sendOtpEmail(eMail, realOtp, false).catch(e => console.error('Email OTP dispatch warning:', e));
+            await sendOtpEmail(eMail, realOtp, false).catch(e => console.error('Email OTP dispatch warning:', e));
         }
 
         res.json({
@@ -372,7 +372,7 @@ exports.forgotPassword = async (req, res) => {
         }
 
         if (user.email && user.email.includes('@')) {
-            sendOtpEmail(user.email, realOtp, true).catch(e => console.error('Password reset email warning:', e));
+            await sendOtpEmail(user.email, realOtp, true).catch(e => console.error('Password reset email warning:', e));
         }
 
         res.json({
