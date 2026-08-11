@@ -640,69 +640,92 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                       ),
                     ),
                   ),
-                  Container(
-                    padding: EdgeInsets.only(
-                      left: 8,
-                      right: 8,
-                      top: 8,
-                      bottom: MediaQuery.of(modalContext).viewInsets.bottom + 8,
-                    ),
-                    color: const Color(0xFFF0F2F5),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.sentiment_satisfied_alt_rounded, color: Color(0xFF54656F), size: 24),
-                        const SizedBox(width: 8),
-                        const Icon(Icons.attach_file_rounded, color: Color(0xFF54656F), size: 22),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(24),
-                            ),
-                            child: TextField(
-                              controller: msgController,
-                              style: const TextStyle(fontSize: 14, color: Color(0xFF111B21)),
-                              decoration: const InputDecoration(
-                                hintText: 'Message',
-                                hintStyle: TextStyle(fontSize: 14, color: Color(0xFF8696A0)),
-                                border: InputBorder.none,
-                                contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  SafeArea(
+                    top: false,
+                    child: Container(
+                      padding: EdgeInsets.only(
+                        left: 8,
+                        right: 8,
+                        top: 8,
+                        bottom: MediaQuery.of(modalContext).viewInsets.bottom + 8,
+                      ),
+                      color: const Color(0xFFF0F2F5),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.sentiment_satisfied_alt_rounded, color: Color(0xFF54656F), size: 24),
+                          const SizedBox(width: 8),
+                          const Icon(Icons.attach_file_rounded, color: Color(0xFF54656F), size: 22),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(24),
+                              ),
+                              child: TextField(
+                                controller: msgController,
+                                style: const TextStyle(fontSize: 14, color: Color(0xFF111B21)),
+                                textInputAction: TextInputAction.send,
+                                onSubmitted: (val) async {
+                                  final text = val.trim();
+                                  if (text.isEmpty) return;
+                                  msgController.clear();
+                                  final dSender = doctor?.name ?? 'Doctor';
+                                  await ApiService().sendMessage(
+                                    senderId: dSender,
+                                    message: text,
+                                    roomId: roomId,
+                                    type: 'doctor',
+                                  );
+                                  _patientService.addNotification(
+                                    recipientRole: 'Patient',
+                                    recipientId: patientName,
+                                    title: '💬 Doctor Reply',
+                                    message: '$dSender: "$text"',
+                                  );
+                                  setModalState(() {});
+                                },
+                                decoration: const InputDecoration(
+                                  hintText: 'Message',
+                                  hintStyle: TextStyle(fontSize: 14, color: Color(0xFF8696A0)),
+                                  border: InputBorder.none,
+                                  contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        CircleAvatar(
-                          radius: 20,
-                          backgroundColor: const Color(0xFF075E54),
-                          child: IconButton(
-                            icon: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
-                            onPressed: () async {
-                              final text = msgController.text.trim();
-                              if (text.isEmpty) return;
-                              msgController.clear();
+                          const SizedBox(width: 8),
+                          CircleAvatar(
+                            radius: 20,
+                            backgroundColor: const Color(0xFF075E54),
+                            child: IconButton(
+                              icon: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
+                              onPressed: () async {
+                                final text = msgController.text.trim();
+                                if (text.isEmpty) return;
+                                msgController.clear();
 
-                              final dSender = doctor?.name ?? 'Doctor';
-                              await ApiService().sendMessage(
-                                senderId: dSender,
-                                message: text,
-                                roomId: roomId,
-                                type: 'doctor',
-                              );
+                                final dSender = doctor?.name ?? 'Doctor';
+                                await ApiService().sendMessage(
+                                  senderId: dSender,
+                                  message: text,
+                                  roomId: roomId,
+                                  type: 'doctor',
+                                );
 
-                              _patientService.addNotification(
-                                recipientRole: 'Patient',
-                                recipientId: patientName,
-                                title: '💬 Doctor Reply',
-                                message: '$dSender: "$text"',
-                              );
+                                _patientService.addNotification(
+                                  recipientRole: 'Patient',
+                                  recipientId: patientName,
+                                  title: '💬 Doctor Reply',
+                                  message: '$dSender: "$text"',
+                                );
 
-                              setModalState(() {});
-                            },
+                                setModalState(() {});
+                              },
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ],

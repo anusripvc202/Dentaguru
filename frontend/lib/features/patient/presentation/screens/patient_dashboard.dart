@@ -306,129 +306,132 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               child: Column(
                 children: [
                   // 🟢 WhatsApp Authentic Teal Header
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF075E54), // Authentic WhatsApp Teal
-                      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                    ),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 22),
-                          onPressed: () => Navigator.of(modalContext).pop(),
-                        ),
-                        const SizedBox(width: 8),
-                        Stack(
-                          children: [
-                            CircleAvatar(
-                              radius: 18,
-                              backgroundColor: Colors.white.withValues(alpha: 0.2),
-                              child: const Icon(Icons.person_rounded, color: Colors.white, size: 20),
-                            ),
-                            Positioned(
-                              right: 0,
-                              bottom: 0,
-                              child: Container(
-                                width: 10,
-                                height: 10,
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF25D366),
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: const Color(0xFF075E54), width: 1.5),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                  SafeArea(
+                    bottom: false,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF075E54), // Authentic WhatsApp Teal
+                        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                      ),
+                      child: Row(
+                        children: [
+                          IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 22),
+                            onPressed: () => Navigator.of(modalContext).pop(),
+                          ),
+                          const SizedBox(width: 8),
+                          Stack(
                             children: [
-                              Text(
-                                docName,
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white),
-                                overflow: TextOverflow.ellipsis,
+                              CircleAvatar(
+                                radius: 18,
+                                backgroundColor: Colors.white.withValues(alpha: 0.2),
+                                child: const Icon(Icons.person_rounded, color: Colors.white, size: 20),
                               ),
-                              const Text(
-                                'online',
-                                style: TextStyle(fontSize: 11, color: Color(0xFFB9E5E1), fontWeight: FontWeight.w400),
+                              Positioned(
+                                right: 0,
+                                bottom: 0,
+                                child: Container(
+                                  width: 10,
+                                  height: 10,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF25D366),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: const Color(0xFF075E54), width: 1.5),
+                                  ),
+                                ),
                               ),
                             ],
                           ),
-                        ),
-                        const Icon(Icons.videocam_rounded, color: Colors.white, size: 20),
-                        const SizedBox(width: 12),
-                        IconButton(
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          icon: const Icon(Icons.delete_outline_rounded, color: Colors.white, size: 20),
-                          tooltip: 'Clear Chat History',
-                          onPressed: () {
-                            showDialog(
-                              context: context,
-                              builder: (confirmCtx) => AlertDialog(
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                                title: const Row(
-                                  children: [
-                                    Icon(Icons.delete_forever_rounded, color: Color(0xFFEF4444)),
-                                    SizedBox(width: 8),
-                                    Text('Clear Chat History?', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  docName,
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const Text(
+                                  'online',
+                                  style: TextStyle(fontSize: 11, color: Color(0xFFB9E5E1), fontWeight: FontWeight.w400),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.videocam_rounded, color: Colors.white, size: 20),
+                          const SizedBox(width: 12),
+                          IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            icon: const Icon(Icons.delete_outline_rounded, color: Colors.white, size: 20),
+                            tooltip: 'Clear Chat History',
+                            onPressed: () {
+                              showDialog(
+                                context: context,
+                                builder: (confirmCtx) => AlertDialog(
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                                  title: const Row(
+                                    children: [
+                                      Icon(Icons.delete_forever_rounded, color: Color(0xFFEF4444)),
+                                      SizedBox(width: 8),
+                                      Text('Clear Chat History?', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                  content: const Text('This will permanently delete all messages in this conversation. Are you sure?'),
+                                  actions: [
+                                    TextButton(onPressed: () => Navigator.pop(confirmCtx), child: const Text('Cancel')),
+                                    ElevatedButton(
+                                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444), foregroundColor: Colors.white),
+                                      onPressed: () async {
+                                        Navigator.pop(confirmCtx);
+                                        final ok = await ApiService().clearChatMessages(roomId: roomId);
+                                        if (ok) {
+                                          setModalState(() {});
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            const SnackBar(content: Text('🗑️ Chat history cleared!'), backgroundColor: Color(0xFF10B981)),
+                                          );
+                                        }
+                                      },
+                                      child: const Text('Clear Chat', style: TextStyle(fontWeight: FontWeight.bold)),
+                                    ),
                                   ],
                                 ),
-                                content: const Text('This will permanently delete all messages in this conversation. Are you sure?'),
-                                actions: [
-                                  TextButton(onPressed: () => Navigator.pop(confirmCtx), child: const Text('Cancel')),
-                                  ElevatedButton(
-                                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444), foregroundColor: Colors.white),
-                                    onPressed: () async {
-                                      Navigator.pop(confirmCtx);
-                                      final ok = await ApiService().clearChatMessages(roomId: roomId);
-                                      if (ok) {
-                                        setModalState(() {});
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text('🗑️ Chat history cleared!'), backgroundColor: Color(0xFF10B981)),
-                                        );
-                                      }
-                                    },
-                                    child: const Text('Clear Chat', style: TextStyle(fontWeight: FontWeight.bold)),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                        const SizedBox(width: 10),
-                        PopupMenuButton<String>(
-                          icon: const Icon(Icons.more_vert_rounded, color: Colors.white, size: 20),
-                          onSelected: (val) async {
-                            if (val == 'clear') {
-                              final ok = await ApiService().clearChatMessages(roomId: roomId);
-                              if (ok) {
-                                setModalState(() {});
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('🗑️ Chat history cleared!'), backgroundColor: Color(0xFF10B981)),
-                                );
+                              );
+                            },
+                          ),
+                          const SizedBox(width: 10),
+                          PopupMenuButton<String>(
+                            icon: const Icon(Icons.more_vert_rounded, color: Colors.white, size: 20),
+                            onSelected: (val) async {
+                              if (val == 'clear') {
+                                final ok = await ApiService().clearChatMessages(roomId: roomId);
+                                if (ok) {
+                                  setModalState(() {});
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('🗑️ Chat history cleared!'), backgroundColor: Color(0xFF10B981)),
+                                  );
+                                }
                               }
-                            }
-                          },
-                          itemBuilder: (ctx) => [
-                            const PopupMenuItem(
-                              value: 'clear',
-                              child: Row(
-                                children: [
-                                  Icon(Icons.delete_sweep_rounded, color: Color(0xFFEF4444), size: 18),
-                                  SizedBox(width: 8),
-                                  Text('Clear Chat History', style: TextStyle(fontSize: 13, color: Color(0xFFEF4444), fontWeight: FontWeight.bold)),
-                                ],
+                            },
+                            itemBuilder: (ctx) => [
+                              const PopupMenuItem(
+                                value: 'clear',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.delete_sweep_rounded, color: Color(0xFFEF4444), size: 18),
+                                    SizedBox(width: 8),
+                                    Text('Clear Chat History', style: TextStyle(fontSize: 13, color: Color(0xFFEF4444), fontWeight: FontWeight.bold)),
+                                  ],
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
 
@@ -573,69 +576,92 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                   ),
 
                   // ✍️ WhatsApp Input Footer Bar
-                  Container(
-                    padding: EdgeInsets.only(
-                      left: 8,
-                      right: 8,
-                      top: 8,
-                      bottom: MediaQuery.of(modalContext).viewInsets.bottom + 8,
-                    ),
-                    color: const Color(0xFFF0F2F5),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.sentiment_satisfied_alt_rounded, color: Color(0xFF54656F), size: 24),
-                        const SizedBox(width: 8),
-                        const Icon(Icons.attach_file_rounded, color: Color(0xFF54656F), size: 22),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(24),
-                            ),
-                            child: TextField(
-                              controller: msgController,
-                              style: const TextStyle(fontSize: 14, color: Color(0xFF111B21)),
-                              decoration: const InputDecoration(
-                                hintText: 'Message',
-                                hintStyle: TextStyle(fontSize: 14, color: Color(0xFF8696A0)),
-                                border: InputBorder.none,
-                                contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  SafeArea(
+                    top: false,
+                    child: Container(
+                      padding: EdgeInsets.only(
+                        left: 8,
+                        right: 8,
+                        top: 8,
+                        bottom: MediaQuery.of(modalContext).viewInsets.bottom + 8,
+                      ),
+                      color: const Color(0xFFF0F2F5),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.sentiment_satisfied_alt_rounded, color: Color(0xFF54656F), size: 24),
+                          const SizedBox(width: 8),
+                          const Icon(Icons.attach_file_rounded, color: Color(0xFF54656F), size: 22),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(24),
+                              ),
+                              child: TextField(
+                                controller: msgController,
+                                style: const TextStyle(fontSize: 14, color: Color(0xFF111B21)),
+                                textInputAction: TextInputAction.send,
+                                onSubmitted: (val) async {
+                                  final text = val.trim();
+                                  if (text.isEmpty) return;
+                                  msgController.clear();
+                                  final pSender = patient.name.isNotEmpty ? patient.name : 'Patient';
+                                  await ApiService().sendMessage(
+                                    senderId: pSender,
+                                    message: text,
+                                    roomId: roomId,
+                                    type: 'patient',
+                                  );
+                                  _patientService.addNotification(
+                                    recipientRole: 'Dentist',
+                                    recipientId: assignedReq.assignedDoctorName ?? 'ALL_DENTISTS',
+                                    title: '💬 New Patient Message',
+                                    message: '$pSender: "$text"',
+                                  );
+                                  setModalState(() {});
+                                },
+                                decoration: const InputDecoration(
+                                  hintText: 'Message',
+                                  hintStyle: TextStyle(fontSize: 14, color: Color(0xFF8696A0)),
+                                  border: InputBorder.none,
+                                  contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        CircleAvatar(
-                          radius: 20,
-                          backgroundColor: const Color(0xFF075E54),
-                          child: IconButton(
-                            icon: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
-                            onPressed: () async {
-                              final text = msgController.text.trim();
-                              if (text.isEmpty) return;
-                              msgController.clear();
+                          const SizedBox(width: 8),
+                          CircleAvatar(
+                            radius: 20,
+                            backgroundColor: const Color(0xFF075E54),
+                            child: IconButton(
+                              icon: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
+                              onPressed: () async {
+                                final text = msgController.text.trim();
+                                if (text.isEmpty) return;
+                                msgController.clear();
 
-                              final pSender = patient.name.isNotEmpty ? patient.name : 'Patient';
-                              await ApiService().sendMessage(
-                                senderId: pSender,
-                                message: text,
-                                roomId: roomId,
-                                type: 'patient',
-                              );
+                                final pSender = patient.name.isNotEmpty ? patient.name : 'Patient';
+                                await ApiService().sendMessage(
+                                  senderId: pSender,
+                                  message: text,
+                                  roomId: roomId,
+                                  type: 'patient',
+                                );
 
-                              _patientService.addNotification(
-                                recipientRole: 'Dentist',
-                                recipientId: assignedReq.assignedDoctorName ?? 'ALL_DENTISTS',
-                                title: '💬 New Patient Message',
-                                message: '$pSender: "$text"',
-                              );
+                                _patientService.addNotification(
+                                  recipientRole: 'Dentist',
+                                  recipientId: assignedReq.assignedDoctorName ?? 'ALL_DENTISTS',
+                                  title: '💬 New Patient Message',
+                                  message: '$pSender: "$text"',
+                                );
 
-                              setModalState(() {});
-                            },
+                                setModalState(() {});
+                              },
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ],
@@ -1273,7 +1299,13 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                         children: [
                                           const Icon(Icons.access_time_filled_rounded, size: 15, color: Color(0xFF15803D)),
                                           const SizedBox(width: 6),
-                                          Text('Confirmed Time Slot: ${req.confirmedTimeSlot}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF15803D))),
+                                          Expanded(
+                                            child: Text(
+                                              'Confirmed Time Slot: ${req.confirmedTimeSlot}',
+                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF15803D)),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
                                         ],
                                       ),
                                     ),
