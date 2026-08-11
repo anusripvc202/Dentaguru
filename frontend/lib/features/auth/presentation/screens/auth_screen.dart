@@ -543,7 +543,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               const SizedBox(width: 6),
               const Expanded(
                 child: Text(
-                  'Security 4-Digit OTP Verification',
+                  'Security OTP Verification',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF166534)),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -567,7 +567,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           ),
           const SizedBox(height: 8),
           const Text(
-            'We dispatch a live 4-digit OTP code to both Mobile Phone SMS and Email Inbox for instant authentication.',
+            'Enter the OTP verification code dispatched to your Mobile Phone SMS or Email Inbox.',
             style: TextStyle(fontSize: 11, color: Color(0xFF166534)),
           ),
           const SizedBox(height: 12),
@@ -601,7 +601,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      '4-Digit OTP verification code has been dispatched to your Mobile SMS & Email Inbox.',
+                      'OTP verification code has been dispatched to your Mobile SMS / Email Inbox.',
                       style: TextStyle(fontSize: 11, color: Color(0xFF15803D), fontWeight: FontWeight.w600),
                     ),
                   ),
@@ -615,9 +615,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   child: TextField(
                     controller: _otpController,
                     keyboardType: TextInputType.number,
-                    maxLength: 4,
+                    maxLength: 8,
                     decoration: InputDecoration(
-                      hintText: '4-digit OTP',
+                      hintText: 'Enter OTP code',
                       counterText: '',
                       filled: true,
                       fillColor: Colors.white,
