@@ -87,6 +87,8 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     String selectedCategory = 'Toothache & Cold Sensitivity';
     String selectedSeverity = 'Moderate';
 
+    bool isSubmitting = false;
+
     showDialog(
       context: context,
       builder: (dialogContext) {
@@ -97,85 +99,88 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               child: Container(
                 constraints: const BoxConstraints(maxWidth: 440),
                 padding: const EdgeInsets.all(22),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primaryBlue.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(12),
+                child: SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryBlue.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(Icons.health_and_safety_rounded, color: AppTheme.primaryBlue, size: 24),
                           ),
-                          child: const Icon(Icons.health_and_safety_rounded, color: AppTheme.primaryBlue, size: 24),
-                        ),
-                        const SizedBox(width: 12),
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Report Dental Problem',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppTheme.textDark),
-                              ),
-                              Text(
-                                'Submit symptoms to Admin & get recommended a specialized Doctor',
-                                style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
-                              ),
-                            ],
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Report Dental Problem',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppTheme.textDark),
+                                ),
+                                Text(
+                                  'Submit symptoms to Admin & get recommended a specialized Doctor',
+                                  style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                                ),
+                              ],
+                            ),
                           ),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
+
+                      // Problem Category Dropdown
+                      DropdownButtonFormField<String>(
+                        value: selectedCategory,
+                        isExpanded: true,
+                        decoration: InputDecoration(
+                          labelText: 'Dental Issue Category',
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-
-                    // Problem Category Dropdown
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedCategory,
-                      decoration: InputDecoration(
-                        labelText: 'Dental Issue Category',
-                        filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        items: [
+                          'Toothache & Cold Sensitivity',
+                          'Bleeding Gums & Swelling',
+                          'Wisdom Tooth Pain',
+                          'Aligners & Braces Adjustment',
+                          'Tooth Decay / Cavity',
+                          'Teeth Cleaning & Whitening',
+                        ].map((cat) => DropdownMenuItem(value: cat, child: Text(cat, style: const TextStyle(fontSize: 13), overflow: TextOverflow.ellipsis))).toList(),
+                        onChanged: (val) => setModalState(() => selectedCategory = val ?? selectedCategory),
                       ),
-                      items: [
-                        'Toothache & Cold Sensitivity',
-                        'Bleeding Gums & Swelling',
-                        'Wisdom Tooth Pain',
-                        'Aligners & Braces Adjustment',
-                        'Tooth Decay / Cavity',
-                        'Teeth Cleaning & Whitening',
-                      ].map((cat) => DropdownMenuItem(value: cat, child: Text(cat, style: const TextStyle(fontSize: 13)))).toList(),
-                      onChanged: (val) => setModalState(() => selectedCategory = val ?? selectedCategory),
-                    ),
-                    const SizedBox(height: 12),
+                      const SizedBox(height: 12),
 
-                    // Symptom Description
-                    TextField(
-                      controller: descriptionController,
-                      maxLines: 3,
-                      decoration: InputDecoration(
-                        labelText: 'Describe Symptoms & Duration',
-                        hintText: 'e.g. Sharp throbbing pain in lower molar when drinking cold liquids...',
-                        filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      // Symptom Description
+                      TextField(
+                        controller: descriptionController,
+                        maxLines: 3,
+                        decoration: InputDecoration(
+                          labelText: 'Describe Symptoms & Duration',
+                          hintText: 'e.g. Sharp throbbing pain in lower molar when drinking cold liquids...',
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 12),
+                      const SizedBox(height: 12),
 
-                    // Pain Severity Chips
-                    const Text('Pain Severity Level:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppTheme.textMuted)),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: ['Mild', 'Moderate', 'Severe'].map((sev) {
-                        final isSelected = selectedSeverity == sev;
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: ChoiceChip(
+                      // Pain Severity Chips
+                      const Text('Pain Severity Level:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppTheme.textMuted)),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: ['Mild', 'Moderate', 'Severe'].map((sev) {
+                          final isSelected = selectedSeverity == sev;
+                          return ChoiceChip(
                             label: Text(sev, style: TextStyle(fontSize: 12, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
                             selected: isSelected,
                             selectedColor: sev == 'Severe'
@@ -193,45 +198,63 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                             onSelected: (val) {
                               if (val) setModalState(() => selectedSeverity = sev);
                             },
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 20),
-
-                    ElevatedButton.icon(
-                      icon: const Icon(Icons.send_rounded, size: 18),
-                      label: const Text('Submit Symptoms to Admin', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primaryBlue,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      onPressed: () {
-                        if (descriptionController.text.trim().isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Please describe your symptoms.')),
                           );
-                          return;
-                        }
-                        _patientService.submitProblem(
-                          problemCategory: selectedCategory,
-                          problemDescription: descriptionController.text.trim(),
-                          severity: selectedSeverity,
-                        );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 20),
 
-                        Navigator.of(dialogContext).pop();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('✅ Dental problem submitted! Admin will recommend a specialist shortly.'),
-                            backgroundColor: Color(0xFF10B981),
-                            duration: Duration(seconds: 3),
-                          ),
-                        );
-                      },
-                    ),
-                  ],
+                      ElevatedButton.icon(
+                        icon: isSubmitting
+                            ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                            : const Icon(Icons.send_rounded, size: 18),
+                        label: Text(isSubmitting ? 'Submitting Problem...' : 'Submit Symptoms to Admin', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primaryBlue,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: isSubmitting
+                            ? null
+                            : () async {
+                                if (descriptionController.text.trim().isEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Please describe your symptoms.')),
+                                  );
+                                  return;
+                                }
+                                setModalState(() => isSubmitting = true);
+                                try {
+                                  await _patientService.submitProblem(
+                                    problemCategory: selectedCategory,
+                                    problemDescription: descriptionController.text.trim(),
+                                    severity: selectedSeverity,
+                                  );
+
+                                  if (dialogContext.mounted) {
+                                    Navigator.of(dialogContext).pop();
+                                  }
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('✅ Dental problem submitted! Admin will recommend a specialist shortly.'),
+                                        backgroundColor: Color(0xFF10B981),
+                                        duration: Duration(seconds: 3),
+                                      ),
+                                    );
+                                  }
+                                } catch (err) {
+                                  setModalState(() => isSubmitting = false);
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Error submitting problem: $err'), backgroundColor: Colors.red),
+                                    );
+                                  }
+                                }
+                              },
+                      ),
+                    ],
+                  ),
                 ),
               ),
             );
@@ -1046,12 +1069,15 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               const SizedBox(height: 24),
 
               // 4. Section: Reported Problems & Doctor Suggestions
-              const Row(
+              Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'Reported Problems & Doctor Suggestions',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                  Expanded(
+                    child: Text(
+                      'Reported Problems & Doctor Suggestions',
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 ],
               ),
@@ -2089,12 +2115,19 @@ class _AnimatedPatientActionTileState extends State<_AnimatedPatientActionTile> 
                   child: Icon(widget.icon, color: widget.color, size: 20),
                 ),
                 const SizedBox(height: 6),
-                Text(
-                  widget.title,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: _isHovered ? widget.color : AppTheme.textDark,
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  child: Text(
+                    widget.title,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      height: 1.1,
+                      color: _isHovered ? widget.color : AppTheme.textDark,
+                    ),
                   ),
                 ),
               ],
