@@ -1114,16 +1114,20 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             children: [
               Icon(
                 icon,
-                size: 16,
+                size: 15,
                 color: isSelected ? Colors.white : AppTheme.textMuted,
               ),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                  fontSize: 12,
-                  color: isSelected ? Colors.white : AppTheme.textMuted,
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                    fontSize: 11.5,
+                    color: isSelected ? Colors.white : AppTheme.textMuted,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
