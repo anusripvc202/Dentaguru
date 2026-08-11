@@ -35,6 +35,9 @@ dependencies:
   firebase_crashlytics: ^4.0.0
   flutter_local_notifications: ^17.0.0
 
+  # Supabase Client — Email OTP Authentication & Cloud Storage
+  supabase_flutter: ^2.5.0
+
   # Media & File Picker
   image_picker: ^1.1.2
   url_launcher: ^6.2.5

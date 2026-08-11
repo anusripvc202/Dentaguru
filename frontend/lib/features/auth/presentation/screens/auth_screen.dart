@@ -8,6 +8,7 @@ import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/firebase_service.dart';
+import '../../../../core/services/supabase_service.dart';
 import '../../../../core/services/analytics_service.dart';
 
 /// Role enum for authentication
@@ -418,11 +419,24 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       _otpErrorMessage = null;
     });
 
-    // 1. Dispatch 4-digit OTP via Backend API (Nodemailer Email & SMS)
-    final res = await ApiService().requestOtp(phone: phone, email: email);
+    bool sendSuccess = false;
 
-    // 2. Also send SMS OTP via Firebase Phone Auth if phone provided
+    // 1. Email OTP via Supabase Auth & Supabase Email Service
+    if (email.isNotEmpty) {
+      final supabaseRes = await SupabaseService().sendEmailOtp(email);
+      sendSuccess = supabaseRes['success'] == true;
+      if (!sendSuccess) {
+        setState(() {
+          _otpErrorMessage = supabaseRes['message'] ?? 'Unable to send OTP. Please try again.';
+        });
+      }
+    }
+
+    // 2. Mobile Phone SMS OTP via Firebase Phone Auth & Backend SMS API
     if (phone.isNotEmpty) {
+      final backendRes = await ApiService().requestOtp(phone: phone, email: '');
+      sendSuccess = sendSuccess || (backendRes['success'] == true);
+
       FirebaseService.sendFirebasePhoneOtp(
         phone,
         onCodeSent: (verId) {
@@ -437,28 +451,26 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     if (!mounted) return;
     setState(() {
       _isSendingOtp = false;
-      _isOtpSent = true;
-      _otpController.clear();
+      if (sendSuccess) {
+        _isOtpSent = true;
+        _otpController.clear();
+      }
     });
 
-    if (res['success'] == true) {
+    if (sendSuccess) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('📩 4-Digit OTP Code dispatched to ${email.isNotEmpty ? email : phone}. Check your inbox or SMS.'),
+          content: Text(email.isNotEmpty ? 'OTP sent to your email.' : 'OTP sent to your mobile phone.'),
           backgroundColor: const Color(0xFF10B981),
         ),
       );
-    } else {
-      setState(() {
-        _otpErrorMessage = res['message'] ?? 'Failed to send OTP code. Check your network connection.';
-      });
     }
   }
 
   Future<void> _handleVerifyOtp() async {
     final code = _otpController.text.trim();
     if (code.isEmpty) {
-      setState(() => _otpErrorMessage = 'Please enter the 4-digit OTP code');
+      setState(() => _otpErrorMessage = 'Please enter the OTP code');
       return;
     }
 
@@ -470,30 +482,46 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     final phone = _phoneController.text.trim();
     final email = _emailController.text.trim();
 
-    // Verify 4-digit code via Firebase or Backend API
-    bool verified = await FirebaseService.verifyFirebaseOtp(code);
-    if (!verified) {
-      final res = await ApiService().verifyOtp(phone: phone, email: email, code: code);
-      verified = res['success'] == true;
+    bool verified = false;
+
+    // 1. Email OTP verification via Supabase Auth
+    if (email.isNotEmpty) {
+      final supabaseVerify = await SupabaseService().verifyEmailOtp(email: email, token: code);
+      verified = supabaseVerify['success'] == true;
+      if (!verified) {
+        _otpErrorMessage = supabaseVerify['message'] ?? 'Invalid or expired OTP.';
+      }
+    }
+
+    // 2. Mobile Phone SMS OTP verification via Firebase or Backend API
+    if (!verified && phone.isNotEmpty) {
+      verified = await FirebaseService.verifyFirebaseOtp(code);
+      if (!verified) {
+        final res = await ApiService().verifyOtp(phone: phone, email: '', code: code);
+        verified = res['success'] == true;
+      }
+      if (!verified && email.isEmpty) {
+        _otpErrorMessage = 'Invalid or expired OTP.';
+      }
     }
 
     if (!mounted) return;
     setState(() => _isVerifyingOtp = false);
 
     if (verified) {
-      AnalyticsService.logOtpVerification(status: 'verified', method: 'Numeric_OTP');
+      AnalyticsService.logOtpVerification(status: 'verified', method: email.isNotEmpty ? 'Supabase_Email_OTP' : 'Firebase_SMS_OTP');
       setState(() {
         _isOtpVerified = true;
         _otpErrorMessage = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('🎉 4-Digit OTP Verified successfully! "Create Account" button is now ACTIVE.'),
+          content: Text('OTP verified successfully.'),
           backgroundColor: Color(0xFF10B981),
         ),
       );
     } else {
-      setState(() => _otpErrorMessage = 'Invalid or expired 4-digit OTP code. Please try again.');
+      setState(() => _otpErrorMessage = _otpErrorMessage ?? 'Invalid or expired OTP.');
     }
   }
 

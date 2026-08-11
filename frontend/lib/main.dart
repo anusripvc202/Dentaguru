@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/routes/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'core/services/firebase_service.dart';
+import 'core/services/supabase_service.dart';
 import 'core/services/analytics_service.dart';
 
 Future<void> main() async {
@@ -10,9 +11,10 @@ Future<void> main() async {
 
   try {
     await FirebaseService.initialize();
+    await SupabaseService.initialize();
     await AnalyticsService.logAppOpen();
   } catch (e) {
-    debugPrint('⚠️ Firebase Service initialization warning: $e');
+    debugPrint('⚠️ Core Services initialization warning: $e');
   }
 
   runApp(

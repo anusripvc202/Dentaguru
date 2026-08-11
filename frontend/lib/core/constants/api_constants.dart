@@ -6,6 +6,10 @@ class ApiConstants {
   /// Live 24/7 Render Express Backend API URL (Connected to Supabase PostgreSQL)
   static const String liveBackendUrl = 'https://dentaguru-backend.onrender.com/api/v1';
 
+  /// Supabase Cloud Credentials for Auth & Direct Email OTP
+  static const String supabaseUrl = 'https://fommrwxpqzkcktweosgp.supabase.co';
+  static const String supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZvbW1yd3hwcXprY2t0d2Vvc2dwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU4MTM3MTAsImV4cCI6MjEwMTM4OTcxMH0.VcuNyxIEeUDMGzMf3upGHzDCE_ihdYn0qZY5sjdOD3g';
+
   /// Express Backend API Base URL
   /// - Web local debug uses http://localhost:5000/api/v1
   /// - Mobile apps (Android/iOS) & Production use live 24/7 Render server
