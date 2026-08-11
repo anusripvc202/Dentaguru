@@ -1,4 +1,4 @@
-name: Firebase App Distribution Pipeline
+name: DentaGuru Build & Distribution Pipeline
 
 on:
   push:
@@ -13,8 +13,8 @@ on:
         default: 'Automated test build distribution via GitHub Actions'
 
 jobs:
-  build-and-distribute:
-    name: Build Android APK & Distribute to Firebase
+  build-and-test:
+    name: Build Android APK & Run Test Suite
     runs-on: ubuntu-latest
 
     steps:
@@ -30,7 +30,6 @@ jobs:
       - name: 3. Set up Flutter SDK
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.22.x'
           channel: 'stable'
           cache: true
 
@@ -39,16 +38,21 @@ jobs:
           cd frontend
           flutter pub get
 
-      - name: 5. Build Release Android APK
+      - name: 5. Run Flutter Unit & Widget Tests
         run: |
           cd frontend
-          flutter build apk --release --no-tree-shake-icons
+          flutter test
 
-      - name: 6. Distribute APK via Firebase App Distribution
+      - name: 6. Build Android APK
+        run: |
+          cd frontend
+          flutter build apk --debug
+
+      - name: 7. Distribute APK via Firebase App Distribution (Optional)
         if: "${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}" != ''
         continue-on-error: true
         uses: w9jds/firebase-action@v11.16.0
         with:
-          args: appdistribution:distribute frontend/build/app/outputs/flutter-apk/app-release.apk --app "${{ secrets.FIREBASE_APP_ID_ANDROID || '1:653454456380:android:5d3a32eaa156d75470b539' }}" --release-notes "${{ github.event.inputs.release_notes || 'Automated build from commit ' }}${{ github.sha }}"
+          args: appdistribution:distribute frontend/build/app/outputs/flutter-apk/app-debug.apk --app "${{ secrets.FIREBASE_APP_ID_ANDROID || '1:653454456380:android:5d3a32eaa156d75470b539' }}" --release-notes "${{ github.event.inputs.release_notes || 'Automated build from commit ' }}${{ github.sha }}"
         env:
           GCP_SA_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}
