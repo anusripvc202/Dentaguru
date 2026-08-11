@@ -78,19 +78,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         elevation: 1,
         shadowColor: Colors.black.withValues(alpha: 0.05),
         automaticallyImplyLeading: false,
-        titleSpacing: 16,
-        title: Row(
-          children: const [
-            DentaGuruLogo(height: 38),
-          ],
+        titleSpacing: 10,
+        title: const FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: DentaGuruLogo(height: 32),
         ),
         actions: [
           const Padding(
-            padding: EdgeInsets.only(right: 8),
+            padding: EdgeInsets.only(right: 4),
             child: ProductsDropdownMenu(),
           ),
           Padding(
-            padding: const EdgeInsets.only(right: 12),
+            padding: const EdgeInsets.only(right: 8),
             child: _AnimatedAppButton(
               onPressed: () => context.go('/login'),
               backgroundColor: AppTheme.primaryBlue,
@@ -611,9 +611,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             crossAxisCount: 2,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            childAspectRatio: 0.98,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+            childAspectRatio: 0.82,
             children: const [
               _AnimatedFeatureTile(
                 title: 'AI Smart Scan',
@@ -1162,32 +1162,37 @@ class _AnimatedFeatureTileState extends State<_AnimatedFeatureTile> {
               ),
             ],
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: widget.color.withValues(alpha: _isHovered ? 0.2 : 0.12),
-                  borderRadius: BorderRadius.circular(12),
+          child: SingleChildScrollView(
+            physics: const NeverScrollableScrollPhysics(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: widget.color.withValues(alpha: _isHovered ? 0.2 : 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(widget.icon, color: widget.color, size: 20),
                 ),
-                child: Icon(widget.icon, color: widget.color, size: 22),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                widget.title,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                widget.subtitle,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11, color: AppTheme.textMuted, height: 1.3),
-              ),
-            ],
+                const SizedBox(height: 8),
+                Text(
+                  widget.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  widget.subtitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 10, color: AppTheme.textMuted, height: 1.3),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1241,7 +1246,7 @@ class _AnimatedAppButtonState extends State<_AnimatedAppButton> {
           style: ElevatedButton.styleFrom(
             backgroundColor: widget.backgroundColor,
             foregroundColor: widget.foregroundColor,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),

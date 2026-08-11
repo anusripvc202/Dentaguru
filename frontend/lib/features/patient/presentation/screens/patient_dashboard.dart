@@ -712,10 +712,15 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
         elevation: 1,
         shadowColor: Colors.black.withValues(alpha: 0.05),
         automaticallyImplyLeading: false,
-        title: const DentaGuruLogo(height: 38),
+        titleSpacing: 10,
+        title: const FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: DentaGuruLogo(height: 32),
+        ),
         actions: [
           const Padding(
-            padding: EdgeInsets.only(right: 6),
+            padding: EdgeInsets.only(right: 4),
             child: ProductsDropdownMenu(),
           ),
           Padding(

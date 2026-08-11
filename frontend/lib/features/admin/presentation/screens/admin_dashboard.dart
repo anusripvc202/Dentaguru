@@ -770,7 +770,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               : AppBar(
                   backgroundColor: Colors.white,
                   elevation: 1,
-                  title: const DentaGuruLogo(height: 30),
+                  titleSpacing: 10,
+                  title: const FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: DentaGuruLogo(height: 28),
+                  ),
                   actions: [
                     const Padding(
                       padding: EdgeInsets.only(right: 4),

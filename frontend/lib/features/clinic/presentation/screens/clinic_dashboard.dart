@@ -36,7 +36,11 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const DentaGuruLogo(height: 28),
+        title: const FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: DentaGuruLogo(height: 28),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
