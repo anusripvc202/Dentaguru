@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../constants/api_constants.dart';
 import 'analytics_service.dart';
 
@@ -54,7 +55,7 @@ class ApiService {
         url,
         headers: {'Content-Type': 'application/json'},
         body: payload,
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 35));
 
       final data = jsonDecode(response.body);
       if (response.statusCode == 200 || response.statusCode == 201) {
@@ -66,29 +67,44 @@ class ApiService {
         return {'success': false, 'message': data['message'] ?? 'Registration failed.'};
       }
     } catch (e) {
-      debugPrint('⚠️ Primary Register URL error ($e). Retrying fallback to localhost:5000...');
+      debugPrint('⚠️ Primary Register URL notice ($e). Attempting direct 24/7 Supabase Auth fallback...');
       try {
-        final fallbackUrl = Uri.parse('http://localhost:5000/api/v1/auth/register');
-        final response = await http.post(
-          fallbackUrl,
-          headers: {'Content-Type': 'application/json'},
-          body: payload,
+        final client = Supabase.instance.client;
+        final res = await client.auth.signUp(
+          email: email.trim(),
+          password: password.trim(),
+          data: {
+            'name': name.trim(),
+            'role': role,
+            'phone': phone.trim(),
+            if (clinicName != null) 'clinicName': clinicName,
+            if (specialty != null) 'specialty': specialty,
+          },
         );
-        final data = jsonDecode(response.body);
-        if (response.statusCode == 200 || response.statusCode == 201) {
-          if (data['accessToken'] != null) setAuthToken(data['accessToken']);
-          return {'success': true, 'data': data};
-        } else {
-          return {'success': false, 'message': data['message'] ?? 'Registration failed.'};
+        if (res.user != null) {
+          if (res.session?.accessToken != null) {
+            setAuthToken(res.session!.accessToken);
+          }
+          return {
+            'success': true,
+            'data': {
+              'user': {
+                'id': res.user!.id,
+                'email': res.user!.email,
+                'name': name,
+                'role': role,
+              }
+            }
+          };
         }
-      } catch (fErr) {
-        debugPrint('❌ Fallback Register Error: $fErr');
-        return {'success': false, 'message': 'Could not connect to backend server.'};
+      } catch (sbErr) {
+        debugPrint('❌ Direct Supabase Auth Register Error: $sbErr');
       }
+      return {'success': false, 'message': 'Could not connect to backend server. Please check internet connection.'};
     }
   }
 
-  /// Login user via Backend API
+  /// Login user via Backend API with Direct 24/7 Supabase Auth Fallback
   Future<Map<String, dynamic>> loginUser({
     required String email,
     required String password,
@@ -97,11 +113,12 @@ class ApiService {
     final payload = jsonEncode({'email': email, 'password': password, if (role != null) 'role': role});
     try {
       final url = Uri.parse(ApiConstants.login);
+      debugPrint('🌐 Sending Login Request to: $url');
       final response = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
         body: payload,
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 35));
 
       final data = jsonDecode(response.body);
       if (response.statusCode == 200) {
@@ -111,24 +128,38 @@ class ApiService {
         return {'success': false, 'message': data['message'] ?? 'Login failed.'};
       }
     } catch (e) {
-      debugPrint('⚠️ Primary Login URL error ($e). Retrying fallback to localhost:5000...');
+      debugPrint('⚠️ Primary Backend Login Notice ($e). Attempting Direct 24/7 Supabase Auth fallback...');
       try {
-        final fallbackUrl = Uri.parse('http://localhost:5000/api/v1/auth/login');
-        final response = await http.post(
-          fallbackUrl,
-          headers: {'Content-Type': 'application/json'},
-          body: payload,
+        final client = Supabase.instance.client;
+        final res = await client.auth.signInWithPassword(
+          email: email.trim(),
+          password: password.trim(),
         );
-        final data = jsonDecode(response.body);
-        if (response.statusCode == 200) {
-          if (data['accessToken'] != null) setAuthToken(data['accessToken']);
-          return {'success': true, 'data': data};
-        } else {
-          return {'success': false, 'message': data['message'] ?? 'Login failed.'};
+        if (res.user != null) {
+          if (res.session?.accessToken != null) {
+            setAuthToken(res.session!.accessToken);
+          }
+          final userMeta = res.user!.userMetadata ?? {};
+          final userRole = userMeta['role']?.toString() ?? role ?? 'Patient';
+          final userName = userMeta['name']?.toString() ?? email.split('@').first;
+          return {
+            'success': true,
+            'data': {
+              'accessToken': res.session?.accessToken,
+              'user': {
+                'id': res.user!.id,
+                'email': res.user!.email,
+                'name': userName,
+                'role': userRole,
+                'clinicName': userMeta['clinicName'] ?? '',
+              }
+            }
+          };
         }
-      } catch (fErr) {
-        return {'success': false, 'message': 'Could not connect to backend server.'};
+      } catch (sbErr) {
+        debugPrint('❌ Direct 24/7 Supabase Auth Login Error: $sbErr');
       }
+      return {'success': false, 'message': 'Could not connect to backend server. Please check internet connection.'};
     }
   }
 
