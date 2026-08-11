@@ -140,9 +140,23 @@ const sendOtpEmail = async (toEmail, otpCode, isPasswordReset = false) => {
         </div>
     `;
 
-    // Direct Gmail SMTP Port 465 SSL Delivery (Delivers to ANY recipient email worldwide)
+    // 1. Primary Attempt: Supabase Cloud Enterprise Email Dispatcher (HTTPS Port 443)
+    try {
+        const { createClient } = require('@supabase/supabase-js');
+        const supabaseUrl = (process.env.SUPABASE_URL || '').trim();
+        const supabaseKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '').trim();
+        if (supabaseUrl && supabaseKey) {
+            const supabase = createClient(supabaseUrl, supabaseKey);
+            await supabase.auth.signInWithOtp({
+                email: toEmail,
+                options: { shouldCreateUser: true }
+            }).catch(err => console.warn('Supabase Auth OTP notice:', err.message));
+        }
+    } catch (e) {
+        console.warn('Supabase Auth notice:', e.message);
+    }
 
-    // 2. Secondary Attempt: Nodemailer SMTP (Gmail / Custom SMTP / Ethereal)
+    // 2. Secondary Attempt: Nodemailer Direct Gmail SSL Port 465 Delivery
     try {
         const mailTransporter = await getTransporter();
         if (!mailTransporter) return { success: false, reason: 'No transporter available' };
