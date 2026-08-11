@@ -63,6 +63,16 @@ class AppTheme {
         iconTheme: IconThemeData(color: primaryBlue),
         titleTextStyle: TextStyle(color: textDark, fontWeight: FontWeight.bold, fontSize: 20),
       ),
+      inputDecorationTheme: InputDecorationTheme(
+        fillColor: const Color(0xFFF8FAFC),
+        filled: true,
+        hintStyle: const TextStyle(fontSize: 12, color: textMuted),
+        labelStyle: const TextStyle(fontSize: 13, color: textMedium),
+        prefixIconColor: primaryBlue,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: primaryBlue, width: 2)),
+      ),
     );
   }
 
@@ -82,6 +92,18 @@ class AppTheme {
       textTheme: GoogleFonts.plusJakartaSansTextTheme(ThemeData.dark().textTheme).copyWith(
         titleLarge: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 22, color: Colors.white),
         titleMedium: GoogleFonts.outfit(fontWeight: FontWeight.w600, fontSize: 16, color: Colors.white),
+        bodyLarge: GoogleFonts.plusJakartaSans(fontSize: 14, color: textDark),
+        bodyMedium: GoogleFonts.plusJakartaSans(fontSize: 13, color: textDark),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        fillColor: const Color(0xFFF8FAFC),
+        filled: true,
+        hintStyle: const TextStyle(fontSize: 12, color: textMuted),
+        labelStyle: const TextStyle(fontSize: 13, color: textMedium),
+        prefixIconColor: primaryBlue,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: primaryBlue, width: 2)),
       ),
       cardTheme: CardThemeData(
         color: const Color(0xFF1E293B),

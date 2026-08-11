@@ -667,6 +667,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     controller: _otpController,
                     keyboardType: TextInputType.number,
                     maxLength: 8,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w600),
                     decoration: InputDecoration(
                       hintText: 'Enter OTP code',
                       counterText: '',
@@ -767,6 +768,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                       controller: otpCtrl,
                       keyboardType: TextInputType.number,
                       maxLength: 4,
+                      style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w600),
                       decoration: InputDecoration(
                         labelText: 'Enter OTP Code',
                         hintText: '1234',
@@ -779,6 +781,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     TextField(
                       controller: newPassCtrl,
                       obscureText: true,
+                      style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w600),
                       decoration: InputDecoration(
                         labelText: 'Set New Password',
                         hintText: '••••••••',
@@ -1160,6 +1163,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             TextFormField(
               controller: _loginEmailController,
               keyboardType: TextInputType.emailAddress,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
               validator: (val) {
                 if (val == null || val.trim().isEmpty) {
                   return 'Please enter your registered email or mobile number';
@@ -1178,6 +1182,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             TextFormField(
               controller: _loginPasswordController,
               obscureText: !_showLoginPassword,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
               validator: (val) {
                 if (val == null || val.trim().isEmpty) {
                   return 'Please enter your password';
@@ -1307,6 +1312,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             // Common Field: Name
             TextFormField(
               controller: _nameController,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
               validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter your full name' : null,
               decoration: _buildInputDecoration(
                 label: _selectedRole == UserRole.dentist
@@ -1324,6 +1330,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             TextFormField(
               controller: _emailController,
               keyboardType: TextInputType.emailAddress,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
               validator: (val) {
                 if (val == null || val.trim().isEmpty) return 'Please enter an email address';
                 if (!val.contains('@')) return 'Enter a valid email address';
@@ -1349,6 +1356,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             TextFormField(
               controller: _passwordController,
               obscureText: !_showRegPassword,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
               validator: (val) {
                 if (val == null || val.trim().isEmpty) return 'Please set a password';
                 if (val.trim().length < 6) return 'Password must be at least 6 characters';
@@ -1423,6 +1431,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   child: TextFormField(
                     controller: _phoneController,
                     keyboardType: TextInputType.phone,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
                     validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter phone' : null,
                     decoration: _buildInputDecoration(
                       label: 'Phone Number',
@@ -1437,6 +1446,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   child: TextFormField(
                     controller: _ageController,
                     keyboardType: TextInputType.number,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
                     decoration: _buildInputDecoration(
                       label: 'Age',
                       hint: '28',
@@ -1501,26 +1511,41 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             TextFormField(
               controller: _phoneController,
               keyboardType: TextInputType.phone,
-              validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter phone number' : null,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter phone' : null,
               decoration: _buildInputDecoration(
-                label: 'Contact Phone Number',
-                hint: '+1 202 555 0100',
+                label: 'Practitioner Phone Number',
+                hint: '+1 202 555 0142',
                 icon: Icons.phone_outlined,
               ),
             ),
             const SizedBox(height: 12),
+
             TextFormField(
               controller: _licenseNoController,
-              validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter license number' : null,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter Dental License Number' : null,
               decoration: _buildInputDecoration(
-                label: 'Dental License Registration No.',
-                hint: 'e.g. DEN-LIC-8890',
+                label: 'Dental Council License Number',
+                hint: 'DEN-LIC-88490',
                 icon: Icons.badge_outlined,
               ),
             ),
             const SizedBox(height: 12),
+
+            TextFormField(
+              controller: _clinicNameController,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter Clinic Name' : null,
+              decoration: _buildInputDecoration(
+                label: 'Primary Clinic / Practice Name',
+                hint: 'Metro Dental Care Clinic',
+                icon: Icons.local_hospital_outlined,
+              ),
+            ),
+            const SizedBox(height: 12),
             DropdownButtonFormField<String>(
-              initialValue: _selectedSpecialty,
+              value: _selectedSpecialty,
               isExpanded: true,
               decoration: _buildInputDecoration(
                 label: 'Dental Specialization',
@@ -1638,6 +1663,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   }) {
     return InputDecoration(
       labelText: label,
+      labelStyle: const TextStyle(color: Color(0xFF475569), fontSize: 13),
       hintText: hint,
       hintStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
       prefixIcon: Icon(icon, color: _accentColor, size: 20),

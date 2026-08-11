@@ -162,6 +162,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                       TextField(
                         controller: descriptionController,
                         maxLines: 3,
+                        style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
                         decoration: InputDecoration(
                           labelText: 'Describe Symptoms & Duration',
                           hintText: 'e.g. Sharp throbbing pain in lower molar when drinking cold liquids...',
