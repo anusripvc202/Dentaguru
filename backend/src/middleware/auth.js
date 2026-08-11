@@ -49,6 +49,42 @@ const authenticateJWT = async (req, res, next) => {
     }
 };
 
+const optionalAuth = async (req, res, next) => {
+    const authHeader = req.headers.authorization;
+
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.split(' ')[1];
+
+        try {
+            const { data: { user }, error } = await supabase.auth.getUser(token);
+            if (!error && user) {
+                req.user = {
+                    id: user.id,
+                    email: user.email,
+                    role: user.user_metadata?.role || 'patient',
+                    user_metadata: user.user_metadata
+                };
+                return next();
+            }
+        } catch (_) {}
+
+        try {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretjwtkey123');
+            const user = await User.findById(decoded.id);
+            if (user) {
+                req.user = user;
+            } else {
+                req.user = {
+                    id: decoded.id,
+                    email: decoded.email,
+                    role: decoded.role || 'patient'
+                };
+            }
+        } catch (_) {}
+    }
+    next();
+};
+
 // Role authorization checker
 const requireRole = (allowedRoles) => {
     return (req, res, next) => {
@@ -69,5 +105,7 @@ const requireRole = (allowedRoles) => {
 
 module.exports = {
     authenticateJWT,
+    optionalAuth,
     requireRole
 };
+

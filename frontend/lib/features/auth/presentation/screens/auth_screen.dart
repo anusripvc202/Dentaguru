@@ -60,7 +60,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   final _experienceController = TextEditingController(text: '5');
   final _clinicAddressController = TextEditingController();
   String? _selectedSpecialty;
-  String? _selectedExistingClinic;
 
   // Role-Specific Fields - Admin
   final _adminEmployeeIdController = TextEditingController();
@@ -77,12 +76,14 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   bool _isVerifyingOtp = false;
   final _otpController = TextEditingController();
   String? _otpErrorMessage;
-  String? _receivedOtp;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this, initialIndex: widget.initialTab);
+    _tabController.addListener(() {
+      if (mounted) setState(() {});
+    });
 
     // Initialize selected role from widget param or default to Patient
     final roleStr = (widget.initialRole ?? 'Patient').toLowerCase();
@@ -268,6 +269,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             experienceYears: 5,
             photoBytes: photoBytes,
           );
+          await PatientProblemService().syncAllDataFromApi();
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('🎉 Welcome back, ${userData['name'] ?? 'Doctor'}! Logging into Dentist Workspace...'),
@@ -276,6 +279,19 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           );
           context.go('/dentist');
         } else if (registeredRole.contains('admin')) {
+          PatientProblemService().updatePatientProfile(
+            id: userData['id']?.toString() ?? '',
+            name: userData['name'] ?? 'Admin',
+            email: userData['email'] ?? email,
+            phone: userPhone,
+            age: '30',
+            gender: 'Female',
+            bloodGroup: 'O Positive (O+)',
+            emergencyContact: userPhone,
+            photoBytes: photoBytes,
+          );
+          await PatientProblemService().syncAllDataFromApi();
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('🎉 Welcome back, ${userData['name'] ?? 'Admin'}! Logging into Admin Dashboard...'),
@@ -296,6 +312,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             emergencyContact: userPhone,
             photoBytes: photoBytes,
           );
+          await PatientProblemService().syncAllDataFromApi();
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('🎉 Welcome back, ${userData['name'] ?? 'Patient'}! Logging into Patient Portal...'),
@@ -395,6 +413,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           );
         }
 
+        await PatientProblemService().syncAllDataFromApi();
+        if (!mounted) return;
         AnalyticsService.logRegistration(method: 'Email_Password', role: _roleName);
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -900,23 +920,19 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         backgroundColor: Colors.white,
         elevation: 1,
         shadowColor: Colors.black.withValues(alpha: 0.05),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: AppTheme.primaryBlue),
-          onPressed: () => context.go('/'),
-          tooltip: 'Back to Home Page',
-        ),
-        title: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              const DentaGuruLogo(height: 26),
-              const SizedBox(width: 6),
-              Text(
+        automaticallyImplyLeading: false,
+        title: Row(
+          children: [
+            const DentaGuruLogo(height: 26),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
                 '$_roleName Portal Authentication',
                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+                overflow: TextOverflow.ellipsis,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
       body: Center(
@@ -1052,15 +1068,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     const SizedBox(height: 18),
 
                     // Tab Body
-                    SizedBox(
-                      height: _selectedRole == UserRole.dentist ? 780 : _selectedRole == UserRole.admin ? 680 : 540,
-                      child: TabBarView(
-                        controller: _tabController,
-                        children: [
-                          _buildSignInForm(),
-                          _buildRegisterForm(),
-                        ],
-                      ),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 250),
+                      child: _tabController.index == 0
+                          ? KeyedSubtree(key: const ValueKey('signin_tab'), child: _buildSignInForm())
+                          : KeyedSubtree(key: const ValueKey('register_tab'), child: _buildRegisterForm()),
                     ),
                   ],
                 ),
@@ -1459,19 +1471,23 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               initialValue: _selectedGender,
+              dropdownColor: Colors.white,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
               decoration: _buildInputDecoration(
                 label: 'Gender',
                 hint: 'Select Gender',
                 icon: Icons.people_outline_rounded,
               ),
               items: ['Female', 'Male', 'Other', 'Prefer not to say'].map((g) {
-                return DropdownMenuItem(value: g, child: Text(g, style: const TextStyle(fontSize: 13)));
+                return DropdownMenuItem(value: g, child: Text(g, style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600)));
               }).toList(),
               onChanged: (val) => setState(() => _selectedGender = val ?? 'Female'),
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               initialValue: _selectedBloodGroup,
+              dropdownColor: Colors.white,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
               decoration: _buildInputDecoration(
                 label: 'Blood Group',
                 hint: 'Select Blood Group',
@@ -1487,7 +1503,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 'B Negative (B-)',
                 'AB Negative (AB-)',
               ].map((bg) {
-                return DropdownMenuItem(value: bg, child: Text(bg, style: const TextStyle(fontSize: 13)));
+                return DropdownMenuItem(value: bg, child: Text(bg, style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600)));
               }).toList(),
               onChanged: (val) => setState(() => _selectedBloodGroup = val ?? 'O Positive (O+)'),
             ),
@@ -1495,6 +1511,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             TextFormField(
               controller: _emergencyContactController,
               keyboardType: TextInputType.phone,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
               decoration: _buildInputDecoration(
                 label: 'Emergency Contact Phone',
                 hint: '+1 202 555 9988',
@@ -1533,35 +1550,26 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ),
             const SizedBox(height: 12),
 
-            TextFormField(
-              controller: _clinicNameController,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-              validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter Clinic Name' : null,
-              decoration: _buildInputDecoration(
-                label: 'Primary Clinic / Practice Name',
-                hint: 'Metro Dental Care Clinic',
-                icon: Icons.local_hospital_outlined,
-              ),
-            ),
-            const SizedBox(height: 12),
             DropdownButtonFormField<String>(
-              value: _selectedSpecialty,
+              initialValue: _selectedSpecialty,
               isExpanded: true,
+              dropdownColor: Colors.white,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
               decoration: _buildInputDecoration(
                 label: 'Dental Specialization',
                 hint: 'Select Specialty',
                 icon: Icons.medical_services_outlined,
               ),
               items: [
+                'General Dentistry',
                 'Orthodontics',
                 'Endodontics',
                 'Periodontics',
                 'Pediatric Dentistry',
                 'Oral & Maxillofacial Surgery',
-                'General Dentistry',
                 'Prosthodontics',
               ].map((sp) {
-                return DropdownMenuItem(value: sp, child: Text(sp, style: const TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis));
+                return DropdownMenuItem(value: sp, child: Text(sp, style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis));
               }).toList(),
               onChanged: (val) => setState(() => _selectedSpecialty = val ?? 'General Dentistry'),
             ),
@@ -1572,10 +1580,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   flex: 3,
                   child: TextFormField(
                     controller: _clinicNameController,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
                     validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter clinic name' : null,
                     decoration: _buildInputDecoration(
-                      label: 'Clinic Name *',
-                      hint: 'e.g. Bright Smile Dental Practice',
+                      label: 'Primary Clinic / Practice Name *',
+                      hint: 'Metro Dental Care Practice',
                       icon: Icons.domain_rounded,
                     ),
                   ),
@@ -1586,6 +1595,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   child: TextFormField(
                     controller: _experienceController,
                     keyboardType: TextInputType.number,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
                     decoration: _buildInputDecoration(
                       label: 'Exp. (Years)',
                       hint: '5',
@@ -1598,6 +1608,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             const SizedBox(height: 12),
             TextFormField(
               controller: _clinicAddressController,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
               validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter clinic location / address' : null,
               decoration: _buildInputDecoration(
                 label: 'Clinic Location / Address *',
@@ -1619,6 +1630,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   child: TextFormField(
                     controller: _phoneController,
                     keyboardType: TextInputType.phone,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
                     validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter phone' : null,
                     decoration: _buildInputDecoration(
                       label: 'Contact Phone',
@@ -1632,6 +1644,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   flex: 2,
                   child: TextFormField(
                     controller: _adminEmployeeIdController,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
                     decoration: _buildInputDecoration(
                       label: 'Admin ID',
                       hint: 'ADM-901',
@@ -1644,6 +1657,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             const SizedBox(height: 12),
             TextFormField(
               controller: _adminDeptController,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
               decoration: _buildInputDecoration(
                 label: 'Department / Key Code',
                 hint: 'Clinical Operations',

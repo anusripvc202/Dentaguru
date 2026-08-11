@@ -28,6 +28,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   void initState() {
     super.initState();
     _patientService.addListener(_onServiceUpdate);
+    _patientService.syncAllDataFromApi();
 
     _entryController = AnimationController(
       vsync: this,
@@ -390,7 +391,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                       onPressed: () async {
                                         Navigator.pop(confirmCtx);
                                         final ok = await ApiService().clearChatMessages(roomId: roomId);
-                                        if (ok) {
+                                        if (ok && context.mounted) {
                                           setModalState(() {});
                                           ScaffoldMessenger.of(context).showSnackBar(
                                             const SnackBar(content: Text('🗑️ Chat history cleared!'), backgroundColor: Color(0xFF10B981)),
@@ -410,7 +411,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                             onSelected: (val) async {
                               if (val == 'clear') {
                                 final ok = await ApiService().clearChatMessages(roomId: roomId);
-                                if (ok) {
+                                if (ok && context.mounted) {
                                   setModalState(() {});
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(content: Text('🗑️ Chat history cleared!'), backgroundColor: Color(0xFF10B981)),
@@ -1453,7 +1454,13 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   Widget _buildNextVisitCard() {
     final requests = _patientService.requests;
     final patient = _patientService.currentPatient;
-    final myRequests = requests.where((r) => (patient.name.isNotEmpty && r.patientName.toLowerCase() == patient.name.toLowerCase()) || (patient.id.isNotEmpty && r.id.contains(patient.id))).toList();
+    final myRequests = requests.where((r) {
+      if (patient.name.isNotEmpty && patient.name != 'Patient' && r.patientName.trim().toLowerCase() == patient.name.trim().toLowerCase()) return true;
+      if (patient.name.isNotEmpty && patient.name != 'Patient' && (r.patientName.toLowerCase().contains(patient.name.toLowerCase()) || patient.name.toLowerCase().contains(r.patientName.toLowerCase()))) return true;
+      if (patient.id.isNotEmpty && r.id.contains(patient.id)) return true;
+      if (patient.name.isEmpty || patient.name == 'Patient' || requests.length <= 5) return true;
+      return false;
+    }).toList();
     final assignedReq = myRequests.where((r) => r.assignedDoctorName != null && r.assignedDoctorName!.isNotEmpty && (r.status == 'Confirmed' || r.status == 'Accepted')).firstOrNull;
 
     if (assignedReq == null) {

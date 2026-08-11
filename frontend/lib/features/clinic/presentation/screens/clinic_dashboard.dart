@@ -18,6 +18,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
   void initState() {
     super.initState();
     _problemService.addListener(_onServiceUpdate);
+    _problemService.syncAllDataFromApi();
   }
 
   @override

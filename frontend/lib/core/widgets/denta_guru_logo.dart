@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 class DentaGuruLogo extends StatelessWidget {
   final double height;
   final BoxFit fit;
   final bool darkBg;
+  final VoidCallback? onTap;
 
   const DentaGuruLogo({
     super.key,
     this.height = 42.0,
     this.fit = BoxFit.contain,
     this.darkBg = false,
+    this.onTap,
   });
 
   @override
@@ -22,8 +25,9 @@ class DentaGuruLogo extends StatelessWidget {
       alignment: Alignment.centerLeft,
     );
 
+    Widget content = logoImage;
     if (darkBg) {
-      return Container(
+      content = Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
           color: Colors.white,
@@ -40,6 +44,14 @@ class DentaGuruLogo extends StatelessWidget {
       );
     }
 
-    return logoImage;
+    return InkWell(
+      onTap: onTap ?? () {
+        try {
+          context.go('/auth');
+        } catch (_) {}
+      },
+      borderRadius: BorderRadius.circular(8),
+      child: content,
+    );
   }
 }

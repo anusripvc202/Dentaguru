@@ -29,6 +29,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   void initState() {
     super.initState();
     _problemService.addListener(_onServiceUpdate);
+    _problemService.syncAllDataFromApi();
 
     _entryController = AnimationController(
       vsync: this,

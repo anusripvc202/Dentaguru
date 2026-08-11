@@ -522,10 +522,12 @@ class ApiService {
   }
 
   /// Patient: Fetch own Dental Problem Requests
-  Future<List<dynamic>> fetchPatientProblemRequests() async {
+  Future<List<dynamic>> fetchPatientProblemRequests({String? patientId}) async {
     try {
-      final url = Uri.parse('${ApiConstants.baseUrl}/patient/problem-requests');
-      final response = await http.get(url, headers: _headers);
+      final uri = Uri.parse('${ApiConstants.baseUrl}/patient/problem-requests').replace(queryParameters: {
+        if (patientId != null && patientId.isNotEmpty) 'patientId': patientId,
+      });
+      final response = await http.get(uri, headers: _headers);
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         return data['requests'] ?? [];

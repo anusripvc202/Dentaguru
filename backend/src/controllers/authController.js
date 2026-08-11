@@ -159,7 +159,10 @@ exports.login = async (req, res) => {
 
         // Enforce Unique Primary Admin Email Authorization
         const normalizedUserEmail = (user.email || '').toString().trim().toLowerCase();
-        if ((role && role.toLowerCase().includes('admin') || user.role.toLowerCase().includes('admin')) && normalizedUserEmail !== 'anusripvc202@gmail.com') {
+        const userRoleStr = (user.role || '').toString().trim().toLowerCase();
+        const reqRoleStr = (role || '').toString().trim().toLowerCase();
+
+        if ((reqRoleStr.includes('admin') || userRoleStr.includes('admin')) && normalizedUserEmail !== 'anusripvc202@gmail.com') {
             return res.status(403).json({
                 success: false,
                 message: 'Access Denied: Only the primary administrator email (anusripvc202@gmail.com) is authorized for Admin access.'

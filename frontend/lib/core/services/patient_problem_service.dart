@@ -480,14 +480,98 @@ class PatientProblemService extends ChangeNotifier {
         _medicalRecords.addAll(List<Map<String, dynamic>>.from(list));
       }
 
-      // 5. Sync live appointments, clinics, and doctors directly from Supabase DB API
-      syncAppointmentsFromApi();
-      syncClinicsFromApi();
-      syncDoctorsFromApi();
+      // 5. Sync live appointments, clinics, doctors, records, and requests directly from Supabase DB API
+      syncAllDataFromApi();
 
       notifyListeners();
     } catch (e) {
       debugPrint('Error loading PatientProblemService state from storage: $e');
+    }
+  }
+
+  Future<void> syncAllDataFromApi() async {
+    try {
+      await syncClinicsFromApi();
+      await syncDoctorsFromApi();
+      await syncAppointmentsFromApi();
+      await syncProblemRequestsFromApi();
+      await syncMedicalRecordsFromApi();
+    } catch (e) {
+      debugPrint('Error in syncAllDataFromApi: $e');
+    }
+  }
+
+  Future<void> syncMedicalRecordsFromApi() async {
+    try {
+      final pId = currentPatient.id.isNotEmpty ? currentPatient.id : null;
+      final apiRecords = await ApiService().fetchMedicalRecords(patientId: pId);
+      if (apiRecords.isNotEmpty) {
+        final existingIds = _medicalRecords.map((r) => r['id']?.toString() ?? '').toSet();
+        for (final item in apiRecords) {
+          final itemMap = Map<String, dynamic>.from(item);
+          final id = itemMap['id']?.toString() ?? '';
+          if (id.isNotEmpty && !existingIds.contains(id)) {
+            _medicalRecords.insert(0, itemMap);
+          } else if (id.isEmpty) {
+            _medicalRecords.insert(0, itemMap);
+          }
+        }
+        _saveToStorage();
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Sync medical records error: $e');
+    }
+  }
+
+  Future<void> syncProblemRequestsFromApi() async {
+    try {
+      final pId = currentPatient.id.isNotEmpty ? currentPatient.id : null;
+      final List problemReqs = currentPatient.email.contains('admin')
+          ? await ApiService().fetchAdminProblemRequests()
+          : await ApiService().fetchPatientProblemRequests(patientId: pId);
+
+      if (problemReqs.isNotEmpty) {
+        for (final pr in problemReqs) {
+          final prId = (pr['_id'] ?? pr['id'] ?? '').toString();
+          if (prId.isEmpty) continue;
+          final category = (pr['problem_category'] ?? pr['problemCategory'] ?? 'Dental Issue').toString();
+          final desc = (pr['problem_description'] ?? pr['problemDescription'] ?? '').toString();
+          final status = (pr['status'] ?? 'PENDING_ADMIN_REVIEW').toString();
+          final severity = (pr['severity'] ?? 'Moderate').toString();
+
+          final patientObj = pr['patient'] ?? {};
+          final pName = (patientObj['name'] ?? pr['patientName'] ?? (currentPatient.name.isNotEmpty ? currentPatient.name : 'Patient')).toString();
+          final pPhone = (patientObj['phone'] ?? pr['patientPhone'] ?? currentPatient.phone).toString();
+
+          final existingIdx = _requests.indexWhere((r) => r.id == prId);
+          if (existingIdx != -1) {
+            _requests[existingIdx].status = status;
+            if (pName.isNotEmpty && pName != 'Patient') _requests[existingIdx].patientName = pName;
+            if (pPhone.isNotEmpty) _requests[existingIdx].patientPhone = pPhone;
+            if (pr['admin_notes'] != null) _requests[existingIdx].adminNotes = pr['admin_notes'].toString();
+          } else {
+            _requests.insert(
+              0,
+              PatientConsultationRequest(
+                id: prId,
+                patientName: pName,
+                patientPhone: pPhone,
+                problemCategory: category,
+                problemDescription: desc,
+                severity: severity,
+                submittedAt: pr['created_at'] != null ? DateTime.parse(pr['created_at']) : DateTime.now(),
+                status: status,
+                adminNotes: pr['admin_notes']?.toString(),
+              ),
+            );
+          }
+        }
+        _saveToStorage();
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Sync problem requests error: $e');
     }
   }
 
@@ -574,7 +658,9 @@ class PatientProblemService extends ChangeNotifier {
 
   Future<void> syncAppointmentsFromApi() async {
     try {
-      final list = await ApiService().fetchAppointments();
+      final pId = currentPatient.id.isNotEmpty ? currentPatient.id : null;
+      final dId = currentDoctor?.id.isNotEmpty == true ? currentDoctor!.id : null;
+      final list = await ApiService().fetchAppointments(patientId: pId, dentistId: dId);
       
       if (list.isNotEmpty) {
         for (final item in list) {
@@ -603,8 +689,9 @@ class PatientProblemService extends ChangeNotifier {
           final clinic = (clinicObj['clinic_name'] ?? clinicObj['name'] ?? item['clinic_name'] ?? item['clinicName'] ?? '').toString();
           final treatment = item['treatment'] ?? 'Dental Consultation';
           final slot = item['time_slot'] ?? item['timeSlot'];
+          final statusStr = (item['status'] ?? 'CONFIRMED').toString();
 
-          final existingIndex = _requests.indexWhere((r) => r.id == reqId || (r.patientName == pName && r.assignedDoctorName != null));
+          final existingIndex = _requests.indexWhere((r) => r.id == reqId || (r.patientName == pName && r.assignedDoctorName != null && r.confirmedTimeSlot == slot?.toString()));
           if (existingIndex != -1) {
             if (pName != 'Patient Consultation') {
               _requests[existingIndex].patientName = pName;
@@ -617,12 +704,12 @@ class PatientProblemService extends ChangeNotifier {
             }
             if (assignedDocName != null && assignedDocName.isNotEmpty && assignedDocName != 'null') {
               _requests[existingIndex].assignedDoctorName = assignedDocName;
-              _requests[existingIndex].status = 'Confirmed';
             }
+            _requests[existingIndex].status = statusStr;
             if (clinic.isNotEmpty) {
               _requests[existingIndex].assignedDoctorClinic = clinic;
             }
-          } else if (assignedDocName != null && assignedDocName.isNotEmpty && assignedDocName != 'null') {
+          } else {
             _requests.add(
               PatientConsultationRequest(
                 id: reqId,
@@ -631,56 +718,18 @@ class PatientProblemService extends ChangeNotifier {
                 problemCategory: treatment.toString(),
                 problemDescription: 'Scheduled dental consultation',
                 severity: 'Moderate',
-                submittedAt: DateTime.now(),
-                status: 'Confirmed',
+                submittedAt: item['created_at'] != null ? DateTime.parse(item['created_at']) : DateTime.now(),
+                status: statusStr,
                 assignedDoctorName: assignedDocName,
                 assignedDoctorSpecialty: 'Dental Specialist',
                 assignedDoctorClinic: clinic.isNotEmpty ? clinic : null,
                 confirmedTimeSlot: slot?.toString(),
-                adminNotes: 'Confirmed consultation record',
+                adminNotes: 'Consultation record',
                 whatsappNotificationSent: true,
               ),
             );
           }
         }
-      }
-
-      // Fetch Patient Problem Requests from backend API
-      try {
-        final problemReqs = await ApiService().fetchPatientProblemRequests();
-        if (problemReqs.isNotEmpty) {
-          for (final pr in problemReqs) {
-            final prId = (pr['_id'] ?? pr['id'] ?? '').toString();
-            if (prId.isEmpty) continue;
-            final category = (pr['problem_category'] ?? pr['problemCategory'] ?? 'Dental Issue').toString();
-            final desc = (pr['problem_description'] ?? pr['problemDescription'] ?? '').toString();
-            final status = (pr['status'] ?? 'PENDING_ADMIN_REVIEW').toString();
-            final severity = (pr['severity'] ?? 'Moderate').toString();
-
-            final existingIdx = _requests.indexWhere((r) => r.id == prId);
-            if (existingIdx != -1) {
-              _requests[existingIdx].status = status;
-              if (pr['admin_notes'] != null) _requests[existingIdx].adminNotes = pr['admin_notes'].toString();
-            } else {
-              _requests.insert(
-                0,
-                PatientConsultationRequest(
-                  id: prId,
-                  patientName: currentPatient.name.isNotEmpty ? currentPatient.name : 'Patient',
-                  patientPhone: currentPatient.phone,
-                  problemCategory: category,
-                  problemDescription: desc,
-                  severity: severity,
-                  submittedAt: DateTime.now(),
-                  status: status,
-                  adminNotes: pr['admin_notes']?.toString(),
-                ),
-              );
-            }
-          }
-        }
-      } catch (e) {
-        debugPrint('Sync problem requests error: $e');
       }
 
       _saveToStorage();
@@ -750,6 +799,7 @@ class PatientProblemService extends ChangeNotifier {
       photoBytes: cachedPhoto,
     );
     _saveToStorage();
+    syncAllDataFromApi();
     notifyListeners();
   }
 
@@ -948,8 +998,11 @@ class PatientProblemService extends ChangeNotifier {
     final cleanSpecialty = specialty.trim().isEmpty ? 'General Dentistry' : specialty.trim();
     final cleanAddress = clinicAddress.trim();
 
+    final existingDoc = _allDoctors.firstWhere((d) => d.email.trim().toLowerCase() == email.trim().toLowerCase(), orElse: () => DoctorModel(id: '', name: '', specialty: '', qualification: '', experienceYears: 0, rating: 0, reviewCount: 0, clinicName: '', phone: '', email: '', status: '', nextAvailableSlots: [], consultationFee: ''));
+    final doctorId = existingDoc.id.isNotEmpty ? existingDoc.id : 'DOC-${100 + _allDoctors.length + 1}';
+
     final newDoctor = DoctorModel(
-      id: 'DOC-${100 + _allDoctors.length + 1}',
+      id: doctorId,
       name: formattedName.isEmpty ? 'Dr. New Dentist' : formattedName,
       specialty: cleanSpecialty,
       qualification: qualification.trim().isEmpty ? 'BDS, MDS' : qualification.trim(),
@@ -969,6 +1022,9 @@ class PatientProblemService extends ChangeNotifier {
 
     if (!_allDoctors.any((d) => d.email.toLowerCase() == newDoctor.email.toLowerCase())) {
       _allDoctors.insert(0, newDoctor);
+    } else {
+      final idx = _allDoctors.indexWhere((d) => d.email.toLowerCase() == newDoctor.email.toLowerCase());
+      if (idx != -1) _allDoctors[idx] = newDoctor;
     }
     currentDoctor = newDoctor;
 
@@ -986,6 +1042,7 @@ class PatientProblemService extends ChangeNotifier {
     }
 
     _saveToStorage();
+    syncAllDataFromApi();
     notifyListeners();
 
     // End-to-end Real-Time Persistence into Supabase ('users', 'clinics', 'dentists')

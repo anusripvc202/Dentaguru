@@ -27,6 +27,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   void initState() {
     super.initState();
     _patientService.addListener(_onServiceUpdate);
+    _patientService.syncAllDataFromApi();
 
     _entryController = AnimationController(
       vsync: this,
@@ -461,7 +462,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                     onPressed: () async {
                                       Navigator.pop(confirmCtx);
                                       final ok = await ApiService().clearChatMessages(roomId: roomId);
-                                      if (ok) {
+                                      if (ok && context.mounted) {
                                         setModalState(() {});
                                         ScaffoldMessenger.of(context).showSnackBar(
                                           const SnackBar(content: Text('🗑️ Chat history cleared!'), backgroundColor: Color(0xFF10B981)),
@@ -481,7 +482,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                           onSelected: (val) async {
                             if (val == 'clear') {
                               final ok = await ApiService().clearChatMessages(roomId: roomId);
-                              if (ok) {
+                              if (ok && context.mounted) {
                                 setModalState(() {});
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(content: Text('🗑️ Chat history cleared!'), backgroundColor: Color(0xFF10B981)),

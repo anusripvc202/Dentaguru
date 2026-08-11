@@ -39,8 +39,9 @@ exports.createProblemRequest = async (req, res) => {
 // 2. PATIENT: GET MY PROBLEM REQUESTS
 exports.getPatientProblemRequests = async (req, res) => {
     try {
-        const patientId = req.user ? req.user.id : req.query.patientId;
-        const requests = await PatientProblemRequest.find({ patient_id: patientId });
+        const patientId = req.query.patientId || (req.user ? req.user.id : null);
+        const query = patientId ? { patient_id: patientId } : {};
+        const requests = await PatientProblemRequest.find(query);
         res.json({ success: true, count: requests.length, requests });
     } catch (err) {
         console.error('Get Patient Problem Requests Error:', err.message);
