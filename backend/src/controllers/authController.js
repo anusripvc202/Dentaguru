@@ -220,29 +220,37 @@ function storeOtp(identifier, code) {
     if (!identifier) return;
     const cleanKey = normalizeKey(identifier);
     if (!cleanKey) return;
-    activeOtpStore.set(cleanKey, {
-        code: String(code).trim(),
-        expiresAt: Date.now() + 60 * 60 * 1000 // 60 minutes expiry
-    });
+
+    let existing = activeOtpStore.get(cleanKey);
+    if (!existing || !Array.isArray(existing.codes)) {
+        existing = { codes: [], expiresAt: Date.now() + 120 * 60 * 1000 };
+    }
+    existing.codes.push(String(code).trim());
+    existing.expiresAt = Date.now() + 120 * 60 * 1000; // 120 minutes (2 hours) validity
+    activeOtpStore.set(cleanKey, existing);
 }
 
 function verifyStoredOtp(identifier, code) {
     if (!code) return false;
     const cleanCode = String(code).trim();
 
-    // 1. Exact key match with normalized identifier
+    // 1. Check normalized key entry
     if (identifier) {
         const cleanKey = normalizeKey(identifier);
         const entry = activeOtpStore.get(cleanKey);
-        if (entry && Date.now() <= entry.expiresAt && entry.code === cleanCode) {
-            return true;
+        if (entry && Date.now() <= entry.expiresAt && Array.isArray(entry.codes)) {
+            if (entry.codes.includes(cleanCode)) {
+                return true;
+            }
         }
     }
 
-    // 2. Fallback check across active stored OTPs in current session
+    // 2. Fallback check across all active OTP entries in session
     for (const [_, entry] of activeOtpStore.entries()) {
-        if (Date.now() <= entry.expiresAt && entry.code === cleanCode) {
-            return true;
+        if (Date.now() <= entry.expiresAt && Array.isArray(entry.codes)) {
+            if (entry.codes.includes(cleanCode)) {
+                return true;
+            }
         }
     }
 
