@@ -7,7 +7,7 @@ const https = require('https');
  */
 const sendViaResendApi = (toEmail, subject, html, apiKey) => {
     return new Promise((resolve) => {
-        const sender = process.env.EMAIL_FROM || 'DentaGuru Security <onboarding@resend.dev>';
+        const sender = 'DentaGuru Security <onboarding@resend.dev>';
         const postData = JSON.stringify({
             from: sender,
             to: [toEmail],
