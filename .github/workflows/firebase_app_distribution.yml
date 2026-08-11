@@ -1,0 +1,52 @@
+name: Firebase App Distribution Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      release_notes:
+        description: 'Release notes for testers'
+        required: false
+        default: 'Automated test build distribution via GitHub Actions'
+
+jobs:
+  build-and-distribute:
+    name: Build Android APK & Distribute to Firebase
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 2. Set up Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: 3. Set up Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.22.x'
+          channel: 'stable'
+          cache: true
+
+      - name: 4. Get Dependencies
+        run: |
+          cd frontend
+          flutter pub get
+
+      - name: 5. Build Release Android APK
+        run: |
+          cd frontend
+          flutter build apk --release --no-tree-shake-icons
+
+      - name: 6. Distribute APK via Firebase App Distribution
+        uses: w9jds/firebase-action@v11.16.0
+        with:
+          args: appdistribution:distribute frontend/build/app/outputs/flutter-apk/app-release.apk --app "${{ secrets.FIREBASE_APP_ID_ANDROID }}" --groups "internal-testers" --release-notes "${{ github.event.inputs.release_notes || 'Automated build from commit ' }}${{ github.sha }}"
+        env:
+          GCP_SA_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}

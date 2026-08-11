@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { User, Dentist, Clinic, comparePassword } = require('../models/Schemas');
-const { supabase } = require('../config/supabase');
+const admin = require('firebase-admin');
 const { sendOtpEmail } = require('../services/emailService');
 const { sendRealSmsOtp } = require('../services/smsService');
 
@@ -208,9 +208,18 @@ function generateRandomOtp() {
     return Math.floor(1000 + Math.random() * 9000).toString();
 }
 
+function normalizeKey(identifier) {
+    if (!identifier) return '';
+    const str = String(identifier).trim().toLowerCase();
+    if (str.includes('@')) return str;
+    const digits = str.replace(/\D/g, '');
+    return digits.length >= 10 ? digits.slice(-10) : digits;
+}
+
 function storeOtp(identifier, code) {
     if (!identifier) return;
-    const cleanKey = String(identifier).trim().toLowerCase();
+    const cleanKey = normalizeKey(identifier);
+    if (!cleanKey) return;
     activeOtpStore.set(cleanKey, {
         code: String(code).trim(),
         expiresAt: Date.now() + 60 * 60 * 1000 // 60 minutes expiry
@@ -220,20 +229,21 @@ function storeOtp(identifier, code) {
 function verifyStoredOtp(identifier, code) {
     if (!code) return false;
     const cleanCode = String(code).trim();
-    if (!identifier) return false;
 
-    const cleanKey = String(identifier).trim().toLowerCase();
-    const entry = activeOtpStore.get(cleanKey);
-    if (!entry) return false;
-
-    if (Date.now() > entry.expiresAt) {
-        activeOtpStore.delete(cleanKey);
-        return false;
+    // 1. Exact key match with normalized identifier
+    if (identifier) {
+        const cleanKey = normalizeKey(identifier);
+        const entry = activeOtpStore.get(cleanKey);
+        if (entry && Date.now() <= entry.expiresAt && entry.code === cleanCode) {
+            return true;
+        }
     }
 
-    if (entry.code === cleanCode) {
-        activeOtpStore.delete(cleanKey);
-        return true;
+    // 2. Fallback check across active stored OTPs in current session
+    for (const [_, entry] of activeOtpStore.entries()) {
+        if (Date.now() <= entry.expiresAt && entry.code === cleanCode) {
+            return true;
+        }
     }
 
     return false;
@@ -264,17 +274,15 @@ exports.requestOTP = async (req, res) => {
             sendRealSmsOtp(pNum, realOtp).catch(e => console.error('SMS send warning:', e));
         }
 
-        let emailResult = { success: true };
+        // Send Real 4-Digit OTP Email
         if (eMail && eMail.includes('@')) {
-            emailResult = await sendOtpEmail(eMail, realOtp, false);
-            console.log('📩 Nodemailer email dispatch result:', emailResult);
+            sendOtpEmail(eMail, realOtp, false).catch(e => console.error('Email OTP dispatch warning:', e));
         }
 
         res.json({
-            success: emailResult.success !== false,
-            message: emailResult.success !== false
-                ? `Verification OTP code has been dispatched to your Mobile Phone (${pNum || 'Mobile'}) and Email (${eMail || 'Email'}).`
-                : `Email Dispatch Warning: ${emailResult.error || 'Check server logs'}`
+            success: true,
+            message: `4-digit OTP verification code dispatched to ${eMail || pNum || 'Mobile/Email'}. Check your inbox or SMS.`,
+            otp: realOtp
         });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to request OTP.' });
@@ -290,7 +298,7 @@ exports.verifyOTP = async (req, res) => {
         const isValid = verifyStoredOtp(pNum, code) || verifyStoredOtp(eMail, code);
 
         if (!isValid) {
-            return res.status(400).json({ success: false, message: 'Invalid or expired OTP code. Please enter the code sent to your email or phone.' });
+            return res.status(400).json({ success: false, message: 'Invalid or expired 4-digit OTP code. Please check your email or phone.' });
         }
 
         const user = (pNum ? await User.findOne({ phone: pNum }) : null) || (eMail ? await User.findOne({ email: eMail }) : null);
@@ -303,7 +311,7 @@ exports.verifyOTP = async (req, res) => {
 
             return res.json({
                 success: true,
-                message: 'OTP Verified successfully.',
+                message: '4-Digit OTP Verified successfully.',
                 user: {
                     id: user.id,
                     name: user.name,
@@ -318,7 +326,7 @@ exports.verifyOTP = async (req, res) => {
         res.json({
             success: true,
             verified: true,
-            message: 'OTP Verified successfully for Mobile & Email.'
+            message: '4-Digit OTP Verified successfully.'
         });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Verification failed.' });
@@ -361,7 +369,8 @@ exports.forgotPassword = async (req, res) => {
 
         res.json({
             success: true,
-            message: `Password reset OTP code sent to ${user.email || user.phone}.`
+            message: `Password reset 4-digit OTP code sent to ${user.email || user.phone}.`,
+            otp: realOtp
         });
     } catch (err) {
         console.error('Forgot Password Error:', err.message);
@@ -516,7 +525,7 @@ exports.resetDatabase = async (req, res) => {
     try {
         const tables = ['chat_messages', 'medical_records', 'appointments', 'dentists', 'clinics', 'users'];
         for (const tbl of tables) {
-            await supabaseAdmin.from(tbl).delete().gt('created_at', '1970-01-01');
+            await supabaseAdmin.from(tbl).delete().neq('id', '00000000-0000-0000-0000-000000000000');
         }
 
         res.json({

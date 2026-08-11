@@ -3,12 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/routes/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'core/services/firebase_service.dart';
+import 'core/services/analytics_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
     await FirebaseService.initialize();
+    await AnalyticsService.logAppOpen();
   } catch (e) {
     debugPrint('⚠️ Firebase Service initialization warning: $e');
   }

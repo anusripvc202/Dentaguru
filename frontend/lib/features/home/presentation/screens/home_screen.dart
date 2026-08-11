@@ -794,11 +794,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _buildStatItem('50K+', 'Happy Patients'),
+          Expanded(child: _buildStatItem('50K+', 'Happy Patients')),
           _buildStatDivider(),
-          _buildStatItem('1,200+', 'Verified Doctors'),
+          Expanded(child: _buildStatItem('1,200+', 'Verified Doctors')),
           _buildStatDivider(),
-          _buildStatItem('99.4%', 'AI Accuracy'),
+          Expanded(child: _buildStatItem('99.4%', 'AI Accuracy')),
         ],
       ),
     );
@@ -809,15 +809,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       children: [
         Text(
           number,
+          textAlign: TextAlign.center,
           style: const TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.w900,
-            fontSize: 20,
+            fontSize: 18,
           ),
         ),
         const SizedBox(height: 2),
         Text(
           label,
+          textAlign: TextAlign.center,
+          overflow: TextOverflow.ellipsis,
           style: const TextStyle(
             color: Color(0xFF93C5FD),
             fontSize: 11,

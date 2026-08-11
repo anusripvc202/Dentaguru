@@ -9,6 +9,9 @@ import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../constants/api_constants.dart';
 
+import 'analytics_service.dart';
+import 'crashlytics_service.dart';
+
 // ─────────────────────────────────────────────────────────────
 // Background message handler (must be a top-level function)
 // ─────────────────────────────────────────────────────────────
@@ -73,33 +76,109 @@ class FirebaseService {
     }
   }
 
-  /// Send Real Verification Email via Google Firebase Auth directly to Gmail inbox
-  static Future<bool> sendFirebaseEmailOtp(String email) async {
+  /// Send Firebase Email Verification link to user's inbox
+  static Future<Map<String, dynamic>> sendFirebaseEmailVerification({
+    required String email,
+    required String password,
+  }) async {
     try {
-      final actionCodeSettings = ActionCodeSettings(
-        url: 'https://dentaguru-6d0a0.firebaseapp.com',
-        handleCodeInApp: true,
-        androidPackageName: 'com.example.dentaguru',
-        androidInstallApp: true,
-        androidMinimumVersion: '12',
-      );
+      User? user = _auth.currentUser;
 
-      await _auth.sendSignInLinkToEmail(
-        email: email,
-        actionCodeSettings: actionCodeSettings,
-      );
-      debugPrint('📩 Firebase Email Verification dispatched to $email');
-      return true;
-    } catch (e) {
-      debugPrint('⚠️ Firebase Email Auth warning: $e');
-      try {
-        await _auth.sendPasswordResetEmail(email: email);
-        debugPrint('📩 Firebase Action Email dispatched to $email');
-        return true;
-      } catch (pErr) {
-        debugPrint('❌ Firebase Email dispatch failed: $pErr');
-        return false;
+      if (user == null || user.email != email) {
+        try {
+          final userCredential = await _auth.createUserWithEmailAndPassword(
+            email: email,
+            password: password,
+          );
+          user = userCredential.user;
+        } on FirebaseAuthException catch (e) {
+          if (e.code == 'email-already-in-use') {
+            final userCredential = await _auth.signInWithEmailAndPassword(
+              email: email,
+              password: password,
+            );
+            user = userCredential.user;
+          } else {
+            rethrow;
+          }
+        }
       }
+
+      if (user != null) {
+        await user.sendEmailVerification();
+        debugPrint('📩 Firebase Email Verification link dispatched to $email');
+        return {
+          'success': true,
+          'message': 'Verification email sent to your email address.',
+        };
+      }
+      return {
+        'success': false,
+        'message': 'Unable to send verification email. Please try again.',
+      };
+    } on FirebaseAuthException catch (e) {
+      debugPrint('❌ Firebase Auth Error: ${e.code} - ${e.message}');
+      String msg;
+      switch (e.code) {
+        case 'email-already-in-use':
+          msg = 'This email is already in use by another account.';
+          break;
+        case 'invalid-email':
+          msg = 'The email address is invalid.';
+          break;
+        case 'weak-password':
+          msg = 'The password must be at least 6 characters long.';
+          break;
+        case 'operation-not-allowed':
+          msg = 'Email/Password sign-in is disabled in your Firebase Console. Please enable Email/Password under Authentication > Sign-in method in Firebase Console.';
+          break;
+        case 'too-many-requests':
+          msg = 'Too many requests. Please wait a few moments and try again.';
+          break;
+        default:
+          msg = e.message ?? 'Firebase Email Verification failed.';
+      }
+      return {'success': false, 'message': msg};
+    } catch (e) {
+      debugPrint('❌ Unexpected Firebase Auth error: $e');
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  /// Check if the Firebase current user's email is verified
+  static Future<bool> checkEmailVerified() async {
+    try {
+      final user = _auth.currentUser;
+      if (user != null) {
+        await user.reload();
+        final refreshedUser = _auth.currentUser;
+        debugPrint('🔍 Firebase Email Verified Status: ${refreshedUser?.emailVerified}');
+        return refreshedUser?.emailVerified ?? false;
+      }
+      return false;
+    } catch (e) {
+      debugPrint('⚠️ Error reloading Firebase user: $e');
+      return false;
+    }
+  }
+
+  /// Send Password Reset Email via Firebase Auth
+  static Future<Map<String, dynamic>> sendPasswordResetEmail(String email) async {
+    try {
+      await _auth.sendPasswordResetEmail(email: email);
+      debugPrint('📩 Firebase Password Reset Email sent to $email');
+      return {
+        'success': true,
+        'message': 'Password reset link sent to $email. Please check your inbox.',
+      };
+    } on FirebaseAuthException catch (e) {
+      debugPrint('❌ Firebase Password Reset Error: ${e.code} - ${e.message}');
+      return {
+        'success': false,
+        'message': e.message ?? 'Failed to send password reset email.',
+      };
+    } catch (e) {
+      return {'success': false, 'message': e.toString()};
     }
   }
 
@@ -125,8 +204,9 @@ class FirebaseService {
       debugPrint('📲 Firebase Service: Skipping native FCM setup on Web');
       return;
     }
-    // 1. Initialize Firebase
+    // 1. Initialize Firebase & Crashlytics
     await Firebase.initializeApp();
+    await CrashlyticsService.initialize();
 
     // 2. Register background handler
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
@@ -163,11 +243,21 @@ class FirebaseService {
     // 6. Show local notification for foreground messages
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       debugPrint('📲 FCM Foreground: ${message.notification?.title}');
+      AnalyticsService.logNotificationReceived(
+        notificationType: message.data['type'] ?? 'general',
+        action: 'foreground_received',
+      );
       _showLocalNotification(message);
     });
 
     // 7. Handle notification tap when app is in background/terminated
-    FirebaseMessaging.onMessageOpenedApp.listen(_handleMessageNavigation);
+    FirebaseMessaging.onMessageOpenedApp.listen((message) {
+      AnalyticsService.logNotificationReceived(
+        notificationType: message.data['type'] ?? 'general',
+        action: 'tapped_open',
+      );
+      _handleMessageNavigation(message);
+    });
 
     // 8. Get & sync FCM token with backend
     await _syncFcmToken();

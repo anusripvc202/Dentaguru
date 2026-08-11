@@ -8,6 +8,7 @@ import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/firebase_service.dart';
+import '../../../../core/services/analytics_service.dart';
 
 /// Role enum for authentication
 enum UserRole { patient, dentist, admin }
@@ -241,6 +242,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 ? _phoneController.text.trim()
                 : (!email.contains('@') && email.isNotEmpty ? email : '9063663180'));
 
+        AnalyticsService.logLogin(method: 'Email_Password', role: _roleName);
+
         if (registeredRole.contains('dentist') || registeredRole.contains('doctor')) {
           PatientProblemService().registerDoctor(
             name: userData['name'] ?? 'Dr. Dentist',
@@ -367,6 +370,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           );
         }
 
+        AnalyticsService.logRegistration(method: 'Email_Password', role: _roleName);
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('🎉 Registered $_roleName account successfully!'),
@@ -413,7 +418,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       _otpErrorMessage = null;
     });
 
-    // 1. Send 4-digit OTP via Backend API (Nodemailer Email & SMS)
+    // 1. Dispatch 4-digit OTP via Backend API (Nodemailer Email & SMS)
     final res = await ApiService().requestOtp(phone: phone, email: email);
 
     // 2. Also send SMS OTP via Firebase Phone Auth if phone provided
@@ -439,7 +444,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     if (res['success'] == true) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('📩 OTP Verification Code sent to ${email.isNotEmpty ? email : phone}. Check your inbox.'),
+          content: Text('📩 4-Digit OTP Code dispatched to ${email.isNotEmpty ? email : phone}. Check your inbox or SMS.'),
           backgroundColor: const Color(0xFF10B981),
         ),
       );
@@ -453,7 +458,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   Future<void> _handleVerifyOtp() async {
     final code = _otpController.text.trim();
     if (code.isEmpty) {
-      setState(() => _otpErrorMessage = 'Please enter OTP code');
+      setState(() => _otpErrorMessage = 'Please enter the 4-digit OTP code');
       return;
     }
 
@@ -465,7 +470,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     final phone = _phoneController.text.trim();
     final email = _emailController.text.trim();
 
-    // Verify code via Firebase or Backend API
+    // Verify 4-digit code via Firebase or Backend API
     bool verified = await FirebaseService.verifyFirebaseOtp(code);
     if (!verified) {
       final res = await ApiService().verifyOtp(phone: phone, email: email, code: code);
@@ -476,18 +481,19 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     setState(() => _isVerifyingOtp = false);
 
     if (verified) {
+      AnalyticsService.logOtpVerification(status: 'verified', method: 'Numeric_OTP');
       setState(() {
         _isOtpVerified = true;
         _otpErrorMessage = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('🎉 OTP Verified successfully! "Create Account" button is now ACTIVE.'),
+          content: Text('🎉 4-Digit OTP Verified successfully! "Create Account" button is now ACTIVE.'),
           backgroundColor: Color(0xFF10B981),
         ),
       );
     } else {
-      setState(() => _otpErrorMessage = 'Invalid or expired OTP code. Please try again.');
+      setState(() => _otpErrorMessage = 'Invalid or expired 4-digit OTP code. Please try again.');
     }
   }
 
@@ -507,10 +513,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             children: [
               const Icon(Icons.mark_email_read_rounded, color: Color(0xFF16A34A), size: 18),
               const SizedBox(width: 6),
-              Expanded(
+              const Expanded(
                 child: Text(
-                  'Security OTP Verification',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF166534)),
+                  'Security 4-Digit OTP Verification',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF166534)),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -567,7 +573,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      'OTP verification code has been dispatched to your Mobile SMS & Email Inbox.',
+                      '4-Digit OTP verification code has been dispatched to your Mobile SMS & Email Inbox.',
                       style: TextStyle(fontSize: 11, color: Color(0xFF15803D), fontWeight: FontWeight.w600),
                     ),
                   ),
@@ -622,7 +628,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ),
           ] else ...[
             const Text(
-              'Identity verified via Mobile SMS & Email OTP. Click Create Account below to finish.',
+              'Identity verified via 4-digit Mobile SMS & Email OTP. Click Create Account below to finish.',
               style: TextStyle(fontSize: 11, color: Color(0xFF15803D), fontWeight: FontWeight.w600),
             ),
           ],
