@@ -2540,313 +2540,357 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setModalState) {
+            final screenHeight = MediaQuery.of(context).size.height;
+            final screenWidth = MediaQuery.of(context).size.width;
+
             return Dialog(
+              insetPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
               backgroundColor: Colors.white,
+              elevation: 20,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               child: Container(
-                constraints: const BoxConstraints(maxWidth: 520, maxHeight: 720),
-                padding: const EdgeInsets.all(22),
-                child: SingleChildScrollView(
-                  physics: const BouncingScrollPhysics(),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: AppTheme.primaryBlue.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Icon(Icons.person_add_alt_1_rounded, color: AppTheme.primaryBlue, size: 22),
+                constraints: BoxConstraints(
+                  maxWidth: 520,
+                  maxHeight: screenHeight * 0.85,
+                ),
+                padding: EdgeInsets.all(screenWidth < 400 ? 14 : 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Header Bar
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryBlue.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(10),
                           ),
-                          const SizedBox(width: 12),
-                          const Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                          child: const Icon(Icons.person_add_alt_1_rounded, color: AppTheme.primaryBlue, size: 20),
+                        ),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Create New Dentist Account',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                'Admin Direct Registration • Ready for App Login',
+                                style: TextStyle(fontSize: 10, color: AppTheme.textMuted),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded, color: AppTheme.textMuted, size: 20),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          onPressed: () => Navigator.of(dialogContext).pop(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    const Divider(height: 1, color: Color(0xFFE2E8F0)),
+                    const SizedBox(height: 12),
+
+                    // Scrollable Form Fields Body
+                    Expanded(
+                      child: SingleChildScrollView(
+                        physics: const BouncingScrollPhysics(),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // Doctor Name
+                            TextField(
+                              controller: nameCtrl,
+                              decoration: InputDecoration(
+                                labelText: 'Doctor Full Name *',
+                                hintText: 'e.g. Dr. Jane Miller',
+                                prefixIcon: const Icon(Icons.person_outline, size: 16),
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+
+                            // Email & Phone
+                            Row(
                               children: [
-                                Text('Create New Dentist Account', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textDark)),
-                                Text('Admin Direct Doctor Registration • Ready for Dentist App Login', style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                                Expanded(
+                                  child: TextField(
+                                    controller: emailCtrl,
+                                    keyboardType: TextInputType.emailAddress,
+                                    decoration: InputDecoration(
+                                      labelText: 'Email Address *',
+                                      hintText: 'e.g. jane@dentaguru.com',
+                                      prefixIcon: const Icon(Icons.email_outlined, size: 16),
+                                      filled: true,
+                                      fillColor: const Color(0xFFF8FAFC),
+                                      contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: TextField(
+                                    controller: phoneCtrl,
+                                    keyboardType: TextInputType.phone,
+                                    decoration: InputDecoration(
+                                      labelText: 'Phone Number *',
+                                      hintText: 'e.g. +91 98765 43210',
+                                      prefixIcon: const Icon(Icons.phone_outlined, size: 16),
+                                      filled: true,
+                                      fillColor: const Color(0xFFF8FAFC),
+                                      contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                    ),
+                                  ),
+                                ),
                               ],
                             ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.close_rounded, color: AppTheme.textMuted),
-                            onPressed: () => Navigator.of(dialogContext).pop(),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
+                            const SizedBox(height: 8),
 
-                      // Doctor Name
-                      TextField(
-                        controller: nameCtrl,
-                        decoration: InputDecoration(
-                          labelText: 'Doctor Full Name *',
-                          hintText: 'e.g. Dr. Jane Miller',
-                          prefixIcon: const Icon(Icons.person_outline, size: 18),
-                          filled: true,
-                          fillColor: const Color(0xFFF8FAFC),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                            // Password
+                            TextField(
+                              controller: passwordCtrl,
+                              obscureText: obscurePassword,
+                              decoration: InputDecoration(
+                                labelText: 'Account Password *',
+                                hintText: 'Used for Dentist Portal sign-in',
+                                prefixIcon: const Icon(Icons.lock_outline_rounded, size: 16),
+                                suffixIcon: IconButton(
+                                  icon: Icon(obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined, size: 16),
+                                  onPressed: () => setModalState(() => obscurePassword = !obscurePassword),
+                                ),
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+
+                            // Specialization & Qualification
+                            Row(
+                              children: [
+                                Expanded(
+                                  flex: 3,
+                                  child: DropdownButtonFormField<String>(
+                                    initialValue: selectedSpecialty,
+                                    decoration: InputDecoration(
+                                      labelText: 'Specialization',
+                                      prefixIcon: const Icon(Icons.medical_services_outlined, size: 16),
+                                      filled: true,
+                                      fillColor: const Color(0xFFF8FAFC),
+                                      contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                    ),
+                                    items: [
+                                      'General Dentistry',
+                                      'Orthodontics',
+                                      'Endodontics',
+                                      'Periodontics',
+                                      'Pediatric Dentistry',
+                                      'Oral & Maxillofacial Surgery',
+                                      'Cosmetic Dentistry',
+                                    ].map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 11)))).toList(),
+                                    onChanged: (val) {
+                                      if (val != null) setModalState(() => selectedSpecialty = val);
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  flex: 2,
+                                  child: TextField(
+                                    controller: qualCtrl,
+                                    decoration: InputDecoration(
+                                      labelText: 'Qualification',
+                                      hintText: 'BDS, MDS',
+                                      prefixIcon: const Icon(Icons.school_outlined, size: 16),
+                                      filled: true,
+                                      fillColor: const Color(0xFFF8FAFC),
+                                      contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+
+                            // License Number & Experience
+                            Row(
+                              children: [
+                                Expanded(
+                                  flex: 3,
+                                  child: TextField(
+                                    controller: licenseCtrl,
+                                    decoration: InputDecoration(
+                                      labelText: 'License Number',
+                                      hintText: 'e.g. DEN-88490',
+                                      prefixIcon: const Icon(Icons.badge_outlined, size: 16),
+                                      filled: true,
+                                      fillColor: const Color(0xFFF8FAFC),
+                                      contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  flex: 2,
+                                  child: TextField(
+                                    controller: expCtrl,
+                                    keyboardType: TextInputType.number,
+                                    decoration: InputDecoration(
+                                      labelText: 'Years Exp.',
+                                      hintText: '5',
+                                      prefixIcon: const Icon(Icons.work_history_outlined, size: 16),
+                                      filled: true,
+                                      fillColor: const Color(0xFFF8FAFC),
+                                      contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+
+                            // State, City & Pincode
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: stateCtrl,
+                                    decoration: InputDecoration(
+                                      labelText: 'State',
+                                      hintText: 'e.g. Telangana',
+                                      prefixIcon: const Icon(Icons.map_outlined, size: 15),
+                                      filled: true,
+                                      fillColor: const Color(0xFFF8FAFC),
+                                      contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: TextField(
+                                    controller: cityCtrl,
+                                    decoration: InputDecoration(
+                                      labelText: 'City',
+                                      hintText: 'e.g. Hyderabad',
+                                      prefixIcon: const Icon(Icons.location_city_outlined, size: 15),
+                                      filled: true,
+                                      fillColor: const Color(0xFFF8FAFC),
+                                      contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: TextField(
+                                    controller: pincodeCtrl,
+                                    keyboardType: TextInputType.number,
+                                    decoration: InputDecoration(
+                                      labelText: 'Pincode',
+                                      hintText: 'e.g. 500032',
+                                      prefixIcon: const Icon(Icons.pin_drop_outlined, size: 15),
+                                      filled: true,
+                                      fillColor: const Color(0xFFF8FAFC),
+                                      contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+
+                            // Practice / Clinic Name & Fee
+                            Row(
+                              children: [
+                                Expanded(
+                                  flex: 3,
+                                  child: TextField(
+                                    controller: clinicCtrl,
+                                    decoration: InputDecoration(
+                                      labelText: 'Practice / Clinic Name',
+                                      hintText: 'e.g. Apex Care Dental',
+                                      prefixIcon: const Icon(Icons.storefront_outlined, size: 16),
+                                      filled: true,
+                                      fillColor: const Color(0xFFF8FAFC),
+                                      contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  flex: 2,
+                                  child: TextField(
+                                    controller: feeCtrl,
+                                    decoration: InputDecoration(
+                                      labelText: 'Fee',
+                                      hintText: '\$75',
+                                      prefixIcon: const Icon(Icons.payments_outlined, size: 16),
+                                      filled: true,
+                                      fillColor: const Color(0xFFF8FAFC),
+                                      contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+
+                            // Clinic Address
+                            TextField(
+                              controller: addressCtrl,
+                              decoration: InputDecoration(
+                                labelText: 'Clinic Address / Location',
+                                hintText: 'e.g. 123 Healthcare Blvd, Suite 400',
+                                prefixIcon: const Icon(Icons.place_outlined, size: 16),
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 10),
+                    ),
+                    const SizedBox(height: 12),
 
-                      // Email & Phone
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: emailCtrl,
-                              keyboardType: TextInputType.emailAddress,
-                              decoration: InputDecoration(
-                                labelText: 'Email Address *',
-                                hintText: 'e.g. jane@dentaguru.com',
-                                prefixIcon: const Icon(Icons.email_outlined, size: 18),
-                                filled: true,
-                                fillColor: const Color(0xFFF8FAFC),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: TextField(
-                              controller: phoneCtrl,
-                              keyboardType: TextInputType.phone,
-                              decoration: InputDecoration(
-                                labelText: 'Phone Number *',
-                                hintText: 'e.g. +91 98765 43210',
-                                prefixIcon: const Icon(Icons.phone_outlined, size: 18),
-                                filled: true,
-                                fillColor: const Color(0xFFF8FAFC),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                            ),
-                          ),
-                        ],
+                    // Fixed Submit Button at Bottom
+                    ElevatedButton.icon(
+                      icon: isSubmitting
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : const Icon(Icons.check_circle_rounded, size: 16),
+                      label: Text(
+                        isSubmitting ? 'Creating Dentist Account...' : 'Create Dentist Account',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                       ),
-                      const SizedBox(height: 10),
-
-                      // Password
-                      TextField(
-                        controller: passwordCtrl,
-                        obscureText: obscurePassword,
-                        decoration: InputDecoration(
-                          labelText: 'Account Password *',
-                          hintText: 'Used for Dentist Portal sign-in',
-                          prefixIcon: const Icon(Icons.lock_outline_rounded, size: 18),
-                          suffixIcon: IconButton(
-                            icon: Icon(obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined, size: 18),
-                            onPressed: () => setModalState(() => obscurePassword = !obscurePassword),
-                          ),
-                          filled: true,
-                          fillColor: const Color(0xFFF8FAFC),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primaryBlue,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
-                      const SizedBox(height: 10),
-
-                      // Specialization & Qualification
-                      Row(
-                        children: [
-                          Expanded(
-                            flex: 3,
-                            child: DropdownButtonFormField<String>(
-                              initialValue: selectedSpecialty,
-                              decoration: InputDecoration(
-                                labelText: 'Specialization',
-                                prefixIcon: const Icon(Icons.medical_services_outlined, size: 18),
-                                filled: true,
-                                fillColor: const Color(0xFFF8FAFC),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                              items: [
-                                'General Dentistry',
-                                'Orthodontics',
-                                'Endodontics',
-                                'Periodontics',
-                                'Pediatric Dentistry',
-                                'Oral & Maxillofacial Surgery',
-                                'Cosmetic Dentistry',
-                              ].map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 12)))).toList(),
-                              onChanged: (val) {
-                                if (val != null) setModalState(() => selectedSpecialty = val);
-                              },
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            flex: 2,
-                            child: TextField(
-                              controller: qualCtrl,
-                              decoration: InputDecoration(
-                                labelText: 'Qualification',
-                                hintText: 'BDS, MDS',
-                                prefixIcon: const Icon(Icons.school_outlined, size: 18),
-                                filled: true,
-                                fillColor: const Color(0xFFF8FAFC),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-
-                      // License Number & Experience
-                      Row(
-                        children: [
-                          Expanded(
-                            flex: 3,
-                            child: TextField(
-                              controller: licenseCtrl,
-                              decoration: InputDecoration(
-                                labelText: 'License Number',
-                                hintText: 'e.g. DEN-88490',
-                                prefixIcon: const Icon(Icons.badge_outlined, size: 18),
-                                filled: true,
-                                fillColor: const Color(0xFFF8FAFC),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            flex: 2,
-                            child: TextField(
-                              controller: expCtrl,
-                              keyboardType: TextInputType.number,
-                              decoration: InputDecoration(
-                                labelText: 'Years Exp.',
-                                hintText: '5',
-                                prefixIcon: const Icon(Icons.work_history_outlined, size: 18),
-                                filled: true,
-                                fillColor: const Color(0xFFF8FAFC),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-
-                      // State, City & Pincode
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: stateCtrl,
-                              decoration: InputDecoration(
-                                labelText: 'State',
-                                hintText: 'e.g. Telangana',
-                                prefixIcon: const Icon(Icons.map_outlined, size: 18),
-                                filled: true,
-                                fillColor: const Color(0xFFF8FAFC),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: TextField(
-                              controller: cityCtrl,
-                              decoration: InputDecoration(
-                                labelText: 'City',
-                                hintText: 'e.g. Hyderabad',
-                                prefixIcon: const Icon(Icons.location_city_outlined, size: 18),
-                                filled: true,
-                                fillColor: const Color(0xFFF8FAFC),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: TextField(
-                              controller: pincodeCtrl,
-                              keyboardType: TextInputType.number,
-                              decoration: InputDecoration(
-                                labelText: 'Pincode',
-                                hintText: 'e.g. 500032',
-                                prefixIcon: const Icon(Icons.pin_drop_outlined, size: 18),
-                                filled: true,
-                                fillColor: const Color(0xFFF8FAFC),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-
-                      // Practice / Clinic Name & Fee
-                      Row(
-                        children: [
-                          Expanded(
-                            flex: 3,
-                            child: TextField(
-                              controller: clinicCtrl,
-                              decoration: InputDecoration(
-                                labelText: 'Practice / Clinic Name',
-                                hintText: 'e.g. Apex Care Dental',
-                                prefixIcon: const Icon(Icons.storefront_outlined, size: 18),
-                                filled: true,
-                                fillColor: const Color(0xFFF8FAFC),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            flex: 2,
-                            child: TextField(
-                              controller: feeCtrl,
-                              decoration: InputDecoration(
-                                labelText: 'Fee',
-                                hintText: '\$75',
-                                prefixIcon: const Icon(Icons.payments_outlined, size: 18),
-                                filled: true,
-                                fillColor: const Color(0xFFF8FAFC),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-
-                      // Clinic Address
-                      TextField(
-                        controller: addressCtrl,
-                        decoration: InputDecoration(
-                          labelText: 'Clinic Address / Location',
-                          hintText: 'e.g. 123 Healthcare Blvd, Suite 400',
-                          prefixIcon: const Icon(Icons.place_outlined, size: 18),
-                          filled: true,
-                          fillColor: const Color(0xFFF8FAFC),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-
-                      // Submit Button
-                      ElevatedButton.icon(
-                        icon: isSubmitting
-                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                            : const Icon(Icons.check_circle_rounded, size: 18),
-                        label: Text(
-                          isSubmitting ? 'Creating Dentist Account...' : 'Create Dentist Account',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primaryBlue,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
                         onPressed: isSubmitting
                             ? null
                             : () async {
@@ -2905,13 +2949,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     ],
                   ),
                 ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
+              );
+            },
+          );
+        },
+      );
+    }
 
   void _showEditDoctorFeeAndSlotsDialog(BuildContext context, DoctorModel doc) {
     final feeCtrl = TextEditingController(text: doc.consultationFee);
