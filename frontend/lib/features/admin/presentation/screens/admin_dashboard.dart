@@ -3418,6 +3418,58 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     );
   }
 
+  void _confirmDeleteRequest(BuildContext context, PatientConsultationRequest req) {
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: const Row(
+            children: [
+              Icon(Icons.delete_forever_rounded, color: Colors.red, size: 22),
+              SizedBox(width: 8),
+              Text('Remove Consultation', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ],
+          ),
+          content: Text(
+            'Are you sure you want to delete the consultation request for "${req.patientName}" (${req.problemCategory})? This action cannot be undone and will permanently remove it from Supabase.',
+            style: const TextStyle(fontSize: 13, color: AppTheme.textMedium),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(),
+              child: const Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
+            ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.delete_outline_rounded, size: 16),
+              label: const Text('Delete Permanently'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                Navigator.of(dialogCtx).pop();
+                await _problemService.deleteProblemRequest(req.id);
+                if (mounted) {
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text('🗑️ Consultation request for "${req.patientName}" removed successfully.'),
+                      backgroundColor: Colors.red.shade700,
+                      duration: const Duration(seconds: 3),
+                    ),
+                  );
+                  setState(() {});
+                }
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   // ==========================================
   // PANEL 1: ADMIN DASHBOARD (RESPONSIVE & OVERFLOW FREE)
   // ==========================================
@@ -3544,9 +3596,23 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 const SizedBox(height: 16),
 
                 if (requests.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: Text('No patient consultation requests submitted.', style: TextStyle(color: AppTheme.textMuted)),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: const Column(
+                      children: [
+                        Icon(Icons.inbox_outlined, size: 36, color: AppTheme.textMuted),
+                        SizedBox(height: 8),
+                        Text('No patient consultation requests found.', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark)),
+                        SizedBox(height: 4),
+                        Text('New dental requests raised by patients will appear here for admin review.', style: TextStyle(fontSize: 11, color: AppTheme.textMuted), textAlign: TextAlign.center),
+                      ],
+                    ),
                   )
                 else
                   Column(
@@ -3687,23 +3753,33 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
                                 const SizedBox(height: 12),
 
-                                SizedBox(
-                                  width: isNarrow ? double.infinity : null,
-                                  child: ElevatedButton.icon(
-                                    icon: const Icon(Icons.mark_chat_read_rounded, size: 16),
-                                    label: Text(
-                                      isPending ? '🟢 Suggest Doctor & Launch WhatsApp' : '💬 Resend WhatsApp Link',
-                                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: ElevatedButton.icon(
+                                        icon: const Icon(Icons.mark_chat_read_rounded, size: 16),
+                                        label: Text(
+                                          isPending ? '🟢 Suggest Doctor & Launch WhatsApp' : '💬 Resend WhatsApp Link',
+                                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: isPending ? const Color(0xFF10B981) : AppTheme.primaryBlue,
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                          elevation: 1,
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                        ),
+                                        onPressed: () => _showAssignDoctorDialog(context, req),
+                                      ),
                                     ),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: isPending ? const Color(0xFF10B981) : AppTheme.primaryBlue,
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                                      elevation: 1,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                    const SizedBox(width: 8),
+                                    IconButton(
+                                      tooltip: 'Remove Request',
+                                      icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
+                                      onPressed: () => _confirmDeleteRequest(context, req),
                                     ),
-                                    onPressed: () => _showAssignDoctorDialog(context, req),
-                                  ),
+                                  ],
                                 ),
                               ],
                             ),

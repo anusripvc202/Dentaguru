@@ -508,6 +508,17 @@ class PatientProblemService extends ChangeNotifier {
 
   List<PatientConsultationRequest> get requests => List.unmodifiable(_requests);
 
+  Future<void> deleteProblemRequest(String id) async {
+    _requests.removeWhere((r) => r.id == id);
+    _saveToStorage();
+    notifyListeners();
+    try {
+      await ApiService().deleteProblemRequest(id);
+    } catch (e) {
+      debugPrint('Error deleting problem request: $e');
+    }
+  }
+
   // List of In-App Notifications
   final List<AppNotificationModel> _appNotifications = [];
 

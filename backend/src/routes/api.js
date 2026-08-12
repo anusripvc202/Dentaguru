@@ -38,6 +38,8 @@ router.get('/patient/suggested-dentists', optionalAuth, problemRequests.getSugge
 
 router.get('/admin/problem-requests', optionalAuth, problemRequests.getAdminProblemRequests);
 router.post('/admin/problem-requests/:id/suggest-dentist', optionalAuth, problemRequests.suggestDentist);
+router.delete('/admin/problem-requests/:id', optionalAuth, problemRequests.deleteProblemRequest);
+router.delete('/patient/problem-requests/:id', optionalAuth, problemRequests.deleteProblemRequest);
 router.get('/admin/patients', optionalAuth, auth.getPatients);
 router.get('/patients', optionalAuth, auth.getPatients);
 

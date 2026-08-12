@@ -550,6 +550,15 @@ const PatientProblemRequest = {
         const { data, error } = await supabaseAdmin.from('patient_problem_requests').update(updateData).eq('id', id).select().single();
         if (error) throw error;
         return data;
+    },
+
+    async findByIdAndDelete(id) {
+        const { data, error } = await supabaseAdmin.from('patient_problem_requests').delete().eq('id', id).select().single();
+        if (error) {
+            console.error('❌ Supabase PatientProblemRequest Delete Error:', error.message);
+            return null;
+        }
+        return data;
     }
 };
 

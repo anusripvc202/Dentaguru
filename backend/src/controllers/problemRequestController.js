@@ -171,3 +171,15 @@ exports.getSuggestedDentists = async (req, res) => {
         res.status(500).json({ success: false, message: 'Failed to fetch suggested dentists.' });
     }
 };
+
+// 6. ADMIN: DELETE PROBLEM REQUEST
+exports.deleteProblemRequest = async (req, res) => {
+    const { id } = req.params;
+    try {
+        await PatientProblemRequest.findByIdAndDelete(id);
+        res.json({ success: true, message: 'Problem request deleted successfully.' });
+    } catch (err) {
+        console.error('Delete Problem Request Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to delete problem request.' });
+    }
+};

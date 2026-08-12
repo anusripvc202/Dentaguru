@@ -330,6 +330,24 @@ class ApiService {
     return [];
   }
 
+  /// Delete a problem request from Supabase via backend API
+  Future<bool> deleteProblemRequest(String id) async {
+    try {
+      await Supabase.instance.client.from('patient_problem_requests').delete().eq('id', id);
+    } catch (sErr) {
+      debugPrint('Supabase direct delete problem request notice: $sErr');
+    }
+
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/admin/problem-requests/$id');
+      final response = await http.delete(url, headers: _headers).timeout(const Duration(seconds: 10));
+      return response.statusCode == 200;
+    } catch (e) {
+      debugPrint('deleteProblemRequest API error: $e');
+      return false;
+    }
+  }
+
   /// Fetch live clinics directory from Supabase
   Future<List<dynamic>> fetchClinics() async {
     try {
