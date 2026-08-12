@@ -73,15 +73,25 @@ class _DentalAdsBannerState extends State<DentalAdsBanner> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Row(children: [
-            Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: const Color(0xFFFFF7ED), borderRadius: BorderRadius.circular(8)), child: const Text('📢', style: TextStyle(fontSize: 14))),
-            const SizedBox(width: 8),
-            Text(widget.isDentist ? 'Dental Supply Partners' : 'Featured Dental Products', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
-          ]),
+          Expanded(
+            child: Row(children: [
+              Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: const Color(0xFFFFF7ED), borderRadius: BorderRadius.circular(8)), child: const Text('📢', style: TextStyle(fontSize: 14))),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  widget.isDentist ? 'Dental Supply Partners' : 'Featured Dental Products',
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+              ),
+            ]),
+          ),
+          const SizedBox(width: 6),
           Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: const Color(0xFFFEF9C3), borderRadius: BorderRadius.circular(8), border: Border.all(color: const Color(0xFFFDE047))), child: const Text('Sponsored', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF92400E)))),
         ]),
         const SizedBox(height: 10),
-        SizedBox(height: 152, child: PageView.builder(
+        SizedBox(height: 160, child: PageView.builder(
           controller: _pageController,
           itemCount: _ads.length,
           onPageChanged: (i) => setState(() => _currentPage = i),

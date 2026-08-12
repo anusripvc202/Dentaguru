@@ -159,7 +159,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               elevation: 20,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
               child: Container(
-                constraints: const BoxConstraints(maxWidth: 580, maxHeight: 680),
+                constraints: BoxConstraints(maxWidth: 580, maxHeight: MediaQuery.of(context).size.height * 0.88),
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -381,119 +381,136 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             ),
                             const SizedBox(height: 8),
 
-                            // Search & Location Filter Bar
-                            Row(
-                              children: [
-                                Expanded(
-                                  flex: 2,
-                                  child: TextField(
-                                    onChanged: (val) => setModalState(() => searchKeyword = val),
-                                    decoration: InputDecoration(
-                                      hintText: 'Search doctor / clinic...',
-                                      prefixIcon: const Icon(Icons.search_rounded, size: 16, color: AppTheme.textMuted),
-                                      filled: true,
-                                      fillColor: const Color(0xFFF8FAFC),
-                                      contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
+                            // Search & Location Filter Bar (Responsive)
+                            LayoutBuilder(
+                              builder: (context, constraints) {
+                                final isMobile = constraints.maxWidth < 520;
+                                final searchField = TextField(
+                                  onChanged: (val) => setModalState(() => searchKeyword = val),
+                                  decoration: InputDecoration(
+                                    hintText: 'Search doctor / clinic...',
+                                    prefixIcon: const Icon(Icons.search_rounded, size: 16, color: AppTheme.textMuted),
+                                    filled: true,
+                                    fillColor: const Color(0xFFF8FAFC),
+                                    contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
+                                  ),
+                                );
+
+                                final locationFieldsRow = Row(
+                                  children: [
+                                    Expanded(
+                                      child: TextField(
+                                        controller: stateFilterController,
+                                        decoration: InputDecoration(
+                                          hintText: 'State...',
+                                          prefixIcon: const Icon(Icons.map_rounded, size: 15, color: AppTheme.textMuted),
+                                          filled: true,
+                                          fillColor: const Color(0xFFF8FAFC),
+                                          contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+                                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
+                                        ),
+                                      ),
                                     ),
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                                Expanded(
-                                  flex: 1,
-                                  child: TextField(
-                                    controller: stateFilterController,
-                                    decoration: InputDecoration(
-                                      hintText: 'State...',
-                                      prefixIcon: const Icon(Icons.map_rounded, size: 15, color: AppTheme.textMuted),
-                                      filled: true,
-                                      fillColor: const Color(0xFFF8FAFC),
-                                      contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: TextField(
+                                        controller: cityFilterController,
+                                        decoration: InputDecoration(
+                                          hintText: 'City...',
+                                          prefixIcon: const Icon(Icons.location_city_rounded, size: 15, color: AppTheme.textMuted),
+                                          filled: true,
+                                          fillColor: const Color(0xFFF8FAFC),
+                                          contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+                                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
+                                        ),
+                                      ),
                                     ),
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                                Expanded(
-                                  flex: 1,
-                                  child: TextField(
-                                    controller: cityFilterController,
-                                    decoration: InputDecoration(
-                                      hintText: 'City...',
-                                      prefixIcon: const Icon(Icons.location_city_rounded, size: 15, color: AppTheme.textMuted),
-                                      filled: true,
-                                      fillColor: const Color(0xFFF8FAFC),
-                                      contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: TextField(
+                                        controller: pincodeFilterController,
+                                        keyboardType: TextInputType.number,
+                                        decoration: InputDecoration(
+                                          hintText: 'Pincode...',
+                                          prefixIcon: const Icon(Icons.pin_drop_rounded, size: 15, color: AppTheme.textMuted),
+                                          filled: true,
+                                          fillColor: const Color(0xFFF8FAFC),
+                                          contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+                                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
+                                        ),
+                                      ),
                                     ),
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                                Expanded(
-                                  flex: 1,
-                                  child: TextField(
-                                    controller: pincodeFilterController,
-                                    keyboardType: TextInputType.number,
-                                    decoration: InputDecoration(
-                                      hintText: 'Pincode...',
-                                      prefixIcon: const Icon(Icons.pin_drop_rounded, size: 15, color: AppTheme.textMuted),
-                                      filled: true,
-                                      fillColor: const Color(0xFFF8FAFC),
-                                      contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
+                                    const SizedBox(width: 4),
+                                    ElevatedButton(
+                                      onPressed: isFilteringApi
+                                          ? null
+                                          : () async {
+                                              setModalState(() => isFilteringApi = true);
+                                              final stVal = stateFilterController.text.trim();
+                                              final cityVal = cityFilterController.text.trim();
+                                              final pinVal = pincodeFilterController.text.trim();
+                                              if (stVal.isEmpty && cityVal.isEmpty && pinVal.isEmpty) {
+                                                setModalState(() {
+                                                  remoteFilteredDoctors = null;
+                                                  isFilteringApi = false;
+                                                });
+                                              } else {
+                                                final res = await _problemService.fetchDoctorsFiltered(
+                                                  state: stVal.isNotEmpty ? stVal : null,
+                                                  city: cityVal.isNotEmpty ? cityVal : null,
+                                                  pincode: pinVal.isNotEmpty ? pinVal : null,
+                                                );
+                                                setModalState(() {
+                                                  remoteFilteredDoctors = res;
+                                                  isFilteringApi = false;
+                                                });
+                                              }
+                                            },
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: AppTheme.primaryBlue,
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                      ),
+                                      child: isFilteringApi
+                                          ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                          : const Icon(Icons.filter_alt_rounded, size: 16),
                                     ),
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                                ElevatedButton(
-                                  onPressed: isFilteringApi
-                                      ? null
-                                      : () async {
-                                          setModalState(() => isFilteringApi = true);
-                                          final stVal = stateFilterController.text.trim();
-                                          final cityVal = cityFilterController.text.trim();
-                                          final pinVal = pincodeFilterController.text.trim();
-                                          if (stVal.isEmpty && cityVal.isEmpty && pinVal.isEmpty) {
-                                            setModalState(() {
-                                              remoteFilteredDoctors = null;
-                                              isFilteringApi = false;
-                                            });
-                                          } else {
-                                            final res = await _problemService.fetchDoctorsFiltered(
-                                              state: stVal.isNotEmpty ? stVal : null,
-                                              city: cityVal.isNotEmpty ? cityVal : null,
-                                              pincode: pinVal.isNotEmpty ? pinVal : null,
-                                            );
-                                            setModalState(() {
-                                              remoteFilteredDoctors = res;
-                                              isFilteringApi = false;
-                                            });
-                                          }
-                                        },
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: AppTheme.primaryBlue,
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                  ),
-                                  child: isFilteringApi
-                                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                                      : const Icon(Icons.filter_alt_rounded, size: 16),
-                                ),
-                                if (stateFilterController.text.isNotEmpty || cityFilterController.text.isNotEmpty || pincodeFilterController.text.isNotEmpty || remoteFilteredDoctors != null) ...[
-                                  const SizedBox(width: 2),
-                                  IconButton(
-                                    icon: const Icon(Icons.clear_rounded, size: 18, color: Color(0xFFEF4444)),
-                                    tooltip: 'Reset Filters',
-                                    onPressed: () => setModalState(() {
-                                      stateFilterController.clear();
-                                      cityFilterController.clear();
-                                      pincodeFilterController.clear();
-                                      remoteFilteredDoctors = null;
-                                    }),
-                                  ),
-                                ],
-                              ],
+                                    if (stateFilterController.text.isNotEmpty || cityFilterController.text.isNotEmpty || pincodeFilterController.text.isNotEmpty || remoteFilteredDoctors != null) ...[
+                                      const SizedBox(width: 2),
+                                      IconButton(
+                                        icon: const Icon(Icons.clear_rounded, size: 18, color: Color(0xFFEF4444)),
+                                        tooltip: 'Reset Filters',
+                                        onPressed: () => setModalState(() {
+                                          stateFilterController.clear();
+                                          cityFilterController.clear();
+                                          pincodeFilterController.clear();
+                                          remoteFilteredDoctors = null;
+                                        }),
+                                      ),
+                                    ],
+                                  ],
+                                );
+
+                                if (isMobile) {
+                                  return Column(
+                                    children: [
+                                      searchField,
+                                      const SizedBox(height: 6),
+                                      locationFieldsRow,
+                                    ],
+                                  );
+                                }
+
+                                return Row(
+                                  children: [
+                                    Expanded(flex: 2, child: searchField),
+                                    const SizedBox(width: 4),
+                                    Expanded(flex: 3, child: locationFieldsRow),
+                                  ],
+                                );
+                              },
                             ),
                             const SizedBox(height: 8),
 
