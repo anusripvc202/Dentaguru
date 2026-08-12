@@ -99,14 +99,21 @@ exports.suggestDentist = async (req, res) => {
             admin_notes: notes || 'Admin reviewed symptoms and suggested specialized dentist.'
         });
 
-        // 2. Create Dentist Suggestion Record
+        // 2. Create Dentist Suggestion Record with Location Snapshot
         const adminId = req.user ? req.user.id : null;
+        const patientUserObj = await User.findById(problemReq.patient_id);
         await DentistSuggestion.create({
             request_id: id,
             patient_id: problemReq.patient_id,
             admin_id: adminId,
             dentist_id: dentistId,
-            notes: notes || 'Admin suggested dentist'
+            patient_state: problemReq.state || patientUserObj?.state || '',
+            patient_city: problemReq.city || patientUserObj?.city || '',
+            patient_pincode: problemReq.pincode || patientUserObj?.pincode || '',
+            dentist_state: dentist.state || '',
+            dentist_city: dentist.city || '',
+            dentist_pincode: dentist.pincode || '',
+            notes: notes || 'Admin suggested dentist based on location & specialty matching'
         });
 
         // 3. Create In-App Notification for Patient & Dentist

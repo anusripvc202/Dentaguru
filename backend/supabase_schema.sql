@@ -9,6 +9,11 @@ CREATE TABLE IF NOT EXISTS public.users (
     password VARCHAR(255) NOT NULL,
     phone VARCHAR(50) UNIQUE NOT NULL,
     role VARCHAR(50) DEFAULT 'Patient',
+    state VARCHAR(100) DEFAULT '',
+    city VARCHAR(100) DEFAULT '',
+    pincode VARCHAR(20) DEFAULT '',
+    latitude NUMERIC,
+    longitude NUMERIC,
     biometric_token TEXT,
     device_token TEXT,
     refresh_tokens TEXT[] DEFAULT '{}',
@@ -53,9 +58,43 @@ CREATE TABLE IF NOT EXISTS public.dentists (
     verification_status VARCHAR(50) DEFAULT 'PENDING_VERIFICATION',
     rating NUMERIC DEFAULT 0,
     reviews_count INTEGER DEFAULT 0,
+    state VARCHAR(100) DEFAULT '',
+    city VARCHAR(100) DEFAULT '',
+    pincode VARCHAR(20) DEFAULT '',
+    latitude NUMERIC,
+    longitude NUMERIC,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ─────────────────────────────────────────────────────────────────
+-- MIGRATION: Run this if the tables already exist in Supabase
+-- ─────────────────────────────────────────────────────────────────
+-- ALTER TABLE public.users ADD COLUMN IF NOT EXISTS state VARCHAR(100) DEFAULT '';
+-- ALTER TABLE public.users ADD COLUMN IF NOT EXISTS city VARCHAR(100) DEFAULT '';
+-- ALTER TABLE public.users ADD COLUMN IF NOT EXISTS pincode VARCHAR(20) DEFAULT '';
+-- ALTER TABLE public.users ADD COLUMN IF NOT EXISTS latitude NUMERIC;
+-- ALTER TABLE public.users ADD COLUMN IF NOT EXISTS longitude NUMERIC;
+
+-- ALTER TABLE public.dentists ADD COLUMN IF NOT EXISTS state VARCHAR(100) DEFAULT '';
+-- ALTER TABLE public.dentists ADD COLUMN IF NOT EXISTS city VARCHAR(100) DEFAULT '';
+-- ALTER TABLE public.dentists ADD COLUMN IF NOT EXISTS pincode VARCHAR(20) DEFAULT '';
+-- ALTER TABLE public.dentists ADD COLUMN IF NOT EXISTS latitude NUMERIC;
+-- ALTER TABLE public.dentists ADD COLUMN IF NOT EXISTS longitude NUMERIC;
+
+-- ALTER TABLE public.patient_problem_requests ADD COLUMN IF NOT EXISTS state VARCHAR(100) DEFAULT '';
+-- ALTER TABLE public.patient_problem_requests ADD COLUMN IF NOT EXISTS city VARCHAR(100) DEFAULT '';
+-- ALTER TABLE public.patient_problem_requests ADD COLUMN IF NOT EXISTS pincode VARCHAR(20) DEFAULT '';
+-- ALTER TABLE public.patient_problem_requests ADD COLUMN IF NOT EXISTS latitude NUMERIC;
+-- ALTER TABLE public.patient_problem_requests ADD COLUMN IF NOT EXISTS longitude NUMERIC;
+
+-- ALTER TABLE public.dentist_suggestions ADD COLUMN IF NOT EXISTS patient_state VARCHAR(100) DEFAULT '';
+-- ALTER TABLE public.dentist_suggestions ADD COLUMN IF NOT EXISTS patient_city VARCHAR(100) DEFAULT '';
+-- ALTER TABLE public.dentist_suggestions ADD COLUMN IF NOT EXISTS patient_pincode VARCHAR(20) DEFAULT '';
+-- ALTER TABLE public.dentist_suggestions ADD COLUMN IF NOT EXISTS dentist_state VARCHAR(100) DEFAULT '';
+-- ALTER TABLE public.dentist_suggestions ADD COLUMN IF NOT EXISTS dentist_city VARCHAR(100) DEFAULT '';
+-- ALTER TABLE public.dentist_suggestions ADD COLUMN IF NOT EXISTS dentist_pincode VARCHAR(20) DEFAULT '';
+-- ─────────────────────────────────────────────────────────────────
 
 -- 4. PATIENT PROBLEM REQUESTS TABLE
 CREATE TABLE IF NOT EXISTS public.patient_problem_requests (
@@ -65,6 +104,11 @@ CREATE TABLE IF NOT EXISTS public.patient_problem_requests (
     problem_description TEXT NOT NULL,
     symptoms TEXT,
     preferred_location VARCHAR(255),
+    state VARCHAR(100) DEFAULT '',
+    city VARCHAR(100) DEFAULT '',
+    pincode VARCHAR(20) DEFAULT '',
+    latitude NUMERIC,
+    longitude NUMERIC,
     attachments JSONB DEFAULT '[]',
     status VARCHAR(50) DEFAULT 'PENDING_ADMIN_REVIEW',
     suggested_dentist_id UUID REFERENCES public.dentists(id) ON DELETE SET NULL,
@@ -80,6 +124,12 @@ CREATE TABLE IF NOT EXISTS public.dentist_suggestions (
     patient_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
     admin_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
     dentist_id UUID REFERENCES public.dentists(id) ON DELETE CASCADE,
+    patient_state VARCHAR(100) DEFAULT '',
+    patient_city VARCHAR(100) DEFAULT '',
+    patient_pincode VARCHAR(20) DEFAULT '',
+    dentist_state VARCHAR(100) DEFAULT '',
+    dentist_city VARCHAR(100) DEFAULT '',
+    dentist_pincode VARCHAR(20) DEFAULT '',
     suggested_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     status VARCHAR(50) DEFAULT 'SUGGESTED',
     notes TEXT,

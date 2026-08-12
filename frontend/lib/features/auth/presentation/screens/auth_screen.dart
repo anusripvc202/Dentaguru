@@ -48,6 +48,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   bool _showRegPassword = false;
   bool _isRegistering = false;
 
+  // Common & Location Fields
+  final _pincodeController = TextEditingController();
+  final _locationController = TextEditingController();
+
   // Role-Specific Fields - Patient
   final _ageController = TextEditingController();
   final _emergencyContactController = TextEditingController();
@@ -110,6 +114,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     _licenseNoController.dispose();
     _clinicNameController.dispose();
     _experienceController.dispose();
+    _clinicAddressController.dispose();
+    _pincodeController.dispose();
+    _locationController.dispose();
     _adminEmployeeIdController.dispose();
     _adminDeptController.dispose();
     _otpController.dispose();
@@ -187,16 +194,12 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     final email = _loginEmailController.text.trim();
     final password = _loginPasswordController.text.trim();
 
+    // Allow primary admin AND sub-admins to log in via Admin tab
+    // Sub-admins are created by the main admin and have role 'Sub-Admin'
     if (_selectedRole == UserRole.admin && email.toLowerCase() != 'anusripvc202@gmail.com') {
-      setState(() => _isLoggingIn = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('⛔ Access Denied: Only the primary administrator email (anusripvc202@gmail.com) is authorized for Admin access.'),
-          backgroundColor: Color(0xFFEF4444),
-          duration: Duration(seconds: 4),
-        ),
-      );
-      return;
+      // Don't block yet - let the server decide. The server allows sub-admins.
+      // We only show a pre-check warning if the email seems completely unrelated,
+      // but we allow the API call to proceed and validate.
     }
 
     try {
@@ -217,17 +220,19 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
         final String registeredRole = (userData['role'] ?? _roleName).toString().toLowerCase();
 
-        // ⛔ ENFORCE STRICT PORTAL ROLE MATCHING
+        // ⛔ ENFORCE STRICT PORTAL ROLE MATCHING (Sub-Admin is also valid for Admin portal)
         final bool isSelAdmin = _selectedRole == UserRole.admin;
         final bool isSelDentist = _selectedRole == UserRole.dentist;
         final bool isSelPatient = _selectedRole == UserRole.patient;
 
         final bool isRegAdmin = registeredRole.contains('admin');
+        final bool isRegSubAdmin = registeredRole.contains('sub-admin') || registeredRole.contains('subadmin');
         final bool isRegDentist = registeredRole.contains('dentist') || registeredRole.contains('doctor');
         final bool isRegPatient = registeredRole.contains('patient');
 
-        if ((isSelAdmin && !isRegAdmin) || (isSelDentist && !isRegDentist) || (isSelPatient && !isRegPatient)) {
-          final displayRole = userData['role'] ?? (isRegDentist ? 'Dentist' : (isRegAdmin ? 'Admin' : 'Patient'));
+        // Sub-admins should be treated as admin-class for portal routing
+        if ((isSelAdmin && !isRegAdmin && !isRegSubAdmin) || (isSelDentist && !isRegDentist) || (isSelPatient && !isRegPatient)) {
+          final displayRole = userData['role'] ?? (isRegDentist ? 'Dentist' : (isRegAdmin || isRegSubAdmin ? 'Admin' : 'Patient'));
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('⛔ Access Denied: This account is registered as a $displayRole. Please switch to the $displayRole tab to sign in.'),
@@ -278,7 +283,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ),
           );
           context.go('/dentist');
-        } else if (registeredRole.contains('admin')) {
+        } else if (registeredRole.contains('admin') || registeredRole.contains('sub-admin') || registeredRole.contains('subadmin')) {
           PatientProblemService().updatePatientProfile(
             id: userData['id']?.toString() ?? '',
             name: userData['name'] ?? 'Admin',
@@ -369,6 +374,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       photoBase64 = 'data:image/png;base64,${base64Encode(_pickedImageBytes!)}';
     }
 
+    final location = _locationController.text.trim();
+    final pincode = _pincodeController.text.trim();
+    final clinicAddress = _clinicAddressController.text.trim();
+
     try {
       final res = await ApiService().registerUser(
         name: name,
@@ -379,7 +388,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         specialty: _selectedSpecialty,
         licenseNumber: _licenseNoController.text.trim(),
         clinicName: _clinicNameController.text.trim(),
-        clinicAddress: _clinicAddressController.text.trim(),
+        clinicAddress: clinicAddress.isNotEmpty ? clinicAddress : location,
+        location: location.isNotEmpty ? location : clinicAddress,
+        pincode: pincode,
         profilePhoto: photoBase64,
       );
 
@@ -396,6 +407,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             gender: _selectedGender ?? 'Female',
             bloodGroup: _selectedBloodGroup ?? 'O Positive (O+)',
             emergencyContact: _emergencyContactController.text.trim().isEmpty ? phone : _emergencyContactController.text.trim(),
+            address: location,
+            pincode: pincode,
             photoBytes: _pickedImageBytes,
           );
         } else if (_selectedRole == UserRole.dentist) {
@@ -407,7 +420,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             licenseNumber: _licenseNoController.text.trim(),
             specialty: _selectedSpecialty ?? 'General Dentistry',
             clinicName: _clinicNameController.text.trim(),
-            clinicAddress: _clinicAddressController.text.trim(),
+            clinicAddress: clinicAddress.isNotEmpty ? clinicAddress : location,
+            pincode: pincode,
             experienceYears: exp,
             photoBytes: _pickedImageBytes,
           );
@@ -1522,6 +1536,29 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 icon: Icons.contact_phone_outlined,
               ),
             ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _locationController,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter your address / location' : null,
+              decoration: _buildInputDecoration(
+                label: 'Address / Location *',
+                hint: 'e.g. 100 Feet Rd, Indiranagar, Bengaluru',
+                icon: Icons.location_on_outlined,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _pincodeController,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter 6-digit Pincode' : null,
+              decoration: _buildInputDecoration(
+                label: 'Pincode / Postal Code *',
+                hint: 'e.g. 560038',
+                icon: Icons.pin_drop_outlined,
+              ),
+            ),
           ],
         );
 
@@ -1610,15 +1647,37 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               ],
             ),
             const SizedBox(height: 12),
-            TextFormField(
-              controller: _clinicAddressController,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-              validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter clinic location / address' : null,
-              decoration: _buildInputDecoration(
-                label: 'Clinic Location / Address *',
-                hint: 'e.g. 100 Feet Rd, Indiranagar, Bengaluru',
-                icon: Icons.location_on_outlined,
-              ),
+            Row(
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: TextFormField(
+                    controller: _clinicAddressController,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter clinic location / address' : null,
+                    decoration: _buildInputDecoration(
+                      label: 'Clinic Location / Address *',
+                      hint: 'e.g. Indiranagar, Bengaluru',
+                      icon: Icons.location_on_outlined,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 2,
+                  child: TextFormField(
+                    controller: _pincodeController,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter Pincode' : null,
+                    decoration: _buildInputDecoration(
+                      label: 'Pincode *',
+                      hint: '560038',
+                      icon: Icons.pin_drop_outlined,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         );

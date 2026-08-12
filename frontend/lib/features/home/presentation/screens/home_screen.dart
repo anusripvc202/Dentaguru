@@ -4,8 +4,6 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
 
-import '../../../../core/widgets/products_dropdown_menu.dart';
-
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -85,10 +83,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           child: DentaGuruLogo(height: 32),
         ),
         actions: [
-          const Padding(
-            padding: EdgeInsets.only(right: 4),
-            child: ProductsDropdownMenu(),
-          ),
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: _AnimatedAppButton(

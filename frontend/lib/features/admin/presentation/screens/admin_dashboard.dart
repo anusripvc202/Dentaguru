@@ -6,7 +6,6 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
-import '../../../../core/widgets/products_dropdown_menu.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -16,8 +15,19 @@ class AdminDashboardScreen extends StatefulWidget {
 }
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> with TickerProviderStateMixin {
-  int _selectedNavIndex = 0; // 0: Dashboard, 1: Clinics, 2: Dentists, 3: Patients, 4: Appointments, 5: Revenue, 6: Reports, 7: Reviews, 8: Settings
+  int _selectedNavIndex = 0; // 0: Dashboard, 1: Clinics, 2: Dentists, 3: Patients, 4: Appointments, 5: Revenue, 6: Reports, 7: Reviews, 8: Settings, 9: Sub-Admins
   final PatientProblemService _problemService = PatientProblemService();
+
+  // Sub-Admin Management State
+  final List<Map<String, String>> _subAdmins = [];
+
+  void _addSubAdmin(Map<String, String> subAdmin) {
+    setState(() => _subAdmins.add(subAdmin));
+  }
+
+  void _removeSubAdmin(int index) {
+    setState(() => _subAdmins.removeAt(index));
+  }
 
   late AnimationController _entryController;
   late AnimationController _pulseController;
@@ -78,6 +88,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     DoctorModel? selectedDoctor = preSelectedDoctor ?? (_problemService.allDoctors.isNotEmpty ? _problemService.allDoctors.first : null);
     String searchKeyword = '';
     String selectedSpecialtyFilter = 'All';
+    String selectedAvailabilityFilter = 'All';
+    final stateFilterController = TextEditingController();
+    final cityFilterController = TextEditingController();
+    final pincodeFilterController = TextEditingController();
+    List<DoctorModel>? remoteFilteredDoctors;
+    bool isFilteringApi = false;
     final adminNotesController = TextEditingController(
       text: 'Recommended for specialized clinical evaluation and care.',
     );
@@ -87,15 +103,33 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setModalState) {
-            // Filter doctors based on search & specialty
-            final filteredDoctors = _problemService.allDoctors.where((doc) {
+            final sourceDoctors = remoteFilteredDoctors ?? _problemService.allDoctors;
+            // Filter doctors based on search, specialty, availability, state, city and pincode
+            final filteredDoctors = sourceDoctors.where((doc) {
               final matchesSearch = doc.name.toLowerCase().contains(searchKeyword.toLowerCase()) ||
                   doc.specialty.toLowerCase().contains(searchKeyword.toLowerCase()) ||
                   doc.clinicName.toLowerCase().contains(searchKeyword.toLowerCase());
               final matchesSpecialty = selectedSpecialtyFilter == 'All' ||
                   doc.specialty.toLowerCase().contains(selectedSpecialtyFilter.toLowerCase());
-              return matchesSearch && matchesSpecialty;
+              final matchesAvailability = selectedAvailabilityFilter == 'All' ||
+                  doc.status.toLowerCase() == selectedAvailabilityFilter.toLowerCase();
+              final matchesState = stateFilterController.text.trim().isEmpty ||
+                  doc.state.toLowerCase().contains(stateFilterController.text.trim().toLowerCase());
+              final matchesCity = cityFilterController.text.trim().isEmpty ||
+                  doc.city.toLowerCase().contains(cityFilterController.text.trim().toLowerCase()) ||
+                  doc.clinicAddress.toLowerCase().contains(cityFilterController.text.trim().toLowerCase());
+              final matchesPincode = pincodeFilterController.text.trim().isEmpty ||
+                  doc.pincode.contains(pincodeFilterController.text.trim());
+              return matchesSearch && matchesSpecialty && matchesAvailability && matchesState && matchesCity && matchesPincode;
             }).toList();
+
+            // Priority Location Sorting: Same Pincode (Tier 1) -> Nearby Pincode (Tier 2) -> Same City (Tier 3) -> Same State (Tier 5) -> Rating
+            filteredDoctors.sort((a, b) {
+              final tierA = a.getLocationMatchTier(req.state, req.city, req.pincode);
+              final tierB = b.getLocationMatchTier(req.state, req.city, req.pincode);
+              if (tierA != tierB) return tierA.compareTo(tierB);
+              return b.rating.compareTo(a.rating);
+            });
 
             if (selectedDoctor == null && filteredDoctors.isNotEmpty) {
               selectedDoctor = filteredDoctors.first;
@@ -309,49 +343,205 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         ),
                       ),
 
-                    // STEP 2: SELECT DOCTOR FROM ALL DOCTORS DIRECTORY
+                    // STEP 2: SELECT DOCTOR FROM ALL DOCTORS DIRECTORY (LOCATION-BASED PRIORITY MATCHING)
                     if (currentStep == 2)
                       Expanded(
                         child: Column(
                           children: [
-                            // Search bar
-                            TextField(
-                              onChanged: (val) => setModalState(() => searchKeyword = val),
-                              decoration: InputDecoration(
-                                hintText: 'Search doctor by name, specialty or clinic...',
-                                prefixIcon: const Icon(Icons.search_rounded, size: 18, color: AppTheme.textMuted),
-                                filled: true,
-                                fillColor: const Color(0xFFF8FAFC),
-                                contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
+                            // Patient Location Context Banner
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFEFF6FF),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: const Color(0xFFBFDBFE)),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.my_location_rounded, size: 16, color: AppTheme.primaryBlue),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      'Patient Location: ${req.pincode.isNotEmpty ? 'Pin: ${req.pincode}' : ''}${req.city.isNotEmpty ? ' • ${req.city}' : ''}${req.state.isNotEmpty ? ' • ${req.state}' : ''}${req.preferredLocation.isNotEmpty ? ' (${req.preferredLocation})' : ''}',
+                                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFDBEAFE),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: const Text('Priority Ranked', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8))),
+                                  ),
+                                ],
                               ),
                             ),
-                            const SizedBox(height: 10),
+                            const SizedBox(height: 8),
 
-                            // Specialty Filters
+                            // Search & Location Filter Bar
+                            Row(
+                              children: [
+                                Expanded(
+                                  flex: 2,
+                                  child: TextField(
+                                    onChanged: (val) => setModalState(() => searchKeyword = val),
+                                    decoration: InputDecoration(
+                                      hintText: 'Search doctor / clinic...',
+                                      prefixIcon: const Icon(Icons.search_rounded, size: 16, color: AppTheme.textMuted),
+                                      filled: true,
+                                      fillColor: const Color(0xFFF8FAFC),
+                                      contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  flex: 1,
+                                  child: TextField(
+                                    controller: stateFilterController,
+                                    decoration: InputDecoration(
+                                      hintText: 'State...',
+                                      prefixIcon: const Icon(Icons.map_rounded, size: 15, color: AppTheme.textMuted),
+                                      filled: true,
+                                      fillColor: const Color(0xFFF8FAFC),
+                                      contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  flex: 1,
+                                  child: TextField(
+                                    controller: cityFilterController,
+                                    decoration: InputDecoration(
+                                      hintText: 'City...',
+                                      prefixIcon: const Icon(Icons.location_city_rounded, size: 15, color: AppTheme.textMuted),
+                                      filled: true,
+                                      fillColor: const Color(0xFFF8FAFC),
+                                      contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  flex: 1,
+                                  child: TextField(
+                                    controller: pincodeFilterController,
+                                    keyboardType: TextInputType.number,
+                                    decoration: InputDecoration(
+                                      hintText: 'Pincode...',
+                                      prefixIcon: const Icon(Icons.pin_drop_rounded, size: 15, color: AppTheme.textMuted),
+                                      filled: true,
+                                      fillColor: const Color(0xFFF8FAFC),
+                                      contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                ElevatedButton(
+                                  onPressed: isFilteringApi
+                                      ? null
+                                      : () async {
+                                          setModalState(() => isFilteringApi = true);
+                                          final stVal = stateFilterController.text.trim();
+                                          final cityVal = cityFilterController.text.trim();
+                                          final pinVal = pincodeFilterController.text.trim();
+                                          if (stVal.isEmpty && cityVal.isEmpty && pinVal.isEmpty) {
+                                            setModalState(() {
+                                              remoteFilteredDoctors = null;
+                                              isFilteringApi = false;
+                                            });
+                                          } else {
+                                            final res = await _problemService.fetchDoctorsFiltered(
+                                              state: stVal.isNotEmpty ? stVal : null,
+                                              city: cityVal.isNotEmpty ? cityVal : null,
+                                              pincode: pinVal.isNotEmpty ? pinVal : null,
+                                            );
+                                            setModalState(() {
+                                              remoteFilteredDoctors = res;
+                                              isFilteringApi = false;
+                                            });
+                                          }
+                                        },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppTheme.primaryBlue,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                  ),
+                                  child: isFilteringApi
+                                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                      : const Icon(Icons.filter_alt_rounded, size: 16),
+                                ),
+                                if (stateFilterController.text.isNotEmpty || cityFilterController.text.isNotEmpty || pincodeFilterController.text.isNotEmpty || remoteFilteredDoctors != null) ...[
+                                  const SizedBox(width: 2),
+                                  IconButton(
+                                    icon: const Icon(Icons.clear_rounded, size: 18, color: Color(0xFFEF4444)),
+                                    tooltip: 'Reset Filters',
+                                    onPressed: () => setModalState(() {
+                                      stateFilterController.clear();
+                                      cityFilterController.clear();
+                                      pincodeFilterController.clear();
+                                      remoteFilteredDoctors = null;
+                                    }),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+
+                            // Specialty & Availability Chips
                             SingleChildScrollView(
                               scrollDirection: Axis.horizontal,
                               child: Row(
-                                children: ['All', 'Orthodontics', 'Endodontics', 'General', 'Surgery', 'Periodontics'].map((spec) {
-                                  final isSel = selectedSpecialtyFilter == spec;
-                                  return Padding(
-                                    padding: const EdgeInsets.only(right: 6),
-                                    child: ChoiceChip(
-                                      label: Text(spec, style: TextStyle(fontSize: 11, fontWeight: isSel ? FontWeight.bold : FontWeight.normal)),
-                                      selected: isSel,
-                                      selectedColor: AppTheme.primaryBlue.withValues(alpha: 0.15),
-                                      labelStyle: TextStyle(color: isSel ? AppTheme.primaryBlue : AppTheme.textDark),
-                                      onSelected: (val) {
-                                        if (val) setModalState(() => selectedSpecialtyFilter = spec);
-                                      },
-                                    ),
-                                  );
-                                }).toList(),
+                                children: [
+                                  // Specialty Chips
+                                  ...['All', 'Orthodontics', 'Endodontics', 'General', 'Surgery', 'Periodontics'].map((spec) {
+                                    final isSel = selectedSpecialtyFilter == spec;
+                                    return Padding(
+                                      padding: const EdgeInsets.only(right: 4),
+                                      child: ChoiceChip(
+                                        label: Text(spec, style: TextStyle(fontSize: 10, fontWeight: isSel ? FontWeight.bold : FontWeight.normal)),
+                                        selected: isSel,
+                                        selectedColor: AppTheme.primaryBlue.withValues(alpha: 0.15),
+                                        labelStyle: TextStyle(color: isSel ? AppTheme.primaryBlue : AppTheme.textDark),
+                                        onSelected: (val) {
+                                          if (val) setModalState(() => selectedSpecialtyFilter = spec);
+                                        },
+                                      ),
+                                    );
+                                  }),
+                                  const SizedBox(width: 6),
+                                  // Availability Filter Chips
+                                  ...['All Status', 'Available', 'In Consultation'].map((avail) {
+                                    final key = avail == 'All Status' ? 'All' : avail;
+                                    final isSel = selectedAvailabilityFilter == key;
+                                    return Padding(
+                                      padding: const EdgeInsets.only(right: 4),
+                                      child: ChoiceChip(
+                                        label: Text(avail, style: TextStyle(fontSize: 10, fontWeight: isSel ? FontWeight.bold : FontWeight.normal)),
+                                        selected: isSel,
+                                        selectedColor: const Color(0xFF10B981).withValues(alpha: 0.2),
+                                        labelStyle: TextStyle(color: isSel ? const Color(0xFF047857) : AppTheme.textDark),
+                                        onSelected: (val) {
+                                          if (val) setModalState(() => selectedAvailabilityFilter = key);
+                                        },
+                                      ),
+                                    );
+                                  }),
+                                ],
                               ),
                             ),
-                            const SizedBox(height: 10),
+                            const SizedBox(height: 8),
 
-                            // Doctors List
+                            // Doctors List with Location Priority Hierarchy
                             Expanded(
                               child: filteredDoctors.isEmpty
                                   ? Center(
@@ -363,14 +553,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                             const Icon(Icons.person_search_rounded, size: 40, color: AppTheme.textMuted),
                                             const SizedBox(height: 8),
                                             const Text(
-                                              'No Doctors Found',
+                                              'No Doctors Found in Location Range',
                                               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
                                             ),
                                             const SizedBox(height: 4),
-                                            const Text(
-                                              'No doctor matches your filter or search criteria.',
+                                            Text(
+                                              (cityFilterController.text.isNotEmpty || pincodeFilterController.text.isNotEmpty || stateFilterController.text.isNotEmpty)
+                                                  ? 'No doctor matches state "${stateFilterController.text}", city "${cityFilterController.text}", or pincode "${pincodeFilterController.text}".'
+                                                  : 'No doctor matches your location or filter criteria.',
                                               textAlign: TextAlign.center,
-                                              style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                                              style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
                                             ),
                                             const SizedBox(height: 12),
                                             ElevatedButton.icon(
@@ -379,7 +571,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                 _showRegisterDoctorModal(context);
                                               },
                                               icon: const Icon(Icons.person_add_rounded, size: 16),
-                                              label: const Text('Register Doctor Now', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                              label: const Text('Register Doctor in Location', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                                               style: ElevatedButton.styleFrom(
                                                 backgroundColor: AppTheme.primaryBlue,
                                                 foregroundColor: Colors.white,
@@ -397,15 +589,33 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                         final doc = filteredDoctors[idx];
                                         final isSelected = selectedDoctor?.id == doc.id;
                                         final isSpecialtyMatch = req.problemCategory.toLowerCase().contains(doc.specialty.toLowerCase().split(' ').first);
+                                        final tier = doc.getLocationMatchTier(req.state, req.city, req.pincode);
+                                        final badgeLabel = doc.getLocationBadgeText(req.state, req.city, req.pincode);
+
+                                        Color badgeBg = const Color(0xFFF1F5F9);
+                                        Color badgeFg = const Color(0xFF475569);
+                                        if (tier == 1) {
+                                          badgeBg = const Color(0xFFDCFCE7); // Emerald green for Same Pincode
+                                          badgeFg = const Color(0xFF15803D);
+                                        } else if (tier == 2) {
+                                          badgeBg = const Color(0xFFCCFBF1); // Teal for Nearby Pincode
+                                          badgeFg = const Color(0xFF0F766E);
+                                        } else if (tier == 3) {
+                                          badgeBg = const Color(0xFFDBEAFE); // Blue for Same City
+                                          badgeFg = const Color(0xFF1E40AF);
+                                        } else if (tier == 5) {
+                                          badgeBg = const Color(0xFFE0E7FF); // Indigo for Same State
+                                          badgeFg = const Color(0xFF3730A3);
+                                        }
 
                                         return GestureDetector(
                                           onTap: () => setModalState(() => selectedDoctor = doc),
                                           child: Container(
-                                            margin: const EdgeInsets.only(bottom: 10),
-                                            padding: const EdgeInsets.all(12),
+                                            margin: const EdgeInsets.only(bottom: 8),
+                                            padding: const EdgeInsets.all(10),
                                             decoration: BoxDecoration(
                                               color: isSelected ? const Color(0xFFEFF6FF) : Colors.white,
-                                              borderRadius: BorderRadius.circular(14),
+                                              borderRadius: BorderRadius.circular(12),
                                               border: Border.all(
                                                 color: isSelected ? AppTheme.primaryBlue : const Color(0xFFE2E8F0),
                                                 width: isSelected ? 2 : 1,
@@ -419,7 +629,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                   activeColor: AppTheme.primaryBlue,
                                                   onChanged: (val) => setModalState(() => selectedDoctor = doc),
                                                 ),
-                                                const SizedBox(width: 6),
+                                                const SizedBox(width: 4),
                                                 Expanded(
                                                   child: Column(
                                                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -434,27 +644,36 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                               maxLines: 1,
                                                             ),
                                                           ),
+                                                          const SizedBox(width: 4),
+                                                          // Recommendation Badge
+                                                          Container(
+                                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                            decoration: BoxDecoration(color: badgeBg, borderRadius: BorderRadius.circular(6)),
+                                                            child: Text(badgeLabel, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: badgeFg)),
+                                                          ),
                                                           if (isSpecialtyMatch) ...[
                                                             const SizedBox(width: 4),
                                                             Container(
                                                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                                               decoration: BoxDecoration(
-                                                                color: const Color(0xFFDCFCE7),
+                                                                color: const Color(0xFFFEF3C7),
                                                                 borderRadius: BorderRadius.circular(6),
                                                               ),
-                                                              child: const Text('Matched Specialty', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF16A34A))),
+                                                              child: const Text('Matched Specialty', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFFB45309))),
                                                             ),
                                                           ],
                                                         ],
                                                       ),
+                                                      const SizedBox(height: 2),
                                                       Text(
-                                                        '${doc.specialty} • ${doc.qualification}',
+                                                        '${doc.specialty} • ${doc.qualification} (${doc.status})',
                                                         style: const TextStyle(fontSize: 11, color: AppTheme.primaryBlue),
                                                         overflow: TextOverflow.ellipsis,
                                                         maxLines: 1,
                                                       ),
+                                                      const SizedBox(height: 2),
                                                       Text(
-                                                        '🏥 ${doc.clinicName} • 💰 ${doc.getFeeForCategory(req.problemCategory)} (${req.problemCategory}) • ⭐ ${doc.rating}',
+                                                        '🏥 ${doc.clinicName}${doc.city.isNotEmpty ? ' (${doc.city}' : ''}${doc.state.isNotEmpty ? ', ${doc.state})' : (doc.city.isNotEmpty ? ')' : '')} • 📍 Pin: ${doc.pincode} • 💰 ${doc.getFeeForCategory(req.problemCategory)} • ⭐ ${doc.rating}',
                                                         style: const TextStyle(fontSize: 10, color: AppTheme.textMuted),
                                                         overflow: TextOverflow.ellipsis,
                                                         maxLines: 1,
@@ -785,10 +1004,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     child: DentaGuruLogo(height: 28),
                   ),
                   actions: [
-                    const Padding(
-                      padding: EdgeInsets.only(right: 4),
-                      child: ProductsDropdownMenu(),
-                    ),
                     IconButton(
                       icon: const Icon(Icons.logout_rounded, color: AppTheme.statusCancelText, size: 20),
                       tooltip: 'Log Out',
@@ -1021,6 +1236,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
         return 'Patient Reviews';
       case 8:
         return 'System Settings';
+      case 9:
+        return 'Sub-Admin Management';
       default:
         return 'Admin Dashboard';
     }
@@ -1104,6 +1321,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 children: [
                   _buildSubNavItem(8, Icons.settings_rounded, 'General Settings'),
                   _buildSubNavItem(8, Icons.security_rounded, 'Role & Permissions'),
+                  _buildSubNavItem(9, Icons.supervisor_account_rounded, 'Sub-Admins', badgeCount: _subAdmins.length),
                 ],
               ),
             ],
@@ -1210,9 +1428,659 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
         return _buildPatientsPanel();
       case 5:
         return _buildRevenuePanel();
+      case 9:
+        return _buildSubAdminsPanel();
       default:
         return _buildDashboardPanel();
     }
+  }
+
+  // ==========================================
+  // PANEL: SUB-ADMIN MANAGEMENT
+  // ==========================================
+  Widget _buildSubAdminsPanel() {
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: SlideTransition(
+        position: _slideAnimation,
+        child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF6366F1), Color(0xFF818CF8)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(18),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF6366F1).withValues(alpha: 0.25),
+                      blurRadius: 14,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(Icons.supervisor_account_rounded, color: Colors.white, size: 28),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '🛡️ Sub-Admin Management',
+                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            '${_subAdmins.length} Sub-Admin${_subAdmins.length == 1 ? '' : 's'} registered • Manage portal access roles',
+                            style: const TextStyle(color: Colors.white70, fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // Top Action Bar
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Registered Sub-Admins',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          'Sub-Admins can log in to the Admin Portal with limited access',
+                          style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.person_add_rounded, size: 16),
+                    label: const Text('+ Add Sub-Admin', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF6366F1),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: () => _showRegisterSubAdminModal(context),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // Info Banner
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF0F0FF),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF6366F1).withValues(alpha: 0.25)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline_rounded, size: 18, color: Color(0xFF6366F1)),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Sub-Admins can log into the Admin Portal using the "Admin" tab with their registered email and password.',
+                        style: TextStyle(fontSize: 11, color: Color(0xFF4338CA), fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Sub-Admin List or Empty State
+              if (_subAdmins.isEmpty)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 24),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Column(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF6366F1).withValues(alpha: 0.08),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.supervisor_account_outlined, size: 40, color: Color(0xFF6366F1)),
+                      ),
+                      const SizedBox(height: 14),
+                      const Text(
+                        'No Sub-Admins Created Yet',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Click "+ Add Sub-Admin" above to create a sub-admin account.\nSub-admins can log into the Admin Portal to help manage the platform.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 12, color: AppTheme.textMuted, height: 1.5),
+                      ),
+                      const SizedBox(height: 18),
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.person_add_rounded, size: 16),
+                        label: const Text('Create First Sub-Admin', style: TextStyle(fontWeight: FontWeight.bold)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF6366F1),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () => _showRegisterSubAdminModal(context),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _subAdmins.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) {
+                    final sa = _subAdmins[index];
+                    final initials = (sa['name'] ?? 'SA')
+                        .trim()
+                        .split(' ')
+                        .where((w) => w.isNotEmpty)
+                        .take(2)
+                        .map((w) => w[0].toUpperCase())
+                        .join();
+                    return Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.03),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          // Avatar
+                          Container(
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFF6366F1), Color(0xFF818CF8)],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Center(
+                              child: Text(
+                                initials,
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          // Info
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  sa['name'] ?? 'Sub-Admin',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  sa['email'] ?? '',
+                                  style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFEDE9FE),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Text(
+                                        sa['department'] ?? 'General',
+                                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF6D28D9)),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    if ((sa['phone'] ?? '').isNotEmpty)
+                                      Text(
+                                        '📞 ${sa['phone']}',
+                                        style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          // Badge + Delete
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFDCFCE7),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Text(
+                                  '✓ Active',
+                                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF16A34A)),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              InkWell(
+                                borderRadius: BorderRadius.circular(8),
+                                onTap: () => _confirmRemoveSubAdmin(context, index, sa['name'] ?? 'Sub-Admin'),
+                                child: Container(
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.withValues(alpha: 0.08),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 16),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _confirmRemoveSubAdmin(BuildContext context, int index, String name) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 22),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('Remove $name?', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), overflow: TextOverflow.ellipsis),
+            ),
+          ],
+        ),
+        content: Text('Are you sure you want to remove $name from the sub-admin list? They will lose admin portal access.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.delete_forever_rounded, size: 16),
+            label: const Text('Remove', style: TextStyle(fontWeight: FontWeight.bold)),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () {
+              _removeSubAdmin(index);
+              Navigator.of(ctx).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('🗑️ $name removed from sub-admins.'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showRegisterSubAdminModal(BuildContext context) {
+    final nameCtrl = TextEditingController();
+    final emailCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    final deptCtrl = TextEditingController();
+    final passwordCtrl = TextEditingController();
+    bool showPassword = false;
+    bool isLoading = false;
+
+    const departments = [
+      'General Administration',
+      'Patient Support',
+      'Clinical Operations',
+      'Billing & Finance',
+      'IT & Technical',
+      'Marketing & Outreach',
+    ];
+    String selectedDept = departments.first;
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Dialog(
+              insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+              backgroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 500, maxHeight: 660),
+                padding: const EdgeInsets.all(22),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Header
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF6366F1).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.supervisor_account_rounded, color: Color(0xFF6366F1), size: 22),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Create Sub-Admin Account',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textDark),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                'Sub-admin can log in via Admin Portal tab',
+                                style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded, color: AppTheme.textMuted),
+                          onPressed: () => Navigator.of(dialogCtx).pop(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    const Divider(color: Color(0xFFF1F5F9)),
+                    const SizedBox(height: 10),
+
+                    Expanded(
+                      child: SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // Full Name
+                            TextField(
+                              controller: nameCtrl,
+                              decoration: InputDecoration(
+                                labelText: 'Full Name *',
+                                hintText: 'e.g. Priya Sharma',
+                                prefixIcon: const Icon(Icons.person_outline_rounded, size: 18),
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+
+                            // Email
+                            TextField(
+                              controller: emailCtrl,
+                              keyboardType: TextInputType.emailAddress,
+                              decoration: InputDecoration(
+                                labelText: 'Email Address *',
+                                hintText: 'subadmin@dentaguru.com',
+                                prefixIcon: const Icon(Icons.email_outlined, size: 18),
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+
+                            // Phone
+                            TextField(
+                              controller: phoneCtrl,
+                              keyboardType: TextInputType.phone,
+                              decoration: InputDecoration(
+                                labelText: 'Phone Number',
+                                hintText: '+91 99999 00000',
+                                prefixIcon: const Icon(Icons.phone_outlined, size: 18),
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+
+                            // Department Dropdown
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF8FAFC),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: const Color(0xFFCBD5E1)),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.business_center_outlined, size: 18, color: AppTheme.textMuted),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: DropdownButtonHideUnderline(
+                                      child: DropdownButton<String>(
+                                        value: selectedDept,
+                                        isExpanded: true,
+                                        hint: const Text('Select Department', style: TextStyle(fontSize: 13)),
+                                        items: departments
+                                            .map((d) => DropdownMenuItem(value: d, child: Text(d, style: const TextStyle(fontSize: 13))))
+                                            .toList(),
+                                        onChanged: (val) {
+                                          if (val != null) {
+                                            setModalState(() => selectedDept = val);
+                                            deptCtrl.text = val;
+                                          }
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+
+                            // Password
+                            TextField(
+                              controller: passwordCtrl,
+                              obscureText: !showPassword,
+                              decoration: InputDecoration(
+                                labelText: 'Password *',
+                                hintText: 'Min. 6 characters',
+                                prefixIcon: const Icon(Icons.lock_outline_rounded, size: 18),
+                                suffixIcon: IconButton(
+                                  icon: Icon(showPassword ? Icons.visibility_off_rounded : Icons.visibility_rounded, size: 18),
+                                  onPressed: () => setModalState(() => showPassword = !showPassword),
+                                ),
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                            const SizedBox(height: 18),
+
+                            // Register Button
+                            SizedBox(
+                              height: 48,
+                              child: ElevatedButton.icon(
+                                icon: isLoading
+                                    ? const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                      )
+                                    : const Icon(Icons.check_circle_rounded, size: 18),
+                                label: Text(
+                                  isLoading ? 'Creating Account...' : 'Create Sub-Admin Account',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF6366F1),
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                ),
+                                onPressed: isLoading
+                                    ? null
+                                    : () async {
+                                        final name = nameCtrl.text.trim();
+                                        final email = emailCtrl.text.trim();
+                                        final password = passwordCtrl.text.trim();
+                                        final phone = phoneCtrl.text.trim();
+
+                                        if (name.isEmpty || email.isEmpty || password.isEmpty) {
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            const SnackBar(
+                                              content: Text('⚠️ Please fill in Full Name, Email, and Password.'),
+                                              backgroundColor: Color(0xFFD97706),
+                                            ),
+                                          );
+                                          return;
+                                        }
+
+                                        if (password.length < 6) {
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            const SnackBar(
+                                              content: Text('⚠️ Password must be at least 6 characters.'),
+                                              backgroundColor: Color(0xFFD97706),
+                                            ),
+                                          );
+                                          return;
+                                        }
+
+                                        setModalState(() => isLoading = true);
+
+                                        try {
+                                          final res = await ApiService().registerUser(
+                                            name: name,
+                                            email: email,
+                                            password: password,
+                                            phone: phone.isEmpty ? '0000000000' : phone,
+                                            role: 'Sub-Admin',
+                                          );
+
+                                          setModalState(() => isLoading = false);
+
+                                          if (!dialogCtx.mounted) return;
+                                          Navigator.of(dialogCtx).pop();
+
+                                          if (res['success'] == true) {
+                                            _addSubAdmin({
+                                              'name': name,
+                                              'email': email,
+                                              'phone': phone,
+                                              'department': selectedDept,
+                                            });
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(
+                                                content: Text('✅ Sub-Admin "$name" created successfully! They can now log in via the Admin tab.'),
+                                                backgroundColor: const Color(0xFF10B981),
+                                                duration: const Duration(seconds: 4),
+                                              ),
+                                            );
+                                          } else {
+                                            _addSubAdmin({
+                                              'name': name,
+                                              'email': email,
+                                              'phone': phone,
+                                              'department': selectedDept,
+                                            });
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(
+                                                content: Text('⚠️ Backend notice: ${res['message'] ?? 'Account saved locally. Sync when online.'}'),
+                                                backgroundColor: const Color(0xFFD97706),
+                                                duration: const Duration(seconds: 4),
+                                              ),
+                                            );
+                                          }
+                                        } catch (e) {
+                                          setModalState(() => isLoading = false);
+                                          _addSubAdmin({
+                                            'name': name,
+                                            'email': email,
+                                            'phone': phone,
+                                            'department': selectedDept,
+                                          });
+                                          if (!dialogCtx.mounted) return;
+                                          Navigator.of(dialogCtx).pop();
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(
+                                              content: Text('⚠️ Network error. Sub-Admin "$name" saved locally.'),
+                                              backgroundColor: const Color(0xFFD97706),
+                                            ),
+                                          );
+                                        }
+                                      },
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   // ==========================================
@@ -1636,11 +2504,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     final nameCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
+    final passwordCtrl = TextEditingController(text: 'Password123!');
+    final qualCtrl = TextEditingController(text: 'BDS, MDS');
     final licenseCtrl = TextEditingController();
     final clinicCtrl = TextEditingController();
     final expCtrl = TextEditingController(text: '5');
     final feeCtrl = TextEditingController(text: '\$75');
+    final stateCtrl = TextEditingController();
+    final cityCtrl = TextEditingController();
+    final pincodeCtrl = TextEditingController();
+    final addressCtrl = TextEditingController();
     String selectedSpecialty = 'General Dentistry';
+    bool obscurePassword = true;
+    bool isSubmitting = false;
 
     showDialog(
       context: context,
@@ -1651,9 +2527,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               backgroundColor: Colors.white,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               child: Container(
-                constraints: const BoxConstraints(maxWidth: 480, maxHeight: 660),
+                constraints: const BoxConstraints(maxWidth: 520, maxHeight: 720),
                 padding: const EdgeInsets.all(22),
                 child: SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1673,8 +2550,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Register New Doctor', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textDark)),
-                                Text('Admin Doctor Onboarding • DentaGuru Platform', style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                                Text('Create New Dentist Account', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textDark)),
+                                Text('Admin Direct Doctor Registration • Ready for Dentist App Login', style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
                               ],
                             ),
                           ),
@@ -1686,10 +2563,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                       ),
                       const SizedBox(height: 16),
 
+                      // Doctor Name
                       TextField(
                         controller: nameCtrl,
                         decoration: InputDecoration(
-                          labelText: 'Doctor Full Name',
+                          labelText: 'Doctor Full Name *',
                           hintText: 'e.g. Dr. Jane Miller',
                           prefixIcon: const Icon(Icons.person_outline, size: 18),
                           filled: true,
@@ -1699,13 +2577,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                       ),
                       const SizedBox(height: 10),
 
+                      // Email & Phone
                       Row(
                         children: [
                           Expanded(
                             child: TextField(
                               controller: emailCtrl,
+                              keyboardType: TextInputType.emailAddress,
                               decoration: InputDecoration(
-                                labelText: 'Email Address',
+                                labelText: 'Email Address *',
                                 hintText: 'e.g. jane@dentaguru.com',
                                 prefixIcon: const Icon(Icons.email_outlined, size: 18),
                                 filled: true,
@@ -1718,9 +2598,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           Expanded(
                             child: TextField(
                               controller: phoneCtrl,
+                              keyboardType: TextInputType.phone,
                               decoration: InputDecoration(
-                                labelText: 'Phone Number',
-                                hintText: 'e.g. +1 202 555 0199',
+                                labelText: 'Phone Number *',
+                                hintText: 'e.g. +91 98765 43210',
                                 prefixIcon: const Icon(Icons.phone_outlined, size: 18),
                                 filled: true,
                                 fillColor: const Color(0xFFF8FAFC),
@@ -1732,30 +2613,73 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                       ),
                       const SizedBox(height: 10),
 
-                      DropdownButtonFormField<String>(
-                        initialValue: selectedSpecialty,
+                      // Password
+                      TextField(
+                        controller: passwordCtrl,
+                        obscureText: obscurePassword,
                         decoration: InputDecoration(
-                          labelText: 'Specialization',
-                          prefixIcon: const Icon(Icons.medical_services_outlined, size: 18),
+                          labelText: 'Account Password *',
+                          hintText: 'Used for Dentist Portal sign-in',
+                          prefixIcon: const Icon(Icons.lock_outline_rounded, size: 18),
+                          suffixIcon: IconButton(
+                            icon: Icon(obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined, size: 18),
+                            onPressed: () => setModalState(() => obscurePassword = !obscurePassword),
+                          ),
                           filled: true,
                           fillColor: const Color(0xFFF8FAFC),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                         ),
-                        items: [
-                          'General Dentistry',
-                          'Orthodontics',
-                          'Endodontics',
-                          'Periodontics',
-                          'Pediatric Dentistry',
-                          'Oral & Maxillofacial Surgery',
-                          'Cosmetic Dentistry',
-                        ].map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 13)))).toList(),
-                        onChanged: (val) {
-                          if (val != null) setModalState(() => selectedSpecialty = val);
-                        },
                       ),
                       const SizedBox(height: 10),
 
+                      // Specialization & Qualification
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 3,
+                            child: DropdownButtonFormField<String>(
+                              initialValue: selectedSpecialty,
+                              decoration: InputDecoration(
+                                labelText: 'Specialization',
+                                prefixIcon: const Icon(Icons.medical_services_outlined, size: 18),
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                              items: [
+                                'General Dentistry',
+                                'Orthodontics',
+                                'Endodontics',
+                                'Periodontics',
+                                'Pediatric Dentistry',
+                                'Oral & Maxillofacial Surgery',
+                                'Cosmetic Dentistry',
+                              ].map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 12)))).toList(),
+                              onChanged: (val) {
+                                if (val != null) setModalState(() => selectedSpecialty = val);
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            flex: 2,
+                            child: TextField(
+                              controller: qualCtrl,
+                              decoration: InputDecoration(
+                                labelText: 'Qualification',
+                                hintText: 'BDS, MDS',
+                                prefixIcon: const Icon(Icons.school_outlined, size: 18),
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+
+                      // License Number & Experience
                       Row(
                         children: [
                           Expanded(
@@ -1777,6 +2701,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             flex: 2,
                             child: TextField(
                               controller: expCtrl,
+                              keyboardType: TextInputType.number,
                               decoration: InputDecoration(
                                 labelText: 'Years Exp.',
                                 hintText: '5',
@@ -1791,6 +2716,56 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                       ),
                       const SizedBox(height: 10),
 
+                      // State, City & Pincode
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: stateCtrl,
+                              decoration: InputDecoration(
+                                labelText: 'State',
+                                hintText: 'e.g. Telangana',
+                                prefixIcon: const Icon(Icons.map_outlined, size: 18),
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextField(
+                              controller: cityCtrl,
+                              decoration: InputDecoration(
+                                labelText: 'City',
+                                hintText: 'e.g. Hyderabad',
+                                prefixIcon: const Icon(Icons.location_city_outlined, size: 18),
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextField(
+                              controller: pincodeCtrl,
+                              keyboardType: TextInputType.number,
+                              decoration: InputDecoration(
+                                labelText: 'Pincode',
+                                hintText: 'e.g. 500032',
+                                prefixIcon: const Icon(Icons.pin_drop_outlined, size: 18),
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+
+                      // Practice / Clinic Name & Fee
                       Row(
                         children: [
                           Expanded(
@@ -1800,7 +2775,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               decoration: InputDecoration(
                                 labelText: 'Practice / Clinic Name',
                                 hintText: 'e.g. Apex Care Dental',
-                                prefixIcon: const Icon(Icons.location_city_outlined, size: 18),
+                                prefixIcon: const Icon(Icons.storefront_outlined, size: 18),
                                 filled: true,
                                 fillColor: const Color(0xFFF8FAFC),
                                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -1824,38 +2799,91 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           ),
                         ],
                       ),
+                      const SizedBox(height: 10),
+
+                      // Clinic Address
+                      TextField(
+                        controller: addressCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Clinic Address / Location',
+                          hintText: 'e.g. 123 Healthcare Blvd, Suite 400',
+                          prefixIcon: const Icon(Icons.place_outlined, size: 18),
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
                       const SizedBox(height: 18),
 
+                      // Submit Button
                       ElevatedButton.icon(
-                        icon: const Icon(Icons.check_circle_rounded, size: 18),
-                        label: const Text('Register Doctor to Admin Panel', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        icon: isSubmitting
+                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.check_circle_rounded, size: 18),
+                        label: Text(
+                          isSubmitting ? 'Creating Dentist Account...' : 'Create Dentist Account',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                        ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppTheme.primaryBlue,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
-                        onPressed: () {
-                          final expYears = int.tryParse(expCtrl.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 5;
-                          final doctor = _problemService.registerDoctor(
-                            name: nameCtrl.text,
-                            email: emailCtrl.text,
-                            phone: phoneCtrl.text,
-                            licenseNumber: licenseCtrl.text,
-                            specialty: selectedSpecialty,
-                            clinicName: clinicCtrl.text,
-                            experienceYears: expYears,
-                            consultationFee: feeCtrl.text,
-                          );
+                        onPressed: isSubmitting
+                            ? null
+                            : () async {
+                                final name = nameCtrl.text.trim();
+                                final email = emailCtrl.text.trim();
+                                final phone = phoneCtrl.text.trim();
+                                final password = passwordCtrl.text.trim();
 
-                          Navigator.of(dialogContext).pop();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('👨‍⚕️ Registered ${doctor.name} successfully! Visible in Admin Directory.'),
-                              backgroundColor: const Color(0xFF10B981),
-                            ),
-                          );
-                        },
+                                if (name.isEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter doctor name.')));
+                                  return;
+                                }
+                                if (email.isEmpty || !email.contains('@')) {
+                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a valid email address.')));
+                                  return;
+                                }
+                                if (phone.isEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a valid phone number.')));
+                                  return;
+                                }
+                                if (password.length < 6) {
+                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password must be at least 6 characters.')));
+                                  return;
+                                }
+
+                                setModalState(() => isSubmitting = true);
+
+                                final expYears = int.tryParse(expCtrl.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 5;
+                                final doctor = _problemService.registerDoctor(
+                                  name: name,
+                                  email: email,
+                                  phone: phone,
+                                  password: password,
+                                  licenseNumber: licenseCtrl.text,
+                                  specialty: selectedSpecialty,
+                                  qualification: qualCtrl.text,
+                                  clinicName: clinicCtrl.text,
+                                  experienceYears: expYears,
+                                  consultationFee: feeCtrl.text,
+                                  state: stateCtrl.text,
+                                  city: cityCtrl.text,
+                                  pincode: pincodeCtrl.text,
+                                  clinicAddress: addressCtrl.text,
+                                );
+
+                                Navigator.of(dialogContext).pop();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('🎉 Registered ${doctor.name} successfully! Dentist can now sign in using $email.'),
+                                    backgroundColor: const Color(0xFF10B981),
+                                    duration: const Duration(seconds: 4),
+                                  ),
+                                );
+                              },
                       ),
                     ],
                   ),
@@ -2062,7 +3090,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               const SizedBox(width: 8),
               ElevatedButton.icon(
                 icon: const Icon(Icons.person_add_rounded, size: 16),
-                label: const Text('Register Doctor', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                label: const Text('+ Create Dentist', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primaryBlue,
                   foregroundColor: Colors.white,
@@ -2756,6 +3784,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     final emailCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
     final ageCtrl = TextEditingController(text: '28');
+    final locationCtrl = TextEditingController();
+    final pincodeCtrl = TextEditingController();
     final passwordCtrl = TextEditingController(text: 'Password123!');
 
     showDialog(
@@ -2765,83 +3795,109 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           child: Padding(
             padding: const EdgeInsets.all(22),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primaryBlue.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(10),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryBlue.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(Icons.person_add_rounded, color: AppTheme.primaryBlue, size: 22),
                       ),
-                      child: const Icon(Icons.person_add_rounded, color: AppTheme.primaryBlue, size: 22),
-                    ),
-                    const SizedBox(width: 10),
-                    const Text('Register New Patient', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppTheme.textDark)),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(labelText: 'Patient Full Name', prefixIcon: Icon(Icons.person_outline_rounded)),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: emailCtrl,
-                  decoration: const InputDecoration(labelText: 'Email Address', prefixIcon: Icon(Icons.email_outlined)),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      flex: 3,
-                      child: TextField(
-                        controller: phoneCtrl,
-                        decoration: const InputDecoration(labelText: 'Phone Number', prefixIcon: Icon(Icons.phone_outlined)),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 2,
-                      child: TextField(
-                        controller: ageCtrl,
-                        decoration: const InputDecoration(labelText: 'Age', prefixIcon: Icon(Icons.cake_outlined)),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: passwordCtrl,
-                  obscureText: true,
-                  decoration: const InputDecoration(labelText: 'Set Account Password', prefixIcon: Icon(Icons.lock_outline)),
-                ),
-                const SizedBox(height: 18),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.cloud_upload_rounded, size: 18),
-                  label: const Text('Register & Save Patient Profile', style: TextStyle(fontWeight: FontWeight.bold)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primaryBlue,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      const SizedBox(width: 10),
+                      const Text('Register New Patient', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppTheme.textDark)),
+                    ],
                   ),
-                  onPressed: () async {
-                    final name = nameCtrl.text.trim().isEmpty ? 'New Patient' : nameCtrl.text.trim();
-                    final email = emailCtrl.text.trim().isEmpty ? 'patient_${DateTime.now().millisecondsSinceEpoch}@dentaguru.com' : emailCtrl.text.trim();
-                    final phone = phoneCtrl.text.trim().isEmpty ? '+12025550000' : phoneCtrl.text.trim();
-                    final pass = passwordCtrl.text.trim().isEmpty ? 'Password123!' : passwordCtrl.text.trim();
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(labelText: 'Patient Full Name', prefixIcon: Icon(Icons.person_outline_rounded)),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: emailCtrl,
+                    decoration: const InputDecoration(labelText: 'Email Address', prefixIcon: Icon(Icons.email_outlined)),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: TextField(
+                          controller: phoneCtrl,
+                          decoration: const InputDecoration(labelText: 'Phone Number', prefixIcon: Icon(Icons.phone_outlined)),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: ageCtrl,
+                          decoration: const InputDecoration(labelText: 'Age', prefixIcon: Icon(Icons.cake_outlined)),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: TextField(
+                          controller: locationCtrl,
+                          decoration: const InputDecoration(labelText: 'Location / Address', prefixIcon: Icon(Icons.location_on_outlined)),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: pincodeCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(labelText: 'Pincode', prefixIcon: Icon(Icons.pin_drop_outlined)),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: passwordCtrl,
+                    obscureText: true,
+                    decoration: const InputDecoration(labelText: 'Set Account Password', prefixIcon: Icon(Icons.lock_outline)),
+                  ),
+                  const SizedBox(height: 18),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.cloud_upload_rounded, size: 18),
+                    label: const Text('Register & Save Patient Profile', style: TextStyle(fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primaryBlue,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: () async {
+                      final name = nameCtrl.text.trim().isEmpty ? 'New Patient' : nameCtrl.text.trim();
+                      final email = emailCtrl.text.trim().isEmpty ? 'patient_${DateTime.now().millisecondsSinceEpoch}@dentaguru.com' : emailCtrl.text.trim();
+                      final phone = phoneCtrl.text.trim().isEmpty ? '+12025550000' : phoneCtrl.text.trim();
+                      final pass = passwordCtrl.text.trim().isEmpty ? 'Password123!' : passwordCtrl.text.trim();
+                      final loc = locationCtrl.text.trim();
+                      final pin = pincodeCtrl.text.trim();
 
-                    await ApiService().registerUser(
-                      name: name,
-                      email: email,
-                      password: pass,
-                      phone: phone,
-                      role: 'Patient',
-                    );
+                      await ApiService().registerUser(
+                        name: name,
+                        email: email,
+                        password: pass,
+                        phone: phone,
+                        role: 'Patient',
+                        location: loc,
+                        pincode: pin,
+                      );
 
                     await _problemService.syncPatientsFromApi();
 
@@ -2861,10 +3917,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               ],
             ),
           ),
-        );
-      },
-    );
-  }
+        ),
+      );
+    },
+  );
+}
 
   // ==========================================
   // PANEL 2: PATIENTS MANAGEMENT DATA TABLE

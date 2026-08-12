@@ -165,9 +165,26 @@ const Dentist = {
 
     async find(query = {}) {
         try {
-            let req = supabaseAdmin.from('dentists').select('*, users(name, email, phone), clinics(clinic_name, location)');
-            for (const [key, val] of Object.entries(query)) {
-                req = req.eq(key, val);
+            let req = supabaseAdmin.from('dentists').select('*, users(name, email, phone, state, city, pincode, latitude, longitude), clinics(clinic_name, location)');
+            // Apply direct dentists table filters
+            if (query.state) {
+                req = req.ilike('state', `%${query.state}%`);
+            }
+            if (query.city) {
+                req = req.ilike('city', `%${query.city}%`);
+            }
+            if (query.pincode) {
+                req = req.ilike('pincode', `%${query.pincode}%`);
+            }
+            if (query.availability_status) {
+                req = req.eq('availability_status', query.availability_status);
+            }
+            if (query.speciality) {
+                req = req.ilike('speciality', `%${query.speciality}%`);
+            }
+            // clinic_id filter
+            if (query.clinic_id) {
+                req = req.eq('clinic_id', query.clinic_id);
             }
             const { data, error } = await req;
             if (error) {
@@ -549,6 +566,12 @@ const DentistSuggestion = {
             patient_id: patientId,
             admin_id: adminId,
             dentist_id: dentistId,
+            patient_state: suggestionData.patient_state || suggestionData.patientState || '',
+            patient_city: suggestionData.patient_city || suggestionData.patientCity || '',
+            patient_pincode: suggestionData.patient_pincode || suggestionData.patientPincode || '',
+            dentist_state: suggestionData.dentist_state || suggestionData.dentistState || '',
+            dentist_city: suggestionData.dentist_city || suggestionData.dentistCity || '',
+            dentist_pincode: suggestionData.dentist_pincode || suggestionData.dentistPincode || '',
             status: suggestionData.status || 'SUGGESTED',
             notes: suggestionData.notes || null
         };

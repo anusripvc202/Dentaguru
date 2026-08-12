@@ -54,15 +54,39 @@ exports.getClinicDentists = async (req, res) => {
     }
 };
 
-// 4. GET ALL DENTISTS
+// 4. GET ALL DENTISTS (with optional state/city/pincode/specialty/availability filters)
 exports.getAllDentists = async (req, res) => {
     try {
-        const dentists = await Dentist.find();
+        const { state, city, pincode, specialty, availability } = req.query;
+
+        // Build filter query for dentists table
+        const filterQuery = {};
+        if (state && state.trim()) filterQuery.state = state.trim();
+        if (city && city.trim()) filterQuery.city = city.trim();
+        if (pincode && pincode.trim()) filterQuery.pincode = pincode.trim();
+        if (specialty && specialty.trim()) filterQuery.speciality = specialty.trim();
+        if (availability && availability.trim()) filterQuery.availability_status = availability.trim();
+
+        const dentists = await Dentist.find(filterQuery);
         const { User } = require('../models/Schemas');
-        const dentistUsers = await User.find({ role: 'Dentist' });
-        
+
+        // Also fetch user-based dentists and merge (those not yet in dentists table)
+        let dentistUsers = await User.find({ role: 'Dentist' });
+
+        if (state && state.trim()) {
+            const stateLower = state.trim().toLowerCase();
+            dentistUsers = dentistUsers.filter(u => (u.state || '').toLowerCase().includes(stateLower));
+        }
+        if (city && city.trim()) {
+            const cityLower = city.trim().toLowerCase();
+            dentistUsers = dentistUsers.filter(u => (u.city || '').toLowerCase().includes(cityLower));
+        }
+        if (pincode && pincode.trim()) {
+            dentistUsers = dentistUsers.filter(u => (u.pincode || '').includes(pincode.trim()));
+        }
+
         const existingEmails = new Set(dentists.map(d => (d.email || d.users?.email || '').toLowerCase()));
-        
+
         for (const u of dentistUsers) {
             const emailClean = (u.email || '').toLowerCase();
             if (emailClean && !existingEmails.has(emailClean)) {
@@ -78,9 +102,14 @@ exports.getAllDentists = async (req, res) => {
                     clinicName: u.clinic_name || 'DentaGuru Practice',
                     phone: u.phone || '',
                     email: u.email || '',
+                    state: u.state || '',
+                    city: u.city || '',
+                    pincode: u.pincode || '',
+                    latitude: u.latitude || null,
+                    longitude: u.longitude || null,
                     availability_status: 'Available',
                     license_number: 'DEN-LIC-REG',
-                    users: { name: u.name, email: u.email, phone: u.phone }
+                    users: { name: u.name, email: u.email, phone: u.phone, state: u.state || '', city: u.city || '', pincode: u.pincode || '', latitude: u.latitude, longitude: u.longitude }
                 });
                 existingEmails.add(emailClean);
             }

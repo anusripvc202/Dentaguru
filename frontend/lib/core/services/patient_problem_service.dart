@@ -23,6 +23,11 @@ class DoctorModel {
   final String licenseNumber;
   final Uint8List? photoBytes;
   final String clinicAddress;
+  final String pincode;
+  final String city;
+  final String state;
+  final double? latitude;
+  final double? longitude;
   final Map<String, String> procedureFees;
 
   DoctorModel({
@@ -43,6 +48,11 @@ class DoctorModel {
     this.licenseNumber = 'DEN-LIC-REG',
     this.photoBytes,
     this.clinicAddress = '123 Healthcare Blvd, Medical Hub, Suite 400',
+    this.pincode = '560038',
+    this.city = '',
+    this.state = '',
+    this.latitude,
+    this.longitude,
     Map<String, String>? procedureFees,
   }) : procedureFees = procedureFees ?? {
           'General Consultation': consultationFee,
@@ -84,6 +94,11 @@ class DoctorModel {
         'consultationFee': consultationFee,
         'licenseNumber': licenseNumber,
         'clinicAddress': clinicAddress,
+        'pincode': pincode,
+        'city': city,
+        'state': state,
+        'latitude': latitude,
+        'longitude': longitude,
         'procedureFees': procedureFees,
         'photoBase64': photoBytes != null ? base64Encode(photoBytes!) : null,
       };
@@ -117,8 +132,62 @@ class DoctorModel {
       licenseNumber: json['licenseNumber'] ?? 'DEN-LIC-REG',
       photoBytes: bytes,
       clinicAddress: json['clinicAddress'] ?? '123 Healthcare Blvd, Medical Hub, Suite 400',
+      pincode: json['pincode'] ?? json['postal_code'] ?? (json['users'] != null ? (json['users']['pincode'] ?? '') : '') ?? '560038',
+      city: json['city'] ?? (json['users'] != null ? (json['users']['city'] ?? '') : '') ?? '',
+      state: json['state'] ?? (json['users'] != null ? (json['users']['state'] ?? '') : '') ?? '',
+      latitude: (json['latitude'] ?? json['lat'] ?? (json['users'] != null ? json['users']['latitude'] : null)) != null
+          ? double.tryParse((json['latitude'] ?? json['lat'] ?? json['users']['latitude']).toString())
+          : null,
+      longitude: (json['longitude'] ?? json['lng'] ?? (json['users'] != null ? json['users']['longitude'] : null)) != null
+          ? double.tryParse((json['longitude'] ?? json['lng'] ?? json['users']['longitude']).toString())
+          : null,
       procedureFees: pFees.isNotEmpty ? pFees : null,
     );
+  }
+
+  int getLocationMatchTier(String targetState, String targetCity, String targetPincode) {
+    final tState = targetState.trim().toLowerCase();
+    final tCity = targetCity.trim().toLowerCase();
+    final tPin = targetPincode.trim();
+
+    final dState = state.trim().toLowerCase();
+    final dCity = city.trim().toLowerCase();
+    final dPin = pincode.trim();
+
+    if (tPin.isNotEmpty && dPin.isNotEmpty && tPin == dPin) {
+      return 1; // Tier 1: Same Pincode
+    }
+
+    if (tPin.isNotEmpty && dPin.isNotEmpty && RegExp(r'^\d+$').hasMatch(tPin) && RegExp(r'^\d+$').hasMatch(dPin)) {
+      final diff = (int.parse(tPin) - int.parse(dPin)).abs();
+      if (diff <= 5) return 2; // Tier 2: Nearby Pincode
+    }
+
+    if (tCity.isNotEmpty && dCity.isNotEmpty && (tCity == dCity || dCity.contains(tCity) || tCity.contains(dCity))) {
+      return 3; // Tier 3: Same City
+    }
+
+    if (tState.isNotEmpty && dState.isNotEmpty && (tState == dState || dState.contains(tState) || tState.contains(dState))) {
+      return 5; // Tier 5: Same State
+    }
+
+    return 6; // Tier 6: Other Location
+  }
+
+  String getLocationBadgeText(String targetState, String targetCity, String targetPincode) {
+    final tier = getLocationMatchTier(targetState, targetCity, targetPincode);
+    switch (tier) {
+      case 1:
+        return '🎯 Same Pincode';
+      case 2:
+        return '📍 Nearby Pincode';
+      case 3:
+        return '🏙️ Same City';
+      case 5:
+        return '🌐 Same State';
+      default:
+        return '🏥 Registered Doctor';
+    }
   }
 }
 
@@ -132,6 +201,8 @@ class PatientProfile {
   String gender;
   String bloodGroup;
   String emergencyContact;
+  String address;
+  String pincode;
   Uint8List? photoBytes;
 
   PatientProfile({
@@ -143,6 +214,8 @@ class PatientProfile {
     this.gender = 'Female',
     this.bloodGroup = 'O Positive (O+)',
     this.emergencyContact = '',
+    this.address = '',
+    this.pincode = '',
     this.photoBytes,
   });
 
@@ -155,6 +228,8 @@ class PatientProfile {
         'gender': gender,
         'bloodGroup': bloodGroup,
         'emergencyContact': emergencyContact,
+        'address': address,
+        'pincode': pincode,
         'photoBase64': photoBytes != null ? base64Encode(photoBytes!) : null,
       };
 
@@ -174,6 +249,8 @@ class PatientProfile {
       gender: json['gender'] ?? 'Female',
       bloodGroup: json['bloodGroup'] ?? 'O Positive (O+)',
       emergencyContact: json['emergencyContact'] ?? '',
+      address: json['address'] ?? json['location'] ?? '',
+      pincode: json['pincode'] ?? json['postal_code'] ?? '',
       photoBytes: bytes,
     );
   }
@@ -200,6 +277,11 @@ class PatientConsultationRequest {
   String? confirmedDate;
   String? adminNotes;
   bool whatsappNotificationSent;
+  final String state;
+  final String city;
+  final String pincode;
+  final double? latitude;
+  final double? longitude;
 
   PatientConsultationRequest({
     required this.id,
@@ -209,6 +291,11 @@ class PatientConsultationRequest {
     required this.problemDescription,
     this.symptoms = '',
     this.preferredLocation = '',
+    this.state = '',
+    this.city = '',
+    this.pincode = '',
+    this.latitude,
+    this.longitude,
     this.attachments = const [],
     required this.severity,
     required this.submittedAt,
@@ -231,6 +318,11 @@ class PatientConsultationRequest {
         'problemDescription': problemDescription,
         'symptoms': symptoms,
         'preferredLocation': preferredLocation,
+        'state': state,
+        'city': city,
+        'pincode': pincode,
+        'latitude': latitude,
+        'longitude': longitude,
         'attachments': attachments,
         'severity': severity,
         'submittedAt': submittedAt.toIso8601String(),
@@ -246,14 +338,20 @@ class PatientConsultationRequest {
       };
 
   factory PatientConsultationRequest.fromJson(Map<String, dynamic> json) {
+    final patientObj = json['patient'] is Map ? json['patient'] : {};
     return PatientConsultationRequest(
       id: (json['id'] ?? json['_id'] ?? '').toString(),
-      patientName: json['patientName'] ?? json['patient_name'] ?? '',
-      patientPhone: json['patientPhone'] ?? json['patient_phone'] ?? '',
+      patientName: json['patientName'] ?? json['patient_name'] ?? (patientObj['name'] ?? ''),
+      patientPhone: json['patientPhone'] ?? json['patient_phone'] ?? (patientObj['phone'] ?? ''),
       problemCategory: json['problemCategory'] ?? json['problem_category'] ?? '',
       problemDescription: json['problemDescription'] ?? json['problem_description'] ?? '',
       symptoms: json['symptoms'] ?? '',
       preferredLocation: json['preferredLocation'] ?? json['preferred_location'] ?? '',
+      state: json['state'] ?? (patientObj['state'] ?? ''),
+      city: json['city'] ?? (patientObj['city'] ?? ''),
+      pincode: json['pincode'] ?? (patientObj['pincode'] ?? ''),
+      latitude: (json['latitude'] ?? patientObj['latitude']) != null ? double.tryParse((json['latitude'] ?? patientObj['latitude']).toString()) : null,
+      longitude: (json['longitude'] ?? patientObj['longitude']) != null ? double.tryParse((json['longitude'] ?? patientObj['longitude']).toString()) : null,
       attachments: List<String>.from(json['attachments'] ?? []),
       severity: json['severity'] ?? 'Moderate',
       submittedAt: json['submittedAt'] != null 
@@ -504,12 +602,14 @@ class PatientProblemService extends ChangeNotifier {
 
   Future<void> syncAllDataFromApi() async {
     try {
-      await syncPatientsFromApi();
-      await syncClinicsFromApi();
-      await syncDoctorsFromApi();
-      await syncAppointmentsFromApi();
-      await syncProblemRequestsFromApi();
-      await syncMedicalRecordsFromApi();
+      await Future.wait([
+        syncPatientsFromApi(),
+        syncClinicsFromApi(),
+        syncDoctorsFromApi(),
+        syncAppointmentsFromApi(),
+        syncProblemRequestsFromApi(),
+        syncMedicalRecordsFromApi(),
+      ]);
     } catch (e) {
       debugPrint('Error in syncAllDataFromApi: $e');
     }
@@ -677,14 +777,20 @@ class PatientProblemService extends ChangeNotifier {
           final cName = (clinicObj['clinic_name'] ?? clinicObj['name'] ?? dMap['clinicName'] ?? '').toString();
           final cLoc = (clinicObj['location'] ?? dMap['location'] ?? 'Healthcare Hub').toString();
 
+          final doctorState = (dMap['state'] ?? userObj['state'] ?? '').toString();
+          final doctorCity = (dMap['city'] ?? userObj['city'] ?? '').toString();
+          final doctorPincode = (dMap['pincode'] ?? userObj['pincode'] ?? dMap['postal_code'] ?? '560038').toString();
+          final lat = (dMap['latitude'] ?? userObj['latitude']) != null ? double.tryParse((dMap['latitude'] ?? userObj['latitude']).toString()) : null;
+          final lng = (dMap['longitude'] ?? userObj['longitude']) != null ? double.tryParse((dMap['longitude'] ?? userObj['longitude']).toString()) : null;
+
           final formattedName = name.startsWith('Dr.') ? name : 'Dr. $name';
 
           _allDoctors.add(DoctorModel(
             id: id.isNotEmpty ? id : 'DOC-${100 + _allDoctors.length + 1}',
             name: formattedName,
             specialty: specialty,
-            qualification: 'BDS, MDS',
-            experienceYears: 5,
+            qualification: dMap['qualifications'] ?? dMap['qualification'] ?? 'BDS, MDS',
+            experienceYears: dMap['experience_years'] ?? dMap['experienceYears'] ?? 5,
             rating: (dMap['rating'] ?? 5.0).toDouble(),
             reviewCount: dMap['reviews_count'] ?? 1,
             clinicName: cName,
@@ -695,6 +801,11 @@ class PatientProblemService extends ChangeNotifier {
             nextAvailableSlots: ['Today, 2:00 PM', 'Tomorrow, 10:00 AM'],
             consultationFee: '\$75',
             licenseNumber: licNum,
+            state: doctorState,
+            city: doctorCity,
+            pincode: doctorPincode,
+            latitude: lat,
+            longitude: lng,
           ));
         }
       }
@@ -702,6 +813,61 @@ class PatientProblemService extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint('Sync doctors error: $e');
+    }
+  }
+
+  /// Fetch doctors from API filtered by state, city, pincode, specialty, availability.
+  /// Returns filtered list without modifying the global [_allDoctors] cache.
+  Future<List<DoctorModel>> fetchDoctorsFiltered({String? state, String? city, String? pincode, String? specialty, String? availability}) async {
+    try {
+      final apiDentists = await ApiService().fetchDentists(state: state, city: city, pincode: pincode, specialty: specialty, availability: availability);
+      final filtered = <DoctorModel>[];
+      for (final dMap in apiDentists) {
+        final id = dMap['id']?.toString() ?? dMap['_id']?.toString() ?? '';
+        final userObj = dMap['users'] ?? dMap['user'] ?? {};
+        final clinicObj = dMap['clinics'] ?? dMap['clinic'] ?? {};
+        final name = (userObj['name'] ?? dMap['name'] ?? 'Dentist').toString();
+        final email = (userObj['email'] ?? dMap['email'] ?? '').toString();
+        final phone = (userObj['phone'] ?? dMap['phone'] ?? '').toString();
+        final spec = (dMap['speciality'] ?? dMap['specialty'] ?? 'General Dentistry').toString();
+        final licNum = (dMap['license_number'] ?? dMap['licenseNumber'] ?? 'DEN-LIC-REG').toString();
+        final cName = (clinicObj['clinic_name'] ?? clinicObj['name'] ?? dMap['clinicName'] ?? '').toString();
+        final cLoc = (clinicObj['location'] ?? dMap['location'] ?? '').toString();
+        final doctorState = (dMap['state'] ?? userObj['state'] ?? '').toString();
+        final doctorCity = (dMap['city'] ?? userObj['city'] ?? '').toString();
+        final doctorPincode = (dMap['pincode'] ?? userObj['pincode'] ?? dMap['postal_code'] ?? '').toString();
+        final lat = (dMap['latitude'] ?? userObj['latitude']) != null ? double.tryParse((dMap['latitude'] ?? userObj['latitude']).toString()) : null;
+        final lng = (dMap['longitude'] ?? userObj['longitude']) != null ? double.tryParse((dMap['longitude'] ?? userObj['longitude']).toString()) : null;
+
+        final formattedName = name.startsWith('Dr.') ? name : 'Dr. $name';
+
+        filtered.add(DoctorModel(
+          id: id.isNotEmpty ? id : 'DOC-${filtered.length + 1}',
+          name: formattedName,
+          specialty: spec,
+          qualification: dMap['qualifications'] ?? dMap['qualification'] ?? 'BDS, MDS',
+          experienceYears: dMap['experience_years'] ?? dMap['experienceYears'] ?? 5,
+          rating: (dMap['rating'] ?? 5.0).toDouble(),
+          reviewCount: dMap['reviews_count'] ?? 1,
+          clinicName: cName,
+          clinicAddress: cLoc,
+          phone: phone,
+          email: email,
+          status: dMap['availability_status'] ?? 'Available',
+          nextAvailableSlots: ['Today, 2:00 PM', 'Tomorrow, 10:00 AM'],
+          consultationFee: '\$75',
+          licenseNumber: licNum,
+          state: doctorState,
+          city: doctorCity,
+          pincode: doctorPincode,
+          latitude: lat,
+          longitude: lng,
+        ));
+      }
+      return filtered;
+    } catch (e) {
+      debugPrint('fetchDoctorsFiltered error: $e');
+      return [];
     }
   }
 
@@ -831,6 +997,8 @@ class PatientProblemService extends ChangeNotifier {
     required String gender,
     required String bloodGroup,
     required String emergencyContact,
+    String address = '',
+    String pincode = '',
     Uint8List? photoBytes,
   }) {
     if (photoBytes != null) {
@@ -847,6 +1015,8 @@ class PatientProblemService extends ChangeNotifier {
       gender: gender.isEmpty ? 'Female' : gender,
       bloodGroup: bloodGroup.isEmpty ? 'O Positive (O+)' : bloodGroup,
       emergencyContact: emergencyContact.trim().isEmpty ? phone.trim() : emergencyContact.trim(),
+      address: address.trim(),
+      pincode: pincode.trim(),
       photoBytes: cachedPhoto,
     );
     _saveToStorage();
@@ -940,22 +1110,7 @@ class PatientProblemService extends ChangeNotifier {
 
       final slotText = req.confirmedTimeSlot ?? 'Today, 2:30 PM';
 
-      // 1. Create & Persist Appointment in Supabase DB ('appointments' table)
-      try {
-        await ApiService().createAppointment(
-          patientId: req.patientName,
-          dentistId: req.assignedDoctorId ?? '',
-          clinicId: req.assignedDoctorClinic ?? '',
-          date: date ?? DateTime.now().toIso8601String(),
-          timeSlot: slotText,
-          treatment: req.problemCategory,
-        );
-        await syncAppointmentsFromApi();
-      } catch (e) {
-        debugPrint('Error persisting appointment in acceptReferralByDentist: $e');
-      }
-
-      // 2. Dispatch Notifications to Patient & Admin
+      // 1. Dispatch Notifications to Patient & Admin & update UI immediately
       addNotification(
         recipientRole: 'Patient',
         recipientId: req.patientName,
@@ -972,6 +1127,18 @@ class PatientProblemService extends ChangeNotifier {
 
       _saveToStorage();
       notifyListeners();
+
+      // 2. Create & Persist Appointment in Supabase DB asynchronously in background
+      ApiService().createAppointment(
+        patientId: req.patientName,
+        dentistId: req.assignedDoctorId ?? '',
+        clinicId: req.assignedDoctorClinic ?? '',
+        date: date ?? DateTime.now().toIso8601String(),
+        timeSlot: slotText,
+        treatment: req.problemCategory,
+      ).then((_) => syncAppointmentsFromApi()).catchError((e) {
+        debugPrint('Error persisting appointment in acceptReferralByDentist: $e');
+      });
     }
   }
 
@@ -1033,10 +1200,14 @@ class PatientProblemService extends ChangeNotifier {
     required String specialty,
     required String clinicName,
     required int experienceYears,
+    String password = 'Password123!',
     String qualification = 'BDS, MDS',
     String consultationFee = '\$75',
     Uint8List? photoBytes,
     String clinicAddress = '123 Healthcare Blvd, Medical Hub, Suite 400',
+    String state = '',
+    String city = '',
+    String pincode = '560038',
   }) {
     if (photoBytes != null) {
       _userPhotoCache[email.trim().toLowerCase()] = photoBytes;
@@ -1048,6 +1219,8 @@ class PatientProblemService extends ChangeNotifier {
     final cleanClinic = clinicName.trim();
     final cleanSpecialty = specialty.trim().isEmpty ? 'General Dentistry' : specialty.trim();
     final cleanAddress = clinicAddress.trim();
+    final cleanCity = city.trim();
+    final cleanPincode = pincode.trim();
 
     final existingDoc = _allDoctors.firstWhere((d) => d.email.trim().toLowerCase() == email.trim().toLowerCase(), orElse: () => DoctorModel(id: '', name: '', specialty: '', qualification: '', experienceYears: 0, rating: 0, reviewCount: 0, clinicName: '', phone: '', email: '', status: '', nextAvailableSlots: [], consultationFee: ''));
     final doctorId = existingDoc.id.isNotEmpty ? existingDoc.id : 'DOC-${100 + _allDoctors.length + 1}';
@@ -1069,6 +1242,8 @@ class PatientProblemService extends ChangeNotifier {
       licenseNumber: cleanLicense,
       photoBytes: cachedPhoto,
       clinicAddress: cleanAddress,
+      city: cleanCity,
+      pincode: cleanPincode,
     );
 
     if (!_allDoctors.any((d) => d.email.toLowerCase() == newDoctor.email.toLowerCase())) {
@@ -1085,7 +1260,7 @@ class PatientProblemService extends ChangeNotifier {
         ClinicModel(
           id: 'CLN-${DateTime.now().millisecondsSinceEpoch}',
           clinicName: cleanClinic,
-          location: cleanAddress,
+          location: cleanAddress.isNotEmpty ? (cleanCity.isNotEmpty ? '$cleanAddress, $cleanCity' : cleanAddress) : cleanCity,
           verified: true,
           services: [cleanSpecialty, 'General Dentistry', 'Root Canal'],
         ),
@@ -1100,13 +1275,18 @@ class PatientProblemService extends ChangeNotifier {
     ApiService().registerUser(
       name: formattedName,
       email: email.trim().isEmpty ? 'doctor_${DateTime.now().millisecondsSinceEpoch}@dentaguru.com' : email.trim(),
-      password: 'Password123!',
+      password: password.trim().isEmpty ? 'Password123!' : password.trim(),
       phone: phone.trim().isEmpty ? '+91${DateTime.now().millisecondsSinceEpoch.toString().substring(3)}' : phone.trim(),
       role: 'Dentist',
       specialty: cleanSpecialty,
       licenseNumber: cleanLicense,
       clinicName: cleanClinic,
       clinicAddress: cleanAddress,
+      location: cleanAddress,
+      city: cleanCity,
+      pincode: cleanPincode,
+      qualification: qualification.trim().isEmpty ? 'BDS, MDS' : qualification.trim(),
+      experienceYears: experienceYears <= 0 ? 5 : experienceYears,
     ).then((res) {
       if (res['success'] == true) {
         syncClinicsFromApi();

@@ -24,12 +24,15 @@ const generateTokens = (user) => {
 
 // 1. REGISTER
 exports.register = async (req, res) => {
-    const { name, email, password, phone, role, fcmToken, specialty, licenseNumber, clinicName, clinicAddress, profilePhoto } = req.body;
+    const { name, email, password, phone, role, fcmToken, specialty, licenseNumber, clinicName, clinicAddress, location, state, city, pincode, latitude, longitude, qualification, experienceYears, profilePhoto } = req.body;
     try {
         const normalizedRole = (role || 'Patient').toString().trim();
         const normalizedEmail = (email || '').toString().trim().toLowerCase();
 
-        if (normalizedRole.toLowerCase() === 'admin' && normalizedEmail !== 'anusripvc202@gmail.com') {
+        // Only block Admin (primary) from registering unless it's the primary admin email.
+        // Sub-Admins (role === 'Sub-Admin') are created by the admin and are NOT restricted by primary email.
+        const isSubAdmin = normalizedRole.toLowerCase() === 'sub-admin' || normalizedRole.toLowerCase() === 'subadmin';
+        if (normalizedRole.toLowerCase() === 'admin' && !isSubAdmin && normalizedEmail !== 'anusripvc202@gmail.com') {
             return res.status(403).json({
                 success: false,
                 message: 'Access Denied: Only the primary administrator email (anusripvc202@gmail.com) is authorized for Admin access.'
@@ -52,6 +55,11 @@ exports.register = async (req, res) => {
             password,
             phone,
             role: role || 'Patient',
+            state: state || '',
+            city: city || '',
+            pincode: pincode || '',
+            latitude: latitude || null,
+            longitude: longitude || null,
             device_token: fcmToken || null,
             biometric_token: profilePhoto || null
         });
@@ -66,7 +74,9 @@ exports.register = async (req, res) => {
             const cName = clinicName && clinicName.trim() ? clinicName.trim() : '';
             if (cName.length > 0) {
                 try {
-                    const cAddr = clinicAddress && clinicAddress.trim() ? clinicAddress.trim() : '';
+                    const cAddr = (clinicAddress && clinicAddress.trim()) ? clinicAddress.trim() : (location && location.trim() ? location.trim() : '');
+                    const cPin = pincode && pincode.trim() ? pincode.trim() : '';
+                    const fullLoc = cPin ? `${cAddr} - ${cPin}` : cAddr;
                     let clinic = await Clinic.findOne({ clinic_name: cName });
                     if (!clinic) {
                         const defaultPricing = req.body.pricing || [
@@ -80,7 +90,7 @@ exports.register = async (req, res) => {
                         clinic = await Clinic.create({
                             user_id: user.id,
                             clinic_name: cName,
-                            location: cAddr,
+                            location: fullLoc,
                             verified: true,
                             rating: 5.0,
                             reviews_count: 0,
@@ -105,7 +115,14 @@ exports.register = async (req, res) => {
                     clinic_id: clinicId,
                     speciality: specialty || req.body.speciality || 'General Dentistry',
                     license_number: licNum,
+                    experience_years: experienceYears ? parseInt(experienceYears) : 5,
+                    qualifications: qualification || 'BDS, MDS',
                     availability_status: 'Available',
+                    state: state || '',
+                    city: city || '',
+                    pincode: pincode || '',
+                    latitude: latitude || null,
+                    longitude: longitude || null,
                     rating: 5.0,
                     reviews_count: 0
                 });
@@ -158,11 +175,16 @@ exports.login = async (req, res) => {
         }
 
         // Enforce Unique Primary Admin Email Authorization
+        // Sub-Admins (role === 'Sub-Admin' / 'sub-admin') bypass this check and can always log in.
         const normalizedUserEmail = (user.email || '').toString().trim().toLowerCase();
         const userRoleStr = (user.role || '').toString().trim().toLowerCase();
         const reqRoleStr = (role || '').toString().trim().toLowerCase();
+        const isSubAdminUser = userRoleStr === 'sub-admin' || userRoleStr === 'subadmin';
+        const isSubAdminReq = reqRoleStr === 'sub-admin' || reqRoleStr === 'subadmin';
 
-        if ((reqRoleStr.includes('admin') || userRoleStr.includes('admin')) && normalizedUserEmail !== 'anusripvc202@gmail.com') {
+        if (!isSubAdminUser && !isSubAdminReq &&
+            (reqRoleStr.includes('admin') || userRoleStr.includes('admin')) &&
+            normalizedUserEmail !== 'anusripvc202@gmail.com') {
             return res.status(403).json({
                 success: false,
                 message: 'Access Denied: Only the primary administrator email (anusripvc202@gmail.com) is authorized for Admin access.'

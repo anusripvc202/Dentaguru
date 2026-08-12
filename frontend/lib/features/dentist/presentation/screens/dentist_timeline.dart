@@ -4,7 +4,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
-import '../../../../core/widgets/products_dropdown_menu.dart';
+import '../../../../core/widgets/dental_ads_banner.dart';
 
 class DentistTimelineScreen extends StatefulWidget {
   const DentistTimelineScreen({super.key});
@@ -841,10 +841,6 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
           ],
         ),
         actions: [
-          const Padding(
-            padding: EdgeInsets.only(right: 6),
-            child: ProductsDropdownMenu(),
-          ),
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: Row(
@@ -1139,6 +1135,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                   ),
                 ],
               ),
+              const SizedBox(height: 24),
+
+              // ── HERO ADS SECTION (Professional Dental Supplies) ────────
+              const DentalAdsBanner(isDentist: true),
               const SizedBox(height: 24),
 
               // 4. Section: Admin Assigned Patients Stream
@@ -1474,8 +1474,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   }) {
     return Expanded(
       child: Container(
-        height: 98,
-        padding: const EdgeInsets.all(12),
+        constraints: const BoxConstraints(minHeight: 112),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
@@ -1491,26 +1491,33 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              padding: const EdgeInsets.all(7),
+              padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
                 color: accentColor.withValues(alpha: 0.12),
                 shape: BoxShape.circle,
               ),
-              child: Icon(icon, color: accentColor, size: 17),
+              child: Icon(icon, color: accentColor, size: 16),
             ),
-            const SizedBox(height: 6),
-            Text(
-              count,
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: accentColor),
+            const SizedBox(height: 4),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                count,
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: accentColor),
+              ),
             ),
             const SizedBox(height: 2),
-            Text(
-              label,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 9.5, color: AppTheme.textMuted, fontWeight: FontWeight.w600, height: 1.1),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 9.5, color: AppTheme.textMuted, fontWeight: FontWeight.w600, height: 1.1),
+              ),
             ),
           ],
         ),
@@ -1528,7 +1535,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
       child: GestureDetector(
         onTap: onTap,
         child: Container(
-          height: 92,
+          constraints: const BoxConstraints(minHeight: 96),
           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
           decoration: BoxDecoration(
             color: Colors.white,
@@ -1544,14 +1551,15 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(7),
                 decoration: BoxDecoration(
                   color: color.withValues(alpha: 0.12),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(icon, color: color, size: 18),
+                child: Icon(icon, color: color, size: 17),
               ),
               const SizedBox(height: 4),
               Padding(

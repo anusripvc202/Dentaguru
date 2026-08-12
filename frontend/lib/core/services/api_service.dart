@@ -32,6 +32,11 @@ class ApiService {
     String? licenseNumber,
     String? clinicName,
     String? clinicAddress,
+    String? location,
+    String? city,
+    String? pincode,
+    String? qualification,
+    int? experienceYears,
     String? profilePhoto,
   }) async {
     final payload = jsonEncode({
@@ -44,6 +49,11 @@ class ApiService {
       if (licenseNumber != null) 'licenseNumber': licenseNumber,
       if (clinicName != null) 'clinicName': clinicName,
       if (clinicAddress != null) 'clinicAddress': clinicAddress,
+      if (location != null) 'location': location,
+      if (city != null) 'city': city,
+      if (pincode != null) 'pincode': pincode,
+      if (qualification != null) 'qualification': qualification,
+      if (experienceYears != null) 'experienceYears': experienceYears,
       if (profilePhoto != null) 'profilePhoto': profilePhoto,
     });
 
@@ -79,6 +89,9 @@ class ApiService {
             'phone': phone.trim(),
             if (clinicName != null) 'clinicName': clinicName,
             if (specialty != null) 'specialty': specialty,
+            if (location != null) 'location': location,
+            if (pincode != null) 'pincode': pincode,
+            if (clinicAddress != null) 'clinicAddress': clinicAddress,
           },
         );
         if (res.user != null) {
@@ -279,19 +292,33 @@ class ApiService {
     }
   }
 
-  /// Fetch live dentists directory from Supabase
-  Future<List<dynamic>> fetchDentists() async {
+  /// Fetch live dentists directory from Supabase.
+  /// Optionally filter by [state], [city], [pincode], [specialty], [availability] (server-side).
+  Future<List<dynamic>> fetchDentists({String? state, String? city, String? pincode, String? specialty, String? availability}) async {
     try {
-      final url = Uri.parse('${ApiConstants.baseUrl}/dentists');
-      final response = await http.get(url, headers: _headers).timeout(const Duration(seconds: 10));
+      final params = <String, String>{};
+      if (state != null && state.trim().isNotEmpty) params['state'] = state.trim();
+      if (city != null && city.trim().isNotEmpty) params['city'] = city.trim();
+      if (pincode != null && pincode.trim().isNotEmpty) params['pincode'] = pincode.trim();
+      if (specialty != null && specialty.trim().isNotEmpty) params['specialty'] = specialty.trim();
+      if (availability != null && availability.trim().isNotEmpty) params['availability'] = availability.trim();
+
+      final uri = Uri.parse('${ApiConstants.baseUrl}/dentists').replace(queryParameters: params.isNotEmpty ? params : null);
+      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         return data['dentists'] ?? [];
       }
     } catch (e) {
       try {
-        final fallbackUrl = Uri.parse('http://localhost:5000/api/v1/dentists');
-        final response = await http.get(fallbackUrl, headers: _headers);
+        final params = <String, String>{};
+        if (state != null && state.trim().isNotEmpty) params['state'] = state.trim();
+        if (city != null && city.trim().isNotEmpty) params['city'] = city.trim();
+        if (pincode != null && pincode.trim().isNotEmpty) params['pincode'] = pincode.trim();
+        if (specialty != null && specialty.trim().isNotEmpty) params['specialty'] = specialty.trim();
+        if (availability != null && availability.trim().isNotEmpty) params['availability'] = availability.trim();
+        final fallbackUri = Uri.parse('http://localhost:5000/api/v1/dentists').replace(queryParameters: params.isNotEmpty ? params : null);
+        final response = await http.get(fallbackUri, headers: _headers);
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body);
           return data['dentists'] ?? [];
@@ -555,6 +582,17 @@ class ApiService {
   /// Patient: Fetch own Dental Problem Requests
   Future<List<dynamic>> fetchPatientProblemRequests({String? patientId}) async {
     try {
+      var query = Supabase.instance.client.from('patient_problem_requests').select('*');
+      if (patientId != null && patientId.isNotEmpty) {
+        query = query.eq('patient_id', patientId);
+      }
+      final res = await query.order('created_at', ascending: false);
+      if (res.isNotEmpty) return res;
+    } catch (e) {
+      debugPrint('Supabase direct fetch patient problem requests notice: $e');
+    }
+
+    try {
       final uri = Uri.parse('${ApiConstants.baseUrl}/patient/problem-requests').replace(queryParameters: {
         if (patientId != null && patientId.isNotEmpty) 'patientId': patientId,
       });
@@ -567,22 +605,22 @@ class ApiService {
     } catch (e) {
       debugPrint('Fetch patient problem requests error: $e');
     }
-    // Direct 24/7 Supabase Cloud Fallback
-    try {
-      var query = Supabase.instance.client.from('patient_problem_requests').select('*');
-      if (patientId != null && patientId.isNotEmpty) {
-        query = query.eq('patient_id', patientId);
-      }
-      final res = await query.order('created_at', ascending: false);
-      if (res.isNotEmpty) return res;
-    } catch (e) {
-      debugPrint('Supabase direct fetch patient problem requests error: $e');
-    }
     return [];
   }
 
   /// Admin: Fetch all Dental Problem Requests
   Future<List<dynamic>> fetchAdminProblemRequests({String? status}) async {
+    try {
+      var query = Supabase.instance.client.from('patient_problem_requests').select('*');
+      if (status != null && status.isNotEmpty) {
+        query = query.eq('status', status);
+      }
+      final res = await query.order('created_at', ascending: false);
+      if (res.isNotEmpty) return res;
+    } catch (e) {
+      debugPrint('Supabase direct fetch admin problem requests notice: $e');
+    }
+
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}/admin/problem-requests').replace(queryParameters: {
         if (status != null && status.isNotEmpty) 'status': status,
@@ -596,22 +634,24 @@ class ApiService {
     } catch (e) {
       debugPrint('Fetch admin problem requests error: $e');
     }
-    // Direct 24/7 Supabase Cloud Fallback
-    try {
-      var query = Supabase.instance.client.from('patient_problem_requests').select('*');
-      if (status != null && status.isNotEmpty) {
-        query = query.eq('status', status);
-      }
-      final res = await query.order('created_at', ascending: false);
-      if (res.isNotEmpty) return res;
-    } catch (e) {
-      debugPrint('Supabase direct fetch admin problem requests error: $e');
-    }
     return [];
   }
 
   /// Admin/All: Fetch all registered Patients directly from Supabase DB
   Future<List<dynamic>> fetchPatients() async {
+    try {
+      final res = await Supabase.instance.client
+          .from('users')
+          .select('id, name, email, phone, role, created_at')
+          .ilike('role', 'Patient')
+          .order('created_at', ascending: false);
+      if (res.isNotEmpty) {
+        return res;
+      }
+    } catch (e) {
+      debugPrint('Supabase direct fetch patients notice: $e');
+    }
+
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}/admin/patients');
       final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
@@ -624,19 +664,6 @@ class ApiService {
       }
     } catch (e) {
       debugPrint('Fetch patients error: $e');
-    }
-    // Direct 24/7 Supabase Cloud Fallback
-    try {
-      final res = await Supabase.instance.client
-          .from('users')
-          .select('id, name, email, phone, role, created_at')
-          .ilike('role', 'Patient')
-          .order('created_at', ascending: false);
-      if (res.isNotEmpty) {
-        return res;
-      }
-    } catch (e) {
-      debugPrint('Supabase direct fetch patients error: $e');
     }
     return [];
   }

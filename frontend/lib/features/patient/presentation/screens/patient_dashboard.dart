@@ -1,11 +1,10 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
-import '../../../../core/widgets/products_dropdown_menu.dart';
+import '../../../../core/widgets/dental_ads_banner.dart';
 
 class PatientDashboardScreen extends StatefulWidget {
   const PatientDashboardScreen({super.key});
@@ -262,15 +261,6 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
             );
           },
         );
-      },
-    );
-  }
-
-  void _showBrushingTimerDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return const _BrushingTimerModal();
       },
     );
   }
@@ -778,10 +768,6 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
           child: DentaGuruLogo(height: 32),
         ),
         actions: [
-          const Padding(
-            padding: EdgeInsets.only(right: 4),
-            child: ProductsDropdownMenu(),
-          ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: Row(
@@ -1093,15 +1079,12 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                     color: const Color(0xFF10B981),
                     onTap: () => setState(() => _currentIndex = 2),
                   ),
-                  const SizedBox(width: 10),
-                  _AnimatedPatientActionTile(
-                    icon: Icons.timer_rounded,
-                    title: 'Brush Timer',
-                    color: AppTheme.brandOrange,
-                    onTap: () => _showBrushingTimerDialog(context),
-                  ),
                 ],
               ),
+              const SizedBox(height: 24),
+
+              // ── HERO ADS SECTION ─────────────────────────────────────
+              const DentalAdsBanner(isDentist: false),
               const SizedBox(height: 24),
 
               // 4. Section: Reported Problems & Doctor Suggestions
@@ -2189,110 +2172,6 @@ class _AnimatedPatientActionTileState extends State<_AnimatedPatientActionTile> 
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-// Custom 2-Minute Brushing Timer Modal Widget
-class _BrushingTimerModal extends StatefulWidget {
-  const _BrushingTimerModal();
-
-  @override
-  State<_BrushingTimerModal> createState() => _BrushingTimerModalState();
-}
-
-class _BrushingTimerModalState extends State<_BrushingTimerModal> {
-  int _secondsLeft = 120;
-  bool _isRunning = false;
-  Timer? _timer;
-
-  void _toggleTimer() {
-    if (_isRunning) {
-      _timer?.cancel();
-      setState(() => _isRunning = false);
-    } else {
-      setState(() => _isRunning = true);
-      _timer = Timer.periodic(const Duration(seconds: 1), (t) {
-        if (_secondsLeft > 0) {
-          setState(() => _secondsLeft--);
-        } else {
-          t.cancel();
-          setState(() => _isRunning = false);
-        }
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final minutes = (_secondsLeft ~/ 60).toString().padLeft(2, '0');
-    final seconds = (_secondsLeft % 60).toString().padLeft(2, '0');
-
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('🪥 2-Minute Oral Care Timer', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
-            const SizedBox(height: 4),
-            const Text('Dentists recommend brushing twice daily for 2 full minutes.', textAlign: TextAlign.center, style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
-            const SizedBox(height: 20),
-            Stack(
-              alignment: Alignment.center,
-              children: [
-                SizedBox(
-                  width: 130,
-                  height: 130,
-                  child: CircularProgressIndicator(
-                    value: _secondsLeft / 120.0,
-                    strokeWidth: 8,
-                    backgroundColor: const Color(0xFFE2E8F0),
-                    valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.brandOrange),
-                  ),
-                ),
-                Text('$minutes:$seconds', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: AppTheme.textDark)),
-              ],
-            ),
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    icon: Icon(_isRunning ? Icons.pause_rounded : Icons.play_arrow_rounded, size: 20),
-                    label: Text(_isRunning ? 'Pause' : 'Start Brushing', style: const TextStyle(fontWeight: FontWeight.bold)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.brandOrange,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                    onPressed: _toggleTimer,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                IconButton(
-                  icon: const Icon(Icons.refresh_rounded, color: AppTheme.textMuted),
-                  onPressed: () {
-                    _timer?.cancel();
-                    setState(() {
-                      _secondsLeft = 120;
-                      _isRunning = false;
-                    });
-                  },
-                ),
-              ],
-            ),
-          ],
         ),
       ),
     );
