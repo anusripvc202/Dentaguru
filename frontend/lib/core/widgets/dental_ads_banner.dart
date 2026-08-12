@@ -16,19 +16,19 @@ class DentalAd {
 }
 
 const List<DentalAd> _patientAds = [
-  DentalAd(brand:'Colgate Total',tagline:'Advanced 12-Hour Protection',description:'Fight bacteria, plaque and tartar 24/7 with Colgate Total whitening formula. Trusted by dentists worldwide.',badgeLabel:'Dentist Recommended',website:'https://www.colgate.com/en-in/products/toothpaste',ctaText:'Shop Colgate',gradientColors:[Color(0xFF1A56DB),Color(0xFF0EA5E9)],icon:Icons.star_rounded,emoji:'🦷'),
+  DentalAd(brand:'GSI Implants',tagline:'Premium Dental Implant Systems',description:'Advanced dental implant solutions, prosthetic components and precision implantology technology.',badgeLabel:'Featured Partner',website:'https://www.gsimplants.com',ctaText:'Visit GSI Implants',gradientColors:[Color(0xFF0F172A),Color(0xFF2563EB)],icon:Icons.biotech_rounded,emoji:'🦷'),
+  DentalAd(brand:'Colgate Total',tagline:'Advanced 12-Hour Protection',description:'Fight bacteria, plaque and tartar 24/7 with Colgate Total whitening formula. Trusted by dentists worldwide.',badgeLabel:'Dentist Recommended',website:'https://www.colgate.com/en-in/products/toothpaste',ctaText:'Shop Colgate',gradientColors:[Color(0xFF1A56DB),Color(0xFF0EA5E9)],icon:Icons.star_rounded,emoji:'✨'),
   DentalAd(brand:'Oral-B iO Series',tagline:'AI Electric Toothbrush',description:'AI-powered oscillating brush removes 100% more plaque vs. regular manual. 6 smart modes for a perfect smile.',badgeLabel:'AI Brush Tech',website:'https://oralb.com/en-in/electric-toothbrushes',ctaText:'Explore Oral-B',gradientColors:[Color(0xFF0D9488),Color(0xFF06B6D4)],icon:Icons.electric_bolt_rounded,emoji:'⚡'),
   DentalAd(brand:'Listerine Cool Mint',tagline:'Kill 99.9% of Germs in 30s',description:'Clinical-strength antiseptic mouthwash. Clinically proven to fight gum disease and freshen breath instantly.',badgeLabel:'Clinically Proven',website:'https://www.listerine-me.com',ctaText:'Try Listerine',gradientColors:[Color(0xFF059669),Color(0xFF10B981)],icon:Icons.water_drop_rounded,emoji:'💧'),
-  DentalAd(brand:'1mg Dental Store',tagline:'Dental Care Delivered Home',description:'Order toothpaste, floss, whitening kits and more at unbeatable prices. Free delivery on orders above Rs.199.',badgeLabel:'Free Delivery',website:'https://www.1mg.com/categories/dental-care',ctaText:'Order Now',gradientColors:[Color(0xFFDC2626),Color(0xFFEF4444)],icon:Icons.local_pharmacy_rounded,emoji:'💊'),
   DentalAd(brand:'Sensodyne Rapid Relief',tagline:'Instant Sensitivity Relief',description:'Say goodbye to tooth pain. Sensodyne clinically proven to relieve sensitivity in 60 seconds.',badgeLabel:'60-Second Relief',website:'https://www.sensodyne.co.in',ctaText:'Get Relief',gradientColors:[Color(0xFF7C3AED),Color(0xFF8B5CF6)],icon:Icons.healing_rounded,emoji:'🛡️'),
 ];
 
 const List<DentalAd> _dentistAds = [
-  DentalAd(brand:'Dentsply Sirona',tagline:'Professional Dental Equipment',description:'Industry-leading dental imaging, treatment units and instruments. Trusted by 300,000+ dentists worldwide.',badgeLabel:'#1 Dental Brand',website:'https://www.dentsplysirona.com',ctaText:'Explore Products',gradientColors:[Color(0xFF1A56DB),Color(0xFF3B82F6)],icon:Icons.medical_services_rounded,emoji:'🦷'),
+  DentalAd(brand:'GSI Implants',tagline:'Premium Dental Implant Systems',description:'Advanced dental implant solutions, prosthetic components and surgical kits for precision implantology.',badgeLabel:'Featured Partner',website:'https://www.gsimplants.com',ctaText:'Visit GSI Implants',gradientColors:[Color(0xFF0F172A),Color(0xFF2563EB)],icon:Icons.biotech_rounded,emoji:'🦷'),
+  DentalAd(brand:'Dentsply Sirona',tagline:'Professional Dental Equipment',description:'Industry-leading dental imaging, treatment units and instruments. Trusted by 300,000+ dentists worldwide.',badgeLabel:'#1 Dental Brand',website:'https://www.dentsplysirona.com',ctaText:'Explore Products',gradientColors:[Color(0xFF1A56DB),Color(0xFF3B82F6)],icon:Icons.medical_services_rounded,emoji:'💎'),
   DentalAd(brand:'KaVo Kerr Group',tagline:'Next-Gen Handpieces',description:'High-speed handpieces, endo motors and curing lights for precision dentistry. ISO certified. Trusted globally.',badgeLabel:'ISO Certified',website:'https://www.kavokerr.com',ctaText:'Shop KaVo',gradientColors:[Color(0xFF0F766E),Color(0xFF0D9488)],icon:Icons.precision_manufacturing_rounded,emoji:'⚙️'),
   DentalAd(brand:'Henry Schein Dental',tagline:'Your Complete Supply Partner',description:'Everything from composites to PPE delivered next-day. Special pricing for registered practices. 800,000+ products.',badgeLabel:'Next-Day Delivery',website:'https://www.henryschein.com/dental',ctaText:'Order Supplies',gradientColors:[Color(0xFFB45309),Color(0xFFD97706)],icon:Icons.inventory_2_rounded,emoji:'📦'),
   DentalAd(brand:'Planmeca Imaging',tagline:'3D CBCT Panoramic Imaging',description:'Ultra-low-dose CBCT scanners with AI diagnostics. Upgrade your practice with world-class dental technology.',badgeLabel:'AI Diagnostics',website:'https://www.planmeca.com',ctaText:'Learn More',gradientColors:[Color(0xFF6D28D9),Color(0xFF7C3AED)],icon:Icons.biotech_rounded,emoji:'🔭'),
-  DentalAd(brand:'Medline Dental PPE',tagline:'PPE and Consumables — Bulk',description:'High-quality gloves, masks, sterilization pouches and infection control supplies. Bulk discounts for clinics.',badgeLabel:'Bulk Pricing',website:'https://www.medline.com',ctaText:'Get Quote',gradientColors:[Color(0xFF047857),Color(0xFF059669)],icon:Icons.health_and_safety_rounded,emoji:'🛡️'),
 ];
 
 class DentalAdsBanner extends StatefulWidget {
@@ -64,7 +64,19 @@ class _DentalAdsBannerState extends State<DentalAdsBanner> {
 
   Future<void> _launch(String url) async {
     final uri = Uri.parse(url);
-    try { if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication); } catch (_) {}
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        await launchUrl(uri);
+      }
+    } catch (e) {
+      try {
+        await launchUrl(uri);
+      } catch (err) {
+        debugPrint('Could not launch website $url: $err');
+      }
+    }
   }
 
   @override
