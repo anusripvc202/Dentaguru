@@ -1071,22 +1071,24 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                   final myAssigned = requests.where((req) {
                     if (req.assignedDoctorId != null && currentDoc != null && req.assignedDoctorId == currentDoc.id) return true;
                     if (req.assignedDoctorName != null && docNameClean.isNotEmpty && req.assignedDoctorName!.toLowerCase().contains(docNameClean)) return true;
-                    if (currentDoc == null && req.assignedDoctorName != null && req.assignedDoctorName!.isNotEmpty) return true;
                     return false;
                   }).toList();
+
+                  final displayCount = myAssigned.isNotEmpty ? myAssigned.length : requests.length;
+                  final pendingCount = requests.where((r) => r.status == 'Doctor Suggested' || r.status == 'Pending').length;
 
                   return Row(
                     children: [
                       _buildQuickStatBox(
                         icon: Icons.groups_rounded,
-                        count: '${myAssigned.length}',
-                        label: "My Assigned Patients",
+                        count: '$displayCount',
+                        label: "Patient Consultations",
                         accentColor: AppTheme.primaryBlue,
                       ),
                       const SizedBox(width: 10),
                       _buildQuickStatBox(
                         icon: Icons.receipt_long_rounded,
-                        count: '${myAssigned.where((r) => r.status == 'Doctor Suggested').length}',
+                        count: '$pendingCount',
                         label: 'Pending My Accept',
                         accentColor: const Color(0xFF10B981),
                       ),
@@ -1177,20 +1179,18 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                   final currentDoc = _patientService.currentDoctor;
                   final docNameClean = currentDoc?.name.replaceAll('Dr. ', '').trim().toLowerCase() ?? '';
 
-                  final myAssignedRequests = requests.where((req) {
-                    if (req.assignedDoctorId != null && currentDoc != null && req.assignedDoctorId == currentDoc.id) {
-                      return true;
-                    }
-                    if (req.assignedDoctorName != null && docNameClean.isNotEmpty && req.assignedDoctorName!.toLowerCase().contains(docNameClean)) {
-                      return true;
-                    }
-                    if (req.assignedDoctorName != null && req.assignedDoctorName!.isNotEmpty) {
-                      return true;
-                    }
-                    return false;
-                  }).toList();
+                  final sortedRequests = List<PatientConsultationRequest>.from(requests);
+                  sortedRequests.sort((a, b) {
+                    final bool aMine = (a.assignedDoctorId != null && currentDoc != null && a.assignedDoctorId == currentDoc.id) ||
+                        (a.assignedDoctorName != null && docNameClean.isNotEmpty && a.assignedDoctorName!.toLowerCase().contains(docNameClean));
+                    final bool bMine = (b.assignedDoctorId != null && currentDoc != null && b.assignedDoctorId == currentDoc.id) ||
+                        (b.assignedDoctorName != null && docNameClean.isNotEmpty && b.assignedDoctorName!.toLowerCase().contains(docNameClean));
+                    if (aMine && !bMine) return -1;
+                    if (!aMine && bMine) return 1;
+                    return 0;
+                  });
 
-                  if (myAssignedRequests.isEmpty) {
+                  if (sortedRequests.isEmpty) {
                     return Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(24),
@@ -1203,10 +1203,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                         children: [
                           Icon(Icons.person_search_rounded, size: 36, color: Colors.grey),
                           SizedBox(height: 8),
-                          Text('No Patient Consultations Assigned Yet', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          Text('No Patient Consultations Yet', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                           SizedBox(height: 4),
                           Text(
-                            'Only patients assigned to your profile by the Super Admin will appear here for your review.',
+                            'Patient consultation requests submitted by patients will appear here for your review.',
                             style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
                             textAlign: TextAlign.center,
                           ),
@@ -1216,7 +1216,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                   }
 
                   return Column(
-                    children: myAssignedRequests.map((req) {
+                    children: sortedRequests.map((req) {
                       final bool isConfirmed = req.status == 'Confirmed' || req.status == 'Accepted';
 
                       return Container(
@@ -1647,14 +1647,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   Widget _buildPatientsTab() {
     final requests = _patientService.requests;
     final patient = _patientService.currentPatient;
-    final currentDoc = _patientService.currentDoctor;
-    final docNameClean = currentDoc?.name.replaceAll('Dr. ', '').trim().toLowerCase() ?? '';
 
-    final myPatients = requests.where((req) {
-      if (req.assignedDoctorId != null && currentDoc != null && req.assignedDoctorId == currentDoc.id) return true;
-      if (req.assignedDoctorName != null && docNameClean.isNotEmpty && req.assignedDoctorName!.toLowerCase().contains(docNameClean)) return true;
-      return false;
-    }).toList();
+    final myPatients = List<PatientConsultationRequest>.from(requests);
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -1675,7 +1669,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 border: Border.all(color: const Color(0xFFE2E8F0)),
               ),
               child: const Center(
-                child: Text('No patient records assigned to your profile.', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                child: Text('No patient records found.', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
               ),
             )
           else
