@@ -988,8 +988,8 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               ),
               const SizedBox(height: 16),
 
-              // ── HERO ADS SECTION (GSI Implants & Partner Brands) ─────
-              const DentalAdsBanner(isDentist: false),
+              // ── HERO ADS SECTION (GSI Implants Featured Partner) ──────
+              const DentalAdsBanner(isDentist: false, firstSlideOnly: true),
               const SizedBox(height: 18),
 
               // 2. Main Hero Problem Banner with Pulsing Icon
@@ -1085,6 +1085,10 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                   ),
                 ],
               ),
+              const SizedBox(height: 24),
+
+              // ── REMAINING PRODUCTS ADS SECTION (Auto-rotating one by one above problems) ──
+              const DentalAdsBanner(isDentist: false, remainingSlidesOnly: true),
               const SizedBox(height: 24),
 
               // 4. Section: Reported Problems & Doctor Suggestions

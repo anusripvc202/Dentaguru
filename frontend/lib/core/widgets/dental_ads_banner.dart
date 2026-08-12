@@ -33,7 +33,18 @@ const List<DentalAd> _dentistAds = [
 
 class DentalAdsBanner extends StatefulWidget {
   final bool isDentist;
-  const DentalAdsBanner({super.key, this.isDentist = false});
+  final bool firstSlideOnly;
+  final bool remainingSlidesOnly;
+  final String? customTitle;
+
+  const DentalAdsBanner({
+    super.key,
+    this.isDentist = false,
+    this.firstSlideOnly = false,
+    this.remainingSlidesOnly = false,
+    this.customTitle,
+  });
+
   @override
   State<DentalAdsBanner> createState() => _DentalAdsBannerState();
 }
@@ -42,17 +53,28 @@ class _DentalAdsBannerState extends State<DentalAdsBanner> {
   late PageController _pageController;
   Timer? _autoScrollTimer;
   int _currentPage = 0;
-  List<DentalAd> get _ads => widget.isDentist ? _dentistAds : _patientAds;
+
+  List<DentalAd> get _ads {
+    final fullList = widget.isDentist ? _dentistAds : _patientAds;
+    if (widget.firstSlideOnly) {
+      return [fullList.first];
+    } else if (widget.remainingSlidesOnly) {
+      return fullList.skip(1).toList();
+    }
+    return fullList;
+  }
 
   @override
   void initState() {
     super.initState();
     _pageController = PageController();
-    _autoScrollTimer = Timer.periodic(const Duration(seconds: 4), (_) {
-      if (!mounted || !_pageController.hasClients) return;
-      final next = (_currentPage + 1) % _ads.length;
-      _pageController.animateToPage(next, duration: const Duration(milliseconds: 550), curve: Curves.easeInOut);
-    });
+    if (_ads.length > 1) {
+      _autoScrollTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+        if (!mounted || !_pageController.hasClients) return;
+        final next = (_currentPage + 1) % _ads.length;
+        _pageController.animateToPage(next, duration: const Duration(milliseconds: 550), curve: Curves.easeInOut);
+      });
+    }
   }
 
   @override
@@ -81,17 +103,26 @@ class _DentalAdsBannerState extends State<DentalAdsBanner> {
 
   @override
   Widget build(BuildContext context) {
+    if (_ads.isEmpty) return const SizedBox.shrink();
+
+    final headerTitle = widget.customTitle ??
+        (widget.firstSlideOnly
+            ? 'Hero Partner'
+            : (widget.remainingSlidesOnly
+                ? (widget.isDentist ? 'Supply & Equipment Partners' : 'Recommended Dental Products')
+                : (widget.isDentist ? 'Dental Supply Partners' : 'Featured Dental Products')));
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
           Expanded(
             child: Row(children: [
-              Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: const Color(0xFFFFF7ED), borderRadius: BorderRadius.circular(8)), child: const Text('📢', style: TextStyle(fontSize: 14))),
+              Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: const Color(0xFFFFF7ED), borderRadius: BorderRadius.circular(8)), child: Text(widget.firstSlideOnly ? '🌟' : '📢', style: const TextStyle(fontSize: 14))),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  widget.isDentist ? 'Dental Supply Partners' : 'Featured Dental Products',
+                  headerTitle,
                   style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
                   overflow: TextOverflow.ellipsis,
                   maxLines: 1,
@@ -109,12 +140,14 @@ class _DentalAdsBannerState extends State<DentalAdsBanner> {
           onPageChanged: (i) => setState(() => _currentPage = i),
           itemBuilder: (ctx, i) => _AdCard(ad: _ads[i], onTap: () => _launch(_ads[i].website)),
         )),
-        const SizedBox(height: 8),
-        Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(_ads.length, (i) {
-          final isActive = i == _currentPage;
-          return AnimatedContainer(duration: const Duration(milliseconds: 280), margin: const EdgeInsets.symmetric(horizontal: 3), width: isActive ? 20 : 6, height: 6,
-            decoration: BoxDecoration(color: isActive ? _ads[_currentPage].gradientColors.first : const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(4)));
-        })),
+        if (_ads.length > 1) ...[
+          const SizedBox(height: 8),
+          Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(_ads.length, (i) {
+            final isActive = i == _currentPage;
+            return AnimatedContainer(duration: const Duration(milliseconds: 280), margin: const EdgeInsets.symmetric(horizontal: 3), width: isActive ? 20 : 6, height: 6,
+              decoration: BoxDecoration(color: isActive ? _ads[_currentPage].gradientColors.first : const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(4)));
+          })),
+        ],
       ],
     );
   }
