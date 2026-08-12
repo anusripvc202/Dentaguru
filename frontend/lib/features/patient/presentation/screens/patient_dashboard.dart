@@ -988,6 +988,10 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               ),
               const SizedBox(height: 16),
 
+              // ── HERO ADS SECTION (GSI Implants & Partner Brands) ─────
+              const DentalAdsBanner(isDentist: false),
+              const SizedBox(height: 18),
+
               // 2. Main Hero Problem Banner with Pulsing Icon
               InkWell(
                 onTap: () => _showReportProblemDialog(context),
@@ -1044,10 +1048,6 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
-
-              // ── HERO ADS SECTION ─────────────────────────────────────
-              const DentalAdsBanner(isDentist: false),
               const SizedBox(height: 20),
 
               // 3. Animated Quick Action Cards
