@@ -1103,6 +1103,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               ),
               const SizedBox(height: 24),
 
+              // ── HERO ADS SECTION (Professional Dental Supplies) ────────
+              const DentalAdsBanner(isDentist: true),
+              const SizedBox(height: 20),
+
               // 3. Quick Practitioner Actions Bar
               const Text('Practitioner Tools', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
               const SizedBox(height: 10),
@@ -1135,10 +1139,6 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
-
-              // ── HERO ADS SECTION (Professional Dental Supplies) ────────
-              const DentalAdsBanner(isDentist: true),
               const SizedBox(height: 24),
 
               // 4. Section: Admin Assigned Patients Stream

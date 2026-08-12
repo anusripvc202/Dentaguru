@@ -1046,6 +1046,10 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               ),
               const SizedBox(height: 20),
 
+              // ── HERO ADS SECTION ─────────────────────────────────────
+              const DentalAdsBanner(isDentist: false),
+              const SizedBox(height: 20),
+
               // 3. Animated Quick Action Cards
               const Text(
                 'Quick Care Services',
@@ -1081,10 +1085,6 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
-
-              // ── HERO ADS SECTION ─────────────────────────────────────
-              const DentalAdsBanner(isDentist: false),
               const SizedBox(height: 24),
 
               // 4. Section: Reported Problems & Doctor Suggestions
