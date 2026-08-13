@@ -1296,7 +1296,6 @@ class PatientProblemService extends ChangeNotifier {
             );
           }
         }
-      }
 
       _saveToStorage();
       notifyListeners();
