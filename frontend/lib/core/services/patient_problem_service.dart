@@ -905,18 +905,8 @@ class PatientProblemService extends ChangeNotifier {
           }
         }
 
-        if ((assignedDocName == null || assignedDocName.isEmpty || assignedDocName == 'null') &&
-            (rawStatus.toUpperCase().contains('ASSIGNED') || rawStatus.toUpperCase().contains('SUGGESTED') || rawStatus.toUpperCase() == 'CONFIRMED')) {
-          if (_allDoctors.isNotEmpty) {
-            final topDoc = _allDoctors.first;
-            assignedDocName = topDoc.name;
-            assignedDocSpecialty = topDoc.specialty;
-            assignedDocClinic = topDoc.clinicName;
-          } else {
-            assignedDocName = 'Dr. Specialist';
-            assignedDocSpecialty = 'Dental Specialist';
-            assignedDocClinic = 'DentaGuru Care Center';
-          }
+        if (assignedDocName == null || assignedDocName == 'null') {
+          assignedDocName = '';
         }
 
         // Normalize status from DB to frontend display values
@@ -1024,18 +1014,8 @@ class PatientProblemService extends ChangeNotifier {
           }
         }
 
-        if ((assignedDocName == null || assignedDocName.isEmpty || assignedDocName == 'null') &&
-            (rawStatus.toUpperCase().contains('ASSIGNED') || rawStatus.toUpperCase().contains('SUGGESTED') || rawStatus.toUpperCase() == 'CONFIRMED')) {
-          if (_allDoctors.isNotEmpty) {
-            final topDoc = _allDoctors.first;
-            assignedDocName = topDoc.name;
-            assignedDocSpecialty = topDoc.specialty;
-            assignedDocClinic = topDoc.clinicName;
-          } else {
-            assignedDocName = 'Dr. Specialist';
-            assignedDocSpecialty = 'Dental Specialist';
-            assignedDocClinic = 'DentaGuru Care Center';
-          }
+        if (assignedDocName == null || assignedDocName == 'null') {
+          assignedDocName = '';
         }
 
         final rawStatusUpper = rawStatus.toUpperCase();
@@ -1561,6 +1541,10 @@ class PatientProblemService extends ChangeNotifier {
       await Supabase.instance.client.from('patient_problem_requests').update({
         'status': 'DENTIST_ASSIGNED',
         'suggested_dentist_id': doctor.id,
+        'assigned_doctor_id': doctor.id,
+        'assigned_doctor_name': doctor.name,
+        'assigned_doctor_specialty': doctor.specialty,
+        'assigned_doctor_clinic': doctor.clinicName,
         'admin_notes': adminNotes,
       }).eq('id', requestId);
     } catch (e) {
