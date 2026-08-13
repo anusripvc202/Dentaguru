@@ -638,11 +638,10 @@ class ApiService {
   /// Patient: Fetch own Dental Problem Requests
   Future<List<dynamic>> fetchPatientProblemRequests({String? patientId}) async {
     try {
-      var query = Supabase.instance.client.from('patient_problem_requests').select('*');
-      if (patientId != null && patientId.isNotEmpty) {
-        query = query.eq('patient_id', patientId);
-      }
-      final res = await query.order('created_at', ascending: false);
+      final res = await Supabase.instance.client
+          .from('patient_problem_requests')
+          .select('*')
+          .order('created_at', ascending: false);
       if (res.isNotEmpty) return res;
     } catch (e) {
       debugPrint('Supabase direct fetch patient problem requests notice: $e');

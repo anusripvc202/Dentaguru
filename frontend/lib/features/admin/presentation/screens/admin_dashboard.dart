@@ -907,7 +907,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                       ),
                                       onPressed: () async {
                                         if (selectedDoctor == null) return;
-                                        _problemService.assignDoctorToRequest(
+                                        await _problemService.assignDoctorToRequest(
                                           requestId: req.id,
                                           doctor: selectedDoctor!,
                                           adminNotes: adminNotesController.text.trim(),

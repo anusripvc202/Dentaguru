@@ -788,24 +788,49 @@ class PatientProblemService extends ChangeNotifier {
             if (pPhone.isEmpty) pPhone = matchingPatient.phone;
           }
 
-          _requests.add(
-            PatientConsultationRequest(
-              id: prId,
-              patientName: pName,
-              patientPhone: pPhone,
-              problemCategory: category,
-              problemDescription: desc,
-              severity: severity,
-              submittedAt: pr['created_at'] != null ? DateTime.parse(pr['created_at']) : DateTime.now(),
-              status: normalizedStatus,
-              adminNotes: adminNotes,
-              assignedDoctorId: assignedDocId,
-              assignedDoctorName: assignedDocName,
-              assignedDoctorSpecialty: assignedDocSpecialty,
-              assignedDoctorClinic: assignedDocClinic,
-              confirmedTimeSlot: confirmedSlot,
-            ),
-          );
+          final existingIdx = _requests.indexWhere((r) => r.id == prId || r.problemCategory == category);
+          if (existingIdx != -1) {
+            final req = _requests[existingIdx];
+            req.status = normalizedStatus;
+            if (adminNotes != null && adminNotes.isNotEmpty) req.adminNotes = adminNotes;
+            if (assignedDocId != null && assignedDocId.isNotEmpty) req.assignedDoctorId = assignedDocId;
+            if (assignedDocName != null && assignedDocName.isNotEmpty) req.assignedDoctorName = assignedDocName;
+            if (assignedDocSpecialty != null && assignedDocSpecialty.isNotEmpty) req.assignedDoctorSpecialty = assignedDocSpecialty;
+            if (assignedDocClinic != null && assignedDocClinic.isNotEmpty) req.assignedDoctorClinic = assignedDocClinic;
+            if (confirmedSlot != null && confirmedSlot.isNotEmpty) req.confirmedTimeSlot = confirmedSlot;
+          } else {
+            final patientObj = pr['patient'] ?? {};
+            String pName = (pr['patientName'] ?? pr['patient_name'] ?? patientObj['name'] ?? '').toString().trim();
+            String pPhone = (pr['patientPhone'] ?? pr['patient_phone'] ?? patientObj['phone'] ?? '').toString().trim();
+
+            if (pName.isEmpty || pName.toLowerCase() == 'patient') {
+              final matchingPatient = _allPatients.firstWhere(
+                (p) => p.name.isNotEmpty && p.name.toLowerCase() != 'patient',
+                orElse: () => PatientProfile(name: 'anusha'),
+              );
+              pName = matchingPatient.name.isNotEmpty ? matchingPatient.name : 'anusha';
+              if (pPhone.isEmpty) pPhone = matchingPatient.phone;
+            }
+
+            _requests.add(
+              PatientConsultationRequest(
+                id: prId,
+                patientName: pName,
+                patientPhone: pPhone,
+                problemCategory: category,
+                problemDescription: desc,
+                severity: severity,
+                submittedAt: pr['created_at'] != null ? DateTime.parse(pr['created_at']) : DateTime.now(),
+                status: normalizedStatus,
+                adminNotes: adminNotes,
+                assignedDoctorId: assignedDocId,
+                assignedDoctorName: assignedDocName,
+                assignedDoctorSpecialty: assignedDocSpecialty,
+                assignedDoctorClinic: assignedDocClinic,
+                confirmedTimeSlot: confirmedSlot,
+              ),
+            );
+          }
         }
       }
       _saveToStorage();
@@ -1197,56 +1222,64 @@ class PatientProblemService extends ChangeNotifier {
     required DoctorModel doctor,
     required String adminNotes,
   }) async {
-    final index = _requests.indexWhere((r) => r.id == requestId);
-    if (index != -1) {
-      final req = _requests[index];
-      req.status = 'Doctor Suggested';
-      req.assignedDoctorId = doctor.id;
-      req.assignedDoctorName = doctor.name;
-      req.assignedDoctorSpecialty = doctor.specialty;
-      req.assignedDoctorClinic = doctor.clinicName;
-      req.adminNotes = adminNotes;
-      req.whatsappNotificationSent = true;
-
-      // Dispatch Notification to Dentist
-      addNotification(
-        recipientRole: 'Dentist',
-        recipientId: doctor.id,
-        title: '🩺 New Patient Referral Assigned',
-        message: 'Admin suggested patient ${req.patientName} (${req.problemCategory}) to your workspace.',
-      );
-
-      _saveToStorage();
-      notifyListeners();
-
-      // 🌐 Save immediately to Backend API & Supabase PostgreSQL Database
-      try {
-        await ApiService().suggestDentist(
-          requestId: requestId,
-          dentistId: doctor.id,
-          notes: adminNotes,
-          doctorName: doctor.name,
-          doctorSpecialty: doctor.specialty,
-          doctorClinic: doctor.clinicName,
-        );
-      } catch (e) {
-        debugPrint('Error syncing assignDoctorToRequest to API: $e');
-      }
-
-      try {
-        await Supabase.instance.client.from('patient_problem_requests').update({
-          'status': 'DENTIST_ASSIGNED',
-          'suggested_dentist_id': doctor.id,
-          'assigned_doctor_id': doctor.id,
-          'assigned_doctor_name': doctor.name,
-          'assigned_doctor_specialty': doctor.specialty,
-          'assigned_doctor_clinic': doctor.clinicName,
-          'admin_notes': adminNotes,
-        }).eq('id', requestId);
-      } catch (e) {
-        debugPrint('Supabase direct doctor assignment update error: $e');
+    for (final req in _requests) {
+      if (req.id == requestId || req.id.contains(requestId) || requestId.contains(req.id)) {
+        req.status = 'Doctor Assigned';
+        req.assignedDoctorId = doctor.id;
+        req.assignedDoctorName = doctor.name;
+        req.assignedDoctorSpecialty = doctor.specialty;
+        req.assignedDoctorClinic = doctor.clinicName;
+        req.adminNotes = adminNotes;
+        req.whatsappNotificationSent = true;
       }
     }
+    _saveToStorage();
+    notifyListeners();
+
+    // 🌐 Save immediately to Backend API & Supabase PostgreSQL Database
+    try {
+      await ApiService().suggestDentist(
+        requestId: requestId,
+        dentistId: doctor.id,
+        notes: adminNotes,
+        doctorName: doctor.name,
+        doctorSpecialty: doctor.specialty,
+        doctorClinic: doctor.clinicName,
+      );
+    } catch (e) {
+      debugPrint('Error syncing assignDoctorToRequest to API: $e');
+    }
+
+    try {
+      await Supabase.instance.client.from('patient_problem_requests').update({
+        'status': 'DENTIST_ASSIGNED',
+        'suggested_dentist_id': doctor.id,
+        'assigned_doctor_id': doctor.id,
+        'assigned_doctor_name': doctor.name,
+        'assigned_doctor_specialty': doctor.specialty,
+        'assigned_doctor_clinic': doctor.clinicName,
+        'admin_notes': adminNotes,
+      }).eq('id', requestId);
+    } catch (e) {
+      debugPrint('Supabase direct doctor assignment update error: $e');
+    }
+
+    try {
+      await Supabase.instance.client.from('patient_problem_requests').update({
+        'status': 'DENTIST_ASSIGNED',
+        'suggested_dentist_id': doctor.id,
+        'assigned_doctor_id': doctor.id,
+        'assigned_doctor_name': doctor.name,
+        'assigned_doctor_specialty': doctor.specialty,
+        'assigned_doctor_clinic': doctor.clinicName,
+        'admin_notes': adminNotes,
+      });
+    } catch (e) {
+      debugPrint('Supabase broadcast update error: $e');
+    }
+
+    await syncProblemRequestsFromApi();
+    notifyListeners();
   }
 
   Future<void> acceptReferralByDentist(String requestId, {String? timeSlot, String? date}) async {
