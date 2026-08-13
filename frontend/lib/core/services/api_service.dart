@@ -851,12 +851,16 @@ class ApiService {
     try {
       final client = Supabase.instance.client;
       final currentUserId = dentistId ?? client.auth.currentUser?.id;
-      final currentDoc = PatientProblemService().currentDoctor;
-      final cleanDocName = (dentistName ?? currentDoc?.name ?? '').replaceAll('Dr. ', '').trim();
+      String cleanDocName = (dentistName ?? '').replaceAll('Dr. ', '').trim();
 
       String? altDentistTableId;
       if (currentUserId != null && currentUserId.isNotEmpty) {
         try {
+          final uRes = await client.from('users').select('name').eq('id', currentUserId).maybeSingle();
+          if (uRes != null && uRes['name'] != null && cleanDocName.isEmpty) {
+            cleanDocName = uRes['name'].toString().replaceAll('Dr. ', '').trim();
+          }
+
           final dRes = await client.from('dentists').select('id, user_id').eq('user_id', currentUserId).maybeSingle();
           if (dRes != null) {
             altDentistTableId = dRes['id']?.toString();
