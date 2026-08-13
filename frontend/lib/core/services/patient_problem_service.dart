@@ -1195,6 +1195,7 @@ class PatientProblemService extends ChangeNotifier {
     required String bloodGroup,
     required String emergencyContact,
     String address = '',
+    String city = '',
     String pincode = '',
     Uint8List? photoBytes,
   }) {
@@ -1213,6 +1214,7 @@ class PatientProblemService extends ChangeNotifier {
       bloodGroup: bloodGroup.isEmpty ? 'O Positive (O+)' : bloodGroup,
       emergencyContact: emergencyContact.trim().isEmpty ? phone.trim() : emergencyContact.trim(),
       address: address.trim(),
+      city: city.trim(),
       pincode: pincode.trim(),
       photoBytes: cachedPhoto,
     );
