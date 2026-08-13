@@ -68,24 +68,43 @@ exports.register = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Phone number already registered.' });
         }
 
-        const user = await User.create({
-            name,
-            email: normalizedEmail,
-            password,
-            phone,
-            role: role || 'Patient',
-            state: state || '',
-            city: city || '',
-            pincode: pincode || '',
-            age: age || '',
-            gender: gender || '',
-            blood_group: bloodGroup || '',
-            emergency_contact: emergencyContact || '',
-            latitude: latitude || null,
-            longitude: longitude || null,
-            device_token: fcmToken || null,
-            biometric_token: profilePhoto || null
-        });
+        let user;
+        try {
+            user = await User.create({
+                name,
+                email: normalizedEmail,
+                password,
+                phone,
+                role: role || 'Patient',
+                state: state || '',
+                city: city || '',
+                pincode: pincode || '',
+                age: age || '',
+                gender: gender || '',
+                blood_group: bloodGroup || '',
+                emergency_contact: emergencyContact || '',
+                latitude: latitude || null,
+                longitude: longitude || null,
+                device_token: fcmToken || null,
+                biometric_token: profilePhoto || null
+            });
+        } catch (createErr) {
+            // Schema fallback: if DB table lacks age/gender/blood_group columns
+            user = await User.create({
+                name,
+                email: normalizedEmail,
+                password,
+                phone,
+                role: role || 'Patient',
+                state: state || '',
+                city: city || '',
+                pincode: pincode || '',
+                latitude: latitude || null,
+                longitude: longitude || null,
+                device_token: fcmToken || null,
+                biometric_token: profilePhoto || null
+            });
+        }
 
         // If registering as a Dentist, automatically insert row into 'dentists' and 'clinics' tables
         if (role === 'Dentist' || (role && role.toLowerCase() === 'dentist')) {
