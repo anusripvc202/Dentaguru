@@ -1451,13 +1451,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                     children: acceptedForMe.map((req) {
                       final slot = (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.trim().isNotEmpty)
                           ? req.confirmedTimeSlot!
-                          : 'Today, 4:00 PM';
+                          : 'Today, 3:00 PM';
                       return _buildTimelineNode(
+                        req: req,
                         time: slot,
-                        name: req.patientName,
-                        procedure: req.problemCategory,
-                        status: 'Accepted & Scheduled',
-                        statusColor: const Color(0xFF10B981),
                       );
                     }).toList(),
                   );
@@ -1585,57 +1582,199 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   }
 
   Widget _buildTimelineNode({
+    required PatientConsultationRequest req,
     required String time,
-    required String name,
-    required String procedure,
-    required String status,
-    required Color statusColor,
   }) {
+    final patientName = (req.patientName.contains('-') && req.patientName.length > 20)
+        ? (_patientService.currentPatient.name.isNotEmpty ? _patientService.currentPatient.name : 'anusha')
+        : req.patientName;
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: statusColor.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(
-              time,
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: statusColor),
-            ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.4), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF10B981).withValues(alpha: 0.08),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  (name.contains('-') && name.length > 20)
-                      ? (_patientService.currentPatient.name.isNotEmpty ? _patientService.currentPatient.name : 'Patient')
-                      : name,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
-                  overflow: TextOverflow.ellipsis,
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Row 1: Patient Name & Contact + Severity Badge
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryBlue.withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.person_rounded, color: AppTheme.primaryBlue, size: 18),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            patientName,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (req.patientPhone.isNotEmpty && req.patientPhone != 'Not Provided') ...[
+                            Text(
+                              '📞 ${req.patientPhone}',
+                              style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 2),
-                Text(procedure, style: const TextStyle(fontSize: 11, color: AppTheme.textMuted), overflow: TextOverflow.ellipsis),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: req.severity == 'Severe' ? const Color(0xFFFEE2E2) : const Color(0xFFFEF3C7),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '${req.severity} Severity',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: req.severity == 'Severe' ? const Color(0xFF991B1B) : const Color(0xFF92400E),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Row 2: Confirmed Time Slot Banner & Accepted Badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFECFDF5),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFA7F3D0)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.access_time_filled_rounded, size: 16, color: Color(0xFF059669)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Confirmed Slot: $time',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF047857)),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.check_circle_rounded, color: Colors.white, size: 12),
+                      SizedBox(width: 4),
+                      Text(
+                        'Accepted & Scheduled',
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
+          const SizedBox(height: 12),
+
+          // Row 3: Procedure Category & Symptoms Description
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: statusColor.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
+              color: AppTheme.primaryBlue.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(6),
             ),
-            child: Text(status, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: statusColor)),
+            child: Text(
+              '📌 Category: ${req.problemCategory}',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.primaryBlue),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Symptoms: "${req.problemDescription}"',
+            style: const TextStyle(fontSize: 12, color: AppTheme.textMedium, height: 1.35),
+          ),
+
+          if (req.adminNotes != null && req.adminNotes!.trim().isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              '📝 Admin Note: ${req.adminNotes}',
+              style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: AppTheme.textMuted),
+            ),
+          ],
+          const SizedBox(height: 14),
+
+          // Row 4: Action Buttons (Issue E-Prescription & Chat)
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 38,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.receipt_long_rounded, size: 14),
+                    label: const Text('Issue E-Prescription', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF10B981),
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.zero,
+                      elevation: 1,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: () => _showPrescriptionModal(context, patientName),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: SizedBox(
+                  height: 38,
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.chat_bubble_outline_rounded, size: 14),
+                    label: const Text('Chat', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.primaryBlue,
+                      side: const BorderSide(color: AppTheme.primaryBlue),
+                      padding: EdgeInsets.zero,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: () {
+                      final rId = 'PATIENT-${patientName.isNotEmpty ? patientName.toUpperCase().replaceAll(' ', '_') : 'GUEST'}';
+                      _showDoctorChatModal(context, patientName, rId);
+                    },
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
