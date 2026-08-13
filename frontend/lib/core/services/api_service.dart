@@ -665,6 +665,20 @@ class ApiService {
       };
       final res = await Supabase.instance.client.from('patient_problem_requests').insert(payload).select().single();
       if (res.isNotEmpty) {
+        // Also dispatch asynchronously to Express backend DB so both central DBs stay 100% in sync
+        http.post(
+          Uri.parse('${ApiConstants.baseUrl}/patient/problem-requests'),
+          headers: _headers,
+          body: jsonEncode({
+            'problemCategory': problemCategory,
+            'problemDescription': problemDescription,
+            'patientName': patientName,
+            'patientPhone': patientPhone,
+            'city': city,
+            'pincode': pincode,
+            'state': state,
+          }),
+        ).timeout(const Duration(seconds: 10)).catchError((_) => http.Response('', 500));
         return {'success': true, 'request': res};
       }
     } catch (e) {
@@ -742,32 +756,55 @@ class ApiService {
   }
 
   /// Admin: Fetch all Dental Problem Requests
+  /// Admin: Fetch all Dental Problem Requests (Combines Supabase direct DB & Express Backend)
   Future<List<dynamic>> fetchAdminProblemRequests({String? status}) async {
+    final List<dynamic> items = [];
+    final existingIds = <String>{};
+
+    // 1. Direct Supabase Query first
     try {
       var query = Supabase.instance.client.from('patient_problem_requests').select('*');
       if (status != null && status.isNotEmpty) {
         query = query.eq('status', status);
       }
       final res = await query.order('created_at', ascending: false);
-      if (res.isNotEmpty) return res;
+      if (res.isNotEmpty) {
+        for (final item in res) {
+          final id = (item['id'] ?? item['_id'] ?? '').toString();
+          if (id.isNotEmpty) existingIds.add(id);
+          items.add(item);
+        }
+      }
     } catch (e) {
       debugPrint('Supabase direct fetch admin problem requests notice: $e');
     }
 
+    // 2. Express Backend API fallback (merges any additional records)
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}/admin/problem-requests').replace(queryParameters: {
         if (status != null && status.isNotEmpty) 'status': status,
       });
-      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
+      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final list = data['requests'] ?? [];
-        if (list is List && list.isNotEmpty) return list;
+        if (list is List) {
+          for (final item in list) {
+            final id = (item['_id'] ?? item['id'] ?? '').toString();
+            if (id.isNotEmpty && !existingIds.contains(id)) {
+              existingIds.add(id);
+              items.add(item);
+            } else if (id.isEmpty) {
+              items.add(item);
+            }
+          }
+        }
       }
     } catch (e) {
       debugPrint('Fetch admin problem requests error: $e');
     }
-    return [];
+
+    return items;
   }
 
   /// Dentist: Fetch ONLY problem requests assigned to the logged-in dentist

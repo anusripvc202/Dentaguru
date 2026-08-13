@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
@@ -17,6 +19,9 @@ class AdminDashboardScreen extends StatefulWidget {
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> with TickerProviderStateMixin {
   int _selectedNavIndex = 0; // 0: Dashboard, 1: Clinics, 2: Dentists, 3: Patients, 4: Appointments, 5: Revenue, 6: Reports, 7: Reviews, 8: Settings, 9: Sub-Admins
   final PatientProblemService _problemService = PatientProblemService();
+
+  Timer? _autoSyncTimer;
+  RealtimeChannel? _realtimeChannel;
 
   // Sub-Admin Management State
   final List<Map<String, String>> _subAdmins = [];
@@ -39,7 +44,31 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   void initState() {
     super.initState();
     _problemService.addListener(_onServiceUpdate);
+    _problemService.setAdminMode(true);
     _problemService.syncAllDataFromApi();
+
+    // ⏱️ Auto-sync timer: polls every 4s to catch new requests raised on other devices
+    _autoSyncTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (mounted) _problemService.syncProblemRequestsFromApi();
+    });
+
+    // ⚡ Supabase Realtime Postgres Changes listener for instant multi-device sync
+    try {
+      _realtimeChannel = Supabase.instance.client
+          .channel('admin_problem_requests_realtime')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'patient_problem_requests',
+            callback: (payload) {
+              debugPrint('⚡ Realtime update on patient_problem_requests: ${payload.eventType}');
+              if (mounted) _problemService.syncProblemRequestsFromApi();
+            },
+          )
+          .subscribe();
+    } catch (e) {
+      debugPrint('Admin Realtime Channel Subscription Notice: $e');
+    }
 
     _entryController = AnimationController(
       vsync: this,
@@ -73,8 +102,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
   @override
   void dispose() {
+    _autoSyncTimer?.cancel();
+    if (_realtimeChannel != null) {
+      try {
+        Supabase.instance.client.removeChannel(_realtimeChannel!);
+      } catch (_) {}
+    }
     _entryController.dispose();
     _pulseController.dispose();
+    _problemService.setAdminMode(false);
     _problemService.removeListener(_onServiceUpdate);
     super.dispose();
   }

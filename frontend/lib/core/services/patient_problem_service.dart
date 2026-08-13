@@ -543,6 +543,15 @@ class PatientProblemService extends ChangeNotifier {
     _loadFromStorage();
   }
 
+  // Admin Mode state flag
+  bool _isAdminMode = false;
+  bool get isAdminMode => _isAdminMode;
+
+  void setAdminMode(bool enabled) {
+    _isAdminMode = enabled;
+    syncProblemRequestsFromApi();
+  }
+
   // Current Logged-in Patient Profile
   PatientProfile currentPatient = PatientProfile();
 
@@ -800,8 +809,10 @@ class PatientProblemService extends ChangeNotifier {
       final pEmail = currentPatient.email.isNotEmpty ? currentPatient.email : authUser?.email;
       final currentPName = currentPatient.name;
 
-      final isAdmin = (authUser?.email != null && (authUser!.email!.toLowerCase().contains('admin') || authUser.email!.toLowerCase() == 'anusripvc202@gmail.com')) ||
-                      currentPatient.email.toLowerCase().contains('admin');
+      final isAdmin = _isAdminMode ||
+                      (authUser?.email != null && (authUser!.email!.toLowerCase().contains('admin') || authUser.email!.toLowerCase() == 'anusripvc202@gmail.com')) ||
+                      currentPatient.email.toLowerCase().contains('admin') ||
+                      currentPatient.id.toLowerCase().contains('admin');
 
       // ✅ ALWAYS clear local cache first to enforce logged-in user isolation!
       _requests.clear();
