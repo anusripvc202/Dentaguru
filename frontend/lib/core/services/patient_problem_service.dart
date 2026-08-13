@@ -1147,12 +1147,14 @@ class PatientProblemService extends ChangeNotifier {
   }) async {
     String pName = currentPatient.name.trim();
     if (pName.isEmpty || pName.toLowerCase() == 'patient') {
-      pName = 'anusha';
+      pName = currentPatient.name.isNotEmpty ? currentPatient.name : 'Patient';
     }
     String pPhone = currentPatient.phone.trim();
 
+    // Insert a temp record immediately for optimistic UI feedback
+    final tempId = 'PR-${DateTime.now().millisecondsSinceEpoch}';
     final newReq = PatientConsultationRequest(
-      id: 'PR-${DateTime.now().millisecondsSinceEpoch}',
+      id: tempId,
       patientName: pName,
       patientPhone: pPhone,
       problemCategory: problemCategory,
@@ -1162,15 +1164,16 @@ class PatientProblemService extends ChangeNotifier {
       attachments: attachments,
       severity: severity,
       submittedAt: DateTime.now(),
-      status: 'PENDING_ADMIN_REVIEW',
+      status: 'SUBMITTED',
     );
     _requests.insert(0, newReq);
     _saveToStorage();
     notifyListeners();
 
     // 🌐 Save immediately to Supabase PostgreSQL database table ('patient_problem_requests')
+    // then re-sync so the local record gets the real UUID from the DB
     try {
-      final res = await ApiService().createProblemRequest(
+      await ApiService().createProblemRequest(
         problemCategory: problemCategory,
         problemDescription: problemDescription,
         symptoms: symptoms,
@@ -1179,9 +1182,7 @@ class PatientProblemService extends ChangeNotifier {
         patientName: pName,
         patientPhone: pPhone,
       );
-      if (res is Map && res['request'] != null && res['request']['id'] != null) {
-        newReq.id = res['request']['id'].toString();
-      }
+      // Replace temp record with the server-assigned UUID record
       await syncProblemRequestsFromApi();
     } catch (e) {
       debugPrint('Error saving problem request to Supabase DB: $e');
