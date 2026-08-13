@@ -739,15 +739,45 @@ class ApiService {
   Future<List<dynamic>> fetchDentistAssignedRequests({String? dentistId}) async {
     // 1. Try Supabase direct first
     try {
-      final currentUserId = dentistId ?? Supabase.instance.client.auth.currentUser?.id;
+      final client = Supabase.instance.client;
+      final currentUserId = dentistId ?? client.auth.currentUser?.id;
+
+      String? altDentistTableId;
       if (currentUserId != null && currentUserId.isNotEmpty) {
-        final res = await Supabase.instance.client
+        try {
+          final dRes = await client.from('dentists').select('id, user_id').eq('user_id', currentUserId).maybeSingle();
+          if (dRes != null) {
+            altDentistTableId = dRes['id']?.toString();
+          }
+        } catch (_) {}
+      }
+
+      List<String> conditions = [];
+      if (currentUserId != null && currentUserId.isNotEmpty) {
+        conditions.add('assigned_doctor_id.eq.$currentUserId');
+        conditions.add('suggested_dentist_id.eq.$currentUserId');
+      }
+      if (altDentistTableId != null && altDentistTableId.isNotEmpty && altDentistTableId != currentUserId) {
+        conditions.add('assigned_doctor_id.eq.$altDentistTableId');
+        conditions.add('suggested_dentist_id.eq.$altDentistTableId');
+      }
+
+      if (conditions.isNotEmpty) {
+        final res = await client
             .from('patient_problem_requests')
             .select('*')
-            .or('assigned_doctor_id.eq.$currentUserId,suggested_dentist_id.eq.$currentUserId')
+            .or(conditions.join(','))
             .order('created_at', ascending: false);
         if (res.isNotEmpty) return List<dynamic>.from(res);
       }
+
+      // Secondary check: fetch all assigned requests so frontend can filter by doctor name / ID fallback
+      final allAssigned = await client
+          .from('patient_problem_requests')
+          .select('*')
+          .not('assigned_doctor_name', 'is', null)
+          .order('created_at', ascending: false);
+      if (allAssigned.isNotEmpty) return List<dynamic>.from(allAssigned);
     } catch (e) {
       debugPrint('Supabase direct fetch dentist assigned requests notice: $e');
     }
@@ -761,7 +791,7 @@ class ApiService {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final list = data['requests'] ?? [];
-        if (list is List) return list;
+        if (list is List && list.isNotEmpty) return list;
       }
     } catch (e) {
       debugPrint('Fetch dentist assigned requests error: $e');

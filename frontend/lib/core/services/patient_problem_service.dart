@@ -645,6 +645,7 @@ class PatientProblemService extends ChangeNotifier {
         syncDoctorsFromApi(),
         syncAppointmentsFromApi(),
         syncProblemRequestsFromApi(),
+        syncDentistAssignedRequestsFromApi(),
         syncMedicalRecordsFromApi(),
         syncSubAdminsFromApi(),
       ]);

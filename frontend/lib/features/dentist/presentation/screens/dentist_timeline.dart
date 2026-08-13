@@ -965,13 +965,18 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   Widget _buildDashboardTab() {
     final currentDoc = _patientService.currentDoctor;
     final docNameClean = currentDoc?.name.replaceAll('Dr. ', '').trim().toLowerCase() ?? '';
-    final sourceRequests = _patientService.dentistAssignedRequests.isNotEmpty
-        ? _patientService.dentistAssignedRequests
-        : _patientService.requests;
+    final allPool = <PatientConsultationRequest>{
+      ..._patientService.dentistAssignedRequests,
+      ..._patientService.requests,
+    }.toList();
 
-    final requests = sourceRequests.where((req) {
-      if (currentDoc != null && req.assignedDoctorId != null && req.assignedDoctorId == currentDoc.id) return true;
-      if (docNameClean.isNotEmpty && req.assignedDoctorName != null && req.assignedDoctorName!.toLowerCase().contains(docNameClean)) return true;
+    final requests = allPool.where((req) {
+      if (currentDoc != null && req.assignedDoctorId != null && (req.assignedDoctorId == currentDoc.id || req.assignedDoctorId == currentDoc.email)) return true;
+      if (req.assignedDoctorName != null && req.assignedDoctorName!.isNotEmpty) {
+        final assignedNameLower = req.assignedDoctorName!.toLowerCase();
+        if (docNameClean.isNotEmpty && assignedNameLower.contains(docNameClean)) return true;
+        if (currentDoc != null && currentDoc.name.isNotEmpty && (assignedNameLower.contains(currentDoc.name.toLowerCase()) || currentDoc.name.toLowerCase().contains(assignedNameLower))) return true;
+      }
       return false;
     }).toList();
 
