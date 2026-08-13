@@ -477,14 +477,30 @@ class ApiService {
     }
   }
 
-  /// Fetch live appointments from Supabase backend
+  /// Fetch live appointments from Supabase backend with Direct Supabase Fallback
   Future<List<dynamic>> fetchAppointments({String? patientId, String? dentistId}) async {
+    // 1. Direct Supabase query first
+    try {
+      final client = Supabase.instance.client;
+      var query = client.from('appointments').select('*');
+      if (patientId != null && patientId.isNotEmpty) {
+        query = query.eq('patient_id', patientId);
+      } else if (dentistId != null && dentistId.isNotEmpty) {
+        query = query.eq('dentist_id', dentistId);
+      }
+      final res = await query.order('created_at', ascending: false);
+      if (res.isNotEmpty) return List<dynamic>.from(res);
+    } catch (e) {
+      debugPrint('Supabase direct fetch appointments notice: $e');
+    }
+
+    // 2. Express backend API fallback
     try {
       final uri = Uri.parse(ApiConstants.appointments).replace(queryParameters: {
         if (patientId != null && patientId.isNotEmpty) 'patientId': patientId,
         if (dentistId != null && dentistId.isNotEmpty) 'dentistId': dentistId,
       });
-      final response = await http.get(uri, headers: _headers);
+      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         return data['appointments'] ?? [];

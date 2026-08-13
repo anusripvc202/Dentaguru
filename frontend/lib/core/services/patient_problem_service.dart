@@ -743,7 +743,10 @@ class PatientProblemService extends ChangeNotifier {
   Future<void> syncProblemRequestsFromApi() async {
     try {
       final pId = currentPatient.id.isNotEmpty ? currentPatient.id : null;
-      final List problemReqs = currentPatient.email.contains('admin')
+      final authUser = Supabase.instance.client.auth.currentUser;
+      final isAdmin = (authUser?.email != null && (authUser!.email!.toLowerCase().contains('admin') || authUser.email!.toLowerCase() == 'anusripvc202@gmail.com')) ||
+                      currentPatient.email.toLowerCase().contains('admin');
+      final List problemReqs = isAdmin
           ? await ApiService().fetchAdminProblemRequests()
           : await ApiService().fetchPatientProblemRequests(patientId: pId);
 
