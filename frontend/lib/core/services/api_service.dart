@@ -637,16 +637,24 @@ class ApiService {
 
   /// Patient: Fetch own Dental Problem Requests
   Future<List<dynamic>> fetchPatientProblemRequests({String? patientId}) async {
+    // 1. Always try Supabase directly first — filters by the logged-in patient's ID
     try {
-      final res = await Supabase.instance.client
+      final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+      var query = Supabase.instance.client
           .from('patient_problem_requests')
-          .select('*')
-          .order('created_at', ascending: false);
-      if (res.isNotEmpty) return res;
+          .select('*');
+      if (currentUserId != null && currentUserId.isNotEmpty) {
+        query = query.eq('patient_id', currentUserId);
+      } else if (patientId != null && patientId.isNotEmpty) {
+        query = query.eq('patient_id', patientId);
+      }
+      final res = await query.order('created_at', ascending: false);
+      if (res.isNotEmpty) return List<dynamic>.from(res);
     } catch (e) {
       debugPrint('Supabase direct fetch patient problem requests notice: $e');
     }
 
+    // 2. Fallback: Express backend (may be cold-starting)
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}/patient/problem-requests').replace(queryParameters: {
         if (patientId != null && patientId.isNotEmpty) 'patientId': patientId,

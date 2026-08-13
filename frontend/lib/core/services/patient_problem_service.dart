@@ -741,95 +741,85 @@ class PatientProblemService extends ChangeNotifier {
           ? await ApiService().fetchAdminProblemRequests()
           : await ApiService().fetchPatientProblemRequests(patientId: pId);
 
+      if (problemReqs.isEmpty) return;
+
+      // ✅ Clear-and-rebuild: always replace local cache with DB truth
       _requests.clear();
-      if (problemReqs.isNotEmpty) {
-        for (final pr in problemReqs) {
-          final prId = (pr['_id'] ?? pr['id'] ?? '').toString();
-          if (prId.isEmpty) continue;
-          final category = (pr['problem_category'] ?? pr['problemCategory'] ?? 'Dental Issue').toString();
-          final desc = (pr['problem_description'] ?? pr['problemDescription'] ?? '').toString();
-          final rawStatus = (pr['status'] ?? 'PENDING_ADMIN_REVIEW').toString();
-          final severity = (pr['severity'] ?? 'Moderate').toString();
-          final adminNotes = pr['admin_notes']?.toString() ?? pr['adminNotes']?.toString();
-          final confirmedSlot = pr['confirmed_time_slot']?.toString() ?? pr['confirmedTimeSlot']?.toString();
 
-          final assignedDocId = (pr['assigned_doctor_id'] ?? pr['suggested_dentist_id'] ?? pr['dentist']?['id'])?.toString();
-          final assignedDocName = (pr['assigned_doctor_name'] ?? pr['assignedDoctorName'] ?? pr['dentist']?['name'])?.toString();
-          final assignedDocSpecialty = (pr['assigned_doctor_specialty'] ?? pr['assignedDoctorSpecialty'] ?? pr['dentist']?['specialty'])?.toString();
-          final assignedDocClinic = (pr['assigned_doctor_clinic'] ?? pr['assignedDoctorClinic'] ?? pr['dentist']?['clinicName'])?.toString();
+      for (final pr in problemReqs) {
+        final prId = (pr['_id'] ?? pr['id'] ?? '').toString();
+        if (prId.isEmpty) continue;
+        final category = (pr['problem_category'] ?? pr['problemCategory'] ?? 'Dental Issue').toString();
+        final desc = (pr['problem_description'] ?? pr['problemDescription'] ?? '').toString();
+        final rawStatus = (pr['status'] ?? 'SUBMITTED').toString();
+        final severity = (pr['severity'] ?? 'Moderate').toString();
+        final adminNotes = pr['admin_notes']?.toString() ?? pr['adminNotes']?.toString();
+        final confirmedSlot = pr['confirmed_time_slot']?.toString() ?? pr['confirmedTimeSlot']?.toString();
+        final symptoms = (pr['symptoms'] ?? '').toString();
+        final preferredLocation = (pr['preferred_location'] ?? pr['preferredLocation'] ?? '').toString();
+        final city = (pr['city'] ?? pr['patient']?['city'] ?? '').toString();
+        final pincode = (pr['pincode'] ?? pr['patient']?['pincode'] ?? '').toString();
+        final state = (pr['state'] ?? pr['patient']?['state'] ?? '').toString();
 
-          final rawStatusUpper = rawStatus.toUpperCase();
-          String normalizedStatus = 'Submitted';
-          if (rawStatusUpper == 'ADMIN_REVIEWED' || rawStatusUpper == 'ADMIN_REVIEW') {
-            normalizedStatus = 'Admin Review';
-          } else if (rawStatusUpper == 'DENTIST_ASSIGNED' || rawStatusUpper == 'DENTIST_SUGGESTED' || rawStatusUpper == 'PENDING_DENTIST_CONFIRMATION' || (assignedDocName != null && assignedDocName.isNotEmpty)) {
-            normalizedStatus = 'Doctor Assigned';
-          } else if (rawStatusUpper == 'CONFIRMED' || rawStatusUpper == 'ACCEPTED') {
-            normalizedStatus = 'Confirmed';
-          } else if (rawStatusUpper == 'SUBMITTED' || rawStatusUpper == 'PENDING_ADMIN_REVIEW') {
-            normalizedStatus = 'Submitted';
-          } else {
-            normalizedStatus = rawStatus;
-          }
+        final assignedDocId = (pr['assigned_doctor_id'] ?? pr['suggested_dentist_id'] ?? pr['dentist']?['id'])?.toString();
+        final assignedDocName = (pr['assigned_doctor_name'] ?? pr['assignedDoctorName'] ?? pr['dentist']?['name'])?.toString();
+        final assignedDocSpecialty = (pr['assigned_doctor_specialty'] ?? pr['assignedDoctorSpecialty'] ?? pr['dentist']?['specialty'])?.toString();
+        final assignedDocClinic = (pr['assigned_doctor_clinic'] ?? pr['assignedDoctorClinic'] ?? pr['dentist']?['clinicName'])?.toString();
 
-          final patientObj = pr['patient'] ?? {};
-          String pName = (pr['patientName'] ?? pr['patient_name'] ?? patientObj['name'] ?? '').toString().trim();
-          String pPhone = (pr['patientPhone'] ?? pr['patient_phone'] ?? patientObj['phone'] ?? '').toString().trim();
-
-          if (pName.isEmpty || pName.toLowerCase() == 'patient') {
-            final matchingPatient = _allPatients.firstWhere(
-              (p) => p.name.isNotEmpty && p.name.toLowerCase() != 'patient',
-              orElse: () => PatientProfile(name: 'anusha'),
-            );
-            pName = matchingPatient.name.isNotEmpty ? matchingPatient.name : 'anusha';
-            if (pPhone.isEmpty) pPhone = matchingPatient.phone;
-          }
-
-          final existingIdx = _requests.indexWhere((r) => r.id == prId || r.problemCategory == category);
-          if (existingIdx != -1) {
-            final req = _requests[existingIdx];
-            req.status = normalizedStatus;
-            if (adminNotes != null && adminNotes.isNotEmpty) req.adminNotes = adminNotes;
-            if (assignedDocId != null && assignedDocId.isNotEmpty) req.assignedDoctorId = assignedDocId;
-            if (assignedDocName != null && assignedDocName.isNotEmpty) req.assignedDoctorName = assignedDocName;
-            if (assignedDocSpecialty != null && assignedDocSpecialty.isNotEmpty) req.assignedDoctorSpecialty = assignedDocSpecialty;
-            if (assignedDocClinic != null && assignedDocClinic.isNotEmpty) req.assignedDoctorClinic = assignedDocClinic;
-            if (confirmedSlot != null && confirmedSlot.isNotEmpty) req.confirmedTimeSlot = confirmedSlot;
-          } else {
-            final patientObj = pr['patient'] ?? {};
-            String pName = (pr['patientName'] ?? pr['patient_name'] ?? patientObj['name'] ?? '').toString().trim();
-            String pPhone = (pr['patientPhone'] ?? pr['patient_phone'] ?? patientObj['phone'] ?? '').toString().trim();
-
-            if (pName.isEmpty || pName.toLowerCase() == 'patient') {
-              final matchingPatient = _allPatients.firstWhere(
-                (p) => p.name.isNotEmpty && p.name.toLowerCase() != 'patient',
-                orElse: () => PatientProfile(name: 'anusha'),
-              );
-              pName = matchingPatient.name.isNotEmpty ? matchingPatient.name : 'anusha';
-              if (pPhone.isEmpty) pPhone = matchingPatient.phone;
-            }
-
-            _requests.add(
-              PatientConsultationRequest(
-                id: prId,
-                patientName: pName,
-                patientPhone: pPhone,
-                problemCategory: category,
-                problemDescription: desc,
-                severity: severity,
-                submittedAt: pr['created_at'] != null ? DateTime.parse(pr['created_at']) : DateTime.now(),
-                status: normalizedStatus,
-                adminNotes: adminNotes,
-                assignedDoctorId: assignedDocId,
-                assignedDoctorName: assignedDocName,
-                assignedDoctorSpecialty: assignedDocSpecialty,
-                assignedDoctorClinic: assignedDocClinic,
-                confirmedTimeSlot: confirmedSlot,
-              ),
-            );
-          }
+        // Normalize status from DB to frontend display values
+        final rawStatusUpper = rawStatus.toUpperCase();
+        String normalizedStatus;
+        if (rawStatusUpper == 'DENTIST_ASSIGNED' ||
+            rawStatusUpper == 'DENTIST_SUGGESTED' ||
+            rawStatusUpper == 'PENDING_DENTIST_CONFIRMATION' ||
+            (assignedDocName != null && assignedDocName.isNotEmpty)) {
+          normalizedStatus = 'Doctor Assigned';
+        } else if (rawStatusUpper == 'ADMIN_REVIEWED' || rawStatusUpper == 'ADMIN_REVIEW') {
+          normalizedStatus = 'Admin Review';
+        } else if (rawStatusUpper == 'CONFIRMED' || rawStatusUpper == 'ACCEPTED') {
+          normalizedStatus = 'Confirmed';
+        } else {
+          normalizedStatus = 'Submitted'; // SUBMITTED / PENDING_ADMIN_REVIEW / anything else
         }
+
+        final patientObj = pr['patient'] ?? {};
+        String pName = (pr['patientName'] ?? pr['patient_name'] ?? patientObj['name'] ?? '').toString().trim();
+        String pPhone = (pr['patientPhone'] ?? pr['patient_phone'] ?? patientObj['phone'] ?? '').toString().trim();
+
+        if (pName.isEmpty || pName.toLowerCase() == 'patient') {
+          final matchingPatient = _allPatients.firstWhere(
+            (p) => p.name.isNotEmpty && p.name.toLowerCase() != 'patient',
+            orElse: () => currentPatient.name.isNotEmpty ? currentPatient : PatientProfile(name: 'Patient'),
+          );
+          pName = matchingPatient.name.isNotEmpty ? matchingPatient.name : 'Patient';
+          if (pPhone.isEmpty) pPhone = matchingPatient.phone;
+        }
+
+        _requests.add(
+          PatientConsultationRequest(
+            id: prId,
+            patientName: pName,
+            patientPhone: pPhone,
+            problemCategory: category,
+            problemDescription: desc,
+            symptoms: symptoms,
+            preferredLocation: preferredLocation,
+            severity: severity,
+            submittedAt: pr['created_at'] != null ? DateTime.tryParse(pr['created_at'].toString()) ?? DateTime.now() : DateTime.now(),
+            status: normalizedStatus,
+            adminNotes: adminNotes,
+            assignedDoctorId: assignedDocId,
+            assignedDoctorName: assignedDocName,
+            assignedDoctorSpecialty: assignedDocSpecialty,
+            assignedDoctorClinic: assignedDocClinic,
+            confirmedTimeSlot: confirmedSlot,
+            city: city,
+            pincode: pincode,
+            state: state,
+          ),
+        );
       }
+
       _saveToStorage();
       notifyListeners();
     } catch (e) {
