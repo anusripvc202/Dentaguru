@@ -1161,6 +1161,8 @@ class PatientProblemService extends ChangeNotifier {
     } catch (e) {
       debugPrint('Error saving problem request to Supabase DB: $e');
     }
+  }
+
   Future<void> markAdminReviewed(String requestId, {String? notes}) async {
     final index = _requests.indexWhere((r) => r.id == requestId);
     if (index != -1) {
