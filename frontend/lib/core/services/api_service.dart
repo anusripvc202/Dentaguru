@@ -28,6 +28,10 @@ class ApiService {
     required String password,
     required String phone,
     String role = 'Patient',
+    String? age,
+    String? gender,
+    String? bloodGroup,
+    String? emergencyContact,
     String? specialty,
     String? licenseNumber,
     String? clinicName,
@@ -46,6 +50,10 @@ class ApiService {
       'password': password,
       'phone': phone,
       'role': role,
+      if (age != null) 'age': age,
+      if (gender != null) 'gender': gender,
+      if (bloodGroup != null) 'bloodGroup': bloodGroup,
+      if (emergencyContact != null) 'emergencyContact': emergencyContact,
       if (specialty != null) 'specialty': specialty,
       if (licenseNumber != null) 'licenseNumber': licenseNumber,
       if (clinicName != null) 'clinicName': clinicName,
@@ -111,6 +119,10 @@ class ApiService {
               'city': city ?? '',
               'pincode': pincode ?? '',
               'state': state ?? '',
+              if (age != null && age.isNotEmpty) 'age': age,
+              if (gender != null && gender.isNotEmpty) 'gender': gender,
+              if (bloodGroup != null && bloodGroup.isNotEmpty) 'blood_group': bloodGroup,
+              if (emergencyContact != null && emergencyContact.isNotEmpty) 'emergency_contact': emergencyContact,
             });
 
             if (role.toLowerCase() == 'dentist') {

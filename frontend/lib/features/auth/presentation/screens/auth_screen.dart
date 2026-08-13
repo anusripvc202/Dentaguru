@@ -299,15 +299,20 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           context.go('/admin');
         } else {
           // Patient Role
+          final String loginAge = (userData['age'] ?? userData['patient_age'] ?? '').toString();
+          final String loginGender = (userData['gender'] ?? '').toString();
+          final String loginBloodGroup = (userData['bloodGroup'] ?? userData['blood_group'] ?? '').toString();
+          final String loginEmergency = (userData['emergencyContact'] ?? userData['emergency_contact'] ?? userPhone).toString();
+
           PatientProblemService().updatePatientProfile(
             id: userData['id']?.toString() ?? '',
             name: userData['name'] ?? email.split('@').first,
             email: userData['email'] ?? email,
             phone: userPhone,
-            age: '28',
-            gender: 'Female',
-            bloodGroup: 'O Positive (O+)',
-            emergencyContact: userPhone,
+            age: loginAge.isNotEmpty ? loginAge : '',
+            gender: loginGender.isNotEmpty ? loginGender : 'Female',
+            bloodGroup: loginBloodGroup.isNotEmpty ? loginBloodGroup : 'O Positive (O+)',
+            emergencyContact: loginEmergency.isNotEmpty ? loginEmergency : userPhone,
             photoBytes: photoBytes,
           );
           await PatientProblemService().syncAllDataFromApi();
@@ -330,26 +335,27 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         );
       }
     } catch (e) {
+      debugPrint('Login Error: $e');
       if (!mounted) return;
       setState(() => _isLoggingIn = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('❌ Network error: $e'),
+          content: Text('❌ Network error during login: $e'),
           backgroundColor: const Color(0xFFEF4444),
         ),
       );
     }
   }
 
-  Future<void> _handleRegister() async {
-    if (_isRegistering) return;
+  void _handleRegister() async {
     if (!_registerFormKey.currentState!.validate()) return;
-
     setState(() => _isRegistering = true);
+
     final name = _nameController.text.trim();
     final email = _emailController.text.trim();
-    final phone = _phoneController.text.trim();
     final password = _passwordController.text.trim();
+    final phone = _phoneController.text.trim();
+    final registeredAge = _ageController.text.trim();
 
     if (_selectedRole == UserRole.admin && email.toLowerCase() != 'anusripvc202@gmail.com') {
       setState(() => _isRegistering = false);
@@ -380,6 +386,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         password: password,
         phone: phone,
         role: _roleName,
+        age: registeredAge,
+        gender: _selectedGender,
+        bloodGroup: _selectedBloodGroup,
+        emergencyContact: _emergencyContactController.text.trim(),
         specialty: _selectedSpecialty,
         licenseNumber: _licenseNoController.text.trim(),
         clinicName: _clinicNameController.text.trim(),
@@ -399,7 +409,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             name: name,
             email: email,
             phone: phone,
-            age: _ageController.text.trim().isEmpty ? '28' : _ageController.text.trim(),
+            age: registeredAge.isNotEmpty ? registeredAge : '',
             gender: _selectedGender ?? 'Female',
             bloodGroup: _selectedBloodGroup ?? 'O Positive (O+)',
             emergencyContact: _emergencyContactController.text.trim().isEmpty ? phone : _emergencyContactController.text.trim(),

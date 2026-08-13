@@ -210,7 +210,7 @@ class PatientProfile {
     this.name = '',
     this.email = '',
     this.phone = '',
-    this.age = '28',
+    this.age = '',
     this.gender = 'Female',
     this.bloodGroup = 'O Positive (O+)',
     this.emergencyContact = '',
@@ -249,7 +249,7 @@ class PatientProfile {
       name: json['name'] ?? '',
       email: json['email'] ?? '',
       phone: json['phone'] ?? '',
-      age: json['age'] ?? '28',
+      age: (json['age'] ?? json['patient_age'] ?? '').toString(),
       gender: json['gender'] ?? 'Female',
       bloodGroup: json['bloodGroup'] ?? 'O Positive (O+)',
       emergencyContact: json['emergencyContact'] ?? '',
@@ -742,7 +742,8 @@ class PatientProblemService extends ChangeNotifier {
           final email = (item['email'] ?? '').toString().trim();
           final phone = (item['phone'] ?? '').toString().trim();
           final role = (item['role'] ?? '').toString().trim().toLowerCase();
-          final age = (item['age'] ?? '28').toString();
+          final rawAge = (item['age'] ?? item['patient_age'] ?? '').toString().trim();
+          final age = (rawAge.isNotEmpty && rawAge != 'null') ? rawAge : '';
           final city = (item['city'] ?? item['location_city'] ?? '').toString();
           final pincode = (item['pincode'] ?? item['postal_code'] ?? '').toString();
           final state = (item['state'] ?? '').toString();

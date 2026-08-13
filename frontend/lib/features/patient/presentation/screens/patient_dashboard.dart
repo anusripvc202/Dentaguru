@@ -951,7 +951,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Text(
-                                '🎂 ${patient.age} Yrs',
+                                '🎂 ${patient.age.trim().isNotEmpty ? patient.age.trim() : "N/A"} Yrs',
                                 style: const TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.bold),
                               ),
                             ),

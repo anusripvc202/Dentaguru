@@ -24,7 +24,7 @@ const generateTokens = (user) => {
 
 // 1. REGISTER
 exports.register = async (req, res) => {
-    const { name, email, password, phone, role, fcmToken, specialty, licenseNumber, clinicName, clinicAddress, location, state, city, pincode, latitude, longitude, qualification, experienceYears, profilePhoto } = req.body;
+    const { name, email, password, phone, role, fcmToken, specialty, licenseNumber, clinicName, clinicAddress, location, state, city, pincode, latitude, longitude, qualification, experienceYears, profilePhoto, age, gender, bloodGroup, emergencyContact } = req.body;
     try {
         const normalizedRole = (role || 'Patient').toString().trim();
         const normalizedEmail = (email || '').toString().trim().toLowerCase();
@@ -77,6 +77,10 @@ exports.register = async (req, res) => {
             state: state || '',
             city: city || '',
             pincode: pincode || '',
+            age: age || '',
+            gender: gender || '',
+            blood_group: bloodGroup || '',
+            emergency_contact: emergencyContact || '',
             latitude: latitude || null,
             longitude: longitude || null,
             device_token: fcmToken || null,
