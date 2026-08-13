@@ -5,6 +5,7 @@ import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/widgets/dental_ads_banner.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class DentistTimelineScreen extends StatefulWidget {
   const DentistTimelineScreen({super.key});
