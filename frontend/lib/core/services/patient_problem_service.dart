@@ -972,11 +972,11 @@ class PatientProblemService extends ChangeNotifier {
           final specialty = (dMap['speciality'] ?? dMap['specialty'] ?? 'General Dentistry').toString();
           final licNum = (dMap['license_number'] ?? dMap['licenseNumber'] ?? 'DEN-LIC-REG').toString();
           final cName = (clinicObj['clinic_name'] ?? clinicObj['name'] ?? dMap['clinicName'] ?? '').toString();
-          final cLoc = (clinicObj['location'] ?? dMap['location'] ?? 'Healthcare Hub').toString();
+          final cLoc = (clinicObj['location'] ?? dMap['location'] ?? '').toString();
 
           final doctorState = (dMap['state'] ?? userObj['state'] ?? '').toString();
           final doctorCity = (dMap['city'] ?? userObj['city'] ?? '').toString();
-          final doctorPincode = (dMap['pincode'] ?? userObj['pincode'] ?? dMap['postal_code'] ?? '560038').toString();
+          final doctorPincode = (dMap['pincode'] ?? userObj['pincode'] ?? dMap['postal_code'] ?? '').toString();
           final lat = (dMap['latitude'] ?? userObj['latitude']) != null ? double.tryParse((dMap['latitude'] ?? userObj['latitude']).toString()) : null;
           final lng = (dMap['longitude'] ?? userObj['longitude']) != null ? double.tryParse((dMap['longitude'] ?? userObj['longitude']).toString()) : null;
 
@@ -1486,10 +1486,10 @@ class PatientProblemService extends ChangeNotifier {
     String qualification = 'BDS, MDS',
     String consultationFee = '\$75',
     Uint8List? photoBytes,
-    String clinicAddress = '123 Healthcare Blvd, Medical Hub, Suite 400',
+    String clinicAddress = '',
     String state = '',
     String city = '',
-    String pincode = '560038',
+    String pincode = '',
   }) {
     if (photoBytes != null) {
       _userPhotoCache[email.trim().toLowerCase()] = photoBytes;

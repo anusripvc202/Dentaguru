@@ -1552,7 +1552,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter address' : null,
                     decoration: _buildInputDecoration(
                       label: 'Address / Location *',
-                      hint: 'e.g. 100 Feet Rd, Indiranagar',
+                      hint: 'e.g. Door No / Street Name',
                       icon: Icons.location_on_outlined,
                     ),
                   ),
@@ -1566,7 +1566,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter City' : null,
                     decoration: _buildInputDecoration(
                       label: 'City *',
-                      hint: 'Vijayawada',
+                      hint: 'e.g. City Name',
                       icon: Icons.location_city_rounded,
                     ),
                   ),
@@ -1581,7 +1581,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter 6-digit Pincode' : null,
               decoration: _buildInputDecoration(
                 label: 'Pincode / Postal Code *',
-                hint: 'e.g. 520001',
+                hint: 'e.g. 6-Digit Pincode',
                 icon: Icons.pin_drop_outlined,
               ),
             ),
@@ -1679,7 +1679,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter clinic location / address' : null,
               decoration: _buildInputDecoration(
                 label: 'Clinic Location / Address *',
-                hint: 'e.g. Indiranagar',
+                hint: 'e.g. Area / Landmark',
                 icon: Icons.location_on_outlined,
               ),
             ),
@@ -1693,7 +1693,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter City' : null,
                     decoration: _buildInputDecoration(
                       label: 'City *',
-                      hint: 'Vijayawada',
+                      hint: 'e.g. City Name',
                       icon: Icons.location_city_rounded,
                     ),
                   ),
@@ -1707,7 +1707,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter Pincode' : null,
                     decoration: _buildInputDecoration(
                       label: 'Pincode *',
-                      hint: '520001',
+                      hint: 'e.g. 6-Digit Pincode',
                       icon: Icons.pin_drop_outlined,
                     ),
                   ),

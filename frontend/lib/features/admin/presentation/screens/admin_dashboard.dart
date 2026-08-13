@@ -2412,7 +2412,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         controller: locationCtrl,
                         decoration: InputDecoration(
                           labelText: 'Full Address / Location *',
-                          hintText: 'e.g. 100 Feet Rd, Indiranagar, Bengaluru',
+                          hintText: 'e.g. Street / Area / City',
                           filled: true,
                           fillColor: const Color(0xFFF8FAFC),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
