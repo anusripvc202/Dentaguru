@@ -17,23 +17,11 @@ class DentaGuruLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Exact DentaGuru Logo rendered with high-fidelity vector graphics & typography
+    // Render exact DentaGuru Logo vector graphic & typography matching user design
     final iconSize = height;
     final fontSize = height * 0.58;
 
-    final Widget logoWidget = Row(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        // Real Image Asset with Vector Fallback
-        Image.asset(
-          'assets/dentaguru_logo.png',
-          height: height,
-          fit: fit,
-          errorBuilder: (context, error, stackTrace) => _buildVectorLogo(iconSize, fontSize),
-        ),
-      ],
-    );
+    final Widget logoWidget = _buildVectorLogo(iconSize, fontSize);
 
     Widget content = logoWidget;
     if (darkBg) {
