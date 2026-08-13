@@ -23,7 +23,7 @@ class DentaGuruLogo extends StatelessWidget {
 
     final Widget logoWidget = Row(
       mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         // Real Image Asset with Vector Fallback
         Image.asset(
@@ -129,7 +129,7 @@ class _DentaGuruIconPainter extends CustomPainter {
 
     // 1. Draw outer 'D' with 3D Blue Gradient
     final dPaint = Paint()
-      :shader = const LinearGradient(
+      ..shader = const LinearGradient(
           colors: [Color(0xFF0052CC), Color(0xFF002D80)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
