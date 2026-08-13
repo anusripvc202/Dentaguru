@@ -3815,64 +3815,40 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   style: const TextStyle(fontSize: 12, color: AppTheme.textDark, height: 1.3),
                                 ),
 
-                                Builder(
-                                  builder: (context) {
-                                    String? docName = req.assignedDoctorName;
-                                    String? docSpec = req.assignedDoctorSpecialty ?? 'Specialist';
-                                    if ((docName == null || docName.isEmpty || docName == 'null') && req.assignedDoctorId != null) {
-                                      final m = _problemService.allDoctors.firstWhere(
-                                        (d) => d.id == req.assignedDoctorId,
-                                        orElse: () => DoctorModel(id: '', name: '', specialty: '', qualification: '', experienceYears: 0, rating: 0, reviewCount: 0, clinicName: '', phone: '', email: '', status: '', nextAvailableSlots: [], consultationFee: ''),
-                                      );
-                                      if (m.name.isNotEmpty) {
-                                        docName = m.name;
-                                        docSpec = m.specialty;
-                                      }
-                                    }
-                                    final bool isAssigned = (docName != null && docName.isNotEmpty && docName != 'null') ||
-                                        req.status == 'Doctor Assigned' || req.status == 'DENTIST_ASSIGNED' || req.status == 'Confirmed';
-
-                                    if (!isAssigned) return const SizedBox.shrink();
-
-                                    final displayName = (docName != null && docName.isNotEmpty && docName != 'null') ? docName : 'Assigned Specialist';
-
-                                    return Column(
+                                if (req.assignedDoctorName != null || req.assignedDoctorId != null || req.status.toUpperCase().contains('ASSIGNED') || req.status == 'Doctor Assigned' || req.status == 'Confirmed') ...[
+                                  const SizedBox(height: 10),
+                                  Container(
+                                    padding: const EdgeInsets.all(10),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF0FDF4),
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(color: const Color(0xFF86EFAC)),
+                                    ),
+                                    child: Row(
                                       children: [
-                                        const SizedBox(height: 10),
-                                        Container(
-                                          padding: const EdgeInsets.all(10),
-                                          decoration: BoxDecoration(
-                                            color: const Color(0xFFF0FDF4),
-                                            borderRadius: BorderRadius.circular(10),
-                                            border: Border.all(color: const Color(0xFF86EFAC)),
-                                          ),
-                                          child: Row(
+                                        const Icon(Icons.verified_user_rounded, color: Color(0xFF16A34A), size: 16),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
                                             children: [
-                                              const Icon(Icons.verified_user_rounded, color: Color(0xFF16A34A), size: 16),
-                                              const SizedBox(width: 8),
-                                              Expanded(
-                                                child: Column(
-                                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                                  children: [
-                                                    Text(
-                                                      'Assigned: $displayName ($docSpec)',
-                                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFF14532D)),
-                                                      overflow: TextOverflow.ellipsis,
-                                                    ),
-                                                    if (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.isNotEmpty) ...[
-                                                      const SizedBox(height: 4),
-                                                      Text(
-                                                        '⏰ Time Slot: ${req.confirmedTimeSlot}',
-                                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.primaryBlue),
-                                                      ),
-                                                    ],
-                                                  ],
-                                                ),
+                                              Text(
+                                                'Assigned: ${req.assignedDoctorName ?? "Assigned Doctor"} (${req.assignedDoctorSpecialty ?? "Specialist"})',
+                                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFF14532D)),
+                                                overflow: TextOverflow.ellipsis,
                                               ),
+                                              if (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.isNotEmpty) ...[
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  '⏰ Time Slot: ${req.confirmedTimeSlot}',
+                                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.primaryBlue),
+                                                ),
+                                              ],
                                             ],
                                           ),
                                         ),
                                       ],
+                                    ),
                                   ),
                                 ],
 
