@@ -1269,9 +1269,6 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               // 2. Animated Practice Stat Boxes Row
               Builder(
                 builder: (context) {
-                  final currentDoc = _patientService.currentDoctor;
-                  final docNameClean = currentDoc?.name.replaceAll('Dr. ', '').trim().toLowerCase() ?? '';
-
                   final displayCount = requests.length;
                   final pendingCount = requests.where((r) => r.status == 'Doctor Suggested' || r.status == 'Pending' || r.status == 'Doctor Assigned').length;
 

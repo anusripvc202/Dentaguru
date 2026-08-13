@@ -7,5 +7,9 @@
 5. **Responsive Layouts & RenderFlex Safety**: Always wrap horizontal flex text elements in `Flexible` or `Expanded` with `TextOverflow.ellipsis` to prevent `RenderFlex` overflow assertions on narrow mobile viewports or headless test runners.
 6. **Widget Test ProviderScope Wrapping**: Always wrap root app widgets in `ProviderScope` within `widget_test.dart` to prevent Riverpod state initializer exceptions in automated CI pipelines.
 7. **24/7 Supabase Cloud Auth Fallback & Cold-Start Resilience**: All authentication and data fetch calls in `ApiService` MUST use minimum 35-second timeouts to accommodate Render server cold starts, AND MUST include direct 24/7 Supabase Cloud (`Supabase.instance.client.auth`) fallback handling so login/registration never fails even if the Express server is sleeping.
-
-
+8. **Strict Iterative Development & Single Final Release APK Workflow**:
+   - During active development, test code changes directly on connected device/emulator (`flutter run`) using Hot Reload / Hot Restart.
+   - Do NOT build a release APK for incremental code changes.
+   - Verify backend API endpoints and Supabase database schemas directly during development iterations.
+   - ONLY compile the release APK after all requested features/fixes are completed and verified:
+     `flutter clean` → `flutter pub get` → `flutter analyze` → `flutter build apk --release`.
