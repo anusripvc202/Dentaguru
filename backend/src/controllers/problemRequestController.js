@@ -370,9 +370,8 @@ exports.getDentistAssignedRequests = async (req, res) => {
             if (docUser && docUser.name) {
                 orConditions.push({ assigned_doctor_name: new RegExp(docUser.name.replace('Dr. ', ''), 'i') });
             }
-            filterQuery = { $or: orConditions };
         } else {
-            filterQuery = { assigned_doctor_name: { $ne: null } };
+            return res.json({ success: true, count: 0, requests: [] });
         }
 
         const rawRequests = await PatientProblemRequest.find(filterQuery);

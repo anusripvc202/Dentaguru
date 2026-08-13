@@ -845,11 +845,14 @@ class ApiService {
   }
 
   /// Dentist: Fetch ONLY problem requests assigned to the logged-in dentist
-  Future<List<dynamic>> fetchDentistAssignedRequests({String? dentistId}) async {
+  /// Dentist: Fetch ONLY problem requests assigned to the logged-in dentist
+  Future<List<dynamic>> fetchDentistAssignedRequests({String? dentistId, String? dentistName}) async {
     // 1. Try Supabase direct first
     try {
       final client = Supabase.instance.client;
       final currentUserId = dentistId ?? client.auth.currentUser?.id;
+      final currentDoc = PatientProblemService().currentDoctor;
+      final cleanDocName = (dentistName ?? currentDoc?.name ?? '').replaceAll('Dr. ', '').trim();
 
       String? altDentistTableId;
       if (currentUserId != null && currentUserId.isNotEmpty) {
@@ -866,14 +869,22 @@ class ApiService {
         if (altDentistTableId != null && altDentistTableId.isNotEmpty && altDentistTableId != currentUserId) altDentistTableId,
       ];
 
-      // A) Query patient_problem_requests by suggested_dentist_id
-      if (idsToMatch.isNotEmpty) {
-        final conds = idsToMatch.map((id) => 'suggested_dentist_id.eq.$id').join(',');
-        final res = await client.from('patient_problem_requests').select('*').or(conds).order('created_at', ascending: false);
+      final List<String> condList = [];
+      for (final id in idsToMatch) {
+        condList.add('suggested_dentist_id.eq.$id');
+        condList.add('assigned_doctor_id.eq.$id');
+      }
+      if (cleanDocName.isNotEmpty) {
+        condList.add('assigned_doctor_name.ilike.%$cleanDocName%');
+      }
+
+      if (condList.isNotEmpty) {
+        final orFilter = condList.join(',');
+        final res = await client.from('patient_problem_requests').select('*').or(orFilter).order('created_at', ascending: false);
         if (res.isNotEmpty) return List<dynamic>.from(res);
       }
 
-      // B) Query dentist_suggestions table in Supabase
+      // Query dentist_suggestions table in Supabase
       if (idsToMatch.isNotEmpty) {
         final conds = idsToMatch.map((id) => 'dentist_id.eq.$id').join(',');
         final suggRes = await client.from('dentist_suggestions').select('request_id').or(conds);
@@ -887,14 +898,8 @@ class ApiService {
         }
       }
 
-      // C) Secondary check: fetch all assigned requests (status != SUBMITTED & status != PENDING_ADMIN_REVIEW)
-      final allAssigned = await client
-          .from('patient_problem_requests')
-          .select('*')
-          .neq('status', 'PENDING_ADMIN_REVIEW')
-          .neq('status', 'SUBMITTED')
-          .order('created_at', ascending: false);
-      if (allAssigned.isNotEmpty) return List<dynamic>.from(allAssigned);
+      // If no assignments match this dentist, return clean empty list
+      return [];
     } catch (e) {
       debugPrint('Supabase direct fetch dentist assigned requests notice: $e');
     }
@@ -908,11 +913,12 @@ class ApiService {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final list = data['requests'] ?? [];
-        if (list is List && list.isNotEmpty) return list;
+        if (list is List) return list;
       }
     } catch (e) {
       debugPrint('Fetch dentist assigned requests error: $e');
     }
+
     return [];
   }
 
