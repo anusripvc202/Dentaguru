@@ -19,9 +19,18 @@ CREATE TABLE IF NOT EXISTS public.users (
     refresh_tokens TEXT[] DEFAULT '{}',
     wallet_balance NUMERIC DEFAULT 0,
     loyalty_points INTEGER DEFAULT 0,
+    age VARCHAR(20) DEFAULT '',
+    gender VARCHAR(50) DEFAULT '',
+    blood_group VARCHAR(50) DEFAULT '',
+    emergency_contact VARCHAR(50) DEFAULT '',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS age VARCHAR(20) DEFAULT '';
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS gender VARCHAR(50) DEFAULT '';
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS blood_group VARCHAR(50) DEFAULT '';
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS emergency_contact VARCHAR(50) DEFAULT '';
 
 -- 2. CLINICS TABLE
 CREATE TABLE IF NOT EXISTS public.clinics (

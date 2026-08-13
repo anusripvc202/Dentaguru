@@ -110,7 +110,7 @@ class ApiService {
           }
           // Directly write patient/dentist record to Supabase DB tables
           try {
-            await client.from('users').upsert({
+            final baseUserMap = {
               'id': res.user!.id,
               'name': name.trim(),
               'email': email.trim().toLowerCase(),
@@ -119,11 +119,20 @@ class ApiService {
               'city': city ?? '',
               'pincode': pincode ?? '',
               'state': state ?? '',
-              if (age != null && age.isNotEmpty) 'age': age,
-              if (gender != null && gender.isNotEmpty) 'gender': gender,
-              if (bloodGroup != null && bloodGroup.isNotEmpty) 'blood_group': bloodGroup,
-              if (emergencyContact != null && emergencyContact.isNotEmpty) 'emergency_contact': emergencyContact,
-            });
+            };
+
+            try {
+              await client.from('users').upsert({
+                ...baseUserMap,
+                if (age != null && age.isNotEmpty) 'age': age,
+                if (gender != null && gender.isNotEmpty) 'gender': gender,
+                if (bloodGroup != null && bloodGroup.isNotEmpty) 'blood_group': bloodGroup,
+                if (emergencyContact != null && emergencyContact.isNotEmpty) 'emergency_contact': emergencyContact,
+              });
+            } catch (_) {
+              // Schema fallback: if 'age' column does not exist in users table, upsert base valid columns
+              await client.from('users').upsert(baseUserMap);
+            }
 
             if (role.toLowerCase() == 'dentist') {
               final licNum = licenseNumber?.trim() ?? 'DEN-LIC-REG';
