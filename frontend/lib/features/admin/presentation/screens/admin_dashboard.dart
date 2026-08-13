@@ -84,6 +84,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   }
 
   void _showAssignDoctorDialog(BuildContext context, PatientConsultationRequest req, {DoctorModel? preSelectedDoctor}) {
+    // 🌐 Automatically mark request as Admin Reviewed in Database & Backend API
+    _problemService.markAdminReviewed(req.id);
+
     int currentStep = 1; // 1: Patient Problem, 2: Select Doctor, 3: Review & Send
     DoctorModel? selectedDoctor = preSelectedDoctor ?? (_problemService.allDoctors.isNotEmpty ? _problemService.allDoctors.first : null);
     String searchKeyword = '';

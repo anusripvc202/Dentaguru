@@ -795,6 +795,21 @@ class ApiService {
     }
   }
 
+  /// Admin: Mark Patient Problem Request as Reviewed
+  Future<Map<String, dynamic>> markAdminReviewed(String requestId, {String? notes}) async {
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/admin/problem-requests/$requestId/review');
+      final response = await http.patch(
+        url,
+        headers: _headers,
+        body: jsonEncode({if (notes != null) 'notes': notes}),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to mark request as reviewed.'};
+    }
+  }
+
   /// Admin: Suggest / Assign Dentist to a Patient Request
   Future<Map<String, dynamic>> suggestDentist({
     required String requestId,

@@ -1151,14 +1151,18 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                         req.assignedDoctorName!.trim().isNotEmpty &&
                         req.assignedDoctorName != 'null' &&
                         req.assignedDoctorName != 'None') ||
+                        req.status == 'Doctor Assigned' ||
                         req.status == 'Doctor Suggested' ||
+                        req.status == 'DENTIST_ASSIGNED' ||
                         req.status == 'DENTIST_SUGGESTED' ||
-                        req.status == 'Confirmed';
+                        req.status == 'Confirmed' ||
+                        req.status == 'Accepted';
 
                     final bool isAdminReviewed = isDoctorAssigned ||
-                        req.status == 'Doctor Suggested' ||
-                        req.status == 'DENTIST_SUGGESTED' ||
-                        req.status == 'Admin Reviewed';
+                        req.status == 'Admin Review' ||
+                        req.status == 'ADMIN_REVIEWED' ||
+                        req.status == 'ADMIN_REVIEW' ||
+                        (req.adminNotes != null && req.adminNotes!.trim().isNotEmpty);
 
                     return Container(
                       margin: const EdgeInsets.only(bottom: 14),
@@ -1370,26 +1374,43 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                             Container(
                               padding: const EdgeInsets.all(14),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFF0F9FF),
+                                color: isAdminReviewed ? const Color(0xFFF0FDF4) : const Color(0xFFF0F9FF),
                                 borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: const Color(0xFFBAE6FD), width: 1.2),
+                                border: Border.all(
+                                  color: isAdminReviewed ? const Color(0xFF86EFAC) : const Color(0xFFBAE6FD),
+                                  width: 1.2,
+                                ),
                               ),
-                              child: const Row(
+                              child: Row(
                                 children: [
-                                  Icon(Icons.hourglass_top_rounded, color: Color(0xFF0284C7), size: 22),
-                                  SizedBox(width: 10),
+                                  Icon(
+                                    isAdminReviewed ? Icons.rate_review_rounded : Icons.hourglass_top_rounded,
+                                    color: isAdminReviewed ? const Color(0xFF16A34A) : const Color(0xFF0284C7),
+                                    size: 22,
+                                  ),
+                                  const SizedBox(width: 10),
                                   Expanded(
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
                                         Text(
-                                          'Awaiting Admin Specialist Recommendation',
-                                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0369A1)),
+                                          isAdminReviewed ? 'Admin Review Completed ✓' : 'Awaiting Admin Specialist Recommendation',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 13,
+                                            color: isAdminReviewed ? const Color(0xFF14532D) : const Color(0xFF0369A1),
+                                          ),
                                         ),
-                                        SizedBox(height: 2),
+                                        const SizedBox(height: 2),
                                         Text(
-                                          'Your symptoms have been submitted to Admin. A specialized doctor will be recommended shortly.',
-                                          style: TextStyle(fontSize: 11, color: Color(0xFF0284C7), height: 1.3),
+                                          isAdminReviewed
+                                              ? 'Admin has reviewed your symptoms and is selecting a specialized doctor.'
+                                              : 'Your symptoms have been submitted to Admin. A specialized doctor will be recommended shortly.',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: isAdminReviewed ? const Color(0xFF15803D) : const Color(0xFF0284C7),
+                                            height: 1.3,
+                                          ),
                                         ),
                                       ],
                                     ),
@@ -1427,7 +1448,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
         ),
         const SizedBox(width: 4),
         Text(
-          title,
+          isDone ? '$title ✓' : title,
           style: TextStyle(
             fontSize: 10,
             fontWeight: isDone ? FontWeight.bold : FontWeight.normal,

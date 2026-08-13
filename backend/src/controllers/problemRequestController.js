@@ -163,6 +163,51 @@ exports.getAdminProblemRequests = async (req, res) => {
     }
 };
 
+// 3.5. ADMIN: MARK PROBLEM REQUEST AS ADMIN REVIEWED
+exports.markAdminReviewed = async (req, res) => {
+    const { id } = req.params;
+    const { notes } = req.body;
+    try {
+        const problemReq = await PatientProblemRequest.findById(id);
+        if (!problemReq) {
+            return res.status(404).json({ success: false, message: 'Problem request not found.' });
+        }
+
+        // Only move to ADMIN_REVIEWED if currently SUBMITTED or PENDING_ADMIN_REVIEW
+        const currentStatus = (problemReq.status || '').toUpperCase();
+        if (currentStatus === 'SUBMITTED' || currentStatus === 'PENDING_ADMIN_REVIEW' || !currentStatus) {
+            const updatedReq = await PatientProblemRequest.findByIdAndUpdate(id, {
+                status: 'ADMIN_REVIEWED',
+                admin_notes: notes || 'Admin reviewed symptoms and is selecting a specialized dentist.'
+            });
+
+            // Notify patient that admin reviewed the request
+            await Notification.create({
+                recipient_role: 'Patient',
+                recipient_id: problemReq.patient_id || 'ALL',
+                title: '📋 Admin Review Completed',
+                message: 'Admin has reviewed your dental symptoms. A specialized doctor will be assigned shortly.',
+                type: 'admin_reviewed'
+            });
+
+            return res.json({
+                success: true,
+                message: 'Problem request marked as Admin Reviewed.',
+                request: updatedReq
+            });
+        }
+
+        return res.json({
+            success: true,
+            message: 'Problem request already reviewed or assigned.',
+            request: problemReq
+        });
+    } catch (err) {
+        console.error('Mark Admin Reviewed Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to mark problem request as admin reviewed.' });
+    }
+};
+
 // 4. ADMIN: SUGGEST DENTIST FOR REQUEST
 exports.suggestDentist = async (req, res) => {
     const { id } = req.params; // Request ID

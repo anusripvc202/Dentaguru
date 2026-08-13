@@ -761,9 +761,18 @@ class PatientProblemService extends ChangeNotifier {
           final assignedDocSpecialty = (pr['assigned_doctor_specialty'] ?? pr['assignedDoctorSpecialty'] ?? pr['dentist']?['specialty'])?.toString();
           final assignedDocClinic = (pr['assigned_doctor_clinic'] ?? pr['assignedDoctorClinic'] ?? pr['dentist']?['clinicName'])?.toString();
 
-          String normalizedStatus = rawStatus;
-          if (rawStatus == 'DENTIST_SUGGESTED' || rawStatus == 'PENDING_DENTIST_CONFIRMATION' || (assignedDocName != null && assignedDocName.isNotEmpty)) {
-            normalizedStatus = 'Doctor Suggested';
+          final rawStatusUpper = rawStatus.toUpperCase();
+          String normalizedStatus = 'Submitted';
+          if (rawStatusUpper == 'ADMIN_REVIEWED' || rawStatusUpper == 'ADMIN_REVIEW') {
+            normalizedStatus = 'Admin Review';
+          } else if (rawStatusUpper == 'DENTIST_ASSIGNED' || rawStatusUpper == 'DENTIST_SUGGESTED' || rawStatusUpper == 'PENDING_DENTIST_CONFIRMATION' || (assignedDocName != null && assignedDocName.isNotEmpty)) {
+            normalizedStatus = 'Doctor Assigned';
+          } else if (rawStatusUpper == 'CONFIRMED' || rawStatusUpper == 'ACCEPTED') {
+            normalizedStatus = 'Confirmed';
+          } else if (rawStatusUpper == 'SUBMITTED' || rawStatusUpper == 'PENDING_ADMIN_REVIEW') {
+            normalizedStatus = 'Submitted';
+          } else {
+            normalizedStatus = rawStatus;
           }
 
           final patientObj = pr['patient'] ?? {};
@@ -1152,6 +1161,32 @@ class PatientProblemService extends ChangeNotifier {
     } catch (e) {
       debugPrint('Error saving problem request to Supabase DB: $e');
     }
+  Future<void> markAdminReviewed(String requestId, {String? notes}) async {
+    final index = _requests.indexWhere((r) => r.id == requestId);
+    if (index != -1) {
+      final req = _requests[index];
+      if (req.status == 'Submitted' || req.status == 'PENDING_ADMIN_REVIEW' || req.status == 'SUBMITTED') {
+        req.status = 'Admin Review';
+        if (notes != null && notes.isNotEmpty) req.adminNotes = notes;
+        _saveToStorage();
+        notifyListeners();
+
+        try {
+          await ApiService().markAdminReviewed(requestId, notes: notes);
+        } catch (e) {
+          debugPrint('Error syncing markAdminReviewed to API: $e');
+        }
+
+        try {
+          await Supabase.instance.client.from('patient_problem_requests').update({
+            'status': 'ADMIN_REVIEWED',
+            if (notes != null && notes.isNotEmpty) 'admin_notes': notes,
+          }).eq('id', requestId);
+        } catch (e) {
+          debugPrint('Supabase direct markAdminReviewed update error: $e');
+        }
+      }
+    }
   }
 
 
@@ -1198,7 +1233,7 @@ class PatientProblemService extends ChangeNotifier {
 
       try {
         await Supabase.instance.client.from('patient_problem_requests').update({
-          'status': 'DENTIST_SUGGESTED',
+          'status': 'DENTIST_ASSIGNED',
           'suggested_dentist_id': doctor.id,
           'assigned_doctor_id': doctor.id,
           'assigned_doctor_name': doctor.name,
