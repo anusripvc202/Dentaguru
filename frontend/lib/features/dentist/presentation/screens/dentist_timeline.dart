@@ -964,6 +964,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   // ==========================================
   Widget _buildDashboardTab() {
     final currentDoc = _patientService.currentDoctor;
+    final authUser = Supabase.instance.client.auth.currentUser;
     final docNameClean = currentDoc?.name.replaceAll('Dr. ', '').trim().toLowerCase() ?? '';
     final allPool = <PatientConsultationRequest>{
       ..._patientService.dentistAssignedRequests,
@@ -971,11 +972,19 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     }.toList();
 
     final requests = allPool.where((req) {
-      if (currentDoc != null && req.assignedDoctorId != null && (req.assignedDoctorId == currentDoc.id || req.assignedDoctorId == currentDoc.email)) return true;
+      if (req.assignedDoctorId != null && req.assignedDoctorId!.isNotEmpty) {
+        final dId = req.assignedDoctorId!;
+        if (currentDoc != null && (dId == currentDoc.id || dId == currentDoc.email)) return true;
+        if (authUser != null && (dId == authUser.id || dId == authUser.email)) return true;
+      }
       if (req.assignedDoctorName != null && req.assignedDoctorName!.isNotEmpty) {
         final assignedNameLower = req.assignedDoctorName!.toLowerCase();
-        if (docNameClean.isNotEmpty && assignedNameLower.contains(docNameClean)) return true;
+        if (docNameClean.isNotEmpty && (assignedNameLower.contains(docNameClean) || docNameClean.contains(assignedNameLower))) return true;
         if (currentDoc != null && currentDoc.name.isNotEmpty && (assignedNameLower.contains(currentDoc.name.toLowerCase()) || currentDoc.name.toLowerCase().contains(assignedNameLower))) return true;
+        if (authUser?.email != null && authUser!.email!.isNotEmpty && assignedNameLower.contains(authUser.email!.split('@').first.toLowerCase())) return true;
+      }
+      if (req.status == 'Doctor Assigned' || req.status == 'DENTIST_ASSIGNED' || req.status == 'Confirmed' || req.status == 'Accepted') {
+        if (currentDoc == null || currentDoc.name == 'Dentist Practitioner' || docNameClean.isEmpty) return true;
       }
       return false;
     }).toList();

@@ -1036,6 +1036,18 @@ class PatientProblemService extends ChangeNotifier {
           ));
         }
       }
+      final authUser = Supabase.instance.client.auth.currentUser;
+      if (authUser != null && authUser.email != null && authUser.email!.isNotEmpty) {
+        final authEmailLower = authUser.email!.toLowerCase();
+        for (final d in _allDoctors) {
+          if (d.email.toLowerCase() == authEmailLower ||
+              (d.id.isNotEmpty && d.id == authUser.id) ||
+              (d.name.isNotEmpty && authEmailLower.contains(d.name.replaceAll('Dr. ', '').trim().toLowerCase()))) {
+            currentDoctor = d;
+            break;
+          }
+        }
+      }
       _saveToStorage();
       notifyListeners();
     } catch (e) {
@@ -1440,7 +1452,18 @@ class PatientProblemService extends ChangeNotifier {
       _saveToStorage();
       notifyListeners();
 
-      // 2. Create & Persist Appointment in Supabase DB asynchronously in background
+      // 2. Direct Supabase PostgreSQL update
+      try {
+        await Supabase.instance.client.from('patient_problem_requests').update({
+          'status': 'CONFIRMED',
+          'confirmed_time_slot': slotText,
+          if (date != null && date.trim().isNotEmpty) 'confirmed_date': date.trim(),
+        }).eq('id', requestId);
+      } catch (e) {
+        debugPrint('Supabase acceptReferralByDentist update error: $e');
+      }
+
+      // 3. Create & Persist Appointment in Supabase DB asynchronously in background
       ApiService().createAppointment(
         patientId: req.patientName,
         dentistId: req.assignedDoctorId ?? '',
