@@ -904,15 +904,17 @@ class PatientProblemService extends ChangeNotifier {
         // Normalize status from DB to frontend display values
         final rawStatusUpper = rawStatus.toUpperCase();
         String normalizedStatus;
-        if (rawStatusUpper == 'DENTIST_ASSIGNED' ||
+        if (rawStatusUpper == 'CONFIRMED' ||
+            rawStatusUpper == 'ACCEPTED' ||
+            rawStatusUpper == 'DENTIST_ACCEPTED') {
+          normalizedStatus = 'Confirmed';
+        } else if (rawStatusUpper == 'DENTIST_ASSIGNED' ||
             rawStatusUpper == 'DENTIST_SUGGESTED' ||
             rawStatusUpper == 'PENDING_DENTIST_CONFIRMATION' ||
             (assignedDocName != null && assignedDocName.isNotEmpty)) {
           normalizedStatus = 'Doctor Assigned';
         } else if (rawStatusUpper == 'ADMIN_REVIEWED' || rawStatusUpper == 'ADMIN_REVIEW') {
           normalizedStatus = 'Admin Review';
-        } else if (rawStatusUpper == 'CONFIRMED' || rawStatusUpper == 'ACCEPTED') {
-          normalizedStatus = 'Confirmed';
         } else {
           normalizedStatus = 'Submitted'; // SUBMITTED / PENDING_ADMIN_REVIEW / anything else
         }
