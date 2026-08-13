@@ -202,8 +202,18 @@ class ApiService {
             setAuthToken(res.session!.accessToken);
           }
           final userMeta = res.user!.userMetadata ?? {};
-          final userRole = userMeta['role']?.toString() ?? role ?? 'Patient';
-          final userName = userMeta['name']?.toString() ?? email.split('@').first;
+          var userRole = userMeta['role']?.toString() ?? role ?? 'Patient';
+          var userName = userMeta['name']?.toString() ?? email.split('@').first;
+          Map<String, dynamic> dbUser = {};
+          try {
+            final uRes = await client.from('users').select('*').eq('id', res.user!.id).maybeSingle();
+            if (uRes != null) {
+              dbUser = Map<String, dynamic>.from(uRes);
+              if (dbUser['name'] != null && dbUser['name'].toString().isNotEmpty) userName = dbUser['name'].toString();
+              if (dbUser['role'] != null && dbUser['role'].toString().isNotEmpty) userRole = dbUser['role'].toString();
+            }
+          } catch (_) {}
+
           return {
             'success': true,
             'data': {
@@ -213,6 +223,12 @@ class ApiService {
                 'email': res.user!.email,
                 'name': userName,
                 'role': userRole,
+                'age': dbUser['age'] ?? userMeta['age'] ?? '',
+                'gender': dbUser['gender'] ?? userMeta['gender'] ?? '',
+                'bloodGroup': dbUser['blood_group'] ?? userMeta['bloodGroup'] ?? '',
+                'emergencyContact': dbUser['emergency_contact'] ?? userMeta['emergencyContact'] ?? '',
+                'city': dbUser['city'] ?? userMeta['city'] ?? '',
+                'pincode': dbUser['pincode'] ?? userMeta['pincode'] ?? '',
                 'clinicName': userMeta['clinicName'] ?? '',
               }
             }

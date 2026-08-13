@@ -760,7 +760,7 @@ class PatientProblemService extends ChangeNotifier {
             name = 'Patient';
           }
 
-          _allPatients.add(PatientProfile(
+          final pProfile = PatientProfile(
             id: id,
             name: name,
             email: email,
@@ -770,7 +770,25 @@ class PatientProblemService extends ChangeNotifier {
             pincode: pincode,
             state: state,
             address: address,
-          ));
+          );
+          _allPatients.add(pProfile);
+
+          final authEmail = Supabase.instance.client.auth.currentUser?.email;
+          final isCurrentPatientMatch = (authEmail != null && authEmail.isNotEmpty && authEmail.toLowerCase() == email.toLowerCase()) ||
+              (currentPatient.email.isNotEmpty && currentPatient.email.toLowerCase() == email.toLowerCase()) ||
+              (currentPatient.id.isNotEmpty && currentPatient.id == id);
+
+          if (isCurrentPatientMatch) {
+            currentPatient.id = id;
+            if (name.isNotEmpty) currentPatient.name = name;
+            if (email.isNotEmpty) currentPatient.email = email;
+            if (phone.isNotEmpty) currentPatient.phone = phone;
+            if (age.isNotEmpty) currentPatient.age = age;
+            if (city.isNotEmpty) currentPatient.city = city;
+            if (pincode.isNotEmpty) currentPatient.pincode = pincode;
+            if (state.isNotEmpty) currentPatient.state = state;
+            if (address.isNotEmpty) currentPatient.address = address;
+          }
         }
       }
       _saveToStorage();
@@ -1389,7 +1407,7 @@ class PatientProblemService extends ChangeNotifier {
       name: name.trim().isEmpty ? 'Patient' : name.trim(),
       email: email.trim().isEmpty ? 'patient@dentaguru.com' : email.trim(),
       phone: phone.trim(),
-      age: age.trim().isEmpty ? '28' : age.trim(),
+      age: age.trim(),
       gender: gender.isEmpty ? 'Female' : gender,
       bloodGroup: bloodGroup.isEmpty ? 'O Positive (O+)' : bloodGroup,
       emergencyContact: emergencyContact.trim().isEmpty ? phone.trim() : emergencyContact.trim(),
