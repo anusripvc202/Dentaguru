@@ -329,9 +329,28 @@ class ApiService {
     }
   }
 
-  /// Fetch live dentists directory from Supabase.
-  /// Optionally filter by [state], [city], [pincode], [specialty], [availability] (server-side).
+  /// Fetch live dentists directory directly from Supabase DB with Express API fallback.
   Future<List<dynamic>> fetchDentists({String? state, String? city, String? pincode, String? specialty, String? availability}) async {
+    // 1. Direct Supabase query first
+    try {
+      final client = Supabase.instance.client;
+      var query = client.from('dentists').select('*, users!user_id(*), clinics!clinic_id(*)');
+      if (state != null && state.trim().isNotEmpty) query = query.eq('state', state.trim());
+      if (city != null && city.trim().isNotEmpty) query = query.eq('city', city.trim());
+      if (pincode != null && pincode.trim().isNotEmpty) query = query.eq('pincode', pincode.trim());
+      if (specialty != null && specialty.trim().isNotEmpty) query = query.eq('speciality', specialty.trim());
+
+      final res = await query.order('created_at', ascending: false);
+      if (res.isNotEmpty) return List<dynamic>.from(res);
+    } catch (e) {
+      debugPrint('Supabase direct fetch dentists notice: $e');
+      try {
+        final simpleRes = await Supabase.instance.client.from('dentists').select('*').order('created_at', ascending: false);
+        if (simpleRes.isNotEmpty) return List<dynamic>.from(simpleRes);
+      } catch (_) {}
+    }
+
+    // 2. Express backend API fallback
     try {
       final params = <String, String>{};
       if (state != null && state.trim().isNotEmpty) params['state'] = state.trim();
@@ -344,25 +363,11 @@ class ApiService {
       final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        return data['dentists'] ?? [];
+        final list = data['dentists'] ?? [];
+        if (list is List && list.isNotEmpty) return list;
       }
     } catch (e) {
-      try {
-        final params = <String, String>{};
-        if (state != null && state.trim().isNotEmpty) params['state'] = state.trim();
-        if (city != null && city.trim().isNotEmpty) params['city'] = city.trim();
-        if (pincode != null && pincode.trim().isNotEmpty) params['pincode'] = pincode.trim();
-        if (specialty != null && specialty.trim().isNotEmpty) params['specialty'] = specialty.trim();
-        if (availability != null && availability.trim().isNotEmpty) params['availability'] = availability.trim();
-        final fallbackUri = Uri.parse('http://localhost:5000/api/v1/dentists').replace(queryParameters: params.isNotEmpty ? params : null);
-        final response = await http.get(fallbackUri, headers: _headers);
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body);
-          return data['dentists'] ?? [];
-        }
-      } catch (fErr) {
-        debugPrint('Fetch dentists fallback error: $fErr');
-      }
+      debugPrint('Fetch dentists API error: $e');
     }
     return [];
   }
