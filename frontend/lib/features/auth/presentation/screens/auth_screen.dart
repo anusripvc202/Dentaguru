@@ -958,6 +958,14 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    // Prominent Brand Logo Header
+                    const Center(
+                      child: Padding(
+                        padding: EdgeInsets.only(bottom: 16),
+                        child: DentaGuruLogo(height: 44),
+                      ),
+                    ),
+
                     // Dynamic Header with Role Icon & Gradient
                     AnimatedContainer(
                       duration: const Duration(milliseconds: 300),
