@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -18,6 +19,9 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   int _currentIndex = 0;
   final PatientProblemService _patientService = PatientProblemService();
 
+  Timer? _autoSyncTimer;
+  RealtimeChannel? _realtimeChannel;
+
   late AnimationController _entryController;
   late AnimationController _pulseController;
   late Animation<double> _fadeAnimation;
@@ -28,8 +32,31 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   void initState() {
     super.initState();
     _patientService.addListener(_onServiceUpdate);
+    _patientService.setDentistMode(true);
     _patientService.syncAllDataFromApi();
-    _patientService.syncDentistAssignedRequestsFromApi();
+
+    // ⏱️ Auto-sync polling timer (every 4s) to catch assigned patients immediately
+    _autoSyncTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (mounted) _patientService.syncProblemRequestsFromApi();
+    });
+
+    // ⚡ Supabase Realtime Postgres Changes listener for instant dentist dashboard updates
+    try {
+      _realtimeChannel = Supabase.instance.client
+          .channel('dentist_problem_requests_realtime')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'patient_problem_requests',
+            callback: (payload) {
+              debugPrint('⚡ Realtime update on patient_problem_requests for Dentist: ${payload.eventType}');
+              if (mounted) _patientService.syncProblemRequestsFromApi();
+            },
+          )
+          .subscribe();
+    } catch (e) {
+      debugPrint('Dentist Realtime Channel Notice: $e');
+    }
 
     _entryController = AnimationController(
       vsync: this,
@@ -63,8 +90,15 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
 
   @override
   void dispose() {
+    _autoSyncTimer?.cancel();
+    if (_realtimeChannel != null) {
+      try {
+        Supabase.instance.client.removeChannel(_realtimeChannel!);
+      } catch (_) {}
+    }
     _entryController.dispose();
     _pulseController.dispose();
+    _patientService.setDentistMode(false);
     _patientService.removeListener(_onServiceUpdate);
     super.dispose();
   }
@@ -221,139 +255,282 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     );
   }
 
-  void _showPrescriptionModal(BuildContext context, String patientName) {
+  void _showPatientDetailsModal(BuildContext context, PatientConsultationRequest req) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 22,
+                  backgroundColor: AppTheme.primaryBlue.withValues(alpha: 0.1),
+                  child: Text(
+                    req.patientName.isNotEmpty ? req.patientName[0].toUpperCase() : 'P',
+                    style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryBlue, fontSize: 18),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(req.patientName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
+                      Text('Submitted Request ID: ${req.id}', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const Divider(height: 24),
+            _buildDetailRow(Icons.category_rounded, 'Category', req.problemCategory),
+            _buildDetailRow(Icons.description_rounded, 'Symptoms', req.problemDescription),
+            if (req.adminNotes != null && req.adminNotes!.isNotEmpty)
+              _buildDetailRow(Icons.note_alt_rounded, 'Admin Note', req.adminNotes!),
+            if (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.isNotEmpty)
+              _buildDetailRow(Icons.access_time_filled_rounded, 'Consultation Slot', req.confirmedTimeSlot!),
+            if (req.city.isNotEmpty || req.preferredLocation.isNotEmpty)
+              _buildDetailRow(Icons.location_on_rounded, 'Location', req.city.isNotEmpty ? req.city : req.preferredLocation),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryBlue,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: const Text('Close Details', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(IconData icon, String label, String val) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: AppTheme.primaryBlue),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppTheme.textMuted)),
+                const SizedBox(height: 2),
+                Text(val, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.textDark)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showPrescriptionModal(BuildContext context, dynamic reqOrName) {
+    final String pName = reqOrName is PatientConsultationRequest ? reqOrName.patientName : reqOrName.toString();
+    final diagnosisController = TextEditingController(text: reqOrName is PatientConsultationRequest ? reqOrName.problemCategory : 'Dental Evaluation');
     final medController = TextEditingController(text: 'Amoxicillin 500mg');
-    final dosageController = TextEditingController(text: '1 Capsule every 8 hours after meals');
+    final dosageController = TextEditingController(text: '1 Capsule every 8 hours');
+    final frequencyController = TextEditingController(text: 'Twice Daily (1-0-1)');
     final durationController = TextEditingController(text: '7 Days');
+    final notesController = TextEditingController(text: 'Take after meals with plenty of water.');
 
     showDialog(
       context: context,
       builder: (dialogContext) {
         return Dialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-          child: Padding(
-            padding: const EdgeInsets.all(22),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF10B981).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(Icons.receipt_long_rounded, color: Color(0xFF10B981), size: 24),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('Issue E-Prescription', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppTheme.textDark)),
-                          Text('Patient: $patientName', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                TextField(
-                  controller: medController,
-                  decoration: InputDecoration(
-                    labelText: 'Medication Name & Strength',
-                    filled: true,
-                    fillColor: const Color(0xFFF8FAFC),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: dosageController,
-                  decoration: InputDecoration(
-                    labelText: 'Dosage Instructions',
-                    filled: true,
-                    fillColor: const Color(0xFFF8FAFC),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: durationController,
-                  decoration: InputDecoration(
-                    labelText: 'Treatment Duration',
-                    filled: true,
-                    fillColor: const Color(0xFFF8FAFC),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.check_circle_rounded, size: 18),
-                  label: const Text('Send Digital E-Prescription to Patient', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF10B981),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  onPressed: () async {
-                    final medName = medController.text.trim();
-                    final dosage = dosageController.text.trim();
-                    final duration = durationController.text.trim();
-
-                    final newRecord = {
-                      'id': 'REC-${DateTime.now().millisecondsSinceEpoch}',
-                      'type': 'prescription',
-                      'title': 'Digital Prescription Slips',
-                      'subtitle': 'Active Prescription (${medName.isNotEmpty ? medName : 'Amoxicillin 500mg'})',
-                      'doctorName': _patientService.currentDoctor?.name ?? 'Dentist Practitioner',
-                      'clinicName': _patientService.currentDoctor?.clinicName ?? '',
-                      'date': DateTime.now().toString().split(' ').first,
-                      'items': [
-                        {
-                          'name': medName.isNotEmpty ? medName : 'Amoxicillin 500mg',
-                          'dosage': dosage.isNotEmpty ? dosage : '1 Capsule every 8 hours after meals',
-                          'duration': duration.isNotEmpty ? duration : '7 Days',
-                          'status': 'Active',
-                        }
-                      ],
-                    };
-
-                    _patientService.addMedicalRecord(newRecord);
-
-                    await ApiService().createMedicalRecord(
-                      patientId: patientName.isNotEmpty ? patientName : _patientService.currentPatient.name,
-                      type: 'prescription',
-                      title: 'Digital Prescription Slips',
-                      subtitle: 'Active Prescription (${medName.isNotEmpty ? medName : 'Amoxicillin 500mg'})',
-                      doctorName: _patientService.currentDoctor?.name ?? 'Dentist Practitioner',
-                      clinicName: _patientService.currentDoctor?.clinicName ?? '',
-                      items: [
-                        {
-                          'name': medName.isNotEmpty ? medName : 'Amoxicillin 500mg',
-                          'dosage': dosage.isNotEmpty ? dosage : '1 Capsule every 8 hours after meals',
-                          'duration': duration.isNotEmpty ? duration : '7 Days',
-                          'status': 'Active',
-                        }
-                      ],
-                    );
-
-                    if (context.mounted) {
-                      Navigator.of(dialogContext).pop();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('💊 Digital E-Prescription issued to $patientName! Live in Patient Health Locker.'),
-                          backgroundColor: const Color(0xFF10B981),
-                          duration: const Duration(seconds: 3),
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(12),
                         ),
+                        child: const Icon(Icons.receipt_long_rounded, color: Color(0xFF10B981), size: 24),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Issue E-Prescription', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppTheme.textDark)),
+                            Text('Patient: $pName', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: diagnosisController,
+                    decoration: InputDecoration(
+                      labelText: 'Clinical Diagnosis',
+                      filled: true,
+                      fillColor: const Color(0xFFF8FAFC),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: medController,
+                    decoration: InputDecoration(
+                      labelText: 'Medication Name & Strength',
+                      filled: true,
+                      fillColor: const Color(0xFFF8FAFC),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: dosageController,
+                          decoration: InputDecoration(
+                            labelText: 'Dosage',
+                            filled: true,
+                            fillColor: const Color(0xFFF8FAFC),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: frequencyController,
+                          decoration: InputDecoration(
+                            labelText: 'Frequency',
+                            filled: true,
+                            fillColor: const Color(0xFFF8FAFC),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: durationController,
+                    decoration: InputDecoration(
+                      labelText: 'Duration',
+                      filled: true,
+                      fillColor: const Color(0xFFF8FAFC),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: notesController,
+                    decoration: InputDecoration(
+                      labelText: 'Instructions / Additional Notes',
+                      filled: true,
+                      fillColor: const Color(0xFFF8FAFC),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.check_circle_rounded, size: 18),
+                    label: const Text('Send Digital E-Prescription to Patient', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF10B981),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: () async {
+                      final diagnosis = diagnosisController.text.trim();
+                      final medName = medController.text.trim();
+                      final dosage = dosageController.text.trim();
+                      final freq = frequencyController.text.trim();
+                      final duration = durationController.text.trim();
+                      final notes = notesController.text.trim();
+
+                      final newRecord = {
+                        'id': 'REC-${DateTime.now().millisecondsSinceEpoch}',
+                        'patient_id': pName,
+                        'type': 'prescription',
+                        'title': 'Digital Prescription Slips',
+                        'subtitle': 'Diagnosis: ${diagnosis.isNotEmpty ? diagnosis : "Dental Care"} (${medName.isNotEmpty ? medName : "Medication"})',
+                        'doctorName': _patientService.currentDoctor?.name ?? 'Attending Dentist',
+                        'clinicName': _patientService.currentDoctor?.clinicName ?? 'DentaGuru Dental Clinic',
+                        'date': DateTime.now().toString().split(' ').first,
+                        'items': [
+                          {
+                            'name': medName.isNotEmpty ? medName : 'Amoxicillin 500mg',
+                            'dosage': dosage.isNotEmpty ? dosage : '1 Capsule',
+                            'frequency': freq.isNotEmpty ? freq : 'Twice Daily',
+                            'duration': duration.isNotEmpty ? duration : '7 Days',
+                            'instructions': notes,
+                            'status': 'Active',
+                          }
+                        ],
+                      };
+
+                      _patientService.addMedicalRecord(newRecord);
+
+                      await ApiService().createMedicalRecord(
+                        patientId: pName,
+                        type: 'prescription',
+                        title: 'Digital Prescription Slips',
+                        subtitle: 'Diagnosis: ${diagnosis.isNotEmpty ? diagnosis : "Dental Care"} (${medName.isNotEmpty ? medName : "Medication"})',
+                        doctorName: _patientService.currentDoctor?.name ?? 'Attending Dentist',
+                        clinicName: _patientService.currentDoctor?.clinicName ?? 'DentaGuru Dental Clinic',
+                        items: [
+                          {
+                            'name': medName.isNotEmpty ? medName : 'Amoxicillin 500mg',
+                            'dosage': dosage.isNotEmpty ? dosage : '1 Capsule',
+                            'frequency': freq.isNotEmpty ? freq : 'Twice Daily',
+                            'duration': duration.isNotEmpty ? duration : '7 Days',
+                            'instructions': notes,
+                            'status': 'Active',
+                          }
+                        ],
                       );
-                    }
-                  },
-                ),
-              ],
+
+                      // Dispatch notification to Patient
+                      _patientService.addNotification(
+                        recipientRole: 'Patient',
+                        recipientId: pName,
+                        title: '💊 New E-Prescription Issued!',
+                        message: 'Dr. ${_patientService.currentDoctor?.name ?? "Attending Dentist"} has issued an E-Prescription for $diagnosis.',
+                      );
+
+                      if (context.mounted) {
+                        Navigator.of(dialogContext).pop();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('💊 Digital E-Prescription issued to $pName! Live in Patient Health Locker.'),
+                            backgroundColor: const Color(0xFF10B981),
+                            duration: const Duration(seconds: 3),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -1222,7 +1399,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
 
                   return Column(
                     children: sortedRequests.map<Widget>((req) {
-                      final bool isConfirmed = req.status == 'Confirmed' || req.status == 'Accepted';
+                      final bool isConfirmed = req.status == 'Confirmed' || req.status == 'Accepted' || req.status == 'DENTIST_ACCEPTED';
 
                       return Container(
                         margin: const EdgeInsets.only(bottom: 14),
@@ -1242,133 +1419,167 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            // 1. Header row: Title + Status Badge
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Expanded(
-                                  child: Text(
-                                    (req.patientName.contains('-') && req.patientName.length > 20)
-                                        ? (_patientService.currentPatient.name.isNotEmpty ? _patientService.currentPatient.name : 'Patient')
-                                        : req.patientName,
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark),
-                                    overflow: TextOverflow.ellipsis,
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        isConfirmed ? Icons.verified_user_rounded : Icons.assignment_ind_rounded,
+                                        size: 18,
+                                        color: isConfirmed ? const Color(0xFF10B981) : const Color(0xFF0284C7),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: Text(
+                                          isConfirmed ? 'Active Patient ✓' : 'Admin Assigned Patient',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 14,
+                                            color: isConfirmed ? const Color(0xFF15803D) : AppTheme.textDark,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                                 const SizedBox(width: 8),
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                   decoration: BoxDecoration(
-                                    color: req.severity == 'Severe' ? Colors.red.shade100 : Colors.orange.shade100,
+                                    color: isConfirmed
+                                        ? const Color(0xFFDCFCE7)
+                                        : (req.severity == 'Severe' ? Colors.red.shade100 : Colors.orange.shade100),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
                                   child: Text(
-                                    '${req.severity} Severity',
+                                    isConfirmed ? '🟢 Accepted by You' : '⏳ Pending Acceptance',
                                     style: TextStyle(
                                       fontSize: 10,
                                       fontWeight: FontWeight.bold,
-                                      color: req.severity == 'Severe' ? Colors.red.shade900 : Colors.orange.shade900,
+                                      color: isConfirmed
+                                          ? const Color(0xFF15803D)
+                                          : (req.severity == 'Severe' ? Colors.red.shade900 : Colors.orange.shade900),
                                     ),
                                   ),
                                 ),
                               ],
                             ),
+                            const Divider(height: 20),
+
+                            // 2. Patient Name
+                            Text(
+                              (req.patientName.contains('-') && req.patientName.length > 20)
+                                  ? (_patientService.currentPatient.name.isNotEmpty ? _patientService.currentPatient.name : 'Patient')
+                                  : req.patientName,
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textDark),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                             const SizedBox(height: 4),
                             Text('📌 Category: ${req.problemCategory}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue)),
                             const SizedBox(height: 4),
                             Text('Symptoms: "${req.problemDescription}"', style: const TextStyle(fontSize: 12, color: AppTheme.textMedium, height: 1.35)),
+
                             if (req.adminNotes != null && req.adminNotes!.isNotEmpty) ...[
                               const SizedBox(height: 6),
                               Text('📝 Admin Note: ${req.adminNotes}', style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: AppTheme.textMuted)),
                             ],
+
+                            if (req.city.isNotEmpty || req.preferredLocation.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text('📍 Location: ${req.city.isNotEmpty ? req.city : req.preferredLocation}', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                            ],
+
                             const SizedBox(height: 12),
 
                             if (isConfirmed) ...[
-                              if (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.isNotEmpty) ...[
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                  margin: const EdgeInsets.only(bottom: 8),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.primaryBlue.withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      const Icon(Icons.access_time_filled_rounded, size: 14, color: AppTheme.primaryBlue),
-                                      const SizedBox(width: 6),
-                                      Text('Confirmed Slot: ${req.confirmedTimeSlot}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.primaryBlue)),
-                                    ],
-                                  ),
+                              // Consultation Slot Info Badge
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                margin: const EdgeInsets.only(bottom: 12),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF0FDF4),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: const Color(0xFF86EFAC)),
                                 ),
-                              ],
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.event_available_rounded, size: 16, color: Color(0xFF16A34A)),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'Consultation: ${req.confirmedTimeSlot ?? "Today, 4:00 PM"}',
+                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF15803D)),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+
+                              // Action Buttons: [ 💬 Chat with Patient ] [ 📝 E-Prescription ] [ View Patient Details ]
                               Row(
                                 children: [
                                   Expanded(
                                     child: SizedBox(
-                                      height: 42,
+                                      height: 40,
+                                      child: OutlinedButton.icon(
+                                        icon: const Icon(Icons.chat_rounded, size: 13),
+                                        label: const Text('💬 Chat with Patient', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: AppTheme.primaryBlue,
+                                          side: const BorderSide(color: AppTheme.primaryBlue, width: 1.2),
+                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                        ),
+                                        onPressed: () {
+                                          final rId = 'PATIENT_${req.patientName.toUpperCase().replaceAll(' ', '_')}';
+                                          _showDoctorChatModal(context, req.patientName, rId);
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: SizedBox(
+                                      height: 40,
                                       child: ElevatedButton.icon(
-                                        icon: const Icon(Icons.receipt_long_rounded, size: 14),
-                                        label: const Text('Issue E-Prescription', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10.5), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                        icon: const Icon(Icons.receipt_long_rounded, size: 13),
+                                        label: const Text('📝 E-Prescription', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10), maxLines: 1, overflow: TextOverflow.ellipsis),
                                         style: ElevatedButton.styleFrom(
                                           backgroundColor: const Color(0xFF10B981),
                                           foregroundColor: Colors.white,
                                           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
                                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                         ),
-                                        onPressed: () => _showPrescriptionModal(context, req.patientName),
+                                        onPressed: () => _showPrescriptionModal(context, req),
                                       ),
                                     ),
                                   ),
-                                  const SizedBox(width: 8),
+                                  const SizedBox(width: 6),
                                   Expanded(
                                     child: SizedBox(
-                                      height: 42,
+                                      height: 40,
                                       child: OutlinedButton.icon(
-                                        icon: const Icon(Icons.chat_bubble_outline_rounded, size: 14),
-                                        label: const Text('Chat', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                        icon: const Icon(Icons.info_outline_rounded, size: 13),
+                                        label: const Text('View Details', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, color: AppTheme.textDark), maxLines: 1, overflow: TextOverflow.ellipsis),
                                         style: OutlinedButton.styleFrom(
-                                          foregroundColor: AppTheme.primaryBlue,
-                                          side: const BorderSide(color: AppTheme.primaryBlue),
+                                          foregroundColor: AppTheme.textDark,
+                                          side: const BorderSide(color: Color(0xFFCBD5E1), width: 1.2),
                                           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
                                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                         ),
-                                        onPressed: () {
-                                          final rId = 'PATIENT-${req.patientName.isNotEmpty ? req.patientName.toUpperCase().replaceAll(' ', '_') : 'GUEST'}';
-                                          _showDoctorChatModal(context, req.patientName, rId);
-                                        },
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Container(
-                                      height: 42,
-                                      alignment: Alignment.center,
-                                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFF10B981).withValues(alpha: 0.12),
-                                        borderRadius: BorderRadius.circular(10),
-                                        border: Border.all(color: const Color(0xFF10B981)),
-                                      ),
-                                      child: const Row(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: [
-                                          Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 14),
-                                          SizedBox(width: 4),
-                                          Expanded(
-                                            child: Text(
-                                              'Accepted',
-                                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
-                                              textAlign: TextAlign.center,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                        ],
+                                        onPressed: () => _showPatientDetailsModal(context, req),
                                       ),
                                     ),
                                   ),
                                 ],
                               ),
                             ] else ...[
+                              // Action Buttons BEFORE Acceptance: [ Decline Referral ] [ Accept & Set Slot ]
                               Row(
                                 children: [
                                   Expanded(
@@ -1376,7 +1587,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                       height: 42,
                                       child: OutlinedButton.icon(
                                         icon: const Icon(Icons.close_rounded, size: 14, color: Color(0xFFEF4444)),
-                                        label: const Text('Decline Referral', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10.5, color: Color(0xFFEF4444)), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                        label: const Text('Decline Referral', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFFEF4444)), maxLines: 1, overflow: TextOverflow.ellipsis),
                                         style: OutlinedButton.styleFrom(
                                           side: const BorderSide(color: Color(0xFFEF4444)),
                                           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
@@ -1400,7 +1611,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                       height: 42,
                                       child: ElevatedButton.icon(
                                         icon: const Icon(Icons.event_available_rounded, size: 14),
-                                        label: const Text('Accept & Set Slot', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10.5), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                        label: const Text('Accept & Set Slot', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
                                         style: ElevatedButton.styleFrom(
                                           backgroundColor: const Color(0xFF10B981),
                                           foregroundColor: Colors.white,

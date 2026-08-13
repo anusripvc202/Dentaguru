@@ -803,6 +803,22 @@ class PatientProblemService extends ChangeNotifier {
     }
   }
 
+  bool _isAdminMode = false;
+  void setAdminMode(bool enabled) {
+    _isAdminMode = enabled;
+    if (enabled) {
+      syncProblemRequestsFromApi();
+    }
+  }
+
+  bool _isDentistMode = false;
+  void setDentistMode(bool enabled) {
+    _isDentistMode = enabled;
+    if (enabled) {
+      syncProblemRequestsFromApi();
+    }
+  }
+
   Future<void> syncProblemRequestsFromApi() async {
     try {
       final authUser = Supabase.instance.client.auth.currentUser;
@@ -820,7 +836,9 @@ class PatientProblemService extends ChangeNotifier {
 
       final List problemReqs = isAdmin
           ? await ApiService().fetchAdminProblemRequests()
-          : await ApiService().fetchPatientProblemRequests(patientId: pId);
+          : (_isDentistMode
+              ? await ApiService().fetchDentistAssignedRequests()
+              : await ApiService().fetchPatientProblemRequests(patientId: pId));
 
       if (problemReqs.isEmpty) {
         _saveToStorage();
@@ -832,8 +850,8 @@ class PatientProblemService extends ChangeNotifier {
         final prId = (pr['_id'] ?? pr['id'] ?? '').toString();
         if (prId.isEmpty) continue;
 
-        // ✅ If NOT admin, enforce strict ownership verification before adding to _requests
-        if (!isAdmin) {
+        // ✅ If NOT admin and NOT dentist, enforce strict patient ownership verification
+        if (!isAdmin && !_isDentistMode) {
           final reqPatientId = (pr['patient_id'] ?? pr['patientId'] ?? pr['patient']?['id'])?.toString() ?? '';
           final reqPatientEmail = (pr['patient_email'] ?? pr['patientEmail'] ?? pr['patient']?['email'])?.toString() ?? '';
           final reqPatientName = (pr['patient_name'] ?? pr['patientName'] ?? pr['patient']?['name'])?.toString() ?? '';
@@ -1587,10 +1605,10 @@ class PatientProblemService extends ChangeNotifier {
       _saveToStorage();
       notifyListeners();
 
-      // 2. Direct Supabase PostgreSQL update
+      // 2. Direct Supabase PostgreSQL update (sets status to DENTIST_ACCEPTED)
       try {
         await Supabase.instance.client.from('patient_problem_requests').update({
-          'status': 'CONFIRMED',
+          'status': 'DENTIST_ACCEPTED',
           'confirmed_time_slot': slotText,
           if (date != null && date.trim().isNotEmpty) 'confirmed_date': date.trim(),
         }).eq('id', requestId);
