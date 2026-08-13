@@ -107,11 +107,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
         return StatefulBuilder(
           builder: (context, setModalState) {
             final sourceDoctors = remoteFilteredDoctors ?? _problemService.allDoctors;
-            // Filter doctors based on search, specialty, availability, state, city and pincode
-            final filteredDoctors = sourceDoctors.where((doc) {
-              final matchesSearch = doc.name.toLowerCase().contains(searchKeyword.toLowerCase()) ||
-                  doc.specialty.toLowerCase().contains(searchKeyword.toLowerCase()) ||
-                  doc.clinicName.toLowerCase().contains(searchKeyword.toLowerCase());
+            final searchTrim = searchKeyword.trim().toLowerCase();
+
+            // 1. Filter doctors matching Search (name, specialty, clinic, city, pincode, state, address) + filters
+            final exactFilteredDoctors = sourceDoctors.where((doc) {
+              final matchesSearch = searchTrim.isEmpty ||
+                  doc.name.toLowerCase().contains(searchTrim) ||
+                  doc.specialty.toLowerCase().contains(searchTrim) ||
+                  doc.clinicName.toLowerCase().contains(searchTrim) ||
+                  doc.city.toLowerCase().contains(searchTrim) ||
+                  doc.pincode.contains(searchTrim) ||
+                  doc.state.toLowerCase().contains(searchTrim) ||
+                  doc.clinicAddress.toLowerCase().contains(searchTrim);
               final matchesSpecialty = selectedSpecialtyFilter == 'All' ||
                   doc.specialty.toLowerCase().contains(selectedSpecialtyFilter.toLowerCase());
               final matchesAvailability = selectedAvailabilityFilter == 'All' ||
@@ -126,10 +133,38 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               return matchesSearch && matchesSpecialty && matchesAvailability && matchesState && matchesCity && matchesPincode;
             }).toList();
 
+            bool isShowingNearestFallback = false;
+            List<DoctorModel> filteredDoctors;
+
+            if (exactFilteredDoctors.isNotEmpty) {
+              filteredDoctors = exactFilteredDoctors;
+            } else if (sourceDoctors.isNotEmpty) {
+              // 2. FALLBACK: No doctor found in searched City/Pincode. Show nearest available doctors!
+              isShowingNearestFallback = true;
+              filteredDoctors = sourceDoctors.where((doc) {
+                final matchesSpecialty = selectedSpecialtyFilter == 'All' ||
+                    doc.specialty.toLowerCase().contains(selectedSpecialtyFilter.toLowerCase());
+                final matchesAvailability = selectedAvailabilityFilter == 'All' ||
+                    doc.status.toLowerCase() == selectedAvailabilityFilter.toLowerCase();
+                return matchesSpecialty && matchesAvailability;
+              }).toList();
+            } else {
+              filteredDoctors = [];
+            }
+
+            // Target location for priority ranking (prefer searched city/pincode or patient location)
+            final targetCity = (searchTrim.isNotEmpty && RegExp(r'^[a-zA-Z\s]+$').hasMatch(searchTrim))
+                ? searchTrim
+                : (cityFilterController.text.trim().isNotEmpty ? cityFilterController.text.trim() : req.city);
+            final targetPincode = (searchTrim.isNotEmpty && RegExp(r'^\d+$').hasMatch(searchTrim))
+                ? searchTrim
+                : (pincodeFilterController.text.trim().isNotEmpty ? pincodeFilterController.text.trim() : req.pincode);
+            final targetState = stateFilterController.text.trim().isNotEmpty ? stateFilterController.text.trim() : req.state;
+
             // Priority Location Sorting: Same Pincode (Tier 1) -> Nearby Pincode (Tier 2) -> Same City (Tier 3) -> Same State (Tier 5) -> Rating
             filteredDoctors.sort((a, b) {
-              final tierA = a.getLocationMatchTier(req.state, req.city, req.pincode);
-              final tierB = b.getLocationMatchTier(req.state, req.city, req.pincode);
+              final tierA = a.getLocationMatchTier(targetState, targetCity, targetPincode);
+              final tierB = b.getLocationMatchTier(targetState, targetCity, targetPincode);
               if (tierA != tierB) return tierA.compareTo(tierB);
               return b.rating.compareTo(a.rating);
             });
@@ -610,110 +645,139 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                         ),
                                       ),
                                     )
-                                  : ListView.builder(
-                                      itemCount: filteredDoctors.length,
-                                      itemBuilder: (context, idx) {
-                                        final doc = filteredDoctors[idx];
-                                        final isSelected = selectedDoctor?.id == doc.id;
-                                        final isSpecialtyMatch = req.problemCategory.toLowerCase().contains(doc.specialty.toLowerCase().split(' ').first);
-                                        final tier = doc.getLocationMatchTier(req.state, req.city, req.pincode);
-                                        final badgeLabel = doc.getLocationBadgeText(req.state, req.city, req.pincode);
+                                   : Column(
+                                       children: [
+                                         if (isShowingNearestFallback) ...[
+                                           Container(
+                                             margin: const EdgeInsets.only(bottom: 8),
+                                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                             decoration: BoxDecoration(
+                                               color: const Color(0xFFFEF3C7),
+                                               borderRadius: BorderRadius.circular(10),
+                                               border: Border.all(color: const Color(0xFFFDE68A)),
+                                             ),
+                                             child: Row(
+                                               children: [
+                                                 const Icon(Icons.location_off_rounded, color: Color(0xFFD97706), size: 16),
+                                                 const SizedBox(width: 8),
+                                                 Expanded(
+                                                   child: Text(
+                                                     'No doctor found directly in "${searchKeyword.isNotEmpty ? searchKeyword : cityFilterController.text.isNotEmpty ? cityFilterController.text : pincodeFilterController.text}". Showing nearest available doctors:',
+                                                     style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF92400E)),
+                                                   ),
+                                                 ),
+                                               ],
+                                             ),
+                                           ),
+                                         ],
+                                         Expanded(
+                                           child: ListView.builder(
+                                             itemCount: filteredDoctors.length,
+                                             itemBuilder: (context, idx) {
+                                               final doc = filteredDoctors[idx];
+                                               final isSelected = selectedDoctor?.id == doc.id;
+                                               final isSpecialtyMatch = req.problemCategory.toLowerCase().contains(doc.specialty.toLowerCase().split(' ').first);
+                                               final tier = doc.getLocationMatchTier(req.state, req.city, req.pincode);
+                                               final badgeLabel = doc.getLocationBadgeText(req.state, req.city, req.pincode);
 
-                                        Color badgeBg = const Color(0xFFF1F5F9);
-                                        Color badgeFg = const Color(0xFF475569);
-                                        if (tier == 1) {
-                                          badgeBg = const Color(0xFFDCFCE7); // Emerald green for Same Pincode
-                                          badgeFg = const Color(0xFF15803D);
-                                        } else if (tier == 2) {
-                                          badgeBg = const Color(0xFFCCFBF1); // Teal for Nearby Pincode
-                                          badgeFg = const Color(0xFF0F766E);
-                                        } else if (tier == 3) {
-                                          badgeBg = const Color(0xFFDBEAFE); // Blue for Same City
-                                          badgeFg = const Color(0xFF1E40AF);
-                                        } else if (tier == 5) {
-                                          badgeBg = const Color(0xFFE0E7FF); // Indigo for Same State
-                                          badgeFg = const Color(0xFF3730A3);
-                                        }
+                                               Color badgeBg = const Color(0xFFF1F5F9);
+                                               Color badgeFg = const Color(0xFF475569);
+                                               if (tier == 1) {
+                                                 badgeBg = const Color(0xFFDCFCE7); // Emerald green for Same Pincode
+                                                 badgeFg = const Color(0xFF15803D);
+                                               } else if (tier == 2) {
+                                                 badgeBg = const Color(0xFFCCFBF1); // Teal for Nearby Pincode
+                                                 badgeFg = const Color(0xFF0F766E);
+                                               } else if (tier == 3) {
+                                                 badgeBg = const Color(0xFFDBEAFE); // Blue for Same City
+                                                 badgeFg = const Color(0xFF1E40AF);
+                                               } else if (tier == 5) {
+                                                 badgeBg = const Color(0xFFE0E7FF); // Indigo for Same State
+                                                 badgeFg = const Color(0xFF3730A3);
+                                               }
 
-                                        return GestureDetector(
-                                          onTap: () => setModalState(() => selectedDoctor = doc),
-                                          child: Container(
-                                            margin: const EdgeInsets.only(bottom: 8),
-                                            padding: const EdgeInsets.all(10),
-                                            decoration: BoxDecoration(
-                                              color: isSelected ? const Color(0xFFEFF6FF) : Colors.white,
-                                              borderRadius: BorderRadius.circular(12),
-                                              border: Border.all(
-                                                color: isSelected ? AppTheme.primaryBlue : const Color(0xFFE2E8F0),
-                                                width: isSelected ? 2 : 1,
-                                              ),
-                                            ),
-                                            child: Row(
-                                              children: [
-                                                Radio<String>(
-                                                  value: doc.id,
-                                                  groupValue: selectedDoctor?.id,
-                                                  activeColor: AppTheme.primaryBlue,
-                                                  onChanged: (val) => setModalState(() => selectedDoctor = doc),
-                                                ),
-                                                const SizedBox(width: 4),
-                                                Expanded(
-                                                  child: Column(
-                                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                                    children: [
-                                                      Row(
-                                                        children: [
-                                                          Expanded(
-                                                            child: Text(
-                                                              doc.name,
-                                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
-                                                              overflow: TextOverflow.ellipsis,
-                                                              maxLines: 1,
-                                                            ),
-                                                          ),
-                                                          const SizedBox(width: 4),
-                                                          // Recommendation Badge
-                                                          Container(
-                                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                            decoration: BoxDecoration(color: badgeBg, borderRadius: BorderRadius.circular(6)),
-                                                            child: Text(badgeLabel, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: badgeFg)),
-                                                          ),
-                                                          if (isSpecialtyMatch) ...[
-                                                            const SizedBox(width: 4),
-                                                            Container(
-                                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                              decoration: BoxDecoration(
-                                                                color: const Color(0xFFFEF3C7),
-                                                                borderRadius: BorderRadius.circular(6),
-                                                              ),
-                                                              child: const Text('Matched Specialty', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFFB45309))),
-                                                            ),
-                                                          ],
-                                                        ],
-                                                      ),
-                                                      const SizedBox(height: 2),
-                                                      Text(
-                                                        '${doc.specialty} • ${doc.qualification} (${doc.status})',
-                                                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.primaryBlue),
-                                                        overflow: TextOverflow.ellipsis,
-                                                        maxLines: 1,
-                                                      ),
-                                                      const SizedBox(height: 2),
-                                                      Text(
-                                                        '🏥 ${doc.clinicName}${doc.city.isNotEmpty ? " • 📍 City: ${doc.city}" : ""}${doc.pincode.isNotEmpty ? " • 📌 Pincode: ${doc.pincode}" : ""} • 💰 ${doc.getFeeForCategory(req.problemCategory)} • ⭐ ${doc.rating}',
-                                                        style: const TextStyle(fontSize: 10.5, color: AppTheme.textDark),
-                                                        overflow: TextOverflow.ellipsis,
-                                                        maxLines: 1,
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                    ),
+                                               return GestureDetector(
+                                                 onTap: () => setModalState(() => selectedDoctor = doc),
+                                                 child: Container(
+                                                   margin: const EdgeInsets.only(bottom: 8),
+                                                   padding: const EdgeInsets.all(10),
+                                                   decoration: BoxDecoration(
+                                                     color: isSelected ? const Color(0xFFEFF6FF) : Colors.white,
+                                                     borderRadius: BorderRadius.circular(12),
+                                                     border: Border.all(
+                                                       color: isSelected ? AppTheme.primaryBlue : const Color(0xFFE2E8F0),
+                                                       width: isSelected ? 2 : 1,
+                                                     ),
+                                                   ),
+                                                   child: Row(
+                                                     children: [
+                                                       Radio<String>(
+                                                         value: doc.id,
+                                                         groupValue: selectedDoctor?.id,
+                                                         activeColor: AppTheme.primaryBlue,
+                                                         onChanged: (val) => setModalState(() => selectedDoctor = doc),
+                                                       ),
+                                                       const SizedBox(width: 4),
+                                                       Expanded(
+                                                         child: Column(
+                                                           crossAxisAlignment: CrossAxisAlignment.start,
+                                                           children: [
+                                                             Row(
+                                                               children: [
+                                                                 Expanded(
+                                                                   child: Text(
+                                                                     doc.name,
+                                                                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
+                                                                     overflow: TextOverflow.ellipsis,
+                                                                     maxLines: 1,
+                                                                   ),
+                                                                 ),
+                                                                 const SizedBox(width: 4),
+                                                                 // Recommendation Badge
+                                                                 Container(
+                                                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                                   decoration: BoxDecoration(color: badgeBg, borderRadius: BorderRadius.circular(6)),
+                                                                   child: Text(badgeLabel, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: badgeFg)),
+                                                                 ),
+                                                                 if (isSpecialtyMatch) ...[
+                                                                   const SizedBox(width: 4),
+                                                                   Container(
+                                                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                                     decoration: BoxDecoration(
+                                                                       color: const Color(0xFFFEF3C7),
+                                                                       borderRadius: BorderRadius.circular(6),
+                                                                     ),
+                                                                     child: const Text('Matched Specialty', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFFB45309))),
+                                                                   ),
+                                                                 ],
+                                                               ],
+                                                             ),
+                                                             const SizedBox(height: 2),
+                                                             Text(
+                                                               '${doc.specialty} • ${doc.qualification} (${doc.status})',
+                                                               style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.primaryBlue),
+                                                               overflow: TextOverflow.ellipsis,
+                                                               maxLines: 1,
+                                                             ),
+                                                             const SizedBox(height: 2),
+                                                             Text(
+                                                               '🏥 ${doc.clinicName}${doc.city.isNotEmpty ? " • 📍 City: ${doc.city}" : ""}${doc.pincode.isNotEmpty ? " • 📌 Pincode: ${doc.pincode}" : ""} • 💰 ${doc.getFeeForCategory(req.problemCategory)} • ⭐ ${doc.rating}',
+                                                               style: const TextStyle(fontSize: 10.5, color: AppTheme.textDark),
+                                                               overflow: TextOverflow.ellipsis,
+                                                               maxLines: 1,
+                                                             ),
+                                                           ],
+                                                         ),
+                                                       ),
+                                                     ],
+                                                   ),
+                                                 ),
+                                               );
+                                             },
+                                           ),
+                                         ),
+                                       ],
+                                     ),
                             ),
                             const SizedBox(height: 10),
 
