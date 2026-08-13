@@ -796,15 +796,21 @@ class ApiService {
     required String requestId,
     required String dentistId,
     String? notes,
+    String? doctorName,
+    String? doctorSpecialty,
+    String? doctorClinic,
   }) async {
     try {
-      final url = Uri.parse('${ApiConstants.baseUrl}/admin/problem-requests/$requestId/suggest-dentist');
+      final url = Uri.parse('${ApiConstants.baseUrl}/problem-requests/$requestId/suggest-dentist');
       final response = await http.post(
         url,
         headers: _headers,
         body: jsonEncode({
           'dentistId': dentistId,
           if (notes != null) 'notes': notes,
+          if (doctorName != null) 'doctorName': doctorName,
+          if (doctorSpecialty != null) 'doctorSpecialty': doctorSpecialty,
+          if (doctorClinic != null) 'doctorClinic': doctorClinic,
         }),
       );
       return jsonDecode(response.body);
@@ -903,66 +909,6 @@ class ApiService {
     } catch (e) {
       return {'success': false, 'message': 'Failed to update clinic verification status.'};
     }
-  }
-
-  /// Admin: Suggest/Assign Dentist for Dental Problem Request
-  Future<Map<String, dynamic>> suggestDentist({
-    required String requestId,
-    required String dentistId,
-    required String notes,
-    String? doctorName,
-    String? doctorSpecialty,
-    String? doctorClinic,
-  }) async {
-    try {
-      final url = Uri.parse('${ApiConstants.baseUrl}/problem-requests/$requestId/suggest-dentist');
-      final response = await http.post(
-        url,
-        headers: _headers,
-        body: jsonEncode({
-          'dentistId': dentistId,
-          'notes': notes,
-          if (doctorName != null) 'doctorName': doctorName,
-          if (doctorSpecialty != null) 'doctorSpecialty': doctorSpecialty,
-          if (doctorClinic != null) 'doctorClinic': doctorClinic,
-        }),
-      );
-      return jsonDecode(response.body);
-    } catch (e) {
-      return {'success': false, 'message': 'Failed to assign dentist to request.'};
-    }
-  }
-
-  /// Patient: Fetch my problem requests
-  Future<List<dynamic>> fetchPatientProblemRequests({String? patientId}) async {
-    try {
-      final uri = Uri.parse('${ApiConstants.baseUrl}/problem-requests').replace(queryParameters: {
-        if (patientId != null && patientId.isNotEmpty) 'patientId': patientId,
-      });
-      final response = await http.get(uri, headers: _headers);
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data['requests'] ?? [];
-      }
-    } catch (e) {
-      debugPrint('Fetch patient problem requests error: $e');
-    }
-    return [];
-  }
-
-  /// Admin: Fetch all problem requests
-  Future<List<dynamic>> fetchAdminProblemRequests() async {
-    try {
-      final uri = Uri.parse('${ApiConstants.baseUrl}/problem-requests/admin');
-      final response = await http.get(uri, headers: _headers);
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data['requests'] ?? [];
-      }
-    } catch (e) {
-      debugPrint('Fetch admin problem requests error: $e');
-    }
-    return [];
   }
 }
 

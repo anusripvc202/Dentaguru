@@ -1424,14 +1424,12 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
 
               Builder(
                 builder: (context) {
-                  final currentDoc = _patientService.currentDoctor;
-                  final docNameClean = currentDoc?.name.replaceAll('Dr. ', '').trim().toLowerCase() ?? '';
-
                   final acceptedForMe = requests.where((req) {
-                    final bool isMine = (req.assignedDoctorId != null && currentDoc != null && req.assignedDoctorId == currentDoc.id) ||
-                        (req.assignedDoctorName != null && docNameClean.isNotEmpty && req.assignedDoctorName!.toLowerCase().contains(docNameClean)) ||
-                        (req.assignedDoctorName != null && req.assignedDoctorName!.isNotEmpty);
-                    return isMine && (req.status == 'Confirmed' || req.status == 'Accepted');
+                    final statusLower = req.status.trim().toLowerCase();
+                    return statusLower == 'confirmed' ||
+                        statusLower == 'accepted' ||
+                        statusLower.contains('accept') ||
+                        statusLower.contains('confirm');
                   }).toList();
 
                   if (acceptedForMe.isEmpty) {
@@ -1451,11 +1449,14 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
 
                   return Column(
                     children: acceptedForMe.map((req) {
+                      final slot = (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.trim().isNotEmpty)
+                          ? req.confirmedTimeSlot!
+                          : 'Today, 4:00 PM';
                       return _buildTimelineNode(
-                        time: req.confirmedTimeSlot ?? 'Today, 2:30 PM',
+                        time: slot,
                         name: req.patientName,
                         procedure: req.problemCategory,
-                        status: 'Accepted',
+                        status: 'Accepted & Scheduled',
                         statusColor: const Color(0xFF10B981),
                       );
                     }).toList(),
