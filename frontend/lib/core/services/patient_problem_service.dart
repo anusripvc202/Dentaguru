@@ -803,14 +803,6 @@ class PatientProblemService extends ChangeNotifier {
     }
   }
 
-  bool _isAdminMode = false;
-  void setAdminMode(bool enabled) {
-    _isAdminMode = enabled;
-    if (enabled) {
-      syncProblemRequestsFromApi();
-    }
-  }
-
   bool _isDentistMode = false;
   void setDentistMode(bool enabled) {
     _isDentistMode = enabled;
