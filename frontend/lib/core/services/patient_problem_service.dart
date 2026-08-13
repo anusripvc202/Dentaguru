@@ -514,6 +514,11 @@ class PatientProblemService extends ChangeNotifier {
 
   List<PatientConsultationRequest> get requests => List.unmodifiable(_requests);
 
+  // List of Consultation Requests Assigned to Logged-In Dentist
+  final List<PatientConsultationRequest> _dentistAssignedRequests = [];
+
+  List<PatientConsultationRequest> get dentistAssignedRequests => List.unmodifiable(_dentistAssignedRequests);
+
   Future<void> deleteProblemRequest(String id) async {
     _requests.removeWhere((r) => r.id == id);
     _saveToStorage();
@@ -824,6 +829,95 @@ class PatientProblemService extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint('Sync problem requests error: $e');
+    }
+  }
+
+  Future<void> syncDentistAssignedRequestsFromApi([String? dentistId]) async {
+    try {
+      final targetDocId = (dentistId != null && dentistId.isNotEmpty)
+          ? dentistId
+          : (currentDoctor != null ? currentDoctor!.id : '');
+      
+      final List problemReqs = await ApiService().fetchDentistAssignedRequests(dentistId: targetDocId);
+
+      _dentistAssignedRequests.clear();
+
+      for (final pr in problemReqs) {
+        final prId = (pr['_id'] ?? pr['id'] ?? '').toString();
+        if (prId.isEmpty) continue;
+        final category = (pr['problem_category'] ?? pr['problemCategory'] ?? 'Dental Issue').toString();
+        final desc = (pr['problem_description'] ?? pr['problemDescription'] ?? '').toString();
+        final rawStatus = (pr['status'] ?? 'SUBMITTED').toString();
+        final severity = (pr['severity'] ?? 'Moderate').toString();
+        final adminNotes = pr['admin_notes']?.toString() ?? pr['adminNotes']?.toString();
+        final confirmedSlot = pr['confirmed_time_slot']?.toString() ?? pr['confirmedTimeSlot']?.toString();
+        final symptoms = (pr['symptoms'] ?? '').toString();
+        final preferredLocation = (pr['preferred_location'] ?? pr['preferredLocation'] ?? '').toString();
+        final city = (pr['city'] ?? pr['patient']?['city'] ?? '').toString();
+        final pincode = (pr['pincode'] ?? pr['patient']?['pincode'] ?? '').toString();
+        final state = (pr['state'] ?? pr['patient']?['state'] ?? '').toString();
+
+        final assignedDocId = (pr['assigned_doctor_id'] ?? pr['suggested_dentist_id'] ?? pr['dentist']?['id'])?.toString();
+        final assignedDocName = (pr['assigned_doctor_name'] ?? pr['assignedDoctorName'] ?? pr['dentist']?['name'])?.toString();
+        final assignedDocSpecialty = (pr['assigned_doctor_specialty'] ?? pr['assignedDoctorSpecialty'] ?? pr['dentist']?['specialty'])?.toString();
+        final assignedDocClinic = (pr['assigned_doctor_clinic'] ?? pr['assignedDoctorClinic'] ?? pr['dentist']?['clinicName'])?.toString();
+
+        final rawStatusUpper = rawStatus.toUpperCase();
+        String normalizedStatus;
+        if (rawStatusUpper == 'DENTIST_ASSIGNED' ||
+            rawStatusUpper == 'DENTIST_SUGGESTED' ||
+            rawStatusUpper == 'PENDING_DENTIST_CONFIRMATION' ||
+            (assignedDocName != null && assignedDocName.isNotEmpty)) {
+          normalizedStatus = 'Doctor Assigned';
+        } else if (rawStatusUpper == 'ADMIN_REVIEWED' || rawStatusUpper == 'ADMIN_REVIEW') {
+          normalizedStatus = 'Admin Review';
+        } else if (rawStatusUpper == 'CONFIRMED' || rawStatusUpper == 'ACCEPTED') {
+          normalizedStatus = 'Confirmed';
+        } else {
+          normalizedStatus = 'Submitted';
+        }
+
+        final patientObj = pr['patient'] ?? {};
+        String pName = (pr['patientName'] ?? pr['patient_name'] ?? patientObj['name'] ?? '').toString().trim();
+        String pPhone = (pr['patientPhone'] ?? pr['patient_phone'] ?? patientObj['phone'] ?? '').toString().trim();
+
+        if (pName.isEmpty || pName.toLowerCase() == 'patient') {
+          final matchingPatient = _allPatients.firstWhere(
+            (p) => p.name.isNotEmpty && p.name.toLowerCase() != 'patient',
+            orElse: () => currentPatient.name.isNotEmpty ? currentPatient : PatientProfile(name: 'Patient'),
+          );
+          pName = matchingPatient.name.isNotEmpty ? matchingPatient.name : 'Patient';
+          if (pPhone.isEmpty) pPhone = matchingPatient.phone;
+        }
+
+        _dentistAssignedRequests.add(
+          PatientConsultationRequest(
+            id: prId,
+            patientName: pName,
+            patientPhone: pPhone,
+            problemCategory: category,
+            problemDescription: desc,
+            symptoms: symptoms,
+            preferredLocation: preferredLocation,
+            severity: severity,
+            submittedAt: pr['created_at'] != null ? DateTime.tryParse(pr['created_at'].toString()) ?? DateTime.now() : DateTime.now(),
+            status: normalizedStatus,
+            adminNotes: adminNotes,
+            assignedDoctorId: assignedDocId,
+            assignedDoctorName: assignedDocName,
+            assignedDoctorSpecialty: assignedDocSpecialty,
+            assignedDoctorClinic: assignedDocClinic,
+            confirmedTimeSlot: confirmedSlot,
+            city: city,
+            pincode: pincode,
+            state: state,
+          ),
+        );
+      }
+
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Sync dentist assigned requests error: $e');
     }
   }
 

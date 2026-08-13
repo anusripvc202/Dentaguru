@@ -28,6 +28,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     super.initState();
     _patientService.addListener(_onServiceUpdate);
     _patientService.syncAllDataFromApi();
+    _patientService.syncDentistAssignedRequestsFromApi();
 
     _entryController = AnimationController(
       vsync: this,
@@ -962,8 +963,18 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   // TAB 1: DENTIST TIMELINE & QUEUE DASHBOARD
   // ==========================================
   Widget _buildDashboardTab() {
-    final requests = _patientService.requests;
     final currentDoc = _patientService.currentDoctor;
+    final docNameClean = currentDoc?.name.replaceAll('Dr. ', '').trim().toLowerCase() ?? '';
+    final sourceRequests = _patientService.dentistAssignedRequests.isNotEmpty
+        ? _patientService.dentistAssignedRequests
+        : _patientService.requests;
+
+    final requests = sourceRequests.where((req) {
+      if (currentDoc != null && req.assignedDoctorId != null && req.assignedDoctorId == currentDoc.id) return true;
+      if (docNameClean.isNotEmpty && req.assignedDoctorName != null && req.assignedDoctorName!.toLowerCase().contains(docNameClean)) return true;
+      return false;
+    }).toList();
+
     final docName = currentDoc?.name ?? 'Dentist Practitioner';
     final docSpecialty = currentDoc?.specialty ?? 'Dental Specialist';
     final clinicName = currentDoc?.clinicName ?? 'Registered Clinic';
@@ -1068,14 +1079,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                   final currentDoc = _patientService.currentDoctor;
                   final docNameClean = currentDoc?.name.replaceAll('Dr. ', '').trim().toLowerCase() ?? '';
 
-                  final myAssigned = requests.where((req) {
-                    if (req.assignedDoctorId != null && currentDoc != null && req.assignedDoctorId == currentDoc.id) return true;
-                    if (req.assignedDoctorName != null && docNameClean.isNotEmpty && req.assignedDoctorName!.toLowerCase().contains(docNameClean)) return true;
-                    return false;
-                  }).toList();
-
-                  final displayCount = myAssigned.isNotEmpty ? myAssigned.length : requests.length;
-                  final pendingCount = requests.where((r) => r.status == 'Doctor Suggested' || r.status == 'Pending').length;
+                  final displayCount = requests.length;
+                  final pendingCount = requests.where((r) => r.status == 'Doctor Suggested' || r.status == 'Pending' || r.status == 'Doctor Assigned').length;
 
                   return Row(
                     children: [
@@ -1172,19 +1177,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
 
               Builder(
                 builder: (context) {
-                  final currentDoc = _patientService.currentDoctor;
-                  final docNameClean = currentDoc?.name.replaceAll('Dr. ', '').trim().toLowerCase() ?? '';
-
-                  final sortedRequests = List<PatientConsultationRequest>.from(requests);
-                  sortedRequests.sort((a, b) {
-                    final bool aMine = (a.assignedDoctorId != null && currentDoc != null && a.assignedDoctorId == currentDoc.id) ||
-                        (a.assignedDoctorName != null && docNameClean.isNotEmpty && a.assignedDoctorName!.toLowerCase().contains(docNameClean));
-                    final bool bMine = (b.assignedDoctorId != null && currentDoc != null && b.assignedDoctorId == currentDoc.id) ||
-                        (b.assignedDoctorName != null && docNameClean.isNotEmpty && b.assignedDoctorName!.toLowerCase().contains(docNameClean));
-                    if (aMine && !bMine) return -1;
-                    if (!aMine && bMine) return 1;
-                    return 0;
-                  });
+                  final sortedRequests = requests;
 
                   if (sortedRequests.isEmpty) {
                     return Container(
@@ -1785,10 +1778,19 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   // TAB 2: PATIENTS TAB
   // ==========================================
   Widget _buildPatientsTab() {
-    final requests = _patientService.requests;
-    final patient = _patientService.currentPatient;
+    final currentDoc = _patientService.currentDoctor;
+    final docNameClean = currentDoc?.name.replaceAll('Dr. ', '').trim().toLowerCase() ?? '';
+    final sourceRequests = _patientService.dentistAssignedRequests.isNotEmpty
+        ? _patientService.dentistAssignedRequests
+        : _patientService.requests;
 
-    final myPatients = List<PatientConsultationRequest>.from(requests);
+    final myPatients = sourceRequests.where((req) {
+      if (currentDoc != null && req.assignedDoctorId != null && req.assignedDoctorId == currentDoc.id) return true;
+      if (docNameClean.isNotEmpty && req.assignedDoctorName != null && req.assignedDoctorName!.toLowerCase().contains(docNameClean)) return true;
+      return false;
+    }).toList();
+
+    final patient = _patientService.currentPatient;
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),

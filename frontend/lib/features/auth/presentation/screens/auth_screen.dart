@@ -49,6 +49,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   bool _isRegistering = false;
 
   // Common & Location Fields
+  final _cityController = TextEditingController();
   final _pincodeController = TextEditingController();
   final _locationController = TextEditingController();
 
@@ -367,6 +368,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     }
 
     final location = _locationController.text.trim();
+    final city = _cityController.text.trim();
     final pincode = _pincodeController.text.trim();
     final clinicAddress = _clinicAddressController.text.trim();
 
@@ -382,6 +384,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         clinicName: _clinicNameController.text.trim(),
         clinicAddress: clinicAddress.isNotEmpty ? clinicAddress : location,
         location: location.isNotEmpty ? location : clinicAddress,
+        city: city,
         pincode: pincode,
         profilePhoto: photoBase64,
       );
@@ -400,6 +403,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             bloodGroup: _selectedBloodGroup ?? 'O Positive (O+)',
             emergencyContact: _emergencyContactController.text.trim().isEmpty ? phone : _emergencyContactController.text.trim(),
             address: location,
+            city: city,
             pincode: pincode,
             photoBytes: _pickedImageBytes,
           );
@@ -413,6 +417,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             specialty: _selectedSpecialty ?? 'General Dentistry',
             clinicName: _clinicNameController.text.trim(),
             clinicAddress: clinicAddress.isNotEmpty ? clinicAddress : location,
+            city: city,
             pincode: pincode,
             experienceYears: exp,
             photoBytes: _pickedImageBytes,
@@ -1537,15 +1542,36 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               ),
             ),
             const SizedBox(height: 12),
-            TextFormField(
-              controller: _locationController,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-              validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter your address / location' : null,
-              decoration: _buildInputDecoration(
-                label: 'Address / Location *',
-                hint: 'e.g. 100 Feet Rd, Indiranagar, Bengaluru',
-                icon: Icons.location_on_outlined,
-              ),
+            Row(
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: TextFormField(
+                    controller: _locationController,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter address' : null,
+                    decoration: _buildInputDecoration(
+                      label: 'Address / Location *',
+                      hint: 'e.g. 100 Feet Rd, Indiranagar',
+                      icon: Icons.location_on_outlined,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 2,
+                  child: TextFormField(
+                    controller: _cityController,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter City' : null,
+                    decoration: _buildInputDecoration(
+                      label: 'City *',
+                      hint: 'Vijayawada',
+                      icon: Icons.location_city_rounded,
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             TextFormField(
@@ -1555,7 +1581,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter 6-digit Pincode' : null,
               decoration: _buildInputDecoration(
                 label: 'Pincode / Postal Code *',
-                hint: 'e.g. 560038',
+                hint: 'e.g. 520001',
                 icon: Icons.pin_drop_outlined,
               ),
             ),
@@ -1647,24 +1673,33 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               ],
             ),
             const SizedBox(height: 12),
+            TextFormField(
+              controller: _clinicAddressController,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter clinic location / address' : null,
+              decoration: _buildInputDecoration(
+                label: 'Clinic Location / Address *',
+                hint: 'e.g. Indiranagar',
+                icon: Icons.location_on_outlined,
+              ),
+            ),
+            const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
-                  flex: 3,
                   child: TextFormField(
-                    controller: _clinicAddressController,
+                    controller: _cityController,
                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter clinic location / address' : null,
+                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter City' : null,
                     decoration: _buildInputDecoration(
-                      label: 'Clinic Location / Address *',
-                      hint: 'e.g. Indiranagar, Bengaluru',
-                      icon: Icons.location_on_outlined,
+                      label: 'City *',
+                      hint: 'Vijayawada',
+                      icon: Icons.location_city_rounded,
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  flex: 2,
                   child: TextFormField(
                     controller: _pincodeController,
                     keyboardType: TextInputType.number,
@@ -1672,7 +1707,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter Pincode' : null,
                     decoration: _buildInputDecoration(
                       label: 'Pincode *',
-                      hint: '560038',
+                      hint: '520001',
                       icon: Icons.pin_drop_outlined,
                     ),
                   ),

@@ -35,6 +35,8 @@ router.post('/auth/reset-db', auth.resetDatabase);
 router.post('/patient/problem-requests', optionalAuth, problemRequests.createProblemRequest);
 router.get('/patient/problem-requests', optionalAuth, problemRequests.getPatientProblemRequests);
 router.get('/patient/suggested-dentists', optionalAuth, problemRequests.getSuggestedDentists);
+router.get('/dentist/assigned-requests', optionalAuth, problemRequests.getDentistAssignedRequests);
+router.get('/dentist/problem-requests', optionalAuth, problemRequests.getDentistAssignedRequests);
 
 router.get('/admin/problem-requests', optionalAuth, problemRequests.getAdminProblemRequests);
 router.patch('/admin/problem-requests/:id/review', optionalAuth, problemRequests.markAdminReviewed);

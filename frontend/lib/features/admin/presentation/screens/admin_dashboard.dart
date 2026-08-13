@@ -300,7 +300,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                       runSpacing: 4,
                                       children: [
                                         Text('📞 Contact: ${req.patientPhone}', style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
-                                        Text('📍 Location: ${req.city.isNotEmpty ? req.city : "Hyderabad"} (PIN: ${req.pincode.isNotEmpty ? req.pincode : "500081"})', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textDark)),
+                                        Text('📍 Location: ${req.city.isNotEmpty ? req.city : "Not Available"}${req.pincode.isNotEmpty ? " (PIN: ${req.pincode})" : ""}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textDark)),
                                         Text('📌 Category: ${req.problemCategory}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.primaryBlue)),
                                       ],
                                     ),
@@ -371,10 +371,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                       children: [
                                         const Text('Patient Location', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppTheme.textMuted)),
                                         Text(
-                                          '📍 ${req.city.isNotEmpty ? req.city : "Hyderabad"} • 📌 Pincode: ${req.pincode.isNotEmpty ? req.pincode : "500001"}${req.state.isNotEmpty ? " • ${req.state}" : ""}',
-                                          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
+                                           '📍 ${req.city.isNotEmpty ? req.city : "Not Available"}${req.pincode.isNotEmpty ? " • 📌 Pincode: ${req.pincode}" : ""}${req.state.isNotEmpty ? " • ${req.state}" : ""}',
+                                           style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
+                                           overflow: TextOverflow.ellipsis,
+                                         ),
                                       ],
                                     ),
                                   ),
@@ -700,7 +700,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                       ),
                                                       const SizedBox(height: 2),
                                                       Text(
-                                                        '🏥 ${doc.clinicName} • 📍 City: ${doc.city.isNotEmpty ? doc.city : "Hyderabad"} • 📌 Pincode: ${doc.pincode.isNotEmpty ? doc.pincode : "500001"} • 💰 ${doc.getFeeForCategory(req.problemCategory)} • ⭐ ${doc.rating}',
+                                                        '🏥 ${doc.clinicName}${doc.city.isNotEmpty ? " • 📍 City: ${doc.city}" : ""}${doc.pincode.isNotEmpty ? " • 📌 Pincode: ${doc.pincode}" : ""} • 💰 ${doc.getFeeForCategory(req.problemCategory)} • ⭐ ${doc.rating}',
                                                         style: const TextStyle(fontSize: 10.5, color: AppTheme.textDark),
                                                         overflow: TextOverflow.ellipsis,
                                                         maxLines: 1,
@@ -3699,7 +3699,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                           ),
                                           const SizedBox(height: 2),
                                           Text(
-                                            '📍 City: ${req.city.isNotEmpty ? req.city : (_problemService.currentPatient.address.isNotEmpty ? _problemService.currentPatient.address : 'Hyderabad')} • PIN: ${req.pincode.isNotEmpty ? req.pincode : (_problemService.currentPatient.pincode.isNotEmpty ? _problemService.currentPatient.pincode : '500081')}',
+                                            '📍 City: ${req.city.isNotEmpty ? req.city : (_problemService.currentPatient.city.isNotEmpty ? _problemService.currentPatient.city : "Not Available")}${req.pincode.isNotEmpty ? " • PIN: ${req.pincode}" : (_problemService.currentPatient.pincode.isNotEmpty ? " • PIN: ${_problemService.currentPatient.pincode}" : "")}',
                                             style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
                                             overflow: TextOverflow.ellipsis,
                                           ),

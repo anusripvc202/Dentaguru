@@ -13,9 +13,9 @@ exports.createProblemRequest = async (req, res) => {
             realName = 'anusha';
         }
         let realPhone = patientPhone || (patientUser ? patientUser.phone : '');
-        let realCity = req.body.city || (patientUser ? patientUser.city : '') || 'Hyderabad';
-        let realPincode = req.body.pincode || (patientUser ? patientUser.pincode : '') || '500001';
-        let realState = req.body.state || (patientUser ? patientUser.state : '') || 'Telangana';
+        let realCity = req.body.city || (patientUser ? patientUser.city : '') || '';
+        let realPincode = req.body.pincode || (patientUser ? patientUser.pincode : '') || '';
+        let realState = req.body.state || (patientUser ? patientUser.state : '') || '';
 
         const request = await PatientProblemRequest.create({
             patient_id: patientId,
@@ -97,9 +97,9 @@ exports.getPatientProblemRequests = async (req, res) => {
                 realPhone = u.phone || '';
             }
 
-            let realCity = r.city || (u ? u.city : '') || 'Hyderabad';
-            let realPincode = r.pincode || (u ? u.pincode : '') || '500001';
-            let realState = r.state || (u ? u.state : '') || 'Telangana';
+            let realCity = r.city || (u ? u.city : '') || '';
+            let realPincode = r.pincode || (u ? u.pincode : '') || '';
+            let realState = r.state || (u ? u.state : '') || '';
 
             return {
                 ...reqObj,
@@ -159,9 +159,9 @@ exports.getAdminProblemRequests = async (req, res) => {
                 realPhone = u.phone || '';
             }
 
-            let realCity = r.city || (u ? u.city : '') || 'Hyderabad';
-            let realPincode = r.pincode || (u ? u.pincode : '') || '500001';
-            let realState = r.state || (u ? u.state : '') || 'Telangana';
+            let realCity = r.city || (u ? u.city : '') || '';
+            let realPincode = r.pincode || (u ? u.pincode : '') || '';
+            let realState = r.state || (u ? u.state : '') || '';
 
             return {
                 ...reqObj,
@@ -334,3 +334,70 @@ exports.deleteProblemRequest = async (req, res) => {
         res.status(500).json({ success: false, message: 'Failed to delete problem request.' });
     }
 };
+
+// 7. DENTIST: GET ASSIGNED PROBLEM REQUESTS (ONLY PROBLEMS ASSIGNED TO LOGGED-IN DENTIST)
+exports.getDentistAssignedRequests = async (req, res) => {
+    try {
+        const dentistId = req.query.dentistId || (req.user ? req.user.id : null);
+        if (!dentistId) {
+            return res.json({ success: true, count: 0, requests: [] });
+        }
+
+        const rawRequests = await PatientProblemRequest.find({
+            $or: [
+                { assigned_doctor_id: dentistId },
+                { suggested_dentist_id: dentistId }
+            ]
+        });
+
+        const patientUsers = await User.find({ role: 'Patient' });
+        const userMap = new Map();
+        for (const u of patientUsers) {
+            userMap.set(u.id, u);
+            if (u.email) userMap.set(u.email.toLowerCase(), u);
+        }
+
+        const requests = rawRequests.map(r => {
+            const reqObj = r.toObject ? r.toObject() : { ...r };
+            const u = userMap.get(r.patient_id) || (r.patient_id ? userMap.get(String(r.patient_id).toLowerCase()) : null);
+
+            let realName = r.patient_name || r.patientName;
+            if ((!realName || realName.trim().toLowerCase() === 'patient') && u) {
+                realName = u.name || (u.email ? u.email.split('@')[0] : 'anusha');
+            }
+
+            let realPhone = r.patient_phone || r.patientPhone;
+            if ((!realPhone || realPhone === 'Not Provided') && u) {
+                realPhone = u.phone || '';
+            }
+
+            let realCity = r.city || (u ? u.city : '') || '';
+            let realPincode = r.pincode || (u ? u.pincode : '') || '';
+            let realState = r.state || (u ? u.state : '') || '';
+
+            return {
+                ...reqObj,
+                patientName: realName,
+                patientPhone: realPhone || (u ? u.phone : ''),
+                city: realCity,
+                pincode: realPincode,
+                state: realState,
+                patient: {
+                    id: u ? u.id : r.patient_id,
+                    name: realName,
+                    email: u ? u.email : '',
+                    phone: realPhone || (u ? u.phone : ''),
+                    city: realCity,
+                    pincode: realPincode,
+                    state: realState,
+                }
+            };
+        });
+
+        res.json({ success: true, count: requests.length, requests });
+    } catch (err) {
+        console.error('Get Dentist Assigned Requests Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to fetch dentist assigned requests.' });
+    }
+};
+

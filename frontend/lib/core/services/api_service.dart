@@ -700,6 +700,40 @@ class ApiService {
     return [];
   }
 
+  /// Dentist: Fetch ONLY problem requests assigned to the logged-in dentist
+  Future<List<dynamic>> fetchDentistAssignedRequests({String? dentistId}) async {
+    // 1. Try Supabase direct first
+    try {
+      final currentUserId = dentistId ?? Supabase.instance.client.auth.currentUser?.id;
+      if (currentUserId != null && currentUserId.isNotEmpty) {
+        final res = await Supabase.instance.client
+            .from('patient_problem_requests')
+            .select('*')
+            .or('assigned_doctor_id.eq.$currentUserId,suggested_dentist_id.eq.$currentUserId')
+            .order('created_at', ascending: false);
+        if (res.isNotEmpty) return List<dynamic>.from(res);
+      }
+    } catch (e) {
+      debugPrint('Supabase direct fetch dentist assigned requests notice: $e');
+    }
+
+    // 2. Fallback: Express backend API
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/dentist/assigned-requests').replace(queryParameters: {
+        if (dentistId != null && dentistId.isNotEmpty) 'dentistId': dentistId,
+      });
+      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final list = data['requests'] ?? [];
+        if (list is List) return list;
+      }
+    } catch (e) {
+      debugPrint('Fetch dentist assigned requests error: $e');
+    }
+    return [];
+  }
+
   /// Admin/All: Fetch all registered Patients directly from Supabase DB
   Future<List<dynamic>> fetchPatients() async {
     try {
