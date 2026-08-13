@@ -798,7 +798,7 @@ class PatientProblemService extends ChangeNotifier {
       final authUser = Supabase.instance.client.auth.currentUser;
       final pId = currentPatient.id.isNotEmpty ? currentPatient.id : authUser?.id;
       final pEmail = currentPatient.email.isNotEmpty ? currentPatient.email : authUser?.email;
-      final pName = currentPatient.name;
+      final currentPName = currentPatient.name;
 
       final isAdmin = (authUser?.email != null && (authUser!.email!.toLowerCase().contains('admin') || authUser.email!.toLowerCase() == 'anusripvc202@gmail.com')) ||
                       currentPatient.email.toLowerCase().contains('admin');
@@ -829,10 +829,10 @@ class PatientProblemService extends ChangeNotifier {
           bool isMine = false;
           if (pId != null && pId.isNotEmpty && (reqPatientId == pId || reqPatientId.contains(pId))) isMine = true;
           if (pEmail != null && pEmail.isNotEmpty && (reqPatientEmail.toLowerCase() == pEmail.toLowerCase() || reqPatientId.toLowerCase() == pEmail.toLowerCase())) isMine = true;
-          if (pName.isNotEmpty && pName != 'Patient' && reqPatientName.trim().toLowerCase() == pName.trim().toLowerCase()) isMine = true;
+          if (currentPName.isNotEmpty && currentPName != 'Patient' && reqPatientName.trim().toLowerCase() == currentPName.trim().toLowerCase()) isMine = true;
 
           // Reject records belonging to another patient
-          if (!isMine && (pId != null || pEmail != null || (pName.isNotEmpty && pName != 'Patient'))) {
+          if (!isMine && (pId != null || pEmail != null || (currentPName.isNotEmpty && currentPName != 'Patient'))) {
             continue;
           }
         }
