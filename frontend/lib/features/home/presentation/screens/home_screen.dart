@@ -975,12 +975,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
           const SizedBox(height: 12),
 
-          // Testimonial Card
           Builder(
             builder: (context) {
               final firstDoc = PatientProblemService().allDoctors.firstOrNull;
-              final docName = firstDoc?.name ?? 'Dr. Dental Specialist, BDS';
-              final docSpec = firstDoc?.specialty ?? 'Senior Dental Practitioner';
+              if (firstDoc == null) return const SizedBox.shrink();
+              final docName = firstDoc.name;
+              final docSpec = firstDoc.specialty;
 
               return Container(
                 padding: const EdgeInsets.all(12),

@@ -5,7 +5,7 @@ const { supabaseAdmin } = require('../config/supabase');
 exports.getDentistsForVerification = async (req, res) => {
     try {
         const { status } = req.query;
-        let query = supabaseAdmin.from('dentists').select('*, users(name, email, phone), clinics(clinic_name, location)');
+        let query = supabaseAdmin.from('dentists').select('*, users(name, email, phone, state, city, pincode, latitude, longitude), clinics(clinic_name, location)');
         if (status) {
             query = query.eq('verification_status', status);
         }

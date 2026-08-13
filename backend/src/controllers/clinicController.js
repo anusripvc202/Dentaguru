@@ -115,7 +115,42 @@ exports.getAllDentists = async (req, res) => {
             }
         }
 
-        res.json({ success: true, count: dentists.length, dentists });
+        const formattedDentists = dentists.map(d => {
+            const uObj = d.users || {};
+            const cObj = d.clinics || {};
+            const name = d.name || uObj.name || 'Dentist';
+            const formattedName = name.startsWith('Dr.') ? name : `Dr. ${name}`;
+            return {
+                id: d.id,
+                user_id: d.user_id || uObj.id,
+                name: formattedName,
+                email: d.email || uObj.email || '',
+                phone: d.phone || uObj.phone || '',
+                speciality: d.speciality || d.specialty || 'General Dentistry',
+                specialty: d.speciality || d.specialty || 'General Dentistry',
+                license_number: d.license_number || d.licenseNumber || 'DEN-LIC-REG',
+                licenseNumber: d.license_number || d.licenseNumber || 'DEN-LIC-REG',
+                qualification: d.qualifications || d.qualification || 'BDS, MDS',
+                experienceYears: d.experience_years || d.experienceYears || 5,
+                experience_years: d.experience_years || d.experienceYears || 5,
+                rating: d.rating || 5.0,
+                reviews_count: d.reviews_count || d.reviewCount || 1,
+                clinicName: cObj.clinic_name || d.clinicName || 'DentaGuru Practice',
+                clinicAddress: cObj.location || d.clinicAddress || d.location || 'Healthcare Hub',
+                state: d.state || uObj.state || '',
+                city: d.city || uObj.city || '',
+                pincode: d.pincode || uObj.pincode || '',
+                latitude: d.latitude || uObj.latitude || null,
+                longitude: d.longitude || uObj.longitude || null,
+                availability_status: d.availability_status || d.status || 'Available',
+                verificationStatus: d.verification_status || d.verificationStatus || 'VERIFIED',
+                profilePhoto: uObj.biometric_token || d.profilePhoto || null,
+                users: uObj,
+                clinics: cObj
+            };
+        });
+
+        res.json({ success: true, count: formattedDentists.length, dentists: formattedDentists });
     } catch (err) {
         console.error('Get All Dentists Error:', err.message);
         res.status(500).json({ success: false, message: 'Failed to fetch all dentists.' });

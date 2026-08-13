@@ -47,8 +47,8 @@ class DoctorModel {
     required this.consultationFee,
     this.licenseNumber = 'DEN-LIC-REG',
     this.photoBytes,
-    this.clinicAddress = '123 Healthcare Blvd, Medical Hub, Suite 400',
-    this.pincode = '560038',
+    this.clinicAddress = '',
+    this.pincode = '',
     this.city = '',
     this.state = '',
     this.latitude,
@@ -117,22 +117,22 @@ class DoctorModel {
     return DoctorModel(
       id: json['id'] ?? '',
       name: json['name'] ?? '',
-      specialty: json['specialty'] ?? '',
-      qualification: json['qualification'] ?? 'BDS, MDS',
-      experienceYears: json['experienceYears'] ?? 5,
+      specialty: json['specialty'] ?? json['speciality'] ?? '',
+      qualification: json['qualification'] ?? json['qualifications'] ?? 'BDS, MDS',
+      experienceYears: json['experienceYears'] ?? json['experience_years'] ?? 5,
       rating: (json['rating'] ?? 5.0).toDouble(),
-      reviewCount: json['reviewCount'] ?? 0,
-      clinicName: json['clinicName'] ?? '',
-      phone: json['phone'] ?? '',
-      email: json['email'] ?? '',
-      status: json['status'] ?? 'Available',
+      reviewCount: json['reviewCount'] ?? json['reviews_count'] ?? 0,
+      clinicName: json['clinicName'] ?? (json['clinics'] != null ? json['clinics']['clinic_name'] : '') ?? '',
+      phone: json['phone'] ?? (json['users'] != null ? json['users']['phone'] : '') ?? '',
+      email: json['email'] ?? (json['users'] != null ? json['users']['email'] : '') ?? '',
+      status: json['status'] ?? json['availability_status'] ?? 'Available',
       verificationStatus: json['verification_status'] ?? json['verificationStatus'] ?? 'VERIFIED',
       nextAvailableSlots: List<String>.from(json['nextAvailableSlots'] ?? []),
       consultationFee: json['consultationFee'] ?? '\$75',
-      licenseNumber: json['licenseNumber'] ?? 'DEN-LIC-REG',
+      licenseNumber: json['licenseNumber'] ?? json['license_number'] ?? 'DEN-LIC-REG',
       photoBytes: bytes,
-      clinicAddress: json['clinicAddress'] ?? '123 Healthcare Blvd, Medical Hub, Suite 400',
-      pincode: json['pincode'] ?? json['postal_code'] ?? (json['users'] != null ? (json['users']['pincode'] ?? '') : '') ?? '560038',
+      clinicAddress: json['clinicAddress'] ?? json['location'] ?? (json['clinics'] != null ? json['clinics']['location'] : '') ?? '',
+      pincode: json['pincode'] ?? json['postal_code'] ?? (json['users'] != null ? (json['users']['pincode'] ?? '') : '') ?? '',
       city: json['city'] ?? (json['users'] != null ? (json['users']['city'] ?? '') : '') ?? '',
       state: json['state'] ?? (json['users'] != null ? (json['users']['state'] ?? '') : '') ?? '',
       latitude: (json['latitude'] ?? json['lat'] ?? (json['users'] != null ? json['users']['latitude'] : null)) != null
@@ -202,6 +202,8 @@ class PatientProfile {
   String bloodGroup;
   String emergencyContact;
   String address;
+  String city;
+  String state;
   String pincode;
   Uint8List? photoBytes;
 
@@ -215,6 +217,8 @@ class PatientProfile {
     this.bloodGroup = 'O Positive (O+)',
     this.emergencyContact = '',
     this.address = '',
+    this.city = '',
+    this.state = '',
     this.pincode = '',
     this.photoBytes,
   });
@@ -229,6 +233,8 @@ class PatientProfile {
         'bloodGroup': bloodGroup,
         'emergencyContact': emergencyContact,
         'address': address,
+        'city': city,
+        'state': state,
         'pincode': pincode,
         'photoBase64': photoBytes != null ? base64Encode(photoBytes!) : null,
       };
@@ -250,6 +256,8 @@ class PatientProfile {
       bloodGroup: json['bloodGroup'] ?? 'O Positive (O+)',
       emergencyContact: json['emergencyContact'] ?? '',
       address: json['address'] ?? json['location'] ?? '',
+      city: json['city'] ?? '',
+      state: json['state'] ?? '',
       pincode: json['pincode'] ?? json['postal_code'] ?? '',
       photoBytes: bytes,
     );
@@ -583,7 +591,12 @@ class PatientProblemService extends ChangeNotifier {
       if (reqStr != null && reqStr.isNotEmpty) {
         final List list = jsonDecode(reqStr);
         _requests.clear();
-        _requests.addAll(list.map((item) => PatientConsultationRequest.fromJson(item)));
+        for (final item in list) {
+          final req = PatientConsultationRequest.fromJson(item);
+          if (req.patientName.trim().toLowerCase() != 'anusha' && req.patientName.trim().toLowerCase() != 't') {
+            _requests.add(req);
+          }
+        }
       }
 
       // 4. Load Medical Records
@@ -599,7 +612,12 @@ class PatientProblemService extends ChangeNotifier {
       if (patStr != null && patStr.isNotEmpty) {
         final List list = jsonDecode(patStr);
         _allPatients.clear();
-        _allPatients.addAll(list.map((item) => PatientProfile.fromJson(item)));
+        for (final item in list) {
+          final p = PatientProfile.fromJson(item);
+          if (p.name.trim().toLowerCase() != 'anusha' && p.name.trim().toLowerCase() != 't') {
+            _allPatients.add(p);
+          }
+        }
       }
 
       // 6. Sync live patients, appointments, clinics, doctors, records, and requests directly from Supabase DB API
@@ -611,6 +629,9 @@ class PatientProblemService extends ChangeNotifier {
     }
   }
 
+  final List<Map<String, dynamic>> _subAdmins = [];
+  List<Map<String, dynamic>> get subAdmins => List.unmodifiable(_subAdmins);
+
   Future<void> syncAllDataFromApi() async {
     try {
       await Future.wait([
@@ -620,23 +641,43 @@ class PatientProblemService extends ChangeNotifier {
         syncAppointmentsFromApi(),
         syncProblemRequestsFromApi(),
         syncMedicalRecordsFromApi(),
+        syncSubAdminsFromApi(),
       ]);
     } catch (e) {
       debugPrint('Error in syncAllDataFromApi: $e');
     }
   }
 
+  Future<void> syncSubAdminsFromApi() async {
+    try {
+      final list = await ApiService().fetchSubAdmins();
+      _subAdmins.clear();
+      if (list.isNotEmpty) {
+        for (final item in list) {
+          _subAdmins.add(Map<String, dynamic>.from(item));
+        }
+      }
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Sync sub-admins error: $e');
+    }
+  }
+
   Future<void> syncPatientsFromApi() async {
     try {
       final list = await ApiService().fetchPatients();
+      _allPatients.clear();
       if (list.isNotEmpty) {
-        _allPatients.clear();
         for (final item in list) {
           final id = (item['id'] ?? '').toString();
           String name = (item['name'] ?? '').toString().trim();
           final email = (item['email'] ?? '').toString().trim();
           final phone = (item['phone'] ?? '').toString().trim();
           final age = (item['age'] ?? '28').toString();
+          final city = (item['city'] ?? item['location_city'] ?? '').toString();
+          final pincode = (item['pincode'] ?? item['postal_code'] ?? '').toString();
+          final state = (item['state'] ?? '').toString();
+          final address = (item['address'] ?? item['location'] ?? '').toString();
 
           if (name.isEmpty && email.isNotEmpty) {
             name = email.split('@').first;
@@ -651,6 +692,10 @@ class PatientProblemService extends ChangeNotifier {
             email: email,
             phone: phone,
             age: age,
+            city: city,
+            pincode: pincode,
+            state: state,
+            address: address,
           ));
         }
       }
@@ -691,6 +736,7 @@ class PatientProblemService extends ChangeNotifier {
           ? await ApiService().fetchAdminProblemRequests()
           : await ApiService().fetchPatientProblemRequests(patientId: pId);
 
+      _requests.clear();
       if (problemReqs.isNotEmpty) {
         for (final pr in problemReqs) {
           final prId = (pr['_id'] ?? pr['id'] ?? '').toString();
@@ -704,32 +750,23 @@ class PatientProblemService extends ChangeNotifier {
           final pName = (patientObj['name'] ?? pr['patientName'] ?? (currentPatient.name.isNotEmpty ? currentPatient.name : 'Patient')).toString();
           final pPhone = (patientObj['phone'] ?? pr['patientPhone'] ?? currentPatient.phone).toString();
 
-          final existingIdx = _requests.indexWhere((r) => r.id == prId);
-          if (existingIdx != -1) {
-            _requests[existingIdx].status = status;
-            if (pName.isNotEmpty && pName != 'Patient') _requests[existingIdx].patientName = pName;
-            if (pPhone.isNotEmpty) _requests[existingIdx].patientPhone = pPhone;
-            if (pr['admin_notes'] != null) _requests[existingIdx].adminNotes = pr['admin_notes'].toString();
-          } else {
-            _requests.insert(
-              0,
-              PatientConsultationRequest(
-                id: prId,
-                patientName: pName,
-                patientPhone: pPhone,
-                problemCategory: category,
-                problemDescription: desc,
-                severity: severity,
-                submittedAt: pr['created_at'] != null ? DateTime.parse(pr['created_at']) : DateTime.now(),
-                status: status,
-                adminNotes: pr['admin_notes']?.toString(),
-              ),
-            );
-          }
+          _requests.add(
+            PatientConsultationRequest(
+              id: prId,
+              patientName: pName,
+              patientPhone: pPhone,
+              problemCategory: category,
+              problemDescription: desc,
+              severity: severity,
+              submittedAt: pr['created_at'] != null ? DateTime.parse(pr['created_at']) : DateTime.now(),
+              status: status,
+              adminNotes: pr['admin_notes']?.toString(),
+            ),
+          );
         }
-        _saveToStorage();
-        notifyListeners();
       }
+      _saveToStorage();
+      notifyListeners();
     } catch (e) {
       debugPrint('Sync problem requests error: $e');
     }
@@ -738,8 +775,8 @@ class PatientProblemService extends ChangeNotifier {
   Future<void> syncClinicsFromApi() async {
     try {
       final list = await ApiService().fetchClinics();
+      _allClinics.clear();
       if (list.isNotEmpty) {
-        _allClinics.clear();
         for (final item in list) {
           _allClinics.add(ClinicModel.fromJson(item));
         }
@@ -774,8 +811,8 @@ class PatientProblemService extends ChangeNotifier {
   Future<void> syncDoctorsFromApi() async {
     try {
       final apiDentists = await ApiService().fetchDentists();
+      _allDoctors.clear();
       if (apiDentists.isNotEmpty) {
-        _allDoctors.clear();
         for (final dMap in apiDentists) {
           final id = dMap['id']?.toString() ?? dMap['_id']?.toString() ?? '';
           final userObj = dMap['users'] ?? dMap['user'] ?? {};
@@ -1238,7 +1275,7 @@ class PatientProblemService extends ChangeNotifier {
 
     final newDoctor = DoctorModel(
       id: doctorId,
-      name: formattedName.isEmpty ? 'Dr. New Dentist' : formattedName,
+      name: formattedName.isEmpty ? (email.isNotEmpty ? email : 'Dentist') : formattedName,
       specialty: cleanSpecialty,
       qualification: qualification.trim().isEmpty ? 'BDS, MDS' : qualification.trim(),
       experienceYears: experienceYears <= 0 ? 5 : experienceYears,

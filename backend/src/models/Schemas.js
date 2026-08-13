@@ -67,8 +67,17 @@ const User = {
         if (userData.password && !userData.password.startsWith('$2a$') && !userData.password.startsWith('$2b$')) {
             userData.password = await hashPassword(userData.password);
         }
-        const { data, error } = await supabaseAdmin.from('users').insert(userData).select().single();
-        if (error) throw error;
+        const payload = {};
+        for (const [key, val] of Object.entries(userData)) {
+            if (val !== undefined && val !== null) {
+                payload[key] = val;
+            }
+        }
+        const { data, error } = await supabaseAdmin.from('users').insert(payload).select().single();
+        if (error) {
+            console.error('❌ Supabase User Insert Error:', error.message);
+            throw error;
+        }
         return data;
     },
 

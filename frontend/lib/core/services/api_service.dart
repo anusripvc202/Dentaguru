@@ -33,6 +33,7 @@ class ApiService {
     String? clinicName,
     String? clinicAddress,
     String? location,
+    String? state,
     String? city,
     String? pincode,
     String? qualification,
@@ -50,6 +51,7 @@ class ApiService {
       if (clinicName != null) 'clinicName': clinicName,
       if (clinicAddress != null) 'clinicAddress': clinicAddress,
       if (location != null) 'location': location,
+      if (state != null) 'state': state,
       if (city != null) 'city': city,
       if (pincode != null) 'pincode': pincode,
       if (qualification != null) 'qualification': qualification,
@@ -98,6 +100,36 @@ class ApiService {
           if (res.session?.accessToken != null) {
             setAuthToken(res.session!.accessToken);
           }
+          // Directly write patient/dentist record to Supabase DB tables
+          try {
+            await client.from('users').upsert({
+              'id': res.user!.id,
+              'name': name.trim(),
+              'email': email.trim().toLowerCase(),
+              'phone': phone.trim(),
+              'role': role,
+              'city': city ?? '',
+              'pincode': pincode ?? '',
+              'state': state ?? '',
+            });
+
+            if (role.toLowerCase() == 'dentist') {
+              final licNum = licenseNumber?.trim() ?? 'DEN-LIC-REG';
+              await client.from('dentists').upsert({
+                'user_id': res.user!.id,
+                'speciality': specialty ?? 'General Dentistry',
+                'license_number': licNum,
+                'experience_years': experienceYears ?? 5,
+                'city': city ?? '',
+                'pincode': pincode ?? '',
+                'state': state ?? '',
+                'availability_status': 'Available',
+              });
+            }
+          } catch (dbErr) {
+            debugPrint('⚠️ Supabase fallback DB write notice: $dbErr');
+          }
+
           return {
             'success': true,
             'data': {
@@ -106,6 +138,8 @@ class ApiService {
                 'email': res.user!.email,
                 'name': name,
                 'role': role,
+                'city': city ?? '',
+                'pincode': pincode ?? '',
               }
             }
           };
@@ -660,7 +694,7 @@ class ApiService {
     try {
       final res = await Supabase.instance.client
           .from('users')
-          .select('id, name, email, phone, role, created_at')
+          .select('id, name, email, phone, role, state, city, pincode, created_at')
           .ilike('role', 'Patient')
           .order('created_at', ascending: false);
       if (res.isNotEmpty) {
@@ -684,6 +718,77 @@ class ApiService {
       debugPrint('Fetch patients error: $e');
     }
     return [];
+  }
+
+  /// Create Sub-Admin (Primary Admin only)
+  Future<Map<String, dynamic>> createSubAdmin({
+    required String name,
+    required String email,
+    required String password,
+    required String phone,
+    List<String>? permissions,
+  }) async {
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/admin/sub-admins');
+      final response = await http.post(
+        url,
+        headers: _headers,
+        body: jsonEncode({
+          'name': name,
+          'email': email,
+          'password': password,
+          'phone': phone,
+          'permissions': permissions ?? ['patients', 'dentists', 'clinics', 'appointments', 'reports'],
+        }),
+      );
+      final data = jsonDecode(response.body);
+      return {
+        'success': response.statusCode == 200 || response.statusCode == 201,
+        'message': data['message'] ?? 'Sub-Admin action completed.',
+        'subAdmin': data['subAdmin'],
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to create Sub-Admin.'};
+    }
+  }
+
+  /// Fetch all Sub-Admins
+  Future<List<dynamic>> fetchSubAdmins() async {
+    try {
+      final res = await Supabase.instance.client
+          .from('users')
+          .select('id, name, email, phone, role, created_at')
+          .ilike('role', 'Sub-Admin')
+          .order('created_at', ascending: false);
+      if (res.isNotEmpty) return res;
+    } catch (_) {}
+
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/admin/sub-admins');
+      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['subAdmins'] ?? [];
+      }
+    } catch (e) {
+      debugPrint('Fetch sub-admins error: $e');
+    }
+    return [];
+  }
+
+  /// Delete Sub-Admin
+  Future<bool> deleteSubAdmin(String id) async {
+    try {
+      await Supabase.instance.client.from('users').delete().eq('id', id);
+    } catch (_) {}
+
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/admin/sub-admins/$id');
+      final response = await http.delete(url, headers: _headers);
+      return response.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
   }
 
   /// Admin: Suggest / Assign Dentist to a Patient Request

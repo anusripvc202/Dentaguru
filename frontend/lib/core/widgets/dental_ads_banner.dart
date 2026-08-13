@@ -50,7 +50,6 @@ class DentalAdsBanner extends StatefulWidget {
 }
 
 class _DentalAdsBannerState extends State<DentalAdsBanner> {
-  late PageController _pageController;
   Timer? _autoScrollTimer;
   int _currentPage = 0;
 
@@ -67,12 +66,12 @@ class _DentalAdsBannerState extends State<DentalAdsBanner> {
   @override
   void initState() {
     super.initState();
-    _pageController = PageController();
     if (_ads.length > 1) {
       _autoScrollTimer = Timer.periodic(const Duration(seconds: 4), (_) {
-        if (!mounted || !_pageController.hasClients) return;
-        final next = (_currentPage + 1) % _ads.length;
-        _pageController.animateToPage(next, duration: const Duration(milliseconds: 550), curve: Curves.easeInOut);
+        if (!mounted) return;
+        setState(() {
+          _currentPage = (_currentPage + 1) % _ads.length;
+        });
       });
     }
   }
@@ -80,7 +79,6 @@ class _DentalAdsBannerState extends State<DentalAdsBanner> {
   @override
   void dispose() {
     _autoScrollTimer?.cancel();
-    _pageController.dispose();
     super.dispose();
   }
 
@@ -133,19 +131,41 @@ class _DentalAdsBannerState extends State<DentalAdsBanner> {
           const SizedBox(width: 6),
           Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: const Color(0xFFFEF9C3), borderRadius: BorderRadius.circular(8), border: Border.all(color: const Color(0xFFFDE047))), child: const Text('Sponsored', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF92400E)))),
         ]),
-        const SizedBox(height: 10),
-        SizedBox(height: 160, child: PageView.builder(
-          controller: _pageController,
-          itemCount: _ads.length,
-          onPageChanged: (i) => setState(() => _currentPage = i),
-          itemBuilder: (ctx, i) => _AdCard(ad: _ads[i], onTap: () => _launch(_ads[i].website)),
-        )),
+        SizedBox(
+          height: 160,
+          width: double.infinity,
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 550),
+            transitionBuilder: (Widget child, Animation<double> animation) {
+              return FadeTransition(
+                opacity: animation,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0.04, 0),
+                    end: Offset.zero,
+                  ).animate(animation),
+                  child: child,
+                ),
+              );
+            },
+            child: KeyedSubtree(
+              key: ValueKey<int>(_currentPage),
+              child: _AdCard(
+                ad: _ads[_currentPage % _ads.length],
+                onTap: () => _launch(_ads[_currentPage % _ads.length].website),
+              ),
+            ),
+          ),
+        ),
         if (_ads.length > 1) ...[
           const SizedBox(height: 8),
           Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(_ads.length, (i) {
             final isActive = i == _currentPage;
-            return AnimatedContainer(duration: const Duration(milliseconds: 280), margin: const EdgeInsets.symmetric(horizontal: 3), width: isActive ? 20 : 6, height: 6,
-              decoration: BoxDecoration(color: isActive ? _ads[_currentPage].gradientColors.first : const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(4)));
+            return GestureDetector(
+              onTap: () => setState(() => _currentPage = i),
+              child: AnimatedContainer(duration: const Duration(milliseconds: 280), margin: const EdgeInsets.symmetric(horizontal: 3), width: isActive ? 20 : 6, height: 6,
+                decoration: BoxDecoration(color: isActive ? _ads[_currentPage % _ads.length].gradientColors.first : const Color(0xFFCBD5E1), borderRadius: BorderRadius.circular(4))),
+            );
           })),
         ],
       ],

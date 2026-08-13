@@ -43,6 +43,11 @@ router.delete('/patient/problem-requests/:id', optionalAuth, problemRequests.del
 router.get('/admin/patients', optionalAuth, auth.getPatients);
 router.get('/patients', optionalAuth, auth.getPatients);
 
+// Sub-Admin Management Routes
+router.post('/admin/sub-admins', optionalAuth, auth.createSubAdmin);
+router.get('/admin/sub-admins', optionalAuth, auth.getSubAdmins);
+router.delete('/admin/sub-admins/:id', optionalAuth, auth.deleteSubAdmin);
+
 // ─────────────────────────────────────────────
 // 3. ADMIN VERIFICATION ENDPOINTS
 // ─────────────────────────────────────────────

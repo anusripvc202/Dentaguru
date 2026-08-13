@@ -1456,6 +1456,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   // PANEL: SUB-ADMIN MANAGEMENT
   // ==========================================
   Widget _buildSubAdminsPanel() {
+    final subAdminList = _problemService.subAdmins;
+
     return FadeTransition(
       opacity: _fadeAnimation,
       child: SlideTransition(
@@ -1479,9 +1481,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   borderRadius: BorderRadius.circular(18),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF6366F1).withValues(alpha: 0.25),
-                      blurRadius: 14,
-                      offset: const Offset(0, 6),
+                      color: Colors.black.withValues(alpha: 0.08),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
                     ),
                   ],
                 ),
@@ -1490,7 +1492,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.18),
+                        color: Colors.white.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(14),
                       ),
                       child: const Icon(Icons.supervisor_account_rounded, color: Colors.white, size: 28),
@@ -1506,7 +1508,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           ),
                           const SizedBox(height: 3),
                           Text(
-                            '${_subAdmins.length} Sub-Admin${_subAdmins.length == 1 ? '' : 's'} registered • Manage portal access roles',
+                            '${subAdminList.length} Sub-Admin${subAdminList.length == 1 ? '' : 's'} registered • Manage portal access roles',
                             style: const TextStyle(color: Colors.white70, fontSize: 11),
                           ),
                         ],
@@ -1578,7 +1580,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               const SizedBox(height: 16),
 
               // Sub-Admin List or Empty State
-              if (_subAdmins.isEmpty)
+              if (subAdminList.isEmpty)
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 24),
@@ -1627,11 +1629,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 ListView.separated(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  itemCount: _subAdmins.length,
+                  itemCount: subAdminList.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 10),
                   itemBuilder: (context, index) {
-                    final sa = _subAdmins[index];
-                    final initials = (sa['name'] ?? 'SA')
+                    final sa = subAdminList[index];
+                    final String saId = sa['id']?.toString() ?? '';
+                    final String name = sa['name']?.toString() ?? 'Sub-Admin';
+                    final String email = sa['email']?.toString() ?? '';
+                    final String phone = sa['phone']?.toString() ?? '';
+                    final initials = name
                         .trim()
                         .split(' ')
                         .where((w) => w.isNotEmpty)
@@ -1658,8 +1664,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           Container(
                             width: 48,
                             height: 48,
-                            decoration: BoxDecoration(
-                              gradient: const LinearGradient(
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(
                                 colors: [Color(0xFF6366F1), Color(0xFF818CF8)],
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
@@ -1668,7 +1674,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             ),
                             child: Center(
                               child: Text(
-                                initials,
+                                initials.isNotEmpty ? initials : 'SA',
                                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
                               ),
                             ),
@@ -1680,13 +1686,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  sa['name'] ?? 'Sub-Admin',
+                                  name,
                                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
                                   overflow: TextOverflow.ellipsis,
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  sa['email'] ?? '',
+                                  email,
                                   style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -1699,18 +1705,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                         color: const Color(0xFFEDE9FE),
                                         borderRadius: BorderRadius.circular(8),
                                       ),
-                                      child: Text(
-                                        sa['department'] ?? 'General',
-                                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF6D28D9)),
+                                      child: const Text(
+                                        'Sub-Admin',
+                                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF6D28D9)),
                                       ),
                                     ),
-                                    const SizedBox(width: 8),
-                                    if ((sa['phone'] ?? '').isNotEmpty)
+                                    if (phone.isNotEmpty) ...[
+                                      const SizedBox(width: 8),
                                       Text(
-                                        '📞 ${sa['phone']}',
+                                        '📞 $phone',
                                         style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                         overflow: TextOverflow.ellipsis,
                                       ),
+                                    ],
                                   ],
                                 ),
                               ],
@@ -1735,7 +1742,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               const SizedBox(height: 8),
                               InkWell(
                                 borderRadius: BorderRadius.circular(8),
-                                onTap: () => _confirmRemoveSubAdmin(context, index, sa['name'] ?? 'Sub-Admin'),
+                                onTap: () => _confirmRemoveSubAdmin(context, saId, name),
                                 child: Container(
                                   padding: const EdgeInsets.all(6),
                                   decoration: BoxDecoration(
@@ -1759,7 +1766,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     );
   }
 
-  void _confirmRemoveSubAdmin(BuildContext context, int index, String name) {
+  void _confirmRemoveSubAdmin(BuildContext context, String subAdminId, String name) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1773,22 +1780,25 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
             ),
           ],
         ),
-        content: Text('Are you sure you want to remove $name from the sub-admin list? They will lose admin portal access.'),
+        content: Text('Are you sure you want to remove $name from sub-admins? They will lose admin portal access.'),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
           ElevatedButton.icon(
             icon: const Icon(Icons.delete_forever_rounded, size: 16),
             label: const Text('Remove', style: TextStyle(fontWeight: FontWeight.bold)),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-            onPressed: () {
-              _removeSubAdmin(index);
+            onPressed: () async {
               Navigator.of(ctx).pop();
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('🗑️ $name removed from sub-admins.'),
-                  backgroundColor: Colors.red,
-                ),
-              );
+              await ApiService().deleteSubAdmin(subAdminId);
+              await _problemService.syncSubAdminsFromApi();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('🗑️ $name removed from sub-admins.'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
             },
           ),
         ],
@@ -2024,13 +2034,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                         setModalState(() => isLoading = true);
 
                                         try {
-                                          final res = await ApiService().registerUser(
+                                          final res = await ApiService().createSubAdmin(
                                             name: name,
                                             email: email,
                                             password: password,
                                             phone: phone.isEmpty ? '0000000000' : phone,
-                                            role: 'Sub-Admin',
                                           );
+
+                                          await _problemService.syncSubAdminsFromApi();
 
                                           setModalState(() => isLoading = false);
 
@@ -2038,12 +2049,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                           Navigator.of(dialogCtx).pop();
 
                                           if (res['success'] == true) {
-                                            _addSubAdmin({
-                                              'name': name,
-                                              'email': email,
-                                              'phone': phone,
-                                              'department': selectedDept,
-                                            });
                                             ScaffoldMessenger.of(context).showSnackBar(
                                               SnackBar(
                                                 content: Text('✅ Sub-Admin "$name" created successfully! They can now log in via the Admin tab.'),
@@ -2052,15 +2057,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                               ),
                                             );
                                           } else {
-                                            _addSubAdmin({
-                                              'name': name,
-                                              'email': email,
-                                              'phone': phone,
-                                              'department': selectedDept,
-                                            });
                                             ScaffoldMessenger.of(context).showSnackBar(
                                               SnackBar(
-                                                content: Text('⚠️ Backend notice: ${res['message'] ?? 'Account saved locally. Sync when online.'}'),
+                                                content: Text('⚠️ Backend notice: ${res['message'] ?? 'Unable to create Sub-Admin account.'}'),
                                                 backgroundColor: const Color(0xFFD97706),
                                                 duration: const Duration(seconds: 4),
                                               ),
@@ -2068,18 +2067,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                           }
                                         } catch (e) {
                                           setModalState(() => isLoading = false);
-                                          _addSubAdmin({
-                                            'name': name,
-                                            'email': email,
-                                            'phone': phone,
-                                            'department': selectedDept,
-                                          });
                                           if (!dialogCtx.mounted) return;
                                           Navigator.of(dialogCtx).pop();
                                           ScaffoldMessenger.of(context).showSnackBar(
                                             SnackBar(
-                                              content: Text('⚠️ Network error. Sub-Admin "$name" saved locally.'),
-                                              backgroundColor: const Color(0xFFD97706),
+                                              content: Text('⚠️ Exception during Sub-Admin creation: $e'),
+                                              backgroundColor: const Color(0xFFEF4444),
                                             ),
                                           );
                                         }
@@ -3330,6 +3323,30 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           }).toList(),
                         ),
                         const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            if (doc.city.isNotEmpty)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                margin: const EdgeInsets.only(right: 6),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFEFF6FF),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text('🏙️ City: ${doc.city}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue)),
+                              ),
+                            if (doc.pincode.isNotEmpty)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFEF3C7),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text('📍 Pin: ${doc.pincode}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFD97706))),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
                         Text(
                           '📞 ${doc.phone} • ✉️ ${doc.email}',
                           style: const TextStyle(fontSize: 10, color: AppTheme.textMuted),
@@ -3502,11 +3519,25 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 childAspectRatio: childRatio,
                 children: [
                   _KpiCard(
-                    title: 'Total Active Patients',
-                    value: '${requests.map((r) => r.patientName).toSet().length}',
-                    growth: requests.isNotEmpty ? '+100% active' : 'Live Sync',
+                    title: 'Total Patients',
+                    value: '${_problemService.allPatients.length}',
+                    growth: 'Central DB Synced',
                     accentColor: AppTheme.primaryBlue,
                     icon: Icons.people_alt_rounded,
+                  ),
+                  _KpiCard(
+                    title: 'Total Dentists',
+                    value: '${_problemService.allDoctors.length}',
+                    growth: 'Verified Dentists',
+                    accentColor: const Color(0xFF10B981),
+                    icon: Icons.medical_services_rounded,
+                  ),
+                  _KpiCard(
+                    title: 'Total Sub-Admins',
+                    value: '${_problemService.subAdmins.length}',
+                    growth: 'Portal Sub-Admins',
+                    accentColor: const Color(0xFF6366F1),
+                    icon: Icons.supervisor_account_rounded,
                   ),
                   _KpiCard(
                     title: 'Pending Consultations',
@@ -3514,20 +3545,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     growth: 'Requires Action',
                     accentColor: const Color(0xFFD97706),
                     icon: Icons.pending_actions_rounded,
-                  ),
-                  _KpiCard(
-                    title: 'Assigned Specialists',
-                    value: '${_problemService.allDoctors.length}',
-                    growth: 'Verified Doctors',
-                    accentColor: const Color(0xFF10B981),
-                    icon: Icons.account_balance_wallet_rounded,
-                  ),
-                  _KpiCard(
-                    title: 'Partner Clinics',
-                    value: '${_problemService.allDoctors.map((d) => d.clinicName).toSet().length}',
-                    growth: 'Network Clinics',
-                    accentColor: const Color(0xFF8B5CF6),
-                    icon: Icons.local_hospital_rounded,
                   ),
                 ],
               );
@@ -4073,10 +4090,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
       patientEntries.add({
         'name': displayName,
-        'age': p.age.isNotEmpty ? p.age : '28',
-        'phone': p.phone.isNotEmpty ? p.phone : '--',
         'email': p.email,
-        'lastVisit': 'Active',
+        'phone': p.phone.isNotEmpty ? p.phone : '--',
+        'city': p.city.isNotEmpty ? p.city : '--',
+        'pincode': p.pincode.isNotEmpty ? p.pincode : '--',
         'status': 'Active',
       });
     }
@@ -4086,10 +4103,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
         !patientEntries.any((p) => p['email'] == _problemService.currentPatient.email)) {
       patientEntries.add({
         'name': _problemService.currentPatient.name,
-        'age': _problemService.currentPatient.age.isNotEmpty ? _problemService.currentPatient.age : '28',
-        'phone': _problemService.currentPatient.phone,
         'email': _problemService.currentPatient.email,
-        'lastVisit': 'Active',
+        'phone': _problemService.currentPatient.phone.isNotEmpty ? _problemService.currentPatient.phone : '--',
+        'city': _problemService.currentPatient.city.isNotEmpty ? _problemService.currentPatient.city : '--',
+        'pincode': _problemService.currentPatient.pincode.isNotEmpty ? _problemService.currentPatient.pincode : '--',
         'status': 'Active',
       });
     }
@@ -4155,20 +4172,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 child: DataTable(
                   columns: const [
                     DataColumn(label: Text('Name', style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('Age', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Email', style: TextStyle(fontWeight: FontWeight.bold))),
                     DataColumn(label: Text('Phone', style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('Last Visit', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('City', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Pincode', style: TextStyle(fontWeight: FontWeight.bold))),
                     DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.bold))),
                     DataColumn(label: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold))),
                   ],
                   rows: patientEntries.map((patient) {
                     final String name = patient['name'] ?? 'Patient';
-                    final String age = patient['age'] ?? '28';
+                    final String email = patient['email'] ?? '--';
                     final String phone = patient['phone'] ?? '--';
-                    final String email = patient['email'] ?? '';
-                    final String lastVisit = patient['lastVisit'] ?? 'Today';
+                    final String city = patient['city'] ?? '--';
+                    final String pincode = patient['pincode'] ?? '--';
                     final String status = patient['status'] ?? 'Active';
-                    return _buildDataRow(name, age, phone, email, lastVisit, status, const Color(0xFFDCFCE7), const Color(0xFF16A34A));
+                    return _buildPatientDataRow(name, email, phone, city, pincode, status, const Color(0xFFDCFCE7), const Color(0xFF16A34A));
                   }).toList(),
                 ),
               ),
@@ -4218,7 +4236,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     );
   }
 
-  DataRow _buildDataRow(String name, String age, String phone, String email, String lastVisit, String status, Color bg, Color text) {
+  DataRow _buildPatientDataRow(String name, String email, String phone, String city, String pincode, String status, Color bg, Color text) {
     return DataRow(
       cells: [
         DataCell(
@@ -4227,16 +4245,29 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               CircleAvatar(
                 radius: 12,
                 backgroundColor: AppTheme.softBlueCard,
-                child: Text(name[0], style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue)),
+                child: Text(name.isNotEmpty ? name[0].toUpperCase() : 'P', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue)),
               ),
               const SizedBox(width: 8),
               Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
             ],
           ),
         ),
-        DataCell(Text(age, style: const TextStyle(fontSize: 12))),
+        DataCell(Text(email, style: const TextStyle(fontSize: 12))),
         DataCell(Text(phone, style: const TextStyle(fontSize: 12))),
-        DataCell(Text(lastVisit, style: const TextStyle(fontSize: 12))),
+        DataCell(
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(6)),
+            child: Text(city.isNotEmpty ? city : '--', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue)),
+          ),
+        ),
+        DataCell(
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(color: const Color(0xFFFEF3C7), borderRadius: BorderRadius.circular(6)),
+            child: Text(pincode.isNotEmpty ? pincode : '--', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFD97706))),
+          ),
+        ),
         DataCell(
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),

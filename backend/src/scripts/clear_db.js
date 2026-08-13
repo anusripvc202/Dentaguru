@@ -1,4 +1,5 @@
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 const { supabaseAdmin } = require('../config/supabase');
 
 async function clearDatabase() {
@@ -43,7 +44,23 @@ async function clearDatabase() {
         }
     }
 
-    console.log('🎉 Database reset complete! All tables are empty.');
+    try {
+        console.log('Checking Supabase Auth users...');
+        const { data: { users }, error: authErr } = await supabaseAdmin.auth.admin.listUsers();
+        if (!authErr && users && users.length > 0) {
+            console.log(`Found ${users.length} Auth users to delete...`);
+            for (const user of users) {
+                await supabaseAdmin.auth.admin.deleteUser(user.id);
+            }
+            console.log('✅ All Supabase Auth users deleted.');
+        } else {
+            console.log('✅ Supabase Auth users verified empty.');
+        }
+    } catch (authE) {
+        console.warn('⚠️ Auth user deletion skipped:', authE.message);
+    }
+
+    console.log('🎉 Database reset complete! All tables and auth users are empty.');
     process.exit(0);
 }
 

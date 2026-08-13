@@ -1143,10 +1143,6 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               ),
               const SizedBox(height: 24),
 
-              // ── BOTTOM ADS SECTION (Auto-rotating remaining slides one by one) ──
-              const DentalAdsBanner(isDentist: true, remainingSlidesOnly: true),
-              const SizedBox(height: 24),
-
               // 4. Section: Admin Assigned Patients Stream
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1216,7 +1212,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                   }
 
                   return Column(
-                    children: sortedRequests.map((req) {
+                    children: sortedRequests.map<Widget>((req) {
                       final bool isConfirmed = req.status == 'Confirmed' || req.status == 'Accepted';
 
                       return Container(
@@ -1417,6 +1413,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 },
               ),
               const SizedBox(height: 20),
+
+              // ── BOTTOM ADS SECTION (Single-card auto-transition under Admin Assigned Patients) ──
+              const DentalAdsBanner(isDentist: true, remainingSlidesOnly: true),
+              const SizedBox(height: 24),
 
               // 5. Daily Consultation Timeline Queue
               const Text("Today's Patient Schedule", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark)),

@@ -70,7 +70,24 @@ async function clearDatabase() {
         }
     }
 
-    console.log('✅ ALL DATABASE TABLES HAVE BEEN WIPED CLEAN!');
+    // Also purge Supabase Auth Users if service role key is present
+    try {
+        console.log('Checking Supabase Auth users...');
+        const { data: { users }, error: authErr } = await supabaseAdmin.auth.admin.listUsers();
+        if (!authErr && users && users.length > 0) {
+            console.log(`Found ${users.length} Auth users to delete...`);
+            for (const user of users) {
+                await supabaseAdmin.auth.admin.deleteUser(user.id);
+            }
+            console.log('✅ All Supabase Auth users deleted.');
+        } else {
+            console.log('✅ Supabase Auth users verified empty.');
+        }
+    } catch (authE) {
+        console.warn('⚠️ Auth user deletion skipped:', authE.message);
+    }
+
+    console.log('✅ ALL DATABASE TABLES AND AUTH USERS HAVE BEEN WIPED CLEAN!');
     process.exit(0);
 }
 

@@ -264,8 +264,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         AnalyticsService.logLogin(method: 'Email_Password', role: _roleName);
 
         if (registeredRole.contains('dentist') || registeredRole.contains('doctor')) {
+          final docName = (userData['name'] != null && userData['name'].toString().trim().isNotEmpty)
+              ? userData['name'].toString().trim()
+              : (userData['email'] != null ? userData['email'].toString() : email);
           PatientProblemService().registerDoctor(
-            name: userData['name'] ?? 'Dr. Dentist',
+            name: docName,
             email: userData['email'] ?? email,
             phone: userPhone,
             licenseNumber: 'DEN-LIC-REGISTERED',
