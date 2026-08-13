@@ -613,7 +613,36 @@ class ApiService {
     List<String>? attachments,
     String? patientName,
     String? patientPhone,
+    String? city,
+    String? pincode,
+    String? state,
   }) async {
+    // 1. Try Supabase direct first
+    try {
+      final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+      final payload = {
+        if (currentUserId != null && currentUserId.isNotEmpty) 'patient_id': currentUserId,
+        'patient_name': patientName ?? '',
+        'patient_phone': patientPhone ?? '',
+        'problem_category': problemCategory,
+        'problem_description': problemDescription,
+        'symptoms': symptoms ?? '',
+        'preferred_location': preferredLocation ?? '',
+        'attachments': attachments ?? [],
+        'city': city ?? '',
+        'pincode': pincode ?? '',
+        'state': state ?? '',
+        'status': 'PENDING_ADMIN_REVIEW',
+      };
+      final res = await Supabase.instance.client.from('patient_problem_requests').insert(payload).select().single();
+      if (res.isNotEmpty) {
+        return {'success': true, 'request': res};
+      }
+    } catch (e) {
+      debugPrint('Supabase direct insert problem request notice: $e');
+    }
+
+    // 2. Fallback: Express backend API
     try {
       final url = Uri.parse('${ApiConstants.baseUrl}/patient/problem-requests');
       final response = await http.post(
@@ -627,8 +656,11 @@ class ApiService {
           if (attachments != null) 'attachments': attachments,
           if (patientName != null) 'patientName': patientName,
           if (patientPhone != null) 'patientPhone': patientPhone,
+          if (city != null) 'city': city,
+          if (pincode != null) 'pincode': pincode,
+          if (state != null) 'state': state,
         }),
-      );
+      ).timeout(const Duration(seconds: 35));
       return jsonDecode(response.body);
     } catch (e) {
       return {'success': false, 'message': 'Failed to submit problem request.'};

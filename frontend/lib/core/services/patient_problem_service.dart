@@ -1236,6 +1236,21 @@ class PatientProblemService extends ChangeNotifier {
       pName = currentPatient.name.isNotEmpty ? currentPatient.name : 'Patient';
     }
     String pPhone = currentPatient.phone.trim();
+    String pCity = currentPatient.city.trim();
+    String pPincode = currentPatient.pincode.trim();
+    String pState = currentPatient.state.trim();
+
+    if (pCity.isEmpty && _allPatients.isNotEmpty) {
+      final match = _allPatients.firstWhere(
+        (p) => (p.email.isNotEmpty && p.email.toLowerCase() == currentPatient.email.toLowerCase()) && p.city.isNotEmpty,
+        orElse: () => PatientProfile(),
+      );
+      if (match.city.isNotEmpty) {
+        pCity = match.city;
+        if (pPincode.isEmpty) pPincode = match.pincode;
+        if (pState.isEmpty) pState = match.state;
+      }
+    }
 
     // Insert a temp record immediately for optimistic UI feedback
     final tempId = 'PR-${DateTime.now().millisecondsSinceEpoch}';
@@ -1251,6 +1266,9 @@ class PatientProblemService extends ChangeNotifier {
       severity: severity,
       submittedAt: DateTime.now(),
       status: 'SUBMITTED',
+      city: pCity,
+      pincode: pPincode,
+      state: pState,
     );
     _requests.insert(0, newReq);
     _saveToStorage();
@@ -1267,6 +1285,9 @@ class PatientProblemService extends ChangeNotifier {
         attachments: attachments,
         patientName: pName,
         patientPhone: pPhone,
+        city: pCity,
+        pincode: pPincode,
+        state: pState,
       );
       // Replace temp record with the server-assigned UUID record
       await syncProblemRequestsFromApi();

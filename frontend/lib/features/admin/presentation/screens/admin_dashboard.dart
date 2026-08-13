@@ -3762,10 +3762,22 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                             overflow: TextOverflow.ellipsis,
                                           ),
                                           const SizedBox(height: 2),
-                                          Text(
-                                            '📍 City: ${req.city.isNotEmpty ? req.city : (_problemService.currentPatient.city.isNotEmpty ? _problemService.currentPatient.city : "Not Available")}${req.pincode.isNotEmpty ? " • PIN: ${req.pincode}" : (_problemService.currentPatient.pincode.isNotEmpty ? " • PIN: ${_problemService.currentPatient.pincode}" : "")}',
-                                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
-                                            overflow: TextOverflow.ellipsis,
+                                          Builder(
+                                            builder: (context) {
+                                              final matchP = _problemService.allPatients.firstWhere(
+                                                (p) => (p.name.isNotEmpty && req.patientName.isNotEmpty && p.name.toLowerCase() == req.patientName.toLowerCase()) ||
+                                                       (p.phone.isNotEmpty && req.patientPhone.isNotEmpty && p.phone == req.patientPhone),
+                                                orElse: () => PatientProfile(),
+                                              );
+                                              final displayCity = req.city.isNotEmpty ? req.city : (matchP.city.isNotEmpty ? matchP.city : (_problemService.currentPatient.city.isNotEmpty ? _problemService.currentPatient.city : "Not Available"));
+                                              final displayPin = req.pincode.isNotEmpty ? req.pincode : (matchP.pincode.isNotEmpty ? matchP.pincode : _problemService.currentPatient.pincode);
+
+                                              return Text(
+                                                '📍 City: $displayCity${displayPin.isNotEmpty ? " • PIN: $displayPin" : ""}',
+                                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
+                                                overflow: TextOverflow.ellipsis,
+                                              );
+                                            },
                                           ),
                                         ],
                                       ),
