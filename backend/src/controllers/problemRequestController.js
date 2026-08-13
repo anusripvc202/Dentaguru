@@ -253,9 +253,9 @@ exports.suggestDentist = async (req, res) => {
         const docSpecialty = doctorSpecialty || (dentist ? (dentist.speciality || dentist.specialty) : 'Dental Specialist');
         const docClinic = doctorClinic || (dentist ? dentist.clinicName : 'DentaGuru Clinic');
 
-        // 1. Update Request Status to DENTIST_SUGGESTED with complete assigned doctor data
+        // 1. Update Request Status to DENTIST_ASSIGNED with complete assigned doctor data
         const updatedReq = await PatientProblemRequest.findByIdAndUpdate(id, {
-            status: 'DENTIST_SUGGESTED',
+            status: 'DENTIST_ASSIGNED',
             suggested_dentist_id: dentistId,
             assigned_doctor_id: dentistId,
             assigned_doctor_name: docName,

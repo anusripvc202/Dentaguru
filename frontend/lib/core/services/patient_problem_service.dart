@@ -1170,7 +1170,7 @@ class PatientProblemService extends ChangeNotifier {
 
     // 🌐 Save immediately to Supabase PostgreSQL database table ('patient_problem_requests')
     try {
-      await ApiService().createProblemRequest(
+      final res = await ApiService().createProblemRequest(
         problemCategory: problemCategory,
         problemDescription: problemDescription,
         symptoms: symptoms,
@@ -1179,7 +1179,10 @@ class PatientProblemService extends ChangeNotifier {
         patientName: pName,
         patientPhone: pPhone,
       );
-      await syncAppointmentsFromApi();
+      if (res is Map && res['request'] != null && res['request']['id'] != null) {
+        newReq.id = res['request']['id'].toString();
+      }
+      await syncProblemRequestsFromApi();
     } catch (e) {
       debugPrint('Error saving problem request to Supabase DB: $e');
     }
@@ -1259,20 +1262,6 @@ class PatientProblemService extends ChangeNotifier {
       }).eq('id', requestId);
     } catch (e) {
       debugPrint('Supabase direct doctor assignment update error: $e');
-    }
-
-    try {
-      await Supabase.instance.client.from('patient_problem_requests').update({
-        'status': 'DENTIST_ASSIGNED',
-        'suggested_dentist_id': doctor.id,
-        'assigned_doctor_id': doctor.id,
-        'assigned_doctor_name': doctor.name,
-        'assigned_doctor_specialty': doctor.specialty,
-        'assigned_doctor_clinic': doctor.clinicName,
-        'admin_notes': adminNotes,
-      });
-    } catch (e) {
-      debugPrint('Supabase broadcast update error: $e');
     }
 
     await syncProblemRequestsFromApi();
