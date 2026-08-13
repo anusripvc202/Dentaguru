@@ -342,6 +342,33 @@ class PatientConsultationRequest {
     return '';
   }
 
+  String get displayDoctorName {
+    if (assignedDoctorName != null &&
+        assignedDoctorName!.trim().isNotEmpty &&
+        assignedDoctorName != 'null') {
+      return assignedDoctorName!;
+    }
+    return 'Dr. Specialist';
+  }
+
+  String get displayDoctorSpecialty {
+    if (assignedDoctorSpecialty != null &&
+        assignedDoctorSpecialty!.trim().isNotEmpty &&
+        assignedDoctorSpecialty != 'null') {
+      return assignedDoctorSpecialty!;
+    }
+    return 'Dental Specialist';
+  }
+
+  String get displayDoctorClinic {
+    if (assignedDoctorClinic != null &&
+        assignedDoctorClinic!.trim().isNotEmpty &&
+        assignedDoctorClinic != 'null') {
+      return assignedDoctorClinic!;
+    }
+    return 'DentaGuru Care Center';
+  }
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'patientName': patientName,
@@ -813,6 +840,20 @@ class PatientProblemService extends ChangeNotifier {
           }
         }
 
+        if ((assignedDocName == null || assignedDocName.isEmpty || assignedDocName == 'null') &&
+            (rawStatus.toUpperCase().contains('ASSIGNED') || rawStatus.toUpperCase().contains('SUGGESTED') || rawStatus.toUpperCase() == 'CONFIRMED')) {
+          if (_allDoctors.isNotEmpty) {
+            final topDoc = _allDoctors.first;
+            assignedDocName = topDoc.name;
+            assignedDocSpecialty = topDoc.specialty;
+            assignedDocClinic = topDoc.clinicName;
+          } else {
+            assignedDocName = 'Dr. Specialist';
+            assignedDocSpecialty = 'Dental Specialist';
+            assignedDocClinic = 'DentaGuru Care Center';
+          }
+        }
+
         // Normalize status from DB to frontend display values
         final rawStatusUpper = rawStatus.toUpperCase();
         String normalizedStatus;
@@ -913,6 +954,20 @@ class PatientProblemService extends ChangeNotifier {
             assignedDocName = matchedDoc.name;
             assignedDocSpecialty = matchedDoc.specialty;
             assignedDocClinic = matchedDoc.clinicName;
+          }
+        }
+
+        if ((assignedDocName == null || assignedDocName.isEmpty || assignedDocName == 'null') &&
+            (rawStatus.toUpperCase().contains('ASSIGNED') || rawStatus.toUpperCase().contains('SUGGESTED') || rawStatus.toUpperCase() == 'CONFIRMED')) {
+          if (_allDoctors.isNotEmpty) {
+            final topDoc = _allDoctors.first;
+            assignedDocName = topDoc.name;
+            assignedDocSpecialty = topDoc.specialty;
+            assignedDocClinic = topDoc.clinicName;
+          } else {
+            assignedDocName = 'Dr. Specialist';
+            assignedDocSpecialty = 'Dental Specialist';
+            assignedDocClinic = 'DentaGuru Care Center';
           }
         }
 

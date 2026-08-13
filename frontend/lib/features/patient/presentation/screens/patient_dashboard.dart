@@ -1283,7 +1283,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF14532D)),
                                             ),
                                             Text(
-                                              '${req.assignedDoctorName} (${req.assignedDoctorSpecialty})',
+                                              '${req.displayDoctorName} (${req.displayDoctorSpecialty})',
                                               style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
                                             ),
                                           ],
@@ -1291,10 +1291,8 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                       ),
                                     ],
                                   ),
-                                  if (req.assignedDoctorClinic != null && req.assignedDoctorClinic!.trim().isNotEmpty) ...[
-                                    const SizedBox(height: 6),
-                                    Text('🏥 Clinic: ${req.assignedDoctorClinic} • 💰 Estimated Fee (${req.problemCategory}): \$85', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF166534))),
-                                  ],
+                                  const SizedBox(height: 6),
+                                  Text('🏥 Clinic: ${req.displayDoctorClinic} • 💰 Estimated Fee (${req.problemCategory}): \$85', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF166534))),
                                   if (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.isNotEmpty) ...[
                                     const SizedBox(height: 8),
                                     Container(
@@ -1337,7 +1335,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                   const SizedBox(height: 12),
                                   ElevatedButton.icon(
                                     icon: const Icon(Icons.calendar_month_rounded, size: 16),
-                                    label: Text('Book Consultation with ${req.assignedDoctorName}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                    label: Text('Book Consultation with ${req.displayDoctorName}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: const Color(0xFF16A34A),
                                       foregroundColor: Colors.white,
@@ -1348,7 +1346,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                     onPressed: () {
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         SnackBar(
-                                          content: Text('📅 Appointment booking request sent for ${req.assignedDoctorName}!'),
+                                          content: Text('📅 Appointment booking request sent for ${req.displayDoctorName}!'),
                                           backgroundColor: const Color(0xFF16A34A),
                                           duration: const Duration(seconds: 3),
                                         ),
@@ -1358,7 +1356,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                   const SizedBox(height: 8),
                                   OutlinedButton.icon(
                                     icon: const Icon(Icons.chat_rounded, size: 16, color: Color(0xFF16A34A)),
-                                    label: Text('Chat with ${req.assignedDoctorName}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF16A34A))),
+                                    label: Text('Chat with ${req.displayDoctorName}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF16A34A))),
                                     style: OutlinedButton.styleFrom(
                                       minimumSize: const Size.fromHeight(40),
                                       side: const BorderSide(color: Color(0xFF16A34A), width: 1.5),
