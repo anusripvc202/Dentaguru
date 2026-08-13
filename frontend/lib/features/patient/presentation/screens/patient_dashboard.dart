@@ -1109,11 +1109,32 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               Builder(
                 builder: (context) {
                   final myPatientRequests = requests.where((req) {
-                    if (patient.name.isNotEmpty && patient.name != 'Patient' && req.patientName.trim().toLowerCase() == patient.name.trim().toLowerCase()) return true;
-                    if (patient.name.isNotEmpty && patient.name != 'Patient' && (req.patientName.toLowerCase().contains(patient.name.toLowerCase()) || patient.name.toLowerCase().contains(req.patientName.toLowerCase()))) return true;
-                    if (patient.id.isNotEmpty && req.id.contains(patient.id)) return true;
-                    // Fallback: Show all requests when patient profile is default or matching active session requests
-                    if (patient.name.isEmpty || patient.name == 'Patient' || requests.length <= 5) return true;
+                    final authUser = Supabase.instance.client.auth.currentUser;
+                    final authId = authUser?.id ?? '';
+                    final authEmail = authUser?.email?.trim().toLowerCase() ?? '';
+
+                    final reqNameLower = req.patientName.trim().toLowerCase();
+                    final patientNameLower = patient.name.trim().toLowerCase();
+                    final patientEmailLower = patient.email.trim().toLowerCase();
+
+                    // 1. Direct match by patient profile ID or authId
+                    if (authId.isNotEmpty && (req.id.contains(authId) || req.patientPhone.contains(authId))) return true;
+                    if (patient.id.isNotEmpty && (req.id.contains(patient.id) || req.patientPhone.contains(patient.id))) return true;
+
+                    // 2. Direct match by email
+                    if (authEmail.isNotEmpty && (reqNameLower.contains(authEmail.split('@').first) || authEmail.contains(reqNameLower))) return true;
+                    if (patientEmailLower.isNotEmpty && (reqNameLower.contains(patientEmailLower.split('@').first) || patientEmailLower.contains(reqNameLower))) return true;
+
+                    // 3. Direct match by patient profile name
+                    if (patientNameLower.isNotEmpty && patientNameLower != 'patient') {
+                      if (reqNameLower == patientNameLower) return true;
+                      if (reqNameLower.contains(patientNameLower) || patientNameLower.contains(reqNameLower)) return true;
+                    }
+
+                    // 4. Direct match by phone number
+                    if (patient.phone.isNotEmpty && req.patientPhone.trim().isNotEmpty && req.patientPhone.trim() == patient.phone.trim()) return true;
+
+                    // ❌ NO MATCH: Return false so another patient's data NEVER displays!
                     return false;
                   }).toList();
 

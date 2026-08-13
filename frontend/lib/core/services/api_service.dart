@@ -484,17 +484,22 @@ class ApiService {
 
   /// Fetch live appointments from Supabase backend with Direct Supabase Fallback
   Future<List<dynamic>> fetchAppointments({String? patientId, String? dentistId}) async {
+    final client = Supabase.instance.client;
+    final currentUserId = client.auth.currentUser?.id;
+    final targetPatientId = patientId ?? currentUserId;
+
     // 1. Direct Supabase query first
     try {
-      final client = Supabase.instance.client;
       var query = client.from('appointments').select('*');
-      if (patientId != null && patientId.isNotEmpty) {
-        query = query.eq('patient_id', patientId);
+      if (targetPatientId != null && targetPatientId.isNotEmpty) {
+        query = query.eq('patient_id', targetPatientId);
       } else if (dentistId != null && dentistId.isNotEmpty) {
         query = query.eq('dentist_id', dentistId);
+      } else {
+        return [];
       }
       final res = await query.order('created_at', ascending: false);
-      if (res.isNotEmpty) return List<dynamic>.from(res);
+      return List<dynamic>.from(res);
     } catch (e) {
       debugPrint('Supabase direct fetch appointments notice: $e');
     }
@@ -502,7 +507,7 @@ class ApiService {
     // 2. Express backend API fallback
     try {
       final uri = Uri.parse(ApiConstants.appointments).replace(queryParameters: {
-        if (patientId != null && patientId.isNotEmpty) 'patientId': patientId,
+        if (targetPatientId != null && targetPatientId.isNotEmpty) 'patientId': targetPatientId,
         if (dentistId != null && dentistId.isNotEmpty) 'dentistId': dentistId,
       });
       final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
@@ -691,35 +696,44 @@ class ApiService {
     }
   }
 
-  /// Patient: Fetch own Dental Problem Requests
+  /// Patient: Fetch own Dental Problem Requests ONLY (Strictly filtered by authenticated patient ID)
   Future<List<dynamic>> fetchPatientProblemRequests({String? patientId}) async {
-    // 1. Always try Supabase directly first — filters by the logged-in patient's ID
+    final client = Supabase.instance.client;
+    final currentUserId = client.auth.currentUser?.id;
+    final currentUserEmail = client.auth.currentUser?.email;
+    final targetId = (patientId != null && patientId.isNotEmpty) ? patientId : currentUserId;
+
+    if (targetId == null || targetId.isEmpty) return [];
+
+    // 1. Always try Supabase directly first — strictly filters by logged-in patient's ID / Email
     try {
-      final currentUserId = Supabase.instance.client.auth.currentUser?.id;
-      var query = Supabase.instance.client
-          .from('patient_problem_requests')
-          .select('*');
-      if (currentUserId != null && currentUserId.isNotEmpty) {
-        query = query.eq('patient_id', currentUserId);
-      } else if (patientId != null && patientId.isNotEmpty) {
-        query = query.eq('patient_id', patientId);
+      final List<String> conds = ['patient_id.eq.$targetId'];
+      if (currentUserEmail != null && currentUserEmail.isNotEmpty && currentUserEmail != targetId) {
+        conds.add('patient_id.eq.$currentUserEmail');
       }
-      final res = await query.order('created_at', ascending: false);
-      if (res.isNotEmpty) return List<dynamic>.from(res);
+
+      final res = await client
+          .from('patient_problem_requests')
+          .select('*')
+          .or(conds.join(','))
+          .order('created_at', ascending: false);
+
+      // Return direct query result for this patient (even if empty, return [] so other patients' data is never leaked!)
+      return List<dynamic>.from(res);
     } catch (e) {
       debugPrint('Supabase direct fetch patient problem requests notice: $e');
     }
 
-    // 2. Fallback: Express backend (may be cold-starting)
+    // 2. Fallback: Express backend API
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}/patient/problem-requests').replace(queryParameters: {
-        if (patientId != null && patientId.isNotEmpty) 'patientId': patientId,
+        'patientId': targetId,
       });
       final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final list = data['requests'] ?? [];
-        if (list is List && list.isNotEmpty) return list;
+        if (list is List) return list;
       }
     } catch (e) {
       debugPrint('Fetch patient problem requests error: $e');

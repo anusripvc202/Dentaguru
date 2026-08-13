@@ -795,22 +795,47 @@ class PatientProblemService extends ChangeNotifier {
 
   Future<void> syncProblemRequestsFromApi() async {
     try {
-      final pId = currentPatient.id.isNotEmpty ? currentPatient.id : null;
       final authUser = Supabase.instance.client.auth.currentUser;
+      final pId = currentPatient.id.isNotEmpty ? currentPatient.id : authUser?.id;
+      final pEmail = currentPatient.email.isNotEmpty ? currentPatient.email : authUser?.email;
+      final pName = currentPatient.name;
+
       final isAdmin = (authUser?.email != null && (authUser!.email!.toLowerCase().contains('admin') || authUser.email!.toLowerCase() == 'anusripvc202@gmail.com')) ||
                       currentPatient.email.toLowerCase().contains('admin');
+
+      // ✅ ALWAYS clear local cache first to enforce logged-in user isolation!
+      _requests.clear();
+
       final List problemReqs = isAdmin
           ? await ApiService().fetchAdminProblemRequests()
           : await ApiService().fetchPatientProblemRequests(patientId: pId);
 
-      if (problemReqs.isEmpty) return;
-
-      // ✅ Clear-and-rebuild: always replace local cache with DB truth
-      _requests.clear();
+      if (problemReqs.isEmpty) {
+        _saveToStorage();
+        notifyListeners();
+        return;
+      }
 
       for (final pr in problemReqs) {
         final prId = (pr['_id'] ?? pr['id'] ?? '').toString();
         if (prId.isEmpty) continue;
+
+        // ✅ If NOT admin, enforce strict ownership verification before adding to _requests
+        if (!isAdmin) {
+          final reqPatientId = (pr['patient_id'] ?? pr['patientId'] ?? pr['patient']?['id'])?.toString() ?? '';
+          final reqPatientEmail = (pr['patient_email'] ?? pr['patientEmail'] ?? pr['patient']?['email'])?.toString() ?? '';
+          final reqPatientName = (pr['patient_name'] ?? pr['patientName'] ?? pr['patient']?['name'])?.toString() ?? '';
+
+          bool isMine = false;
+          if (pId != null && pId.isNotEmpty && (reqPatientId == pId || reqPatientId.contains(pId))) isMine = true;
+          if (pEmail != null && pEmail.isNotEmpty && (reqPatientEmail.toLowerCase() == pEmail.toLowerCase() || reqPatientId.toLowerCase() == pEmail.toLowerCase())) isMine = true;
+          if (pName.isNotEmpty && pName != 'Patient' && reqPatientName.trim().toLowerCase() == pName.trim().toLowerCase()) isMine = true;
+
+          // Reject records belonging to another patient
+          if (!isMine && (pId != null || pEmail != null || (pName.isNotEmpty && pName != 'Patient'))) {
+            continue;
+          }
+        }
         final category = (pr['problem_category'] ?? pr['problemCategory'] ?? 'Dental Issue').toString();
         final desc = (pr['problem_description'] ?? pr['problemDescription'] ?? '').toString();
         final rawStatus = (pr['status'] ?? 'SUBMITTED').toString();
@@ -1195,8 +1220,16 @@ class PatientProblemService extends ChangeNotifier {
       final dId = currentDoctor?.id.isNotEmpty == true ? currentDoctor!.id : null;
       final list = await ApiService().fetchAppointments(patientId: pId, dentistId: dId);
       
-      if (list.isNotEmpty) {
         for (final item in list) {
+          final itemPatientId = (item['patient_id'] ?? item['patientId'] ?? item['patient']?['id'])?.toString();
+          final authUser = Supabase.instance.client.auth.currentUser;
+          final isAdmin = (authUser?.email != null && (authUser!.email!.toLowerCase().contains('admin') || authUser.email!.toLowerCase() == 'anusripvc202@gmail.com')) ||
+                          currentPatient.email.toLowerCase().contains('admin');
+
+          if (!isAdmin && pId != null && pId.isNotEmpty && itemPatientId != null && itemPatientId.isNotEmpty && itemPatientId != pId && !itemPatientId.contains(pId)) {
+            continue; // Skip appointments belonging to another patient!
+          }
+
           final reqId = (item['_id'] ?? item['id'] ?? 'REQ-${item['patient_id']}-${DateTime.now().millisecondsSinceEpoch}').toString();
           
           final patientObj = item['patient'] ?? item['users'] ?? {};
@@ -1324,6 +1357,9 @@ class PatientProblemService extends ChangeNotifier {
       _userPhotoCache[email.trim().toLowerCase()] = photoBytes;
     }
     final cachedPhoto = photoBytes ?? _userPhotoCache[email.trim().toLowerCase()];
+
+    // Clear old patient requests cache on user profile change
+    _requests.clear();
 
     currentPatient = PatientProfile(
       id: id.trim(),

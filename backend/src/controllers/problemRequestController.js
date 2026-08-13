@@ -52,20 +52,24 @@ exports.createProblemRequest = async (req, res) => {
     }
 };
 
-// 2. PATIENT: GET MY PROBLEM REQUESTS
+// 2. PATIENT: GET MY PROBLEM REQUESTS ONLY
 exports.getPatientProblemRequests = async (req, res) => {
     try {
-        let query = {};
         const targetId = req.query.patientId || (req.user ? req.user.id : null);
+        if (!targetId && !req.user) {
+            return res.json({ success: true, requests: [] });
+        }
+
+        let query = {};
         if (targetId) {
-            const user = await User.findById(targetId);
+            const user = await User.findById(targetId).catch(() => null);
             const possibleIds = [targetId];
             if (user && user.name) possibleIds.push(user.name);
             if (user && user.email) possibleIds.push(user.email);
             if (req.user && req.user.id && !possibleIds.includes(req.user.id)) possibleIds.push(req.user.id);
             query.patient_id = { $in: possibleIds };
         } else if (req.user) {
-            const user = await User.findById(req.user.id);
+            const user = await User.findById(req.user.id).catch(() => null);
             const possibleIds = [req.user.id];
             if (user && user.name) possibleIds.push(user.name);
             if (user && user.email) possibleIds.push(user.email);
