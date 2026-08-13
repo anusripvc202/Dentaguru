@@ -300,6 +300,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                       runSpacing: 4,
                                       children: [
                                         Text('📞 Contact: ${req.patientPhone}', style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+                                        Text('📍 Location: ${req.city.isNotEmpty ? req.city : "Hyderabad"} (PIN: ${req.pincode.isNotEmpty ? req.pincode : "500081"})', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textDark)),
                                         Text('📌 Category: ${req.problemCategory}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.primaryBlue)),
                                       ],
                                     ),
@@ -3688,6 +3689,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                           Text(
                                             '📞 Phone: ${req.patientPhone.isNotEmpty ? req.patientPhone : (_problemService.currentPatient.phone.isNotEmpty ? _problemService.currentPatient.phone : 'Not Provided')}',
                                             style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            '📍 City: ${req.city.isNotEmpty ? req.city : (_problemService.currentPatient.address.isNotEmpty ? _problemService.currentPatient.address : 'Hyderabad')} • PIN: ${req.pincode.isNotEmpty ? req.pincode : (_problemService.currentPatient.pincode.isNotEmpty ? _problemService.currentPatient.pincode : '500081')}',
+                                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
                                             overflow: TextOverflow.ellipsis,
                                           ),
                                         ],
