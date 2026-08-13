@@ -150,6 +150,29 @@ exports.getAllDentists = async (req, res) => {
             };
         });
 
+        const pCity = (req.query.patientCity || req.query.city || '').trim().toLowerCase();
+        const pPin = (req.query.patientPincode || req.query.pincode || '').trim();
+
+        if (pCity || pPin) {
+            formattedDentists.sort((a, b) => {
+                const aCity = (a.city || '').trim().toLowerCase();
+                const aPin = (a.pincode || '').trim();
+                const bCity = (b.city || '').trim().toLowerCase();
+                const bPin = (b.pincode || '').trim();
+
+                let scoreA = 3; // Other location
+                if (pPin && aPin && aPin === pPin) scoreA = 1; // Same Pincode
+                else if (pCity && aCity && (aCity === pCity || aCity.includes(pCity) || pCity.includes(aCity))) scoreA = 2; // Same City
+
+                let scoreB = 3;
+                if (pPin && bPin && bPin === pPin) scoreB = 1;
+                else if (pCity && bCity && (bCity === pCity || bCity.includes(pCity) || pCity.includes(bCity))) scoreB = 2;
+
+                if (scoreA !== scoreB) return scoreA - scoreB;
+                return (b.rating || 5.0) - (a.rating || 5.0);
+            });
+        }
+
         res.json({ success: true, count: formattedDentists.length, dentists: formattedDentists });
     } catch (err) {
         console.error('Get All Dentists Error:', err.message);

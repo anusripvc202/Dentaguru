@@ -13,11 +13,17 @@ exports.createProblemRequest = async (req, res) => {
             realName = 'anusha';
         }
         let realPhone = patientPhone || (patientUser ? patientUser.phone : '');
+        let realCity = req.body.city || (patientUser ? patientUser.city : '') || 'Hyderabad';
+        let realPincode = req.body.pincode || (patientUser ? patientUser.pincode : '') || '500001';
+        let realState = req.body.state || (patientUser ? patientUser.state : '') || 'Telangana';
 
         const request = await PatientProblemRequest.create({
             patient_id: patientId,
             patient_name: realName,
             patient_phone: realPhone,
+            city: realCity,
+            pincode: realPincode,
+            state: realState,
             problem_category: problemCategory || 'General Dental Issue',
             problem_description: problemDescription || '',
             symptoms: symptoms || '',
@@ -91,15 +97,25 @@ exports.getPatientProblemRequests = async (req, res) => {
                 realPhone = u.phone || '';
             }
 
+            let realCity = r.city || (u ? u.city : '') || 'Hyderabad';
+            let realPincode = r.pincode || (u ? u.pincode : '') || '500001';
+            let realState = r.state || (u ? u.state : '') || 'Telangana';
+
             return {
                 ...reqObj,
                 patientName: realName,
                 patientPhone: realPhone || (u ? u.phone : ''),
+                city: realCity,
+                pincode: realPincode,
+                state: realState,
                 patient: {
                     id: u ? u.id : r.patient_id,
                     name: realName,
                     email: u ? u.email : '',
                     phone: realPhone || (u ? u.phone : ''),
+                    city: realCity,
+                    pincode: realPincode,
+                    state: realState,
                 }
             };
         });
@@ -143,15 +159,25 @@ exports.getAdminProblemRequests = async (req, res) => {
                 realPhone = u.phone || '';
             }
 
+            let realCity = r.city || (u ? u.city : '') || 'Hyderabad';
+            let realPincode = r.pincode || (u ? u.pincode : '') || '500001';
+            let realState = r.state || (u ? u.state : '') || 'Telangana';
+
             return {
                 ...reqObj,
                 patientName: realName,
                 patientPhone: realPhone || (u ? u.phone : ''),
+                city: realCity,
+                pincode: realPincode,
+                state: realState,
                 patient: {
                     id: u ? u.id : r.patient_id,
                     name: realName,
                     email: u ? u.email : '',
                     phone: realPhone || (u ? u.phone : ''),
+                    city: realCity,
+                    pincode: realPincode,
+                    state: realState,
                 }
             };
         });

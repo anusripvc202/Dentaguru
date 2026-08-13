@@ -179,15 +179,12 @@ class DoctorModel {
     final tier = getLocationMatchTier(targetState, targetCity, targetPincode);
     switch (tier) {
       case 1:
-        return '🎯 Same Pincode';
+        return '✅ Same Pincode – Best Match';
       case 2:
-        return '📍 Nearby Pincode';
       case 3:
-        return '🏙️ Same City';
-      case 5:
-        return '🌐 Same State';
+        return '🟢 Same City';
       default:
-        return '🏥 Registered Doctor';
+        return '📍 Other Location';
     }
   }
 }

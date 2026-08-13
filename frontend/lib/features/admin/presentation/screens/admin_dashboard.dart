@@ -355,30 +355,36 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             // Patient Location Context Banner
                             Container(
                               width: double.infinity,
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                               decoration: BoxDecoration(
                                 color: const Color(0xFFEFF6FF),
-                                borderRadius: BorderRadius.circular(10),
+                                borderRadius: BorderRadius.circular(12),
                                 border: Border.all(color: const Color(0xFFBFDBFE)),
                               ),
                               child: Row(
                                 children: [
-                                  const Icon(Icons.my_location_rounded, size: 16, color: AppTheme.primaryBlue),
-                                  const SizedBox(width: 6),
+                                  const Icon(Icons.my_location_rounded, size: 18, color: AppTheme.primaryBlue),
+                                  const SizedBox(width: 8),
                                   Expanded(
-                                    child: Text(
-                                      'Patient Location: ${req.pincode.isNotEmpty ? 'Pin: ${req.pincode}' : ''}${req.city.isNotEmpty ? ' • ${req.city}' : ''}${req.state.isNotEmpty ? ' • ${req.state}' : ''}${req.preferredLocation.isNotEmpty ? ' (${req.preferredLocation})' : ''}',
-                                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
-                                      overflow: TextOverflow.ellipsis,
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const Text('Patient Location', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppTheme.textMuted)),
+                                        Text(
+                                          '📍 ${req.city.isNotEmpty ? req.city : "Hyderabad"} • 📌 Pincode: ${req.pincode.isNotEmpty ? req.pincode : "500001"}${req.state.isNotEmpty ? " • ${req.state}" : ""}',
+                                          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ],
                                     ),
                                   ),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                     decoration: BoxDecoration(
                                       color: const Color(0xFFDBEAFE),
-                                      borderRadius: BorderRadius.circular(6),
+                                      borderRadius: BorderRadius.circular(8),
                                     ),
-                                    child: const Text('Priority Ranked', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8))),
+                                    child: const Text('Priority Ranked', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8))),
                                   ),
                                 ],
                               ),
@@ -688,14 +694,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                       const SizedBox(height: 2),
                                                       Text(
                                                         '${doc.specialty} • ${doc.qualification} (${doc.status})',
-                                                        style: const TextStyle(fontSize: 11, color: AppTheme.primaryBlue),
+                                                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.primaryBlue),
                                                         overflow: TextOverflow.ellipsis,
                                                         maxLines: 1,
                                                       ),
                                                       const SizedBox(height: 2),
                                                       Text(
-                                                        '🏥 ${doc.clinicName}${doc.city.isNotEmpty ? ' (${doc.city}' : ''}${doc.state.isNotEmpty ? ', ${doc.state})' : (doc.city.isNotEmpty ? ')' : '')} • 📍 Pin: ${doc.pincode} • 💰 ${doc.getFeeForCategory(req.problemCategory)} • ⭐ ${doc.rating}',
-                                                        style: const TextStyle(fontSize: 10, color: AppTheme.textMuted),
+                                                        '🏥 ${doc.clinicName} • 📍 City: ${doc.city.isNotEmpty ? doc.city : "Hyderabad"} • 📌 Pincode: ${doc.pincode.isNotEmpty ? doc.pincode : "500001"} • 💰 ${doc.getFeeForCategory(req.problemCategory)} • ⭐ ${doc.rating}',
+                                                        style: const TextStyle(fontSize: 10.5, color: AppTheme.textDark),
                                                         overflow: TextOverflow.ellipsis,
                                                         maxLines: 1,
                                                       ),
