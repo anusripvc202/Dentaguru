@@ -614,7 +614,9 @@ class PatientProblemService extends ChangeNotifier {
         _allPatients.clear();
         for (final item in list) {
           final p = PatientProfile.fromJson(item);
-          if (p.name.trim().toLowerCase() != 'anusha' && p.name.trim().toLowerCase() != 't') {
+          final pName = p.name.trim().toLowerCase();
+          final pEmail = p.email.trim().toLowerCase();
+          if (pName != 'anusha' && pName != 't' && pName != 'anusri' && !pEmail.contains('admin')) {
             _allPatients.add(p);
           }
         }
@@ -673,11 +675,16 @@ class PatientProblemService extends ChangeNotifier {
           String name = (item['name'] ?? '').toString().trim();
           final email = (item['email'] ?? '').toString().trim();
           final phone = (item['phone'] ?? '').toString().trim();
+          final role = (item['role'] ?? '').toString().trim().toLowerCase();
           final age = (item['age'] ?? '28').toString();
           final city = (item['city'] ?? item['location_city'] ?? '').toString();
           final pincode = (item['pincode'] ?? item['postal_code'] ?? '').toString();
           final state = (item['state'] ?? '').toString();
           final address = (item['address'] ?? item['location'] ?? '').toString();
+
+          if (role.contains('admin') || email.contains('admin') || name.toLowerCase() == 'anusri') {
+            continue; // Skip admin accounts
+          }
 
           if (name.isEmpty && email.isNotEmpty) {
             name = email.split('@').first;

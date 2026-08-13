@@ -369,10 +369,18 @@ exports.resetDatabase = async (req, res) => {
 // 9. GET ALL PATIENTS / USERS FROM SUPABASE DB
 exports.getPatients = async (req, res) => {
     try {
+        // Fetch admin emails to strictly exclude admin accounts from patient list
+        const adminUsers = await User.find({ role: { $in: ['Admin', 'Sub-Admin'] } });
+        const adminEmails = new Set(adminUsers.map(u => (u.email || '').trim().toLowerCase()));
+
         const dbPatients = await User.find({ role: 'Patient' });
         const patientMap = new Map();
 
         for (const p of dbPatients) {
+            const pEmail = (p.email || '').trim().toLowerCase();
+            if (adminEmails.has(pEmail) || (p.role && p.role.toLowerCase().includes('admin')) || (p.name && p.name.trim().toLowerCase() === 'anusri')) {
+                continue;
+            }
             const pName = p.name && p.name.trim().length > 0
                 ? p.name.trim()
                 : (p.email ? p.email.split('@')[0] : 'Patient');
@@ -382,7 +390,7 @@ exports.getPatients = async (req, res) => {
                 name: pName,
                 email: p.email,
                 phone: p.phone || '',
-                role: p.role || 'Patient',
+                role: 'Patient',
                 state: p.state || '',
                 city: p.city || '',
                 pincode: p.pincode || '',
@@ -398,8 +406,12 @@ exports.getPatients = async (req, res) => {
             for (const r of reqs) {
                 const pId = r.patient_id || r.patient?.id || r.id;
                 const pName = r.patient?.name || r.patientName || (r.patientEmail ? r.patientEmail.split('@')[0] : 'Patient');
-                const pEmail = r.patient?.email || r.patientEmail || `${pName?.toLowerCase().replace(/\s+/g, '')}@patient.org`;
+                const pEmail = (r.patient?.email || r.patientEmail || `${pName?.toLowerCase().replace(/\s+/g, '')}@patient.org`).trim().toLowerCase();
                 const pPhone = r.patient?.phone || r.patientPhone || '';
+
+                if (adminEmails.has(pEmail) || (pName && pName.trim().toLowerCase() === 'anusri')) {
+                    continue; // Skip admin accounts
+                }
 
                 if (pId && !patientMap.has(pId)) {
                     patientMap.set(pId, {
