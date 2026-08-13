@@ -4098,19 +4098,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
       });
     }
 
-    // Check logged in current patient if not present
-    if (_problemService.currentPatient.name.isNotEmpty &&
-        !patientEntries.any((p) => p['email'] == _problemService.currentPatient.email)) {
-      patientEntries.add({
-        'name': _problemService.currentPatient.name,
-        'email': _problemService.currentPatient.email,
-        'phone': _problemService.currentPatient.phone.isNotEmpty ? _problemService.currentPatient.phone : '--',
-        'city': _problemService.currentPatient.city.isNotEmpty ? _problemService.currentPatient.city : '--',
-        'pincode': _problemService.currentPatient.pincode.isNotEmpty ? _problemService.currentPatient.pincode : '--',
-        'status': 'Active',
-      });
-    }
-
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.all(16),

@@ -259,7 +259,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ? userData['phone'].toString()
             : (_phoneController.text.trim().isNotEmpty
                 ? _phoneController.text.trim()
-                : (!email.contains('@') && email.isNotEmpty ? email : '9063663180'));
+                : (!email.contains('@') && email.isNotEmpty ? email : ''));
 
         AnalyticsService.logLogin(method: 'Email_Password', role: _roleName);
 
@@ -287,17 +287,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           );
           context.go('/dentist');
         } else if (registeredRole.contains('admin') || registeredRole.contains('sub-admin') || registeredRole.contains('subadmin')) {
-          PatientProblemService().updatePatientProfile(
-            id: userData['id']?.toString() ?? '',
-            name: userData['name'] ?? 'Admin',
-            email: userData['email'] ?? email,
-            phone: userPhone,
-            age: '30',
-            gender: 'Female',
-            bloodGroup: 'O Positive (O+)',
-            emergencyContact: userPhone,
-            photoBytes: photoBytes,
-          );
           await PatientProblemService().syncAllDataFromApi();
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
