@@ -143,6 +143,7 @@ class ApiService {
               }
             }
           };
+        }
       } catch (sbErr) {
         debugPrint('❌ Direct Supabase Auth Register Error: $sbErr');
         if (role.toLowerCase() == 'admin' && email.trim().toLowerCase() == 'anusripvc202@gmail.com') {
