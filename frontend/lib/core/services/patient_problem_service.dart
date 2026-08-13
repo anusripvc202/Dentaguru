@@ -316,6 +316,32 @@ class PatientConsultationRequest {
     this.whatsappNotificationSent = false,
   });
 
+  String getDisplayCity(List<PatientProfile> allPatients) {
+    if (city.trim().isNotEmpty) return city.trim();
+    if (allPatients.isNotEmpty) {
+      final match = allPatients.firstWhere(
+        (p) => (p.name.isNotEmpty && patientName.isNotEmpty && p.name.trim().toLowerCase() == patientName.trim().toLowerCase()) ||
+               (p.phone.isNotEmpty && patientPhone.isNotEmpty && p.phone.trim() == patientPhone.trim()),
+        orElse: () => PatientProfile(),
+      );
+      if (match.city.trim().isNotEmpty) return match.city.trim();
+    }
+    return 'Not Available';
+  }
+
+  String getDisplayPincode(List<PatientProfile> allPatients) {
+    if (pincode.trim().isNotEmpty) return pincode.trim();
+    if (allPatients.isNotEmpty) {
+      final match = allPatients.firstWhere(
+        (p) => (p.name.isNotEmpty && patientName.isNotEmpty && p.name.trim().toLowerCase() == patientName.trim().toLowerCase()) ||
+               (p.phone.isNotEmpty && patientPhone.isNotEmpty && p.phone.trim() == patientPhone.trim()),
+        orElse: () => PatientProfile(),
+      );
+      if (match.pincode.trim().isNotEmpty) return match.pincode.trim();
+    }
+    return '';
+  }
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'patientName': patientName,
