@@ -43,9 +43,17 @@ exports.register = async (req, res) => {
         if (isAdminReg) {
             const existingAdmins = await User.find({ role: 'Admin' });
             if (existingAdmins && existingAdmins.length > 0) {
-                return res.status(403).json({
+                const matchAdmin = existingAdmins.find(a => a.email === normalizedEmail);
+                if (matchAdmin) {
+                    return res.status(200).json({
+                        success: true,
+                        message: 'Primary Admin is already registered. Logging into Admin Dashboard...',
+                        user: matchAdmin,
+                    });
+                }
+                return res.status(400).json({
                     success: false,
-                    message: 'Registration Failed: A Primary Administrator already exists in the system. Only one Primary Admin is allowed.'
+                    message: 'Primary Admin is already registered in the system. Only one Primary Admin is allowed. Please log in using your Admin credentials.'
                 });
             }
         }

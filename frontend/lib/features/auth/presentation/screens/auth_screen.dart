@@ -342,6 +342,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   }
 
   Future<void> _handleRegister() async {
+    if (_isRegistering) return;
     if (!_registerFormKey.currentState!.validate()) return;
 
     setState(() => _isRegistering = true);
@@ -419,6 +420,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             clinicAddress: clinicAddress.isNotEmpty ? clinicAddress : location,
             city: city,
             pincode: pincode,
+            qualification: 'BDS, MDS',
             experienceYears: exp,
             photoBytes: _pickedImageBytes,
           );
@@ -428,17 +430,19 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         if (!mounted) return;
         AnalyticsService.logRegistration(method: 'Email_Password', role: _roleName);
 
+        ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('🎉 Registered $_roleName account successfully!'),
             backgroundColor: const Color(0xFF10B981),
+            duration: const Duration(seconds: 2),
           ),
         );
         context.go(_targetRoute);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('❌ Registration Failed: ${res['message'] ?? 'Could not register user.'}'),
+            content: Text('❌ ${res['message'] ?? 'Could not register user.'}'),
             backgroundColor: const Color(0xFFEF4444),
           ),
         );
