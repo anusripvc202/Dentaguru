@@ -984,8 +984,9 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         if (currentDoc != null && currentDoc.name.isNotEmpty && (assignedNameLower.contains(currentDoc.name.toLowerCase()) || currentDoc.name.toLowerCase().contains(assignedNameLower))) return true;
         if (authUser?.email != null && authUser!.email!.isNotEmpty && assignedNameLower.contains(authUser.email!.split('@').first.toLowerCase())) return true;
       }
-      if (req.status == 'Doctor Assigned' || req.status == 'DENTIST_ASSIGNED' || req.status == 'Confirmed' || req.status == 'Accepted') {
-        if (currentDoc == null || currentDoc.name == 'Dentist Practitioner' || docNameClean.isEmpty) return true;
+      final statusUpper = req.status.toUpperCase();
+      if (statusUpper.contains('ASSIGNED') || statusUpper.contains('CONFIRMED') || statusUpper.contains('ACCEPTED') || req.status == 'Doctor Assigned') {
+        return true;
       }
       return false;
     }).toList();

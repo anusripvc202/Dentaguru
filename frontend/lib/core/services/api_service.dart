@@ -768,30 +768,37 @@ class ApiService {
         } catch (_) {}
       }
 
-      List<String> conditions = [];
-      if (currentUserId != null && currentUserId.isNotEmpty) {
-        conditions.add('assigned_doctor_id.eq.$currentUserId');
-        conditions.add('suggested_dentist_id.eq.$currentUserId');
-      }
-      if (altDentistTableId != null && altDentistTableId.isNotEmpty && altDentistTableId != currentUserId) {
-        conditions.add('assigned_doctor_id.eq.$altDentistTableId');
-        conditions.add('suggested_dentist_id.eq.$altDentistTableId');
-      }
+      final idsToMatch = [
+        if (currentUserId != null && currentUserId.isNotEmpty) currentUserId,
+        if (altDentistTableId != null && altDentistTableId.isNotEmpty && altDentistTableId != currentUserId) altDentistTableId,
+      ];
 
-      if (conditions.isNotEmpty) {
-        final res = await client
-            .from('patient_problem_requests')
-            .select('*')
-            .or(conditions.join(','))
-            .order('created_at', ascending: false);
+      // A) Query patient_problem_requests by suggested_dentist_id
+      if (idsToMatch.isNotEmpty) {
+        final conds = idsToMatch.map((id) => 'suggested_dentist_id.eq.$id').join(',');
+        final res = await client.from('patient_problem_requests').select('*').or(conds).order('created_at', ascending: false);
         if (res.isNotEmpty) return List<dynamic>.from(res);
       }
 
-      // Secondary check: fetch all assigned requests so frontend can filter by doctor name / ID fallback
+      // B) Query dentist_suggestions table in Supabase
+      if (idsToMatch.isNotEmpty) {
+        final conds = idsToMatch.map((id) => 'dentist_id.eq.$id').join(',');
+        final suggRes = await client.from('dentist_suggestions').select('request_id').or(conds);
+        if (suggRes.isNotEmpty) {
+          final reqIds = suggRes.map((s) => s['request_id']?.toString() ?? '').where((id) => id.isNotEmpty).toList();
+          if (reqIds.isNotEmpty) {
+            final res = await client.from('patient_problem_requests').select('*').in_('id', reqIds).order('created_at', ascending: false);
+            if (res.isNotEmpty) return List<dynamic>.from(res);
+          }
+        }
+      }
+
+      // C) Secondary check: fetch all assigned requests (status != SUBMITTED & status != PENDING_ADMIN_REVIEW)
       final allAssigned = await client
           .from('patient_problem_requests')
           .select('*')
-          .not('assigned_doctor_name', 'is', null)
+          .neq('status', 'PENDING_ADMIN_REVIEW')
+          .neq('status', 'SUBMITTED')
           .order('created_at', ascending: false);
       if (allAssigned.isNotEmpty) return List<dynamic>.from(allAssigned);
     } catch (e) {

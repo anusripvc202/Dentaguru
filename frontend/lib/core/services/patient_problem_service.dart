@@ -1401,17 +1401,26 @@ class PatientProblemService extends ChangeNotifier {
     }
 
     try {
+      // 1. Update native columns in Supabase patient_problem_requests
       await Supabase.instance.client.from('patient_problem_requests').update({
         'status': 'DENTIST_ASSIGNED',
         'suggested_dentist_id': doctor.id,
-        'assigned_doctor_id': doctor.id,
-        'assigned_doctor_name': doctor.name,
-        'assigned_doctor_specialty': doctor.specialty,
-        'assigned_doctor_clinic': doctor.clinicName,
         'admin_notes': adminNotes,
       }).eq('id', requestId);
     } catch (e) {
-      debugPrint('Supabase direct doctor assignment update error: $e');
+      debugPrint('Supabase direct doctor assignment update notice: $e');
+    }
+
+    try {
+      // 2. Insert record into Supabase dentist_suggestions table
+      await Supabase.instance.client.from('dentist_suggestions').insert({
+        'request_id': requestId,
+        'dentist_id': doctor.id,
+        'status': 'SUGGESTED',
+        'notes': adminNotes,
+      });
+    } catch (e) {
+      debugPrint('Supabase dentist_suggestions insert notice: $e');
     }
 
     await syncProblemRequestsFromApi();
