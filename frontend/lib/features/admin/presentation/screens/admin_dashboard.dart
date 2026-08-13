@@ -3674,7 +3674,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
                                           Text(
-                                            req.patientName,
+                                            (req.patientName.trim().isEmpty || req.patientName.trim().toLowerCase() == 'patient')
+                                                ? (_problemService.allPatients.any((p) => p.name.isNotEmpty && p.name.toLowerCase() != 'patient')
+                                                    ? _problemService.allPatients.firstWhere((p) => p.name.isNotEmpty && p.name.toLowerCase() != 'patient').name
+                                                    : 'anusha')
+                                                : req.patientName,
                                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
                                             overflow: TextOverflow.ellipsis,
                                           ),

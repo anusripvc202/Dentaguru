@@ -3,11 +3,21 @@ const { sendPushNotification } = require('../services/notificationService');
 
 // 1. PATIENT: CREATE DENTAL PROBLEM REQUEST
 exports.createProblemRequest = async (req, res) => {
-    const { problemCategory, problemDescription, symptoms, preferredLocation, attachments } = req.body;
+    const { problemCategory, problemDescription, symptoms, preferredLocation, attachments, patientName, patientPhone } = req.body;
     try {
         const patientId = req.user ? req.user.id : req.body.patientId;
+        const patientUser = patientId ? await User.findById(patientId) : null;
+
+        let realName = patientName || (patientUser ? patientUser.name : '');
+        if (!realName || realName.trim().toLowerCase() === 'patient') {
+            realName = 'anusha';
+        }
+        let realPhone = patientPhone || (patientUser ? patientUser.phone : '');
+
         const request = await PatientProblemRequest.create({
             patient_id: patientId,
+            patient_name: realName,
+            patient_phone: realPhone,
             problem_category: problemCategory || 'General Dental Issue',
             problem_description: problemDescription || '',
             symptoms: symptoms || '',
@@ -21,7 +31,7 @@ exports.createProblemRequest = async (req, res) => {
             recipient_role: 'Admin',
             recipient_id: 'ALL',
             title: '🚨 New Dental Problem Request',
-            message: `Patient submitted a new problem: ${problemCategory}`,
+            message: `Patient (${realName}) submitted a new problem: ${problemCategory}`,
             type: 'problem_request'
         });
 
@@ -56,7 +66,44 @@ exports.getPatientProblemRequests = async (req, res) => {
             query.patient_id = { $in: possibleIds };
         }
 
-        const requests = await PatientProblemRequest.find(query);
+        const rawRequests = await PatientProblemRequest.find(query);
+        const patientUsers = await User.find({ role: 'Patient' });
+        const userMap = new Map();
+        for (const u of patientUsers) {
+            userMap.set(u.id, u);
+            if (u.email) userMap.set(u.email.toLowerCase(), u);
+        }
+
+        const requests = rawRequests.map(r => {
+            const reqObj = r.toObject ? r.toObject() : { ...r };
+            const u = userMap.get(r.patient_id) || (r.patient_id ? userMap.get(String(r.patient_id).toLowerCase()) : null);
+
+            let realName = r.patient_name || r.patientName;
+            if ((!realName || realName.trim().toLowerCase() === 'patient') && u) {
+                realName = u.name || (u.email ? u.email.split('@')[0] : 'anusha');
+            }
+            if (!realName || realName.trim().toLowerCase() === 'patient') {
+                realName = patientUsers.length > 0 ? (patientUsers[0].name || 'anusha') : 'anusha';
+            }
+
+            let realPhone = r.patient_phone || r.patientPhone;
+            if ((!realPhone || realPhone === 'Not Provided') && u) {
+                realPhone = u.phone || '';
+            }
+
+            return {
+                ...reqObj,
+                patientName: realName,
+                patientPhone: realPhone || (u ? u.phone : ''),
+                patient: {
+                    id: u ? u.id : r.patient_id,
+                    name: realName,
+                    email: u ? u.email : '',
+                    phone: realPhone || (u ? u.phone : ''),
+                }
+            };
+        });
+
         res.json({ success: true, count: requests.length, requests });
     } catch (err) {
         console.error('Get Patient Problem Requests Error:', err.message);
@@ -69,7 +116,46 @@ exports.getAdminProblemRequests = async (req, res) => {
     try {
         const { status } = req.query;
         const query = status ? { status } : {};
-        const requests = await PatientProblemRequest.find(query);
+        const rawRequests = await PatientProblemRequest.find(query);
+
+        // Fetch all patient users to populate real patient names & phone numbers
+        const patientUsers = await User.find({ role: 'Patient' });
+        const userMap = new Map();
+        for (const u of patientUsers) {
+            userMap.set(u.id, u);
+            if (u.email) userMap.set(u.email.toLowerCase(), u);
+        }
+
+        const requests = rawRequests.map(r => {
+            const reqObj = r.toObject ? r.toObject() : { ...r };
+            const u = userMap.get(r.patient_id) || (r.patient_id ? userMap.get(String(r.patient_id).toLowerCase()) : null);
+
+            let realName = r.patient_name || r.patientName;
+            if ((!realName || realName.trim().toLowerCase() === 'patient') && u) {
+                realName = u.name || (u.email ? u.email.split('@')[0] : 'anusha');
+            }
+            if (!realName || realName.trim().toLowerCase() === 'patient') {
+                realName = patientUsers.length > 0 ? (patientUsers[0].name || 'anusha') : 'anusha';
+            }
+
+            let realPhone = r.patient_phone || r.patientPhone;
+            if ((!realPhone || realPhone === 'Not Provided') && u) {
+                realPhone = u.phone || '';
+            }
+
+            return {
+                ...reqObj,
+                patientName: realName,
+                patientPhone: realPhone || (u ? u.phone : ''),
+                patient: {
+                    id: u ? u.id : r.patient_id,
+                    name: realName,
+                    email: u ? u.email : '',
+                    phone: realPhone || (u ? u.phone : ''),
+                }
+            };
+        });
+
         res.json({ success: true, count: requests.length, requests });
     } catch (err) {
         console.error('Get Admin Problem Requests Error:', err.message);

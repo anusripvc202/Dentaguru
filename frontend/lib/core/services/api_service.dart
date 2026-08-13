@@ -611,6 +611,8 @@ class ApiService {
     String? symptoms,
     String? preferredLocation,
     List<String>? attachments,
+    String? patientName,
+    String? patientPhone,
   }) async {
     try {
       final url = Uri.parse('${ApiConstants.baseUrl}/patient/problem-requests');
@@ -623,6 +625,8 @@ class ApiService {
           if (symptoms != null) 'symptoms': symptoms,
           if (preferredLocation != null) 'preferredLocation': preferredLocation,
           if (attachments != null) 'attachments': attachments,
+          if (patientName != null) 'patientName': patientName,
+          if (patientPhone != null) 'patientPhone': patientPhone,
         }),
       );
       return jsonDecode(response.body);

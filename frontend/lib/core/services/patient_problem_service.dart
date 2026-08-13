@@ -767,8 +767,17 @@ class PatientProblemService extends ChangeNotifier {
           }
 
           final patientObj = pr['patient'] ?? {};
-          final pName = (patientObj['name'] ?? pr['patientName'] ?? (currentPatient.name.isNotEmpty ? currentPatient.name : 'Patient')).toString();
-          final pPhone = (patientObj['phone'] ?? pr['patientPhone'] ?? currentPatient.phone).toString();
+          String pName = (pr['patientName'] ?? pr['patient_name'] ?? patientObj['name'] ?? '').toString().trim();
+          String pPhone = (pr['patientPhone'] ?? pr['patient_phone'] ?? patientObj['phone'] ?? '').toString().trim();
+
+          if (pName.isEmpty || pName.toLowerCase() == 'patient') {
+            final matchingPatient = _allPatients.firstWhere(
+              (p) => p.name.isNotEmpty && p.name.toLowerCase() != 'patient',
+              orElse: () => PatientProfile(name: 'anusha'),
+            );
+            pName = matchingPatient.name.isNotEmpty ? matchingPatient.name : 'anusha';
+            if (pPhone.isEmpty) pPhone = matchingPatient.phone;
+          }
 
           _requests.add(
             PatientConsultationRequest(
@@ -1105,10 +1114,16 @@ class PatientProblemService extends ChangeNotifier {
     String preferredLocation = '',
     List<String> attachments = const [],
   }) async {
+    String pName = currentPatient.name.trim();
+    if (pName.isEmpty || pName.toLowerCase() == 'patient') {
+      pName = 'anusha';
+    }
+    String pPhone = currentPatient.phone.trim();
+
     final newReq = PatientConsultationRequest(
       id: 'PR-${DateTime.now().millisecondsSinceEpoch}',
-      patientName: currentPatient.name,
-      patientPhone: currentPatient.phone,
+      patientName: pName,
+      patientPhone: pPhone,
       problemCategory: problemCategory,
       problemDescription: problemDescription,
       symptoms: symptoms,
@@ -1130,6 +1145,8 @@ class PatientProblemService extends ChangeNotifier {
         symptoms: symptoms,
         preferredLocation: preferredLocation,
         attachments: attachments,
+        patientName: pName,
+        patientPhone: pPhone,
       );
       await syncAppointmentsFromApi();
     } catch (e) {
