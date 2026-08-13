@@ -750,8 +750,20 @@ class PatientProblemService extends ChangeNotifier {
           if (prId.isEmpty) continue;
           final category = (pr['problem_category'] ?? pr['problemCategory'] ?? 'Dental Issue').toString();
           final desc = (pr['problem_description'] ?? pr['problemDescription'] ?? '').toString();
-          final status = (pr['status'] ?? 'PENDING_ADMIN_REVIEW').toString();
+          final rawStatus = (pr['status'] ?? 'PENDING_ADMIN_REVIEW').toString();
           final severity = (pr['severity'] ?? 'Moderate').toString();
+          final adminNotes = pr['admin_notes']?.toString() ?? pr['adminNotes']?.toString();
+          final confirmedSlot = pr['confirmed_time_slot']?.toString() ?? pr['confirmedTimeSlot']?.toString();
+
+          final assignedDocId = (pr['assigned_doctor_id'] ?? pr['suggested_dentist_id'] ?? pr['dentist']?['id'])?.toString();
+          final assignedDocName = (pr['assigned_doctor_name'] ?? pr['assignedDoctorName'] ?? pr['dentist']?['name'])?.toString();
+          final assignedDocSpecialty = (pr['assigned_doctor_specialty'] ?? pr['assignedDoctorSpecialty'] ?? pr['dentist']?['specialty'])?.toString();
+          final assignedDocClinic = (pr['assigned_doctor_clinic'] ?? pr['assignedDoctorClinic'] ?? pr['dentist']?['clinicName'])?.toString();
+
+          String normalizedStatus = rawStatus;
+          if (rawStatus == 'DENTIST_SUGGESTED' || rawStatus == 'PENDING_DENTIST_CONFIRMATION' || (assignedDocName != null && assignedDocName.isNotEmpty)) {
+            normalizedStatus = 'Doctor Suggested';
+          }
 
           final patientObj = pr['patient'] ?? {};
           final pName = (patientObj['name'] ?? pr['patientName'] ?? (currentPatient.name.isNotEmpty ? currentPatient.name : 'Patient')).toString();
@@ -766,8 +778,13 @@ class PatientProblemService extends ChangeNotifier {
               problemDescription: desc,
               severity: severity,
               submittedAt: pr['created_at'] != null ? DateTime.parse(pr['created_at']) : DateTime.now(),
-              status: status,
-              adminNotes: pr['admin_notes']?.toString(),
+              status: normalizedStatus,
+              adminNotes: adminNotes,
+              assignedDoctorId: assignedDocId,
+              assignedDoctorName: assignedDocName,
+              assignedDoctorSpecialty: assignedDocSpecialty,
+              assignedDoctorClinic: assignedDocClinic,
+              confirmedTimeSlot: confirmedSlot,
             ),
           );
         }
@@ -798,11 +815,6 @@ class PatientProblemService extends ChangeNotifier {
   Future<bool> registerClinic({
     required String clinicName,
     required String location,
-    List<String>? services,
-    List<Map<String, dynamic>>? pricing,
-  }) async {
-    final res = await ApiService().createClinicProfile(
-      clinicName: clinicName,
       location: location,
       services: services,
       pricing: pricing,

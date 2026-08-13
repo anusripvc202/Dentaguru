@@ -1147,13 +1147,18 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
 
                   return Column(
                     children: myPatientRequests.map((req) {
-                    final bool isDoctorAssigned = req.assignedDoctorName != null &&
-                        req.assignedDoctorName!.isNotEmpty &&
+                    final bool isDoctorAssigned = (req.assignedDoctorName != null &&
+                        req.assignedDoctorName!.trim().isNotEmpty &&
                         req.assignedDoctorName != 'null' &&
-                        req.assignedDoctorName != 'None';
+                        req.assignedDoctorName != 'None') ||
+                        req.status == 'Doctor Suggested' ||
+                        req.status == 'DENTIST_SUGGESTED' ||
+                        req.status == 'Confirmed';
+
                     final bool isAdminReviewed = isDoctorAssigned ||
                         req.status == 'Doctor Suggested' ||
-                        req.status == 'DENTIST_SUGGESTED';
+                        req.status == 'DENTIST_SUGGESTED' ||
+                        req.status == 'Admin Reviewed';
 
                     return Container(
                       margin: const EdgeInsets.only(bottom: 14),
@@ -1192,18 +1197,20 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                 decoration: BoxDecoration(
                                   color: isDoctorAssigned
-                                      ? const Color(0xFFFEF3C7)
-                                      : const Color(0xFFDBEAFE),
+                                      ? const Color(0xFFDCFCE7)
+                                      : (isAdminReviewed ? const Color(0xFFE0F2FE) : const Color(0xFFFEF3C7)),
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Text(
-                                  isDoctorAssigned ? req.status : 'Pending Admin Review',
+                                  isDoctorAssigned
+                                      ? '🟢 Doctor Assigned'
+                                      : (isAdminReviewed ? '🔵 Admin Reviewed' : '⏳ Pending Admin Review'),
                                   style: TextStyle(
                                     fontSize: 10,
                                     fontWeight: FontWeight.bold,
                                     color: isDoctorAssigned
-                                        ? const Color(0xFFD97706)
-                                        : AppTheme.primaryBlue,
+                                        ? const Color(0xFF15803D)
+                                        : (isAdminReviewed ? const Color(0xFF0369A1) : const Color(0xFFB45309)),
                                   ),
                                 ),
                               ),

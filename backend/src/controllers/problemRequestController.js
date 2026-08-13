@@ -80,22 +80,30 @@ exports.getAdminProblemRequests = async (req, res) => {
 // 4. ADMIN: SUGGEST DENTIST FOR REQUEST
 exports.suggestDentist = async (req, res) => {
     const { id } = req.params; // Request ID
-    const { dentistId, notes } = req.body;
+    const { dentistId, notes, doctorName, doctorSpecialty, doctorClinic } = req.body;
     try {
         const problemReq = await PatientProblemRequest.findById(id);
         if (!problemReq) {
             return res.status(404).json({ success: false, message: 'Problem request not found.' });
         }
 
-        const dentist = await Dentist.findOne({ id: dentistId });
-        if (!dentist) {
-            return res.status(404).json({ success: false, message: 'Selected dentist not found.' });
+        let dentist = await Dentist.findOne({ id: dentistId });
+        if (!dentist && dentistId) {
+            dentist = await Dentist.findById(dentistId);
         }
 
-        // 1. Update Request Status to DENTIST_SUGGESTED
+        const docName = doctorName || (dentist ? dentist.name : 'Dr. Specialist');
+        const docSpecialty = doctorSpecialty || (dentist ? (dentist.speciality || dentist.specialty) : 'Dental Specialist');
+        const docClinic = doctorClinic || (dentist ? dentist.clinicName : 'DentaGuru Clinic');
+
+        // 1. Update Request Status to DENTIST_SUGGESTED with complete assigned doctor data
         const updatedReq = await PatientProblemRequest.findByIdAndUpdate(id, {
             status: 'DENTIST_SUGGESTED',
             suggested_dentist_id: dentistId,
+            assigned_doctor_id: dentistId,
+            assigned_doctor_name: docName,
+            assigned_doctor_specialty: docSpecialty,
+            assigned_doctor_clinic: docClinic,
             admin_notes: notes || 'Admin reviewed symptoms and suggested specialized dentist.'
         });
 
@@ -110,9 +118,9 @@ exports.suggestDentist = async (req, res) => {
             patient_state: problemReq.state || patientUserObj?.state || '',
             patient_city: problemReq.city || patientUserObj?.city || '',
             patient_pincode: problemReq.pincode || patientUserObj?.pincode || '',
-            dentist_state: dentist.state || '',
-            dentist_city: dentist.city || '',
-            dentist_pincode: dentist.pincode || '',
+            dentist_state: dentist ? (dentist.state || '') : '',
+            dentist_city: dentist ? (dentist.city || '') : '',
+            dentist_pincode: dentist ? (dentist.pincode || '') : '',
             notes: notes || 'Admin suggested dentist based on location & specialty matching'
         });
 
@@ -121,33 +129,19 @@ exports.suggestDentist = async (req, res) => {
             recipient_role: 'Patient',
             recipient_id: problemReq.patient_id || 'ALL',
             title: '🩺 Dentist Suggested by Admin',
-            message: `Admin has reviewed your dental problem request and suggested a specialist. Tap to view dentist profile.`,
+            message: `Admin has reviewed your dental problem request and suggested ${docName}. Tap to view profile.`,
             type: 'dentist_suggested'
         });
 
-        await Notification.create({
-            recipient_role: 'Dentist',
-            recipient_id: dentist.user_id || dentistId,
-            title: '📋 New Patient Referral',
-            message: `Admin suggested a patient request (${problemReq.problem_category}) to your profile.`,
-            type: 'referral_received'
-        });
-
-        // 4. Send Push Notification if FCM token available
-        const patientUser = await User.findById(problemReq.patient_id);
-        if (patientUser?.device_token) {
-            await sendPushNotification(
-                patientUser.device_token,
-                '🩺 Dentist Suggested by Admin',
-                `Admin suggested a specialist for your request: ${problemReq.problem_category}`,
-                { requestId: String(id), dentistId: String(dentistId), type: 'dentist_suggested' }
-            );
+        if (dentist) {
+            await Notification.create({
+                recipient_role: 'Dentist',
+                recipient_id: dentist.user_id || dentistId,
+                title: '📋 New Patient Referral',
+                message: `Admin suggested a patient request (${problemReq.problem_category}) to your profile.`,
+                type: 'referral_received'
+            });
         }
-
-        // 5. Existing WhatsApp Integration Logging / Payload Trigger
-        console.log(`💬 [WhatsApp Integration] Sending Dentist details to Patient ${patientUser?.phone || 'Phone'}:`);
-        console.log(`   - Dentist: ${dentist.speciality} Specialist`);
-        console.log(`   - Request ID: ${id}`);
 
         res.json({
             success: true,
