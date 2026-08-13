@@ -787,7 +787,8 @@ class ApiService {
         if (suggRes.isNotEmpty) {
           final reqIds = suggRes.map((s) => s['request_id']?.toString() ?? '').where((id) => id.isNotEmpty).toList();
           if (reqIds.isNotEmpty) {
-            final res = await client.from('patient_problem_requests').select('*').in_('id', reqIds).order('created_at', ascending: false);
+            final idConds = reqIds.map((id) => 'id.eq.$id').join(',');
+            final res = await client.from('patient_problem_requests').select('*').or(idConds).order('created_at', ascending: false);
             if (res.isNotEmpty) return List<dynamic>.from(res);
           }
         }
