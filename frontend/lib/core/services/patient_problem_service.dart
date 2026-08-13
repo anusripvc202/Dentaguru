@@ -815,6 +815,11 @@ class PatientProblemService extends ChangeNotifier {
   Future<bool> registerClinic({
     required String clinicName,
     required String location,
+    List<String>? services,
+    List<Map<String, dynamic>>? pricing,
+  }) async {
+    final res = await ApiService().createClinicProfile(
+      clinicName: clinicName,
       location: location,
       services: services,
       pricing: pricing,
@@ -1132,11 +1137,11 @@ class PatientProblemService extends ChangeNotifier {
   }
 
 
-  void assignDoctorToRequest({
+  Future<void> assignDoctorToRequest({
     required String requestId,
     required DoctorModel doctor,
     required String adminNotes,
-  }) {
+  }) async {
     final index = _requests.indexWhere((r) => r.id == requestId);
     if (index != -1) {
       final req = _requests[index];
@@ -1158,6 +1163,34 @@ class PatientProblemService extends ChangeNotifier {
 
       _saveToStorage();
       notifyListeners();
+
+      // 🌐 Save immediately to Backend API & Supabase PostgreSQL Database
+      try {
+        await ApiService().suggestDentist(
+          requestId: requestId,
+          dentistId: doctor.id,
+          notes: adminNotes,
+          doctorName: doctor.name,
+          doctorSpecialty: doctor.specialty,
+          doctorClinic: doctor.clinicName,
+        );
+      } catch (e) {
+        debugPrint('Error syncing assignDoctorToRequest to API: $e');
+      }
+
+      try {
+        await Supabase.instance.client.from('patient_problem_requests').update({
+          'status': 'DENTIST_SUGGESTED',
+          'suggested_dentist_id': doctor.id,
+          'assigned_doctor_id': doctor.id,
+          'assigned_doctor_name': doctor.name,
+          'assigned_doctor_specialty': doctor.specialty,
+          'assigned_doctor_clinic': doctor.clinicName,
+          'admin_notes': adminNotes,
+        }).eq('id', requestId);
+      } catch (e) {
+        debugPrint('Supabase direct doctor assignment update error: $e');
+      }
     }
   }
 
