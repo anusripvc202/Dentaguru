@@ -990,11 +990,17 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 IconButton(
                   icon: const Icon(Icons.logout_rounded, color: Color(0xFFEF4444), size: 22),
                   tooltip: 'Log Out',
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Logged out of Dentist workspace.')),
-                    );
-                    context.go('/');
+                  onPressed: () async {
+                    await _patientService.clearAllDataAndStorage();
+                    try {
+                      await Supabase.instance.client.auth.signOut();
+                    } catch (_) {}
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Logged out of Dentist workspace.')),
+                      );
+                      context.go('/');
+                    }
                   },
                 ),
               ],
@@ -1077,15 +1083,37 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   // ==========================================
   Widget _buildDashboardTab() {
     final currentDoc = _patientService.currentDoctor;
-    final currentDocName = (currentDoc?.name ?? '').replaceAll('Dr.', '').trim().toLowerCase();
+    final currentDocName = (currentDoc?.name ?? '').replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
     final currentDocId = (currentDoc?.id ?? '').trim();
-    final currentDocClinic = (currentDoc?.clinicName ?? '').trim().toLowerCase();
+    final currentDocUserId = (currentDoc?.userId ?? '').trim();
+    final currentDocEmail = (currentDoc?.email ?? '').trim().toLowerCase();
+    final authUser = Supabase.instance.client.auth.currentUser;
+    final authUserId = authUser?.id ?? '';
+    final authEmail = authUser?.email?.trim().toLowerCase() ?? '';
+
+    bool isAssignedToMe(PatientConsultationRequest r) {
+      final aId = r.assignedDoctorId?.trim();
+      if (aId != null && aId.isNotEmpty) {
+        if (currentDocId.isNotEmpty && aId == currentDocId) return true;
+        if (currentDocUserId.isNotEmpty && aId == currentDocUserId) return true;
+        if (authUserId.isNotEmpty && aId == authUserId) return true;
+        if (currentDocEmail.isNotEmpty && aId.toLowerCase() == currentDocEmail) return true;
+        if (authEmail.isNotEmpty && aId.toLowerCase() == authEmail) return true;
+      }
+      
+      final aName = r.assignedDoctorName?.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
+      if (currentDocName.isNotEmpty && currentDocName != 'dentist' && currentDocName != 'doctor' &&
+          aName != null && aName.isNotEmpty && aName == currentDocName) {
+        return true;
+      }
+      return false;
+    }
 
     final Map<String, PatientConsultationRequest> uniqueMap = {};
 
     // 1. Add all requests assigned directly to this dentist from backend
     for (final r in _patientService.dentistAssignedRequests) {
-      if (r.id.isNotEmpty) {
+      if (isAssignedToMe(r) && r.id.isNotEmpty) {
         final key = (r.id.startsWith('PR-'))
             ? '${r.patientName.trim().toLowerCase()}_${r.problemCategory.trim().toLowerCase()}'
             : r.id;
@@ -1095,15 +1123,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
 
     // 2. Cross-reference general requests only if assigned to this specific doctor
     for (final r in _patientService.requests) {
-      final docNameMatch = currentDocName.isNotEmpty &&
-          r.assignedDoctorName != null &&
-          r.assignedDoctorName!.replaceAll('Dr.', '').trim().toLowerCase().contains(currentDocName);
-      final docIdMatch = currentDocId.isNotEmpty && r.assignedDoctorId == currentDocId;
-      final clinicMatch = currentDocClinic.isNotEmpty &&
-          r.assignedDoctorClinic != null &&
-          r.assignedDoctorClinic!.trim().toLowerCase() == currentDocClinic;
-
-      if (docNameMatch || docIdMatch || clinicMatch) {
+      if (isAssignedToMe(r) && r.id.isNotEmpty) {
         final key = (r.id.startsWith('PR-'))
             ? '${r.patientName.trim().toLowerCase()}_${r.problemCategory.trim().toLowerCase()}'
             : r.id;
@@ -1961,20 +1981,43 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   // ==========================================
   Widget _buildPatientsTab() {
     final currentDoc = _patientService.currentDoctor;
-    final docNameClean = currentDoc?.name.replaceAll('Dr. ', '').trim().toLowerCase() ?? '';
-    final sourceRequests = _patientService.dentistAssignedRequests.isNotEmpty
-        ? _patientService.dentistAssignedRequests
-        : _patientService.requests;
-
+    final currentDocName = (currentDoc?.name ?? '').replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
+    final currentDocId = (currentDoc?.id ?? '').trim();
+    final currentDocUserId = (currentDoc?.userId ?? '').trim();
+    final currentDocEmail = (currentDoc?.email ?? '').trim().toLowerCase();
     final authUser = Supabase.instance.client.auth.currentUser;
-    final myPatients = sourceRequests.where((req) {
-      if (currentDoc != null && req.assignedDoctorId != null && (req.assignedDoctorId == currentDoc.id || req.assignedDoctorId == currentDoc.email)) return true;
-      if (authUser != null && req.assignedDoctorId != null && (req.assignedDoctorId == authUser.id || req.assignedDoctorId == authUser.email)) return true;
-      if (docNameClean.isNotEmpty && req.assignedDoctorName != null && (req.assignedDoctorName!.toLowerCase().contains(docNameClean) || docNameClean.contains(req.assignedDoctorName!.toLowerCase()))) return true;
-      if (authUser?.email != null && authUser!.email!.isNotEmpty && req.assignedDoctorName != null && req.assignedDoctorName!.toLowerCase().contains(authUser.email!.split('@').first.toLowerCase())) return true;
-      if (_patientService.dentistAssignedRequests.any((r) => r.id == req.id)) return true;
+    final authUserId = authUser?.id ?? '';
+    final authEmail = authUser?.email?.trim().toLowerCase() ?? '';
+
+    bool isAssignedToMe(PatientConsultationRequest r) {
+      final aId = r.assignedDoctorId?.trim();
+      if (aId != null && aId.isNotEmpty) {
+        if (currentDocId.isNotEmpty && aId == currentDocId) return true;
+        if (currentDocUserId.isNotEmpty && aId == currentDocUserId) return true;
+        if (authUserId.isNotEmpty && aId == authUserId) return true;
+        if (currentDocEmail.isNotEmpty && aId.toLowerCase() == currentDocEmail) return true;
+        if (authEmail.isNotEmpty && aId.toLowerCase() == authEmail) return true;
+      }
+      
+      final aName = r.assignedDoctorName?.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
+      if (currentDocName.isNotEmpty && currentDocName != 'dentist' && currentDocName != 'doctor' &&
+          aName != null && aName.isNotEmpty && aName == currentDocName) {
+        return true;
+      }
       return false;
-    }).toList();
+    }
+
+    final allPool = [
+      ..._patientService.dentistAssignedRequests,
+      ..._patientService.requests,
+    ];
+    final Map<String, PatientConsultationRequest> uniquePatientMap = {};
+    for (final req in allPool) {
+      if (isAssignedToMe(req)) {
+        uniquePatientMap[req.patientName.trim().toLowerCase()] = req;
+      }
+    }
+    final myPatients = uniquePatientMap.values.toList();
 
     final patient = _patientService.currentPatient;
 
@@ -2053,10 +2096,21 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   // TAB 3: PRESCRIPTIONS TAB
   // ==========================================
   Widget _buildPrescriptionsTab() {
+    final currentDoc = _patientService.currentDoctor;
+    final currentDocName = (currentDoc?.name ?? '').replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
+    final currentDocId = (currentDoc?.id ?? '').trim();
+
     return FutureBuilder<List<dynamic>>(
       future: ApiService().fetchMedicalRecords(),
       builder: (context, snapshot) {
-        final records = (snapshot.data ?? []).where((r) => r['type'] == 'prescription').toList();
+        final records = (snapshot.data ?? []).where((r) {
+          if (r['type'] != 'prescription') return false;
+          final dName = (r['doctorName'] ?? r['doctor_name'] ?? '').toString().replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
+          final dId = (r['doctorId'] ?? r['doctor_id'] ?? '').toString();
+          if (currentDocId.isNotEmpty && dId == currentDocId) return true;
+          if (currentDocName.isNotEmpty && currentDocName != 'dentist' && dName == currentDocName) return true;
+          return false;
+        }).toList();
 
         return SingleChildScrollView(
           physics: const BouncingScrollPhysics(),

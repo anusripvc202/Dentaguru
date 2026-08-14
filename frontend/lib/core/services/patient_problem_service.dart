@@ -8,6 +8,7 @@ import 'api_service.dart';
 /// Model representing a Doctor/Dentist registered in DentaGuru platform
 class DoctorModel {
   final String id;
+  final String userId;
   final String name;
   final String specialty;
   final String qualification;
@@ -33,6 +34,7 @@ class DoctorModel {
 
   DoctorModel({
     required this.id,
+    this.userId = '',
     required this.name,
     required this.specialty,
     required this.qualification,
@@ -80,6 +82,7 @@ class DoctorModel {
 
   Map<String, dynamic> toJson() => {
         'id': id,
+        'userId': userId,
         'name': name,
         'specialty': specialty,
         'qualification': qualification,
@@ -116,7 +119,8 @@ class DoctorModel {
       (json['procedureFees'] as Map).forEach((k, v) => pFees[k.toString()] = v.toString());
     }
     return DoctorModel(
-      id: json['id'] ?? '',
+      id: (json['id'] ?? json['_id'] ?? '').toString(),
+      userId: (json['userId'] ?? json['user_id'] ?? (json['users'] != null ? json['users']['id'] : '') ?? '').toString(),
       name: json['name'] ?? '',
       specialty: json['specialty'] ?? json['speciality'] ?? '',
       qualification: json['qualification'] ?? json['qualifications'] ?? 'BDS, MDS',
@@ -929,11 +933,19 @@ class PatientProblemService extends ChangeNotifier {
       final List problemReqs = isAdmin
           ? await ApiService().fetchAdminProblemRequests()
           : (_isDentistMode
-              ? await ApiService().fetchDentistAssignedRequests()
+              ? await ApiService().fetchDentistAssignedRequests(
+                  dentistId: currentDoctor?.id.isNotEmpty == true ? currentDoctor!.id : currentDoctor?.userId,
+                  dentistName: currentDoctor?.name,
+                )
               : await ApiService().fetchPatientProblemRequests(patientId: pId));
 
       if (problemReqs.isEmpty) {
-        if (!_isDentistMode && !isAdmin) {
+        if (_isDentistMode) {
+          _dentistAssignedRequests.clear();
+          _requests.removeWhere((r) => r.assignedDoctorId != null && r.assignedDoctorId!.isNotEmpty);
+          _saveToStorage();
+          notifyListeners();
+        } else if (!isAdmin) {
           _requests.clear();
           _saveToStorage();
           notifyListeners();
@@ -945,6 +957,26 @@ class PatientProblemService extends ChangeNotifier {
         final prId = (pr['_id'] ?? pr['id'] ?? '').toString();
         if (prId.isEmpty) continue;
         final reqPatientId = (pr['patient_id'] ?? pr['patientId'] ?? pr['patient']?['id'])?.toString() ?? '';
+
+        // ✅ If Dentist mode, enforce strict dentist ownership verification
+        if (_isDentistMode) {
+          final assignedDocId = (pr['assigned_doctor_id'] ?? pr['suggested_dentist_id'] ?? pr['dentist']?['id'])?.toString();
+          final assignedDocName = (pr['assigned_doctor_name'] ?? pr['assignedDoctorName'] ?? pr['dentist']?['name'])?.toString();
+          final myId = currentDoctor?.id ?? '';
+          final myUserId = currentDoctor?.userId ?? '';
+          final myEmail = currentDoctor?.email.toLowerCase() ?? '';
+          final myName = (currentDoctor?.name ?? '').replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
+
+          bool isForMe = false;
+          if (myId.isNotEmpty && assignedDocId == myId) isForMe = true;
+          if (myUserId.isNotEmpty && assignedDocId == myUserId) isForMe = true;
+          if (myEmail.isNotEmpty && assignedDocId?.toLowerCase() == myEmail) isForMe = true;
+          if (myName.isNotEmpty && myName != 'dentist' && assignedDocName != null && assignedDocName.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase() == myName) isForMe = true;
+
+          if (!isForMe) {
+            continue; // Skip records not assigned to this specific doctor!
+          }
+        }
 
         // ✅ If NOT admin and NOT dentist, enforce strict patient ownership verification
         if (!isAdmin && !_isDentistMode) {
@@ -1130,6 +1162,9 @@ class PatientProblemService extends ChangeNotifier {
       final List problemReqs = await ApiService().fetchDentistAssignedRequests(dentistId: targetDocId);
 
       if (problemReqs.isEmpty) {
+        _dentistAssignedRequests.clear();
+        _saveToStorage();
+        notifyListeners();
         return;
       }
 
@@ -1312,9 +1347,11 @@ class PatientProblemService extends ChangeNotifier {
           final lng = (dMap['longitude'] ?? userObj['longitude']) != null ? double.tryParse((dMap['longitude'] ?? userObj['longitude']).toString()) : null;
 
           final formattedName = name.startsWith('Dr.') ? name : 'Dr. $name';
+          final doctorUserId = (dMap['user_id'] ?? userObj['id'] ?? '').toString();
 
           _allDoctors.add(DoctorModel(
             id: id.isNotEmpty ? id : 'DOC-${100 + _allDoctors.length + 1}',
+            userId: doctorUserId,
             name: formattedName,
             specialty: specialty,
             qualification: dMap['qualifications'] ?? dMap['qualification'] ?? 'BDS, MDS',
@@ -1343,6 +1380,7 @@ class PatientProblemService extends ChangeNotifier {
         for (final d in _allDoctors) {
           if (d.email.toLowerCase() == authEmailLower ||
               (d.id.isNotEmpty && d.id == authUser.id) ||
+              (d.userId.isNotEmpty && d.userId == authUser.id) ||
               (d.name.isNotEmpty && authEmailLower.contains(d.name.replaceAll('Dr. ', '').trim().toLowerCase()))) {
             currentDoctor = d;
             break;
@@ -1417,85 +1455,110 @@ class PatientProblemService extends ChangeNotifier {
   Future<void> syncAppointmentsFromApi() async {
     try {
       final pId = currentPatient.id.isNotEmpty ? currentPatient.id : null;
-      final dId = currentDoctor?.id.isNotEmpty == true ? currentDoctor!.id : null;
-      final list = await ApiService().fetchAppointments(patientId: pId, dentistId: dId);
+      final dId = currentDoctor?.id.isNotEmpty == true ? currentDoctor!.id : (currentDoctor?.userId.isNotEmpty == true ? currentDoctor!.userId : null);
       
-        for (final item in list) {
-          final itemPatientId = (item['patient_id'] ?? item['patientId'] ?? item['patient']?['id'])?.toString();
-          final authUser = Supabase.instance.client.auth.currentUser;
-          final isAdmin = (authUser?.email != null && (authUser!.email!.toLowerCase().contains('admin') || authUser.email!.toLowerCase() == 'anusripvc202@gmail.com')) ||
-                          currentPatient.email.toLowerCase().contains('admin');
+      final list = _isDentistMode
+          ? (dId != null ? await ApiService().fetchAppointments(dentistId: dId) : <dynamic>[])
+          : (pId != null ? await ApiService().fetchAppointments(patientId: pId) : <dynamic>[]);
+      
+      if (list.isEmpty) {
+        if (_isDentistMode) {
+          _requests.removeWhere((r) => r.problemDescription == 'Scheduled dental consultation');
+          _saveToStorage();
+          notifyListeners();
+        }
+        return;
+      }
 
-          if (!isAdmin && pId != null && pId.isNotEmpty && itemPatientId != null && itemPatientId.isNotEmpty && itemPatientId != pId && !itemPatientId.contains(pId)) {
-            continue; // Skip appointments belonging to another patient!
-          }
+      for (final item in list) {
+        final itemPatientId = (item['patient_id'] ?? item['patientId'] ?? item['patient']?['id'])?.toString();
+        final itemDentistId = (item['dentist_id'] ?? item['dentistId'])?.toString();
+        final authUser = Supabase.instance.client.auth.currentUser;
+        final isAdmin = (authUser?.email != null && (authUser!.email!.toLowerCase().contains('admin') || authUser.email!.toLowerCase() == 'anusripvc202@gmail.com')) ||
+                        currentPatient.email.toLowerCase().contains('admin');
 
-          final reqId = (item['_id'] ?? item['id'] ?? 'REQ-${item['patient_id']}-${DateTime.now().millisecondsSinceEpoch}').toString();
-          
-          final patientObj = item['patient'] ?? item['users'] ?? {};
-          final String rawPName = (patientObj['name'] ?? item['patient_name'] ?? item['patientName'] ?? '').toString();
-          final String pName = (rawPName.isNotEmpty && rawPName != 'Patient') 
-              ? rawPName 
-              : (currentPatient.name.isNotEmpty ? currentPatient.name : 'Patient Consultation');
-
-          final String pPhone = (patientObj['phone'] ?? item['phone'] ?? (currentPatient.phone.isNotEmpty ? currentPatient.phone : '')).toString();
-
-          final rawD = (item['dentist_name'] ?? item['dentistName'] ?? item['dentist_id'] ?? '').toString();
-          String? assignedDocName;
-          if (rawD.isNotEmpty && !rawD.contains('-')) {
-            assignedDocName = rawD;
-          } else if (rawD.isNotEmpty) {
-            final matchedDoc = _allDoctors.firstWhere((d) => d.id == rawD, orElse: () => DoctorModel(id: '', name: '', specialty: '', qualification: '', experienceYears: 0, rating: 0, reviewCount: 0, clinicName: '', phone: '', email: '', status: '', nextAvailableSlots: [], consultationFee: ''));
-            if (matchedDoc.name.isNotEmpty) {
-              assignedDocName = matchedDoc.name;
-            }
-          }
-
-          final clinicObj = item['clinic'] ?? {};
-          final clinic = (clinicObj['clinic_name'] ?? clinicObj['name'] ?? item['clinic_name'] ?? item['clinicName'] ?? '').toString();
-          final treatment = item['treatment'] ?? 'Dental Consultation';
-          final slot = item['time_slot'] ?? item['timeSlot'];
-          final statusStr = (item['status'] ?? 'CONFIRMED').toString();
-
-          final existingIndex = _requests.indexWhere((r) => r.id == reqId || (r.patientName == pName && r.assignedDoctorName != null && r.confirmedTimeSlot == slot?.toString()));
-          if (existingIndex != -1) {
-            if (pName != 'Patient Consultation') {
-              _requests[existingIndex].patientName = pName;
-            }
-            if (pPhone.isNotEmpty) {
-              _requests[existingIndex].patientPhone = pPhone;
-            }
-            if (slot != null && slot.toString().isNotEmpty && slot.toString() != 'Pending Review') {
-              _requests[existingIndex].confirmedTimeSlot = slot.toString();
-            }
-            if (assignedDocName != null && assignedDocName.isNotEmpty && assignedDocName != 'null') {
-              _requests[existingIndex].assignedDoctorName = assignedDocName;
-            }
-            _requests[existingIndex].status = statusStr;
-            if (clinic.isNotEmpty) {
-              _requests[existingIndex].assignedDoctorClinic = clinic;
-            }
-          } else {
-            _requests.add(
-              PatientConsultationRequest(
-                id: reqId,
-                patientName: pName,
-                patientPhone: pPhone,
-                problemCategory: treatment.toString(),
-                problemDescription: 'Scheduled dental consultation',
-                severity: 'Moderate',
-                submittedAt: item['created_at'] != null ? DateTime.parse(item['created_at']) : DateTime.now(),
-                status: statusStr,
-                assignedDoctorName: assignedDocName,
-                assignedDoctorSpecialty: 'Dental Specialist',
-                assignedDoctorClinic: clinic.isNotEmpty ? clinic : null,
-                confirmedTimeSlot: slot?.toString(),
-                adminNotes: 'Consultation record',
-                whatsappNotificationSent: true,
-              ),
-            );
+        if (_isDentistMode) {
+          final myId = currentDoctor?.id ?? '';
+          final myUserId = currentDoctor?.userId ?? '';
+          if (itemDentistId != null && itemDentistId.isNotEmpty && itemDentistId != myId && itemDentistId != myUserId) {
+            continue; // Skip appointments for other dentists!
           }
         }
+
+        if (!isAdmin && !_isDentistMode && pId != null && pId.isNotEmpty && itemPatientId != null && itemPatientId.isNotEmpty && itemPatientId != pId && !itemPatientId.contains(pId)) {
+          continue; // Skip appointments belonging to another patient!
+        }
+
+        final reqId = (item['_id'] ?? item['id'] ?? 'REQ-${item['patient_id']}-${DateTime.now().millisecondsSinceEpoch}').toString();
+        
+        final patientObj = item['patient'] ?? item['users'] ?? {};
+        final String rawPName = (patientObj['name'] ?? item['patient_name'] ?? item['patientName'] ?? '').toString();
+        final String pName = (rawPName.isNotEmpty && rawPName != 'Patient') 
+            ? rawPName 
+            : (currentPatient.name.isNotEmpty ? currentPatient.name : 'Patient Consultation');
+
+        final String pPhone = (patientObj['phone'] ?? item['phone'] ?? (currentPatient.phone.isNotEmpty ? currentPatient.phone : '')).toString();
+
+        final rawD = (item['dentist_name'] ?? item['dentistName'] ?? item['dentist_id'] ?? '').toString();
+        String? assignedDocName;
+        if (rawD.isNotEmpty && !rawD.contains('-')) {
+          assignedDocName = rawD;
+        } else if (rawD.isNotEmpty) {
+          final matchedDoc = _allDoctors.firstWhere((d) => d.id == rawD || d.userId == rawD, orElse: () => DoctorModel(id: '', name: '', specialty: '', qualification: '', experienceYears: 0, rating: 0, reviewCount: 0, clinicName: '', phone: '', email: '', status: '', nextAvailableSlots: [], consultationFee: ''));
+          if (matchedDoc.name.isNotEmpty) {
+            assignedDocName = matchedDoc.name;
+          }
+        }
+
+        final clinicObj = item['clinic'] ?? {};
+        final clinic = (clinicObj['clinic_name'] ?? clinicObj['name'] ?? item['clinic_name'] ?? item['clinicName'] ?? '').toString();
+        final treatment = item['treatment'] ?? 'Dental Consultation';
+        final slot = item['time_slot'] ?? item['timeSlot'];
+        final statusStr = (item['status'] ?? 'CONFIRMED').toString();
+
+        final existingIndex = _requests.indexWhere((r) => r.id == reqId || (r.patientName == pName && r.assignedDoctorName != null && r.confirmedTimeSlot == slot?.toString()));
+        if (existingIndex != -1) {
+          if (pName != 'Patient Consultation') {
+            _requests[existingIndex].patientName = pName;
+          }
+          if (pPhone.isNotEmpty) {
+            _requests[existingIndex].patientPhone = pPhone;
+          }
+          if (slot != null && slot.toString().isNotEmpty && slot.toString() != 'Pending Review') {
+            _requests[existingIndex].confirmedTimeSlot = slot.toString();
+          }
+          if (assignedDocName != null && assignedDocName.isNotEmpty && assignedDocName != 'null') {
+            _requests[existingIndex].assignedDoctorName = assignedDocName;
+          }
+          if (itemDentistId != null && itemDentistId.isNotEmpty) {
+            _requests[existingIndex].assignedDoctorId = itemDentistId;
+          }
+          _requests[existingIndex].status = statusStr;
+          if (clinic.isNotEmpty) {
+            _requests[existingIndex].assignedDoctorClinic = clinic;
+          }
+        } else {
+          _requests.add(
+            PatientConsultationRequest(
+              id: reqId,
+              patientName: pName,
+              patientPhone: pPhone,
+              problemCategory: treatment.toString(),
+              problemDescription: 'Scheduled dental consultation',
+              severity: 'Moderate',
+              submittedAt: item['created_at'] != null ? DateTime.parse(item['created_at']) : DateTime.now(),
+              status: statusStr,
+              assignedDoctorId: itemDentistId ?? dId,
+              assignedDoctorName: assignedDocName,
+              assignedDoctorSpecialty: 'Dental Specialist',
+              assignedDoctorClinic: clinic.isNotEmpty ? clinic : null,
+              confirmedTimeSlot: slot?.toString(),
+              adminNotes: 'Consultation record',
+              whatsappNotificationSent: true,
+            ),
+          );
+        }
+      }
 
       _saveToStorage();
       notifyListeners();
@@ -1949,6 +2012,7 @@ class PatientProblemService extends ChangeNotifier {
   }
 
   DoctorModel registerDoctor({
+    String id = '',
     required String name,
     required String email,
     required String phone,
@@ -1979,7 +2043,9 @@ class PatientProblemService extends ChangeNotifier {
     final cleanPincode = pincode.trim();
 
     final existingDoc = _allDoctors.firstWhere((d) => d.email.trim().toLowerCase() == email.trim().toLowerCase(), orElse: () => DoctorModel(id: '', name: '', specialty: '', qualification: '', experienceYears: 0, rating: 0, reviewCount: 0, clinicName: '', phone: '', email: '', status: '', nextAvailableSlots: [], consultationFee: ''));
-    final doctorId = existingDoc.id.isNotEmpty ? existingDoc.id : 'DOC-${100 + _allDoctors.length + 1}';
+    final doctorId = id.trim().isNotEmpty
+        ? id.trim()
+        : (existingDoc.id.isNotEmpty ? existingDoc.id : (Supabase.instance.client.auth.currentUser?.id ?? 'DOC-${100 + _allDoctors.length + 1}'));
 
     final newDoctor = DoctorModel(
       id: doctorId,
@@ -2007,6 +2073,10 @@ class PatientProblemService extends ChangeNotifier {
     } else {
       final idx = _allDoctors.indexWhere((d) => d.email.toLowerCase() == newDoctor.email.toLowerCase());
       if (idx != -1) _allDoctors[idx] = newDoctor;
+    }
+
+    if (currentDoctor?.id != newDoctor.id || currentDoctor?.email.toLowerCase() != newDoctor.email.toLowerCase()) {
+      _dentistAssignedRequests.clear();
     }
     currentDoctor = newDoctor;
 

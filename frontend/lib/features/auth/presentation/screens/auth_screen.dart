@@ -270,7 +270,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           final docName = (userData['name'] != null && userData['name'].toString().trim().isNotEmpty)
               ? userData['name'].toString().trim()
               : (userData['email'] != null ? userData['email'].toString() : email);
+          final docId = (userData['id'] ?? Supabase.instance.client.auth.currentUser?.id ?? '').toString();
+          
           PatientProblemService().registerDoctor(
+            id: docId,
             name: docName,
             email: userData['email'] ?? email,
             phone: userPhone,
@@ -442,7 +445,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           );
         } else if (_selectedRole == UserRole.dentist) {
           final exp = int.tryParse(_experienceController.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 5;
+          final docId = (res['user']?['id'] ?? Supabase.instance.client.auth.currentUser?.id ?? '').toString();
           PatientProblemService().registerDoctor(
+            id: docId,
             name: name,
             email: email,
             phone: phone,

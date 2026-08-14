@@ -90,10 +90,10 @@ exports.getPatientProblemRequests = async (req, res) => {
 
             let realName = r.patient_name || r.patientName;
             if ((!realName || realName.trim().toLowerCase() === 'patient') && u) {
-                realName = u.name || (u.email ? u.email.split('@')[0] : 'anusha');
+                realName = u.name || (u.email ? u.email.split('@')[0] : 'Patient');
             }
-            if (!realName || realName.trim().toLowerCase() === 'patient') {
-                realName = patientUsers.length > 0 ? (patientUsers[0].name || 'anusha') : 'anusha';
+            if (!realName || realName.trim().length === 0) {
+                realName = 'Patient';
             }
 
             let realPhone = r.patient_phone || r.patientPhone;
@@ -344,16 +344,25 @@ exports.deleteProblemRequest = async (req, res) => {
 // 7. DENTIST: GET ASSIGNED PROBLEM REQUESTS (ONLY PROBLEMS ASSIGNED TO LOGGED-IN DENTIST)
 exports.getDentistAssignedRequests = async (req, res) => {
     try {
-        const rawDentistId = req.query.dentistId;
-        const dentistId = (rawDentistId && String(rawDentistId).trim().length > 0) ? String(rawDentistId).trim() : (req.user ? req.user.id : null);
+        let rawDentistId = null;
+        if (req.user && (req.user.role === 'Dentist' || req.user.role === 'dentist' || req.user.role === 'Doctor' || req.user.role === 'doctor')) {
+            rawDentistId = req.user.id;
+        } else {
+            rawDentistId = req.query.dentistId || (req.user ? req.user.id : null);
+        }
+
+        if (!rawDentistId || String(rawDentistId).trim().length === 0) {
+            return res.json({ success: true, count: 0, requests: [] });
+        }
+        const dentistId = String(rawDentistId).trim();
         
         let docUser = null;
         let docDentistRec = null;
-        if (dentistId) {
-            docUser = await User.findById(dentistId).catch(() => null);
-            docDentistRec = await Dentist.findOne({ $or: [{ _id: dentistId }, { user_id: dentistId }, { id: dentistId }] }).catch(() => null);
+        docUser = await User.findById(dentistId).catch(() => null);
+        if (!docUser && req.user && req.user.id === dentistId) {
+            docUser = req.user;
         }
-        if (!docUser && req.user) docUser = req.user;
+        docDentistRec = await Dentist.findOne({ $or: [{ _id: dentistId }, { user_id: dentistId }, { id: dentistId }] }).catch(() => null);
 
         const possibleIds = [
             dentistId,
@@ -364,25 +373,13 @@ exports.getDentistAssignedRequests = async (req, res) => {
             docDentistRec ? docDentistRec.user_id : null,
         ].filter(Boolean).map(String);
 
-        let filterQuery = {};
-        if (possibleIds.length > 0 || (docUser && docUser.name)) {
-            const orConditions = [];
-            if (possibleIds.length > 0) {
-                orConditions.push({ assigned_doctor_id: { $in: possibleIds } });
-                orConditions.push({ suggested_dentist_id: { $in: possibleIds } });
-            }
-            if (docUser && docUser.name && docUser.name.trim().length > 0) {
-                const cleanName = docUser.name.replace('Dr. ', '').trim();
-                if (cleanName.length > 0) {
-                    orConditions.push({ assigned_doctor_name: new RegExp(cleanName, 'i') });
-                }
-            }
-            filterQuery = orConditions.length > 0 ? { $or: orConditions } : {};
-        } else {
+        if (possibleIds.length === 0) {
             return res.json({ success: true, count: 0, requests: [] });
         }
 
-        const rawRequests = await PatientProblemRequest.find(filterQuery);
+        const rawRequests = await PatientProblemRequest.find({
+            suggested_dentist_id: possibleIds.length === 1 ? possibleIds[0] : { $in: possibleIds }
+        });
 
         const patientUsers = await User.find({ role: 'Patient' });
         const userMap = new Map();

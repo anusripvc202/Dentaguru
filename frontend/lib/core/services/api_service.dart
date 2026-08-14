@@ -575,15 +575,16 @@ class ApiService {
   Future<List<dynamic>> fetchAppointments({String? patientId, String? dentistId}) async {
     final client = Supabase.instance.client;
     final currentUserId = client.auth.currentUser?.id;
-    final targetPatientId = patientId ?? currentUserId;
 
     // 1. Direct Supabase query first
     try {
       var query = client.from('appointments').select('*');
-      if (targetPatientId != null && targetPatientId.isNotEmpty) {
-        query = query.eq('patient_id', targetPatientId);
-      } else if (dentistId != null && dentistId.isNotEmpty) {
+      if (dentistId != null && dentistId.isNotEmpty) {
         query = query.eq('dentist_id', dentistId);
+      } else if (patientId != null && patientId.isNotEmpty) {
+        query = query.eq('patient_id', patientId);
+      } else if (currentUserId != null && currentUserId.isNotEmpty) {
+        query = query.eq('patient_id', currentUserId);
       } else {
         return [];
       }
@@ -596,7 +597,7 @@ class ApiService {
     // 2. Express backend API fallback
     try {
       final uri = Uri.parse(ApiConstants.appointments).replace(queryParameters: {
-        if (targetPatientId != null && targetPatientId.isNotEmpty) 'patientId': targetPatientId,
+        if (patientId != null && patientId.isNotEmpty) 'patientId': patientId,
         if (dentistId != null && dentistId.isNotEmpty) 'dentistId': dentistId,
       });
       final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
@@ -924,26 +925,34 @@ class ApiService {
       final currentUserId = (dentistId != null && dentistId.trim().isNotEmpty)
           ? dentistId.trim()
           : client.auth.currentUser?.id;
+      
+      if (currentUserId == null || currentUserId.isEmpty) {
+        return [];
+      }
+
       String cleanDocName = (dentistName ?? '').replaceAll('Dr. ', '').trim();
 
       String? altDentistTableId;
-      if (currentUserId != null && currentUserId.isNotEmpty && isUuid(currentUserId)) {
+      String? altUserId;
+      if (isUuid(currentUserId)) {
         try {
           final uRes = await client.from('users').select('name').eq('id', currentUserId).maybeSingle();
           if (uRes != null && uRes['name'] != null && cleanDocName.isEmpty) {
             cleanDocName = uRes['name'].toString().replaceAll('Dr. ', '').trim();
           }
 
-          final dRes = await client.from('dentists').select('id, user_id').eq('user_id', currentUserId).maybeSingle();
-          if (dRes != null && dRes['id'] != null) {
+          final dRes = await client.from('dentists').select('id, user_id').or('id.eq.$currentUserId,user_id.eq.$currentUserId').maybeSingle();
+          if (dRes != null) {
             altDentistTableId = dRes['id']?.toString();
+            altUserId = dRes['user_id']?.toString();
           }
         } catch (_) {}
       }
 
-      final idsToMatch = [
-        if (currentUserId != null && currentUserId.isNotEmpty && isUuid(currentUserId)) currentUserId,
+      final idsToMatch = <String>[
+        if (currentUserId.isNotEmpty && isUuid(currentUserId)) currentUserId,
         if (altDentistTableId != null && altDentistTableId.isNotEmpty && isUuid(altDentistTableId) && altDentistTableId != currentUserId) altDentistTableId,
+        if (altUserId != null && altUserId.isNotEmpty && isUuid(altUserId) && altUserId != currentUserId) altUserId,
       ];
 
       final List<String> condList = [];

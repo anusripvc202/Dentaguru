@@ -163,13 +163,38 @@ const Clinic = {
 // 3. DENTIST MODEL (Supabase PostgreSQL)
 const Dentist = {
     async findOne(query) {
-        let req = supabaseAdmin.from('dentists').select('*');
-        for (const [key, val] of Object.entries(query)) {
-            req = req.eq(key, val);
+        if (!query) return null;
+        try {
+            let req = supabaseAdmin.from('dentists').select('*');
+            if (query.$or && Array.isArray(query.$or)) {
+                const conds = [];
+                for (const item of query.$or) {
+                    if (item.user_id && isUUID(item.user_id)) conds.push(`user_id.eq.${item.user_id}`);
+                    if (item.id && isUUID(item.id)) conds.push(`id.eq.${item.id}`);
+                    if (item._id && isUUID(item._id)) conds.push(`id.eq.${item._id}`);
+                }
+                if (conds.length > 0) {
+                    req = req.or(conds.join(','));
+                } else {
+                    return null;
+                }
+            } else {
+                for (const [key, val] of Object.entries(query)) {
+                    if (key === '_id' || key === 'id') {
+                        if (isUUID(val)) req = req.eq('id', val);
+                    } else if (val !== undefined && val !== null) {
+                        req = req.eq(key, val);
+                    }
+                }
+            }
+            const { data, error } = await req.maybeSingle();
+            if (error) {
+                return null;
+            }
+            return data;
+        } catch (_) {
+            return null;
         }
-        const { data, error } = await req.maybeSingle();
-        if (error) throw error;
-        return data;
     },
 
     async find(query = {}) {
@@ -269,12 +294,10 @@ async function resolveDentistUuid(input) {
         let user = await User.findOne({ name: str });
         if (!user) user = await User.findOne({ email: str });
         if (user) {
-            let d = await supabaseAdmin.from('dentists').select('*').eq('user_id', user.id).maybeSingle();
-            if (d && d.data) return d.data.id;
+            let d = await supabaseAdmin.from('dentists').select('id, user_id').eq('user_id', user.id).maybeSingle();
+            if (d && d.data && d.data.id) return d.data.id;
+            return user.id;
         }
-
-        const { data: dentists } = await supabaseAdmin.from('dentists').select('id').limit(1);
-        if (dentists && dentists.length > 0) return dentists[0].id;
     } catch (e) {
         console.error('Error resolving dentist UUID:', e.message);
     }
@@ -288,10 +311,7 @@ async function resolveClinicUuid(input) {
 
     try {
         let c = await Clinic.findOne({ clinic_name: str });
-        if (c) return c.id;
-
-        const { data: clinics } = await supabaseAdmin.from('clinics').select('id').limit(1);
-        if (clinics && clinics.length > 0) return clinics[0].id;
+        if (c && c.id) return c.id;
     } catch (e) {
         console.error('Error resolving clinic UUID:', e.message);
     }
@@ -535,11 +555,68 @@ const PatientProblemRequest = {
                 req = req.in('patient_id', pId);
             } else if (typeof pId === 'string' && pId.length > 0) {
                 req = req.eq('patient_id', pId);
+            } else {
+                return [];
             }
         }
+
+        // Strict Dentist Filtering: Check both direct assignment and dentist_suggestions
+        const dId = query.suggested_dentist_id || query.dentist_id || query.assigned_doctor_id || query.dentistId;
+        if (dId) {
+            const rawList = (typeof dId === 'object' && dId.$in) ? dId.$in : (Array.isArray(dId) ? dId : [dId]);
+            const dList = [];
+            for (const item of rawList) {
+                if (!item) continue;
+                const str = String(item).trim();
+                if (isUUID(str)) {
+                    if (!dList.includes(str)) dList.push(str);
+                    try {
+                        const d = await supabaseAdmin.from('dentists').select('id, user_id').or(`id.eq.${str},user_id.eq.${str}`).maybeSingle();
+                        if (d && d.data) {
+                            if (d.data.id && !dList.includes(d.data.id)) dList.push(d.data.id);
+                            if (d.data.user_id && !dList.includes(d.data.user_id)) dList.push(d.data.user_id);
+                        }
+                    } catch (_) {}
+                } else {
+                    const resolved = await resolveDentistUuid(str);
+                    if (resolved && !dList.includes(resolved)) dList.push(resolved);
+                }
+            }
+
+            if (dList.length > 0) {
+                let suggestedReqIds = [];
+                try {
+                    const conds = dList.map(id => `dentist_id.eq.${id}`).join(',');
+                    const { data: sData } = await supabaseAdmin.from('dentist_suggestions').select('request_id').or(conds);
+                    if (sData && sData.length > 0) {
+                        suggestedReqIds = sData.map(s => s.request_id).filter(Boolean);
+                    }
+                } catch (_) {}
+
+                const orParts = [];
+                for (const id of dList) {
+                    orParts.push(`suggested_dentist_id.eq.${id}`);
+                }
+                for (const rId of suggestedReqIds) {
+                    if (isUUID(rId)) orParts.push(`id.eq.${rId}`);
+                }
+
+                if (orParts.length > 0) {
+                    req = req.or(orParts.join(','));
+                } else {
+                    return [];
+                }
+            } else {
+                return [];
+            }
+        }
+
         const { data, error } = await req.order('created_at', { ascending: false });
         if (error) {
-            console.warn('⚠️ Problem requests query error, falling back to simple select:', error.message);
+            console.warn('⚠️ Problem requests query error:', error.message);
+            if (dId || query.patient_id || query.patientId) {
+                return [];
+            }
             const simple = await supabaseAdmin.from('patient_problem_requests').select('*').order('created_at', { ascending: false });
             return simple.data || [];
         }

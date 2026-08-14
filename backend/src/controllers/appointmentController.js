@@ -99,6 +99,11 @@ exports.getAppointments = async (req, res) => {
             if (clinic) query.clinic_id = clinic.id;
         }
 
+        const isAdmin = req.user && (req.user.role === 'Admin' || req.user.role === 'admin' || req.user.role === 'Sub-Admin' || req.user.role === 'subadmin');
+        if (!isAdmin && !patientId && !dentistId && !clinicId && !req.user) {
+            return res.json({ success: true, count: 0, appointments: [] });
+        }
+
         const list = await Appointment.find(query);
         res.json({ success: true, count: list.length, appointments: list });
     } catch (err) {
