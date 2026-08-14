@@ -10,6 +10,8 @@ import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/firebase_service.dart';
 import '../../../../core/services/supabase_service.dart';
 import '../../../../core/services/analytics_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Role enum for authentication
 enum UserRole { patient, dentist, admin }
@@ -299,10 +301,28 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           context.go('/admin');
         } else {
           // Patient Role
-          final String loginAge = (userData['age'] ?? userData['patient_age'] ?? '').toString();
-          final String loginGender = (userData['gender'] ?? '').toString();
-          final String loginBloodGroup = (userData['bloodGroup'] ?? userData['blood_group'] ?? '').toString();
-          final String loginEmergency = (userData['emergencyContact'] ?? userData['emergency_contact'] ?? userPhone).toString();
+          final prefs = await SharedPreferences.getInstance();
+          final cachedProfileStr = prefs.getString('dentaguru_patient_profile_${email.trim().toLowerCase()}') ?? prefs.getString('dentaguru_patient_profile');
+          Map<String, dynamic> cachedMap = {};
+          if (cachedProfileStr != null && cachedProfileStr.isNotEmpty) {
+            try {
+              cachedMap = jsonDecode(cachedProfileStr);
+            } catch (_) {}
+          }
+
+          Map<String, dynamic> dbProfileMeta = {};
+          try {
+            final uRow = await Supabase.instance.client.from('users').select('device_token, city, pincode, state').ilike('email', email.trim()).maybeSingle();
+            if (uRow != null && uRow['device_token'] != null && uRow['device_token'].toString().startsWith('{')) {
+              dbProfileMeta = jsonDecode(uRow['device_token'].toString());
+            }
+          } catch (_) {}
+
+          final authMeta = Supabase.instance.client.auth.currentUser?.userMetadata ?? {};
+          final String loginAge = (userData['age'] ?? dbProfileMeta['age'] ?? cachedMap['age'] ?? authMeta['age'] ?? authMeta['patient_age'] ?? '').toString();
+          final String loginGender = (userData['gender'] ?? dbProfileMeta['gender'] ?? cachedMap['gender'] ?? authMeta['gender'] ?? 'Female').toString();
+          final String loginBloodGroup = (userData['bloodGroup'] ?? userData['blood_group'] ?? dbProfileMeta['bloodGroup'] ?? cachedMap['bloodGroup'] ?? authMeta['bloodGroup'] ?? 'O Positive (O+)').toString();
+          final String loginEmergency = (userData['emergencyContact'] ?? userData['emergency_contact'] ?? dbProfileMeta['emergencyContact'] ?? cachedMap['emergencyContact'] ?? authMeta['emergencyContact'] ?? userPhone).toString();
 
           PatientProblemService().updatePatientProfile(
             id: userData['id']?.toString() ?? '',
@@ -313,6 +333,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             gender: loginGender.isNotEmpty ? loginGender : 'Female',
             bloodGroup: loginBloodGroup.isNotEmpty ? loginBloodGroup : 'O Positive (O+)',
             emergencyContact: loginEmergency.isNotEmpty ? loginEmergency : userPhone,
+            city: (userData['city'] ?? dbProfileMeta['city'] ?? cachedMap['city'] ?? '').toString(),
+            pincode: (userData['pincode'] ?? dbProfileMeta['pincode'] ?? cachedMap['pincode'] ?? '').toString(),
             photoBytes: photoBytes,
           );
           await PatientProblemService().syncAllDataFromApi();

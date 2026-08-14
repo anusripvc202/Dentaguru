@@ -3601,7 +3601,25 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   // PANEL 1: ADMIN DASHBOARD (RESPONSIVE & OVERFLOW FREE)
   // ==========================================
   Widget _buildDashboardPanel() {
-    final requests = _problemService.requests;
+    final Map<String, PatientConsultationRequest> uniqueMap = {};
+    for (final r in _problemService.requests) {
+      final key = (r.id.isNotEmpty && !r.id.startsWith('PR-'))
+          ? r.id
+          : '${r.patientName.trim().toLowerCase()}_${r.problemCategory.trim().toLowerCase()}';
+      if (!uniqueMap.containsKey(key)) {
+        uniqueMap[key] = r;
+      } else {
+        final existing = uniqueMap[key]!;
+        if (r.status == 'Confirmed' || r.status == 'Doctor Assigned' || (r.assignedDoctorName != null && r.assignedDoctorName!.isNotEmpty)) {
+          uniqueMap[key] = r;
+        }
+      }
+    }
+    final requests = uniqueMap.values.toList();
+    final pendingCount = requests.where((r) {
+      final st = r.status.trim().toLowerCase();
+      return st == 'pending admin review' || st == 'submitted' || st == 'admin review';
+    }).length;
 
     return FadeTransition(
       opacity: _fadeAnimation,
@@ -3651,7 +3669,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   ),
                   _KpiCard(
                     title: 'Pending Consultations',
-                    value: '${requests.where((r) => r.status == "Pending Admin Review").length}',
+                    value: '$pendingCount',
                     growth: 'Requires Action',
                     accentColor: const Color(0xFFD97706),
                     icon: Icons.pending_actions_rounded,
@@ -3869,7 +3887,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                             crossAxisAlignment: CrossAxisAlignment.start,
                                             children: [
                                               Text(
-                                                'Assigned: ${req.assignedDoctorName ?? "Assigned Doctor"} (${req.assignedDoctorSpecialty ?? "Specialist"})',
+                                                'Assigned: ${req.displayDoctorName} (${req.displayDoctorSpecialty})',
                                                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFF14532D)),
                                                 overflow: TextOverflow.ellipsis,
                                               ),

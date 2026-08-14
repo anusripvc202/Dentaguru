@@ -185,6 +185,24 @@ exports.register = async (req, res) => {
             refresh_tokens: [refreshToken]
         });
 
+        // Also sync user_metadata to Supabase Auth for permanent cloud persistence
+        try {
+            await supabaseAdmin.auth.admin.updateUserById(user.id, {
+                user_metadata: {
+                    name,
+                    role: role || 'Patient',
+                    phone,
+                    age: age || '',
+                    gender: gender || '',
+                    bloodGroup: bloodGroup || '',
+                    emergencyContact: emergencyContact || '',
+                    city: city || '',
+                    pincode: pincode || '',
+                    state: state || ''
+                }
+            });
+        } catch (_) {}
+
         res.status(201).json({
             success: true,
             message: 'User registered successfully in Supabase PostgreSQL.',
@@ -194,6 +212,10 @@ exports.register = async (req, res) => {
                 email: user.email,
                 phone: user.phone,
                 role: user.role,
+                age: age || user.age || '',
+                gender: gender || user.gender || '',
+                bloodGroup: bloodGroup || user.blood_group || '',
+                emergencyContact: emergencyContact || user.emergency_contact || '',
                 city: user.city || '',
                 pincode: user.pincode || '',
                 profilePhoto: user.biometric_token
@@ -257,6 +279,23 @@ exports.login = async (req, res) => {
             await User.findByIdAndUpdate(user.id, { device_token: fcmToken });
         }
 
+        let userAge = user.age || user.patient_age || '';
+        let userGender = user.gender || '';
+        let userBloodGroup = user.blood_group || user.bloodGroup || '';
+        let userEmergency = user.emergency_contact || user.emergencyContact || '';
+
+        if (!userAge || !userGender) {
+            try {
+                const { data: { user: sbAuthUser } } = await supabaseAdmin.auth.admin.getUserById(user.id);
+                if (sbAuthUser && sbAuthUser.user_metadata) {
+                    if (!userAge) userAge = sbAuthUser.user_metadata.age || sbAuthUser.user_metadata.patient_age || '';
+                    if (!userGender) userGender = sbAuthUser.user_metadata.gender || '';
+                    if (!userBloodGroup) userBloodGroup = sbAuthUser.user_metadata.bloodGroup || sbAuthUser.user_metadata.blood_group || '';
+                    if (!userEmergency) userEmergency = sbAuthUser.user_metadata.emergencyContact || sbAuthUser.user_metadata.emergency_contact || '';
+                }
+            } catch (_) {}
+        }
+
         const { accessToken, refreshToken } = generateTokens(user);
         await User.findByIdAndUpdate(user.id, {
             refresh_tokens: [refreshToken]
@@ -273,10 +312,10 @@ exports.login = async (req, res) => {
                 email: user.email,
                 phone: user.phone,
                 role: user.role,
-                age: user.age || '',
-                gender: user.gender || '',
-                bloodGroup: user.blood_group || '',
-                emergencyContact: user.emergency_contact || '',
+                age: userAge,
+                gender: userGender,
+                bloodGroup: userBloodGroup,
+                emergencyContact: userEmergency,
                 permissions: user.permissions || [],
                 city: user.city || '',
                 pincode: user.pincode || '',

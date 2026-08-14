@@ -37,7 +37,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
 
     // ⏱️ Auto-sync polling timer (every 4s) to catch assigned patients immediately
     _autoSyncTimer = Timer.periodic(const Duration(seconds: 4), (_) {
-      if (mounted) _patientService.syncProblemRequestsFromApi();
+      if (mounted) {
+        _patientService.syncProblemRequestsFromApi();
+        _patientService.syncDentistAssignedRequestsFromApi();
+      }
     });
 
     // ⚡ Supabase Realtime Postgres Changes listener for instant dentist dashboard updates
@@ -50,7 +53,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
             table: 'patient_problem_requests',
             callback: (payload) {
               debugPrint('⚡ Realtime update on patient_problem_requests for Dentist: ${payload.eventType}');
-              if (mounted) _patientService.syncProblemRequestsFromApi();
+              if (mounted) {
+                _patientService.syncProblemRequestsFromApi();
+                _patientService.syncDentistAssignedRequestsFromApi();
+              }
             },
           )
           .subscribe();
@@ -104,7 +110,9 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   }
 
   void _onServiceUpdate() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   void _showUpdateMyFeeAndSlotsDialog(BuildContext context) {
@@ -237,8 +245,16 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               ),
               onPressed: () async {
                 final chosenSlot = slotCtrl.text.trim().isNotEmpty ? slotCtrl.text.trim() : 'Today, 2:30 PM';
+
+                debugPrint('[ACCEPT] Button clicked');
+                debugPrint('[ACCEPT] Referral ID: ${req.id}');
+                debugPrint('[ACCEPT] Patient ID: ${req.patientId}');
+                debugPrint('[ACCEPT] Dentist ID: ${req.assignedDoctorId ?? ""}');
+
                 await _patientService.acceptReferralByDentist(req.id, timeSlot: chosenSlot);
+
                 if (dialogCtx.mounted) Navigator.of(dialogCtx).pop();
+
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
@@ -255,88 +271,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     );
   }
 
-  void _showPatientDetailsModal(BuildContext context, PatientConsultationRequest req) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 22,
-                  backgroundColor: AppTheme.primaryBlue.withValues(alpha: 0.1),
-                  child: Text(
-                    req.patientName.isNotEmpty ? req.patientName[0].toUpperCase() : 'P',
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryBlue, fontSize: 18),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(req.patientName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
-                      Text('Submitted Request ID: ${req.id}', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const Divider(height: 24),
-            _buildDetailRow(Icons.category_rounded, 'Category', req.problemCategory),
-            _buildDetailRow(Icons.description_rounded, 'Symptoms', req.problemDescription),
-            if (req.adminNotes != null && req.adminNotes!.isNotEmpty)
-              _buildDetailRow(Icons.note_alt_rounded, 'Admin Note', req.adminNotes!),
-            if (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.isNotEmpty)
-              _buildDetailRow(Icons.access_time_filled_rounded, 'Consultation Slot', req.confirmedTimeSlot!),
-            if (req.city.isNotEmpty || req.preferredLocation.isNotEmpty)
-              _buildDetailRow(Icons.location_on_rounded, 'Location', req.city.isNotEmpty ? req.city : req.preferredLocation),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () => Navigator.pop(ctx),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primaryBlue,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                child: const Text('Close Details', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
-  Widget _buildDetailRow(IconData icon, String label, String val) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 18, color: AppTheme.primaryBlue),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppTheme.textMuted)),
-                const SizedBox(height: 2),
-                Text(val, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.textDark)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   void _showPrescriptionModal(BuildContext context, dynamic reqOrName) {
     final String pName = reqOrName is PatientConsultationRequest ? reqOrName.patientName : reqOrName.toString();
@@ -1142,31 +1077,45 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   // ==========================================
   Widget _buildDashboardTab() {
     final currentDoc = _patientService.currentDoctor;
-    final authUser = Supabase.instance.client.auth.currentUser;
-    final docNameClean = currentDoc?.name.replaceAll('Dr. ', '').trim().toLowerCase() ?? '';
-    final allPool = <PatientConsultationRequest>{
-      ..._patientService.dentistAssignedRequests,
-      ..._patientService.requests,
-    }.toList();
+    final currentDocName = (currentDoc?.name ?? '').replaceAll('Dr.', '').trim().toLowerCase();
+    final currentDocId = (currentDoc?.id ?? '').trim();
+    final currentDocClinic = (currentDoc?.clinicName ?? '').trim().toLowerCase();
 
-    final requests = allPool.where((req) {
-      if (req.assignedDoctorId != null && req.assignedDoctorId!.isNotEmpty) {
-        final dId = req.assignedDoctorId!;
-        if (currentDoc != null && (dId == currentDoc.id || dId == currentDoc.email)) return true;
-        if (authUser != null && (dId == authUser.id || dId == authUser.email)) return true;
+    final Map<String, PatientConsultationRequest> uniqueMap = {};
+
+    // 1. Add all requests assigned directly to this dentist from backend
+    for (final r in _patientService.dentistAssignedRequests) {
+      if (r.id.isNotEmpty) {
+        final key = (r.id.startsWith('PR-'))
+            ? '${r.patientName.trim().toLowerCase()}_${r.problemCategory.trim().toLowerCase()}'
+            : r.id;
+        uniqueMap[key] = r;
       }
-      if (req.assignedDoctorName != null && req.assignedDoctorName!.isNotEmpty) {
-        final assignedNameLower = req.assignedDoctorName!.toLowerCase();
-        if (docNameClean.isNotEmpty && (assignedNameLower.contains(docNameClean) || docNameClean.contains(assignedNameLower))) return true;
-        if (currentDoc != null && currentDoc.name.isNotEmpty && (assignedNameLower.contains(currentDoc.name.toLowerCase()) || currentDoc.name.toLowerCase().contains(assignedNameLower))) return true;
-        if (authUser?.email != null && authUser!.email!.isNotEmpty && assignedNameLower.contains(authUser.email!.split('@').first.toLowerCase())) return true;
+    }
+
+    // 2. Cross-reference general requests only if assigned to this specific doctor
+    for (final r in _patientService.requests) {
+      final docNameMatch = currentDocName.isNotEmpty &&
+          r.assignedDoctorName != null &&
+          r.assignedDoctorName!.replaceAll('Dr.', '').trim().toLowerCase().contains(currentDocName);
+      final docIdMatch = currentDocId.isNotEmpty && r.assignedDoctorId == currentDocId;
+      final clinicMatch = currentDocClinic.isNotEmpty &&
+          r.assignedDoctorClinic != null &&
+          r.assignedDoctorClinic!.trim().toLowerCase() == currentDocClinic;
+
+      if (docNameMatch || docIdMatch || clinicMatch) {
+        final key = (r.id.startsWith('PR-'))
+            ? '${r.patientName.trim().toLowerCase()}_${r.problemCategory.trim().toLowerCase()}'
+            : r.id;
+        if (!uniqueMap.containsKey(key)) {
+          uniqueMap[key] = r;
+        } else if (r.status == 'Confirmed' || r.status == 'Accepted') {
+          uniqueMap[key] = r;
+        }
       }
-      final statusUpper = req.status.toUpperCase();
-      if (statusUpper.contains('ASSIGNED') || statusUpper.contains('CONFIRMED') || statusUpper.contains('ACCEPTED') || req.status == 'Doctor Assigned') {
-        return true;
-      }
-      return false;
-    }).toList();
+    }
+
+    final requests = uniqueMap.values.toList();
 
     final docName = currentDoc?.name ?? 'Dentist Practitioner';
     final docSpecialty = currentDoc?.specialty ?? 'Dental Specialist';
@@ -1485,10 +1434,35 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                               Text('📝 Admin Note: ${req.adminNotes}', style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: AppTheme.textMuted)),
                             ],
 
-                            if (req.city.isNotEmpty || req.preferredLocation.isNotEmpty) ...[
-                              const SizedBox(height: 4),
-                              Text('📍 Location: ${req.city.isNotEmpty ? req.city : req.preferredLocation}', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
-                            ],
+                            // Location with City & Pincode
+                            Builder(
+                              builder: (_) {
+                                final locParts = <String>[];
+                                if (req.city.isNotEmpty) locParts.add('City: ${req.city}');
+                                if (req.pincode.isNotEmpty) locParts.add('Pincode: ${req.pincode}');
+                                if (req.state.isNotEmpty) locParts.add(req.state);
+                                final displayLoc = locParts.isNotEmpty
+                                    ? locParts.join(' • ')
+                                    : (req.preferredLocation.isNotEmpty ? req.preferredLocation : 'Hyderabad');
+                                return Padding(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Icon(Icons.location_on_rounded, size: 14, color: AppTheme.primaryBlue),
+                                      const SizedBox(width: 4),
+                                      Expanded(
+                                        child: Text(
+                                          '📍 $displayLoc',
+                                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.textMedium),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
 
                             const SizedBox(height: 12),
 
@@ -1517,20 +1491,20 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                 ),
                               ),
 
-                              // Action Buttons: [ 💬 Chat with Patient ] [ 📝 E-Prescription ] [ View Patient Details ]
+                              // Action Buttons AFTER Acceptance: [ 💬 Chat with Patient ] [ 📝 E-Prescription ]
                               Row(
                                 children: [
                                   Expanded(
                                     child: SizedBox(
-                                      height: 40,
+                                      height: 44,
                                       child: OutlinedButton.icon(
-                                        icon: const Icon(Icons.chat_rounded, size: 13),
-                                        label: const Text('💬 Chat with Patient', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                        icon: const Icon(Icons.chat_rounded, size: 15),
+                                        label: const Text('💬 Chat with Patient', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
                                         style: OutlinedButton.styleFrom(
                                           foregroundColor: AppTheme.primaryBlue,
-                                          side: const BorderSide(color: AppTheme.primaryBlue, width: 1.2),
-                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                          side: const BorderSide(color: AppTheme.primaryBlue, width: 1.5),
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                         ),
                                         onPressed: () {
                                           final rId = 'PATIENT_${req.patientName.toUpperCase().replaceAll(' ', '_')}';
@@ -1539,37 +1513,21 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                       ),
                                     ),
                                   ),
-                                  const SizedBox(width: 6),
+                                  const SizedBox(width: 10),
                                   Expanded(
                                     child: SizedBox(
-                                      height: 40,
+                                      height: 44,
                                       child: ElevatedButton.icon(
-                                        icon: const Icon(Icons.receipt_long_rounded, size: 13),
-                                        label: const Text('📝 E-Prescription', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                        icon: const Icon(Icons.receipt_long_rounded, size: 15),
+                                        label: const Text('📝 E-Prescription', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
                                         style: ElevatedButton.styleFrom(
                                           backgroundColor: const Color(0xFF10B981),
                                           foregroundColor: Colors.white,
-                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                          elevation: 1,
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                         ),
                                         onPressed: () => _showPrescriptionModal(context, req),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Expanded(
-                                    child: SizedBox(
-                                      height: 40,
-                                      child: OutlinedButton.icon(
-                                        icon: const Icon(Icons.info_outline_rounded, size: 13),
-                                        label: const Text('View Details', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, color: AppTheme.textDark), maxLines: 1, overflow: TextOverflow.ellipsis),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: AppTheme.textDark,
-                                          side: const BorderSide(color: Color(0xFFCBD5E1), width: 1.2),
-                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                        ),
-                                        onPressed: () => _showPatientDetailsModal(context, req),
                                       ),
                                     ),
                                   ),
@@ -2008,9 +1966,13 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         ? _patientService.dentistAssignedRequests
         : _patientService.requests;
 
+    final authUser = Supabase.instance.client.auth.currentUser;
     final myPatients = sourceRequests.where((req) {
-      if (currentDoc != null && req.assignedDoctorId != null && req.assignedDoctorId == currentDoc.id) return true;
-      if (docNameClean.isNotEmpty && req.assignedDoctorName != null && req.assignedDoctorName!.toLowerCase().contains(docNameClean)) return true;
+      if (currentDoc != null && req.assignedDoctorId != null && (req.assignedDoctorId == currentDoc.id || req.assignedDoctorId == currentDoc.email)) return true;
+      if (authUser != null && req.assignedDoctorId != null && (req.assignedDoctorId == authUser.id || req.assignedDoctorId == authUser.email)) return true;
+      if (docNameClean.isNotEmpty && req.assignedDoctorName != null && (req.assignedDoctorName!.toLowerCase().contains(docNameClean) || docNameClean.contains(req.assignedDoctorName!.toLowerCase()))) return true;
+      if (authUser?.email != null && authUser!.email!.isNotEmpty && req.assignedDoctorName != null && req.assignedDoctorName!.toLowerCase().contains(authUser.email!.split('@').first.toLowerCase())) return true;
+      if (_patientService.dentistAssignedRequests.any((r) => r.id == req.id)) return true;
       return false;
     }).toList();
 

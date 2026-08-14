@@ -344,13 +344,14 @@ exports.deleteProblemRequest = async (req, res) => {
 // 7. DENTIST: GET ASSIGNED PROBLEM REQUESTS (ONLY PROBLEMS ASSIGNED TO LOGGED-IN DENTIST)
 exports.getDentistAssignedRequests = async (req, res) => {
     try {
-        const dentistId = req.query.dentistId || (req.user ? req.user.id : null);
+        const rawDentistId = req.query.dentistId;
+        const dentistId = (rawDentistId && String(rawDentistId).trim().length > 0) ? String(rawDentistId).trim() : (req.user ? req.user.id : null);
         
         let docUser = null;
         let docDentistRec = null;
         if (dentistId) {
             docUser = await User.findById(dentistId).catch(() => null);
-            docDentistRec = await Dentist.findOne({ $or: [{ _id: dentistId }, { user_id: dentistId }] }).catch(() => null);
+            docDentistRec = await Dentist.findOne({ $or: [{ _id: dentistId }, { user_id: dentistId }, { id: dentistId }] }).catch(() => null);
         }
         if (!docUser && req.user) docUser = req.user;
 
@@ -364,15 +365,19 @@ exports.getDentistAssignedRequests = async (req, res) => {
         ].filter(Boolean).map(String);
 
         let filterQuery = {};
-        if (possibleIds.length > 0) {
-            const orConditions = [
-                { assigned_doctor_id: { $in: possibleIds } },
-                { suggested_dentist_id: { $in: possibleIds } },
-            ];
-            if (docUser && docUser.name) {
-                orConditions.push({ assigned_doctor_name: new RegExp(docUser.name.replace('Dr. ', ''), 'i') });
+        if (possibleIds.length > 0 || (docUser && docUser.name)) {
+            const orConditions = [];
+            if (possibleIds.length > 0) {
+                orConditions.push({ assigned_doctor_id: { $in: possibleIds } });
+                orConditions.push({ suggested_dentist_id: { $in: possibleIds } });
             }
-            filterQuery = { $or: orConditions };
+            if (docUser && docUser.name && docUser.name.trim().length > 0) {
+                const cleanName = docUser.name.replace('Dr. ', '').trim();
+                if (cleanName.length > 0) {
+                    orConditions.push({ assigned_doctor_name: new RegExp(cleanName, 'i') });
+                }
+            }
+            filterQuery = orConditions.length > 0 ? { $or: orConditions } : {};
         } else {
             return res.json({ success: true, count: 0, requests: [] });
         }
@@ -429,4 +434,68 @@ exports.getDentistAssignedRequests = async (req, res) => {
         res.status(500).json({ success: false, message: 'Failed to fetch dentist assigned requests.' });
     }
 };
+
+// 8. DENTIST: ACCEPT PROBLEM REQUEST & CONFIRM TIME SLOT
+exports.acceptProblemRequest = async (req, res) => {
+    const { id } = req.params;
+    const { timeSlot, date, notes } = req.body;
+    const slotText = timeSlot || 'Today, 2:30 PM';
+    try {
+        const { supabaseAdmin } = require('../config/supabase');
+        
+        // 1. Update status in Supabase patient_problem_requests
+        try {
+            await supabaseAdmin.from('patient_problem_requests').update({
+                status: 'DENTIST_ACCEPTED',
+            }).eq('id', id);
+        } catch (e) {
+            console.warn('Supabase status update in acceptProblemRequest:', e.message);
+        }
+
+        // 2. Update confirmed slot if column available
+        try {
+            await supabaseAdmin.from('patient_problem_requests').update({
+                confirmed_time_slot: slotText,
+                ...(date ? { confirmed_date: date } : {})
+            }).eq('id', id);
+        } catch (_) {}
+
+        // 3. Update dentist_suggestions
+        try {
+            await supabaseAdmin.from('dentist_suggestions').update({
+                status: 'ACCEPTED'
+            }).eq('request_id', id);
+        } catch (_) {}
+
+        // 4. Notifications
+        try {
+            const problemReq = await PatientProblemRequest.findById(id);
+            const pId = problemReq ? problemReq.patient_id : 'ALL';
+            await Notification.create({
+                recipient_role: 'Patient',
+                recipient_id: pId || 'ALL',
+                title: '🎉 Consultation Accepted!',
+                message: `Your dentist has accepted the consultation. Confirmed Time Slot: ${slotText}`,
+                type: 'referral_accepted'
+            });
+            await Notification.create({
+                recipient_role: 'Admin',
+                recipient_id: 'ALL',
+                title: '✅ Doctor Accepted Referral',
+                message: `Consultation referral was accepted by dentist. Time Slot: ${slotText}`,
+                type: 'referral_accepted'
+            });
+        } catch (_) {}
+
+        res.json({
+            success: true,
+            message: 'Consultation referral accepted successfully.',
+            confirmedTimeSlot: slotText
+        });
+    } catch (err) {
+        console.error('Accept Problem Request Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to accept problem request.' });
+    }
+};
+
 

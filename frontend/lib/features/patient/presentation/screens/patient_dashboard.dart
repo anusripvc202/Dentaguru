@@ -83,6 +83,48 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     return name[0].toUpperCase() + name.substring(1);
   }
 
+  String _resolvePatientAge(PatientProfile patient) {
+    if (patient.age.trim().isNotEmpty && patient.age.trim() != 'null') {
+      return patient.age.trim();
+    }
+    try {
+      final authUser = Supabase.instance.client.auth.currentUser;
+      final metaAge = authUser?.userMetadata?['age']?.toString() ?? authUser?.userMetadata?['patient_age']?.toString();
+      if (metaAge != null && metaAge.trim().isNotEmpty && metaAge.trim() != 'null') {
+        patient.age = metaAge.trim();
+        return metaAge.trim();
+      }
+    } catch (_) {}
+    final match = _patientService.allPatients.firstWhere(
+      (p) => (p.email.isNotEmpty && p.email.toLowerCase() == patient.email.toLowerCase()) ||
+          (p.phone.isNotEmpty && p.phone == patient.phone) ||
+          (p.name.isNotEmpty && p.name.toLowerCase() == patient.name.toLowerCase()),
+      orElse: () => PatientProfile(),
+    );
+    if (match.age.trim().isNotEmpty && match.age.trim() != 'null') {
+      patient.age = match.age.trim();
+      return match.age.trim();
+    }
+    return '';
+  }
+
+  String _resolvePatientBloodGroup(PatientProfile patient) {
+    if (patient.bloodGroup.trim().isNotEmpty && patient.bloodGroup.trim() != 'null' && patient.bloodGroup != 'O Positive (O+)') {
+      return patient.bloodGroup.trim();
+    }
+    final match = _patientService.allPatients.firstWhere(
+      (p) => (p.email.isNotEmpty && p.email.toLowerCase() == patient.email.toLowerCase()) ||
+          (p.phone.isNotEmpty && p.phone == patient.phone) ||
+          (p.name.isNotEmpty && p.name.toLowerCase() == patient.name.toLowerCase()),
+      orElse: () => PatientProfile(),
+    );
+    if (match.bloodGroup.trim().isNotEmpty && match.bloodGroup.trim() != 'null') {
+      patient.bloodGroup = match.bloodGroup.trim();
+      return match.bloodGroup.trim();
+    }
+    return patient.bloodGroup.isNotEmpty ? patient.bloodGroup : 'O Positive (O+)';
+  }
+
   void _showReportProblemDialog(BuildContext context) {
     final descriptionController = TextEditingController();
     String selectedCategory = 'Toothache & Cold Sensitivity';
@@ -939,7 +981,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Text(
-                                '🩸 ${patient.bloodGroup}',
+                                '🩸 ${_resolvePatientBloodGroup(patient)}',
                                 style: const TextStyle(fontSize: 11, color: AppTheme.primaryBlue, fontWeight: FontWeight.bold),
                               ),
                             ),
@@ -951,7 +993,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Text(
-                                '🎂 ${patient.age.trim().isNotEmpty ? patient.age.trim() : "N/A"} Yrs',
+                                '🎂 ${_resolvePatientAge(patient).isNotEmpty ? _resolvePatientAge(patient) : "N/A"} Yrs',
                                 style: const TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.bold),
                               ),
                             ),
@@ -1109,7 +1151,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
 
               Builder(
                 builder: (context) {
-                  final myPatientRequests = requests.where((req) {
+                  final rawFiltered = requests.where((req) {
                     final authUser = Supabase.instance.client.auth.currentUser;
                     final authId = authUser?.id ?? '';
                     final authEmail = authUser?.email?.trim().toLowerCase() ?? '';
@@ -1139,7 +1181,23 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                     return false;
                   }).toList();
 
-                  if (myPatientRequests.isEmpty) {
+                  // Deduplicate requests by ID or category to prevent duplicate cards
+                  final uniqueMap = <String, PatientConsultationRequest>{};
+                  for (final req in rawFiltered) {
+                    final key = req.id.isNotEmpty ? req.id : '${req.patientName}_${req.problemCategory}';
+                    if (!uniqueMap.containsKey(key)) {
+                      uniqueMap[key] = req;
+                    } else {
+                      if (req.status == 'Confirmed' || req.status == 'DENTIST_ACCEPTED' || (req.assignedDoctorName != null && req.assignedDoctorName!.isNotEmpty && req.assignedDoctorName != 'null')) {
+                        uniqueMap[key] = req;
+                      }
+                    }
+                  }
+                  final myPatientRequests = uniqueMap.values.toList();
+                  myPatientRequests.sort((a, b) => b.submittedAt.compareTo(a.submittedAt));
+                  final displayRequests = myPatientRequests.take(1).toList();
+
+                  if (displayRequests.isEmpty) {
                     return Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(20),
@@ -1168,17 +1226,21 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                   }
 
                   return Column(
-                    children: myPatientRequests.map((req) {
-                    final bool isDoctorAssigned = (req.assignedDoctorName != null &&
+                    children: displayRequests.map((req) {
+                      final bool isConfirmed = req.status == 'Confirmed' ||
+                        req.status == 'Accepted' ||
+                        req.status == 'DENTIST_ACCEPTED' ||
+                        (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.isNotEmpty);
+
+                    final bool isDoctorAssigned = isConfirmed ||
+                        (req.assignedDoctorName != null &&
                         req.assignedDoctorName!.trim().isNotEmpty &&
                         req.assignedDoctorName != 'null' &&
                         req.assignedDoctorName != 'None') ||
                         req.status == 'Doctor Assigned' ||
                         req.status == 'Doctor Suggested' ||
                         req.status == 'DENTIST_ASSIGNED' ||
-                        req.status == 'DENTIST_SUGGESTED' ||
-                        req.status == 'Confirmed' ||
-                        req.status == 'Accepted';
+                        req.status == 'DENTIST_SUGGESTED';
 
                     final bool isAdminReviewed = isDoctorAssigned ||
                         req.status == 'Admin Review' ||
@@ -1193,12 +1255,14 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(18),
                         border: Border.all(
-                          color: isDoctorAssigned ? const Color(0xFF10B981) : const Color(0xFF0284C7),
+                          color: isConfirmed
+                              ? const Color(0xFF10B981)
+                              : (isDoctorAssigned ? const Color(0xFF0284C7) : const Color(0xFFCBD5E1)),
                           width: 1.5,
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: (isDoctorAssigned ? const Color(0xFF10B981) : const Color(0xFF0284C7)).withValues(alpha: 0.08),
+                            color: (isConfirmed ? const Color(0xFF10B981) : const Color(0xFF0284C7)).withValues(alpha: 0.08),
                             blurRadius: 10,
                             offset: const Offset(0, 3),
                           ),
@@ -1222,21 +1286,27 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                 decoration: BoxDecoration(
-                                  color: isDoctorAssigned
+                                  color: isConfirmed
                                       ? const Color(0xFFDCFCE7)
-                                      : (isAdminReviewed ? const Color(0xFFE0F2FE) : const Color(0xFFFEF3C7)),
+                                      : (isDoctorAssigned
+                                          ? const Color(0xFFE0F2FE)
+                                          : (isAdminReviewed ? const Color(0xFFFEF3C7) : const Color(0xFFF1F5F9))),
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Text(
-                                  isDoctorAssigned
-                                      ? '🟢 Doctor Assigned'
-                                      : (isAdminReviewed ? '🔵 Admin Reviewed' : '⏳ Pending Admin Review'),
+                                  isConfirmed
+                                      ? '🟢 Confirmed & Scheduled'
+                                      : (isDoctorAssigned
+                                          ? '🔵 Doctor Assigned'
+                                          : (isAdminReviewed ? '🟡 Admin Reviewed' : '⏳ Pending Admin Review')),
                                   style: TextStyle(
                                     fontSize: 10,
                                     fontWeight: FontWeight.bold,
-                                    color: isDoctorAssigned
+                                    color: isConfirmed
                                         ? const Color(0xFF15803D)
-                                        : (isAdminReviewed ? const Color(0xFF0369A1) : const Color(0xFFB45309)),
+                                        : (isDoctorAssigned
+                                            ? const Color(0xFF0369A1)
+                                            : (isAdminReviewed ? const Color(0xFFB45309) : const Color(0xFF64748B))),
                                   ),
                                 ),
                               ),
@@ -1249,10 +1319,10 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                           ),
                           const SizedBox(height: 12),
 
-                          // 3-Step Progress Tracker for Patient
+                          // 4-Step Progress Tracker for Patient
                           Container(
                             width: double.infinity,
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                             decoration: BoxDecoration(
                               color: const Color(0xFFF8FAFC),
                               borderRadius: BorderRadius.circular(12),
@@ -1268,6 +1338,8 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                   _buildProgressStep(title: 'Admin Review', isDone: isAdminReviewed),
                                   _buildProgressLine(isDone: isDoctorAssigned),
                                   _buildProgressStep(title: 'Doctor Assigned', isDone: isDoctorAssigned),
+                                  _buildProgressLine(isDone: isConfirmed),
+                                  _buildProgressStep(title: 'Confirmed', isDone: isConfirmed),
                                 ],
                               ),
                             ),
@@ -1278,9 +1350,12 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                             Container(
                               padding: const EdgeInsets.all(14),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFF0FDF4),
+                                color: isConfirmed ? const Color(0xFFF0FDF4) : const Color(0xFFF0F9FF),
                                 borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: const Color(0xFF86EFAC), width: 1.5),
+                                border: Border.all(
+                                  color: isConfirmed ? const Color(0xFF86EFAC) : const Color(0xFFBAE6FD),
+                                  width: 1.5,
+                                ),
                               ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1289,24 +1364,36 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                     children: [
                                       Container(
                                         padding: const EdgeInsets.all(8),
-                                        decoration: const BoxDecoration(
-                                          color: Color(0xFFDCFCE7),
+                                        decoration: BoxDecoration(
+                                          color: isConfirmed ? const Color(0xFFDCFCE7) : const Color(0xFFE0F2FE),
                                           shape: BoxShape.circle,
                                         ),
-                                        child: const Icon(Icons.verified_rounded, color: Color(0xFF16A34A), size: 20),
+                                        child: Icon(
+                                          isConfirmed ? Icons.verified_rounded : Icons.person_search_rounded,
+                                          color: isConfirmed ? const Color(0xFF16A34A) : const Color(0xFF0284C7),
+                                          size: 20,
+                                        ),
                                       ),
                                       const SizedBox(width: 10),
                                       Expanded(
                                         child: Column(
                                           crossAxisAlignment: CrossAxisAlignment.start,
                                           children: [
-                                            const Text(
-                                              '👨‍⚕️ Recommended Specialist',
-                                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF14532D)),
+                                            Text(
+                                              isConfirmed ? '🎉 Consultation Confirmed & Scheduled' : '👨‍⚕️ Assigned Specialist',
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 13,
+                                                color: isConfirmed ? const Color(0xFF14532D) : const Color(0xFF0369A1),
+                                              ),
                                             ),
                                             Text(
                                               '${req.displayDoctorName} (${req.displayDoctorSpecialty})',
-                                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.bold,
+                                                color: isConfirmed ? const Color(0xFF15803D) : AppTheme.textDark,
+                                              ),
                                             ),
                                           ],
                                         ),
@@ -1314,7 +1401,14 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                     ],
                                   ),
                                   const SizedBox(height: 6),
-                                  Text('🏥 Clinic: ${req.displayDoctorClinic} • 💰 Estimated Fee (${req.problemCategory}): \$85', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF166534))),
+                                  Text(
+                                    '🏥 Clinic: ${req.displayDoctorClinic} • 💰 Estimated Fee (${req.problemCategory}): ₹500',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: isConfirmed ? const Color(0xFF166534) : const Color(0xFF0369A1),
+                                    ),
+                                  ),
                                   if (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.isNotEmpty) ...[
                                     const SizedBox(height: 8),
                                     Container(
@@ -1337,6 +1431,12 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                           ),
                                         ],
                                       ),
+                                    ),
+                                  ] else ...[
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      '⏳ Waiting for doctor to accept referral and set time slot.',
+                                      style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: AppTheme.textMuted),
                                     ),
                                   ],
                                   if (req.adminNotes != null && req.adminNotes!.isNotEmpty) ...[
@@ -1504,20 +1604,29 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
       if (patient.name.isEmpty || patient.name == 'Patient' || requests.length <= 1) return true;
       return false;
     }).toList();
-    final assignedReq = myRequests.where((r) {
-      final hasDocName = r.assignedDoctorName != null &&
-          r.assignedDoctorName!.isNotEmpty &&
-          r.assignedDoctorName != 'null' &&
-          r.assignedDoctorName != 'None';
-      final statusUpper = r.status.toUpperCase();
-      final isAssignedOrConfirmed = statusUpper.contains('ASSIGN') ||
-          statusUpper.contains('SUGGEST') ||
-          statusUpper.contains('CONFIRM') ||
-          statusUpper.contains('ACCEPT');
-      return hasDocName || isAssignedOrConfirmed;
-    }).firstOrNull;
+    final assignedReq = myRequests.firstWhere(
+      (r) => (r.status == 'Confirmed' || r.status == 'Accepted') && r.confirmedTimeSlot != null && r.confirmedTimeSlot!.isNotEmpty,
+      orElse: () => myRequests.firstWhere(
+        (r) => r.confirmedTimeSlot != null && r.confirmedTimeSlot!.isNotEmpty,
+        orElse: () => myRequests.firstWhere(
+          (r) {
+            final hasDocName = r.assignedDoctorName != null &&
+                r.assignedDoctorName!.isNotEmpty &&
+                r.assignedDoctorName != 'null' &&
+                r.assignedDoctorName != 'None';
+            final statusUpper = r.status.toUpperCase();
+            final isAssignedOrConfirmed = statusUpper.contains('ASSIGN') ||
+                statusUpper.contains('SUGGEST') ||
+                statusUpper.contains('CONFIRM') ||
+                statusUpper.contains('ACCEPT');
+            return hasDocName || isAssignedOrConfirmed;
+          },
+          orElse: () => PatientConsultationRequest(id: '', patientName: '', patientPhone: '', problemCategory: '', problemDescription: '', severity: '', submittedAt: DateTime.now(), status: ''),
+        ),
+      ),
+    );
 
-    if (assignedReq == null) {
+    if (assignedReq.id.isEmpty) {
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(20),
@@ -1540,7 +1649,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
 
     final docName = assignedReq.assignedDoctorName ?? 'Attending Specialist';
     final clinicName = assignedReq.assignedDoctorClinic ?? '';
-    final isConfirmed = assignedReq.status == 'Doctor Suggested' || assignedReq.status == 'Confirmed';
+    final isConfirmed = assignedReq.status == 'Doctor Suggested' || assignedReq.status == 'Confirmed' || assignedReq.status == 'Accepted';
 
     return Container(
       decoration: BoxDecoration(
@@ -1579,7 +1688,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                           Text(
                             (assignedReq.confirmedTimeSlot != null && assignedReq.confirmedTimeSlot!.isNotEmpty)
                                 ? assignedReq.confirmedTimeSlot!
-                                : 'Today • 02:30 PM',
+                                : 'Slot Pending Confirmation',
                             style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.textDark),
                           ),
                           const SizedBox(height: 4),
@@ -1592,7 +1701,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                               ),
                               const SizedBox(width: 4),
                               const Text(
-                                '• 💰 Fee: \$85',
+                                '• 💰 Fee: ₹500',
                                 style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
                               ),
                             ],
@@ -2122,8 +2231,8 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _buildProfileStat('Blood Group', patient.bloodGroup),
-                    _buildProfileStat('Age', '${patient.age} Yrs'),
+                    _buildProfileStat('Blood Group', _resolvePatientBloodGroup(patient)),
+                    _buildProfileStat('Age', '${_resolvePatientAge(patient).isNotEmpty ? _resolvePatientAge(patient) : "N/A"} Yrs'),
                     _buildProfileStat('Gender', patient.gender),
                   ],
                 ),

@@ -37,6 +37,9 @@ router.get('/patient/problem-requests', optionalAuth, problemRequests.getPatient
 router.get('/patient/suggested-dentists', optionalAuth, problemRequests.getSuggestedDentists);
 router.get('/dentist/assigned-requests', optionalAuth, problemRequests.getDentistAssignedRequests);
 router.get('/dentist/problem-requests', optionalAuth, problemRequests.getDentistAssignedRequests);
+router.patch('/problem-requests/:id/accept', optionalAuth, problemRequests.acceptProblemRequest);
+router.post('/problem-requests/:id/accept', optionalAuth, problemRequests.acceptProblemRequest);
+router.patch('/dentist/problem-requests/:id/accept', optionalAuth, problemRequests.acceptProblemRequest);
 
 router.get('/admin/problem-requests', optionalAuth, problemRequests.getAdminProblemRequests);
 router.patch('/admin/problem-requests/:id/review', optionalAuth, problemRequests.markAdminReviewed);

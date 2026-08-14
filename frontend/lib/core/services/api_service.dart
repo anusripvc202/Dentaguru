@@ -82,6 +82,24 @@ class ApiService {
         if (data['accessToken'] != null) {
           setAuthToken(data['accessToken']);
         }
+        // Persist profile metadata directly to Supabase DB users table
+        try {
+          final profileMeta = jsonEncode({
+            if (age != null && age.isNotEmpty) 'age': age,
+            if (bloodGroup != null && bloodGroup.isNotEmpty) 'bloodGroup': bloodGroup,
+            if (gender != null && gender.isNotEmpty) 'gender': gender,
+            if (emergencyContact != null && emergencyContact.isNotEmpty) 'emergencyContact': emergencyContact,
+            if (city != null) 'city': city,
+            if (pincode != null) 'pincode': pincode,
+            if (location != null) 'address': location,
+          });
+          await Supabase.instance.client.from('users').update({
+            'device_token': profileMeta,
+            if (city != null && city.isNotEmpty) 'city': city,
+            if (pincode != null && pincode.isNotEmpty) 'pincode': pincode,
+            if (state != null && state.isNotEmpty) 'state': state,
+          }).ilike('email', email.trim());
+        } catch (_) {}
         return {'success': true, 'data': data};
       } else {
         return {'success': false, 'message': data['message'] ?? 'Registration failed.'};
@@ -97,11 +115,17 @@ class ApiService {
             'name': name.trim(),
             'role': role,
             'phone': phone.trim(),
+            if (age != null && age.isNotEmpty) 'age': age,
+            if (gender != null && gender.isNotEmpty) 'gender': gender,
+            if (bloodGroup != null && bloodGroup.isNotEmpty) 'bloodGroup': bloodGroup,
+            if (emergencyContact != null && emergencyContact.isNotEmpty) 'emergencyContact': emergencyContact,
             if (clinicName != null) 'clinicName': clinicName,
             if (specialty != null) 'specialty': specialty,
             if (location != null) 'location': location,
             if (pincode != null) 'pincode': pincode,
             if (clinicAddress != null) 'clinicAddress': clinicAddress,
+            if (city != null) 'city': city,
+            if (state != null) 'state': state,
           },
         );
         if (res.user != null) {
@@ -110,6 +134,16 @@ class ApiService {
           }
           // Directly write patient/dentist record to Supabase DB tables
           try {
+            final profileMeta = jsonEncode({
+              if (age != null && age.isNotEmpty) 'age': age,
+              if (bloodGroup != null && bloodGroup.isNotEmpty) 'bloodGroup': bloodGroup,
+              if (gender != null && gender.isNotEmpty) 'gender': gender,
+              if (emergencyContact != null && emergencyContact.isNotEmpty) 'emergencyContact': emergencyContact,
+              if (city != null) 'city': city,
+              if (pincode != null) 'pincode': pincode,
+              if (location != null) 'address': location,
+            });
+
             final baseUserMap = {
               'id': res.user!.id,
               'name': name.trim(),
@@ -119,6 +153,7 @@ class ApiService {
               'city': city ?? '',
               'pincode': pincode ?? '',
               'state': state ?? '',
+              'device_token': profileMeta,
             };
 
             try {
@@ -130,7 +165,7 @@ class ApiService {
                 if (emergencyContact != null && emergencyContact.isNotEmpty) 'emergency_contact': emergencyContact,
               });
             } catch (_) {
-              // Schema fallback: if 'age' column does not exist in users table, upsert base valid columns
+              // Schema fallback: upsert base valid columns
               await client.from('users').upsert(baseUserMap);
             }
 
@@ -159,6 +194,10 @@ class ApiService {
                 'email': res.user!.email,
                 'name': name,
                 'role': role,
+                'age': age ?? '',
+                'bloodGroup': bloodGroup ?? 'O Positive (O+)',
+                'gender': gender ?? 'Female',
+                'emergencyContact': emergencyContact ?? phone,
                 'city': city ?? '',
                 'pincode': pincode ?? '',
               }
@@ -194,6 +233,19 @@ class ApiService {
       final data = jsonDecode(response.body);
       if (response.statusCode == 200) {
         if (data['accessToken'] != null) setAuthToken(data['accessToken']);
+        try {
+          final uRow = await Supabase.instance.client.from('users').select('device_token, city, pincode, state').ilike('email', email.trim()).maybeSingle();
+          if (uRow != null && uRow['device_token'] != null && uRow['device_token'].toString().startsWith('{')) {
+            final Map<String, dynamic> tokenMeta = jsonDecode(uRow['device_token'].toString());
+            if (data['user'] is Map<String, dynamic>) {
+              final uMap = data['user'] as Map<String, dynamic>;
+              if (uMap['age'] == null || uMap['age'].toString().isEmpty) uMap['age'] = tokenMeta['age'];
+              if (uMap['bloodGroup'] == null || uMap['bloodGroup'].toString().isEmpty) uMap['bloodGroup'] = tokenMeta['bloodGroup'];
+              if (uMap['gender'] == null || uMap['gender'].toString().isEmpty) uMap['gender'] = tokenMeta['gender'];
+              if (uMap['emergencyContact'] == null || uMap['emergencyContact'].toString().isEmpty) uMap['emergencyContact'] = tokenMeta['emergencyContact'];
+            }
+          }
+        } catch (_) {}
         return {'success': true, 'data': data};
       } else {
         return {'success': false, 'message': data['message'] ?? 'Login failed.'};
@@ -758,19 +810,21 @@ class ApiService {
 
     // 1. Always try Supabase directly first — strictly filters by logged-in patient's ID / Email
     try {
-      final List<String> conds = ['patient_id.eq.$targetId'];
-      if (currentUserEmail != null && currentUserEmail.isNotEmpty && currentUserEmail != targetId) {
-        conds.add('patient_id.eq.$currentUserEmail');
+      final uuidRegex = RegExp(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$');
+      final List<String> conds = [];
+      if (uuidRegex.hasMatch(targetId)) {
+        conds.add('patient_id.eq.$targetId');
       }
 
-      final res = await client
-          .from('patient_problem_requests')
-          .select('*')
-          .or(conds.join(','))
-          .order('created_at', ascending: false);
+      if (conds.isNotEmpty) {
+        final res = await client
+            .from('patient_problem_requests')
+            .select('*')
+            .or(conds.join(','))
+            .order('created_at', ascending: false);
 
-      // Return direct query result for this patient (even if empty, return [] so other patients' data is never leaked!)
-      return List<dynamic>.from(res);
+        return List<dynamic>.from(res);
+      }
     } catch (e) {
       debugPrint('Supabase direct fetch patient problem requests notice: $e');
     }
@@ -816,7 +870,7 @@ class ApiService {
       debugPrint('Supabase direct fetch admin problem requests notice: $e');
     }
 
-    // 2. Express Backend API fallback (merges any additional records)
+    // 2. Express Backend API fallback (merges any additional records or enriches existing items)
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}/admin/problem-requests').replace(queryParameters: {
         if (status != null && status.isNotEmpty) 'status': status,
@@ -828,10 +882,25 @@ class ApiService {
         if (list is List) {
           for (final item in list) {
             final id = (item['_id'] ?? item['id'] ?? '').toString();
-            if (id.isNotEmpty && !existingIds.contains(id)) {
-              existingIds.add(id);
-              items.add(item);
-            } else if (id.isEmpty) {
+            if (id.isNotEmpty) {
+              final existingIndex = items.indexWhere((it) => (it['id'] ?? it['_id'] ?? '').toString() == id);
+              if (existingIndex != -1) {
+                final existingMap = Map<String, dynamic>.from(items[existingIndex]);
+                if (item['assigned_doctor_name'] != null && (existingMap['assigned_doctor_name'] == null || existingMap['assigned_doctor_name'].toString().isEmpty)) {
+                  existingMap['assigned_doctor_name'] = item['assigned_doctor_name'];
+                }
+                if (item['assigned_doctor_specialty'] != null && (existingMap['assigned_doctor_specialty'] == null || existingMap['assigned_doctor_specialty'].toString().isEmpty)) {
+                  existingMap['assigned_doctor_specialty'] = item['assigned_doctor_specialty'];
+                }
+                if (item['assigned_doctor_clinic'] != null && (existingMap['assigned_doctor_clinic'] == null || existingMap['assigned_doctor_clinic'].toString().isEmpty)) {
+                  existingMap['assigned_doctor_clinic'] = item['assigned_doctor_clinic'];
+                }
+                items[existingIndex] = existingMap;
+              } else {
+                existingIds.add(id);
+                items.add(item);
+              }
+            } else {
               items.add(item);
             }
           }
@@ -846,14 +915,19 @@ class ApiService {
 
   /// Dentist: Fetch ONLY problem requests assigned to the logged-in dentist
   Future<List<dynamic>> fetchDentistAssignedRequests({String? dentistId, String? dentistName}) async {
+    final uuidRegex = RegExp(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$');
+    bool isUuid(String? s) => s != null && uuidRegex.hasMatch(s.trim());
+
     // 1. Try Supabase direct first
     try {
       final client = Supabase.instance.client;
-      final currentUserId = dentistId ?? client.auth.currentUser?.id;
+      final currentUserId = (dentistId != null && dentistId.trim().isNotEmpty)
+          ? dentistId.trim()
+          : client.auth.currentUser?.id;
       String cleanDocName = (dentistName ?? '').replaceAll('Dr. ', '').trim();
 
       String? altDentistTableId;
-      if (currentUserId != null && currentUserId.isNotEmpty) {
+      if (currentUserId != null && currentUserId.isNotEmpty && isUuid(currentUserId)) {
         try {
           final uRes = await client.from('users').select('name').eq('id', currentUserId).maybeSingle();
           if (uRes != null && uRes['name'] != null && cleanDocName.isEmpty) {
@@ -861,24 +935,20 @@ class ApiService {
           }
 
           final dRes = await client.from('dentists').select('id, user_id').eq('user_id', currentUserId).maybeSingle();
-          if (dRes != null) {
+          if (dRes != null && dRes['id'] != null) {
             altDentistTableId = dRes['id']?.toString();
           }
         } catch (_) {}
       }
 
       final idsToMatch = [
-        if (currentUserId != null && currentUserId.isNotEmpty) currentUserId,
-        if (altDentistTableId != null && altDentistTableId.isNotEmpty && altDentistTableId != currentUserId) altDentistTableId,
+        if (currentUserId != null && currentUserId.isNotEmpty && isUuid(currentUserId)) currentUserId,
+        if (altDentistTableId != null && altDentistTableId.isNotEmpty && isUuid(altDentistTableId) && altDentistTableId != currentUserId) altDentistTableId,
       ];
 
       final List<String> condList = [];
       for (final id in idsToMatch) {
         condList.add('suggested_dentist_id.eq.$id');
-        condList.add('assigned_doctor_id.eq.$id');
-      }
-      if (cleanDocName.isNotEmpty) {
-        condList.add('assigned_doctor_name.ilike.%$cleanDocName%');
       }
 
       if (condList.isNotEmpty) {
@@ -892,7 +962,7 @@ class ApiService {
         final conds = idsToMatch.map((id) => 'dentist_id.eq.$id').join(',');
         final suggRes = await client.from('dentist_suggestions').select('request_id').or(conds);
         if (suggRes.isNotEmpty) {
-          final reqIds = suggRes.map((s) => s['request_id']?.toString() ?? '').where((id) => id.isNotEmpty).toList();
+          final reqIds = suggRes.map((s) => s['request_id']?.toString() ?? '').where((id) => id.isNotEmpty && isUuid(id)).toList();
           if (reqIds.isNotEmpty) {
             final idConds = reqIds.map((id) => 'id.eq.$id').join(',');
             final res = await client.from('patient_problem_requests').select('*').or(idConds).order('created_at', ascending: false);
@@ -900,9 +970,6 @@ class ApiService {
           }
         }
       }
-
-      // If no assignments match this dentist, return clean empty list
-      return [];
     } catch (e) {
       debugPrint('Supabase direct fetch dentist assigned requests notice: $e');
     }
@@ -916,7 +983,7 @@ class ApiService {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final list = data['requests'] ?? [];
-        if (list is List) return list;
+        if (list is List && list.isNotEmpty) return list;
       }
     } catch (e) {
       debugPrint('Fetch dentist assigned requests error: $e');
@@ -930,7 +997,7 @@ class ApiService {
     try {
       final res = await Supabase.instance.client
           .from('users')
-          .select('id, name, email, phone, role, state, city, pincode, created_at')
+          .select('*')
           .ilike('role', 'Patient')
           .order('created_at', ascending: false);
       if (res.isNotEmpty) {
@@ -1068,6 +1135,31 @@ class ApiService {
     } catch (e) {
       return {'success': false, 'message': 'Failed to suggest dentist.'};
     }
+  }
+
+  /// Dentist: Accept Problem Request / Referral & Confirm Slot
+  Future<Map<String, dynamic>> acceptProblemRequest({
+    required String requestId,
+    String? timeSlot,
+    String? date,
+  }) async {
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/problem-requests/$requestId/accept');
+      final response = await http.patch(
+        url,
+        headers: _headers,
+        body: jsonEncode({
+          if (timeSlot != null) 'timeSlot': timeSlot,
+          if (date != null) 'date': date,
+        }),
+      ).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+    } catch (e) {
+      debugPrint('Accept problem request API error: $e');
+    }
+    return {'success': false};
   }
 
   /// Dentist: Accept Appointment Request [PENDING -> CONFIRMED]
