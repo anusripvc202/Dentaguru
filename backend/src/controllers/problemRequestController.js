@@ -250,34 +250,34 @@ exports.suggestDentist = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Problem request not found.' });
         }
 
-        let dentist = await Dentist.findOne({ id: dentistId });
+        let dentist = null;
+        if (dentistId) {
+            dentist = await Dentist.findById(dentistId).catch(() => null);
+        }
         if (!dentist && dentistId) {
-            dentist = await Dentist.findById(dentistId);
+            dentist = await Dentist.findOne({ $or: [{ id: dentistId }, { user_id: dentistId }, { _id: dentistId }] }).catch(() => null);
         }
 
-        const docName = doctorName || (dentist ? dentist.name : 'Dr. Specialist');
-        const docSpecialty = doctorSpecialty || (dentist ? (dentist.speciality || dentist.specialty) : 'Dental Specialist');
-        const docClinic = doctorClinic || (dentist ? dentist.clinicName : 'DentaGuru Clinic');
+        const resolvedDentistTableId = dentist ? dentist.id : dentistId;
+        const resolvedDentistUserId = dentist ? (dentist.user_id || dentistId) : dentistId;
 
-        // 1. Update Request Status to DENTIST_ASSIGNED with complete assigned doctor data
+        const docName = doctorName || (dentist ? (dentist.users?.name || dentist.name) : 'Dr. Specialist');
+
+        // 1. Update Request Status to DENTIST_ASSIGNED with valid native schema columns
         const updatedReq = await PatientProblemRequest.findByIdAndUpdate(id, {
             status: 'DENTIST_ASSIGNED',
-            suggested_dentist_id: dentistId,
-            assigned_doctor_id: dentistId,
-            assigned_doctor_name: docName,
-            assigned_doctor_specialty: docSpecialty,
-            assigned_doctor_clinic: docClinic,
+            suggested_dentist_id: resolvedDentistTableId,
             admin_notes: notes || 'Admin reviewed symptoms and suggested specialized dentist.'
         });
 
         // 2. Create Dentist Suggestion Record with Location Snapshot
         const adminId = req.user ? req.user.id : null;
-        const patientUserObj = await User.findById(problemReq.patient_id);
+        const patientUserObj = await User.findById(problemReq.patient_id).catch(() => null);
         await DentistSuggestion.create({
             request_id: id,
             patient_id: problemReq.patient_id,
             admin_id: adminId,
-            dentist_id: dentistId,
+            dentist_id: resolvedDentistTableId,
             patient_state: problemReq.state || patientUserObj?.state || '',
             patient_city: problemReq.city || patientUserObj?.city || '',
             patient_pincode: problemReq.pincode || patientUserObj?.pincode || '',
@@ -296,10 +296,10 @@ exports.suggestDentist = async (req, res) => {
             type: 'dentist_suggested'
         });
 
-        if (dentist) {
+        if (dentist || resolvedDentistUserId) {
             await Notification.create({
                 recipient_role: 'Dentist',
-                recipient_id: dentist.user_id || dentistId,
+                recipient_id: resolvedDentistUserId,
                 title: '📋 New Patient Referral',
                 message: `Admin suggested a patient request (${problemReq.problem_category}) to your profile.`,
                 type: 'referral_received'

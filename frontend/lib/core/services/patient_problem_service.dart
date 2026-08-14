@@ -1774,10 +1774,23 @@ class PatientProblemService extends ChangeNotifier {
     required DoctorModel doctor,
     required String adminNotes,
   }) async {
+    // Resolve valid dentist table UUID to satisfy foreign key constraints
+    String targetDentistTableId = doctor.id;
+    try {
+      final dRes = await Supabase.instance.client
+          .from('dentists')
+          .select('id')
+          .or('id.eq.${doctor.id},user_id.eq.${doctor.id}')
+          .maybeSingle();
+      if (dRes != null && dRes['id'] != null) {
+        targetDentistTableId = dRes['id'].toString();
+      }
+    } catch (_) {}
+
     for (final req in _requests) {
       if (req.id == requestId || req.id.contains(requestId) || requestId.contains(req.id)) {
         req.status = 'Doctor Assigned';
-        req.assignedDoctorId = doctor.id;
+        req.assignedDoctorId = targetDentistTableId;
         req.assignedDoctorName = doctor.name;
         req.assignedDoctorSpecialty = doctor.specialty;
         req.assignedDoctorClinic = doctor.clinicName;
@@ -1792,7 +1805,7 @@ class PatientProblemService extends ChangeNotifier {
     try {
       await ApiService().suggestDentist(
         requestId: requestId,
-        dentistId: doctor.id,
+        dentistId: targetDentistTableId,
         notes: adminNotes,
         doctorName: doctor.name,
         doctorSpecialty: doctor.specialty,
@@ -1806,7 +1819,7 @@ class PatientProblemService extends ChangeNotifier {
       // 1. Update native columns in Supabase patient_problem_requests
       await Supabase.instance.client.from('patient_problem_requests').update({
         'status': 'DENTIST_ASSIGNED',
-        'suggested_dentist_id': doctor.id,
+        'suggested_dentist_id': targetDentistTableId,
         'admin_notes': adminNotes,
       }).eq('id', requestId);
     } catch (e) {
@@ -1814,20 +1827,10 @@ class PatientProblemService extends ChangeNotifier {
     }
 
     try {
-      // Try updating extended columns if available in PostgreSQL schema
-      await Supabase.instance.client.from('patient_problem_requests').update({
-        'assigned_doctor_id': doctor.id,
-        'assigned_doctor_name': doctor.name,
-        'assigned_doctor_specialty': doctor.specialty,
-        'assigned_doctor_clinic': doctor.clinicName,
-      }).eq('id', requestId);
-    } catch (_) {}
-
-    try {
       // 2. Insert record into Supabase dentist_suggestions table
       await Supabase.instance.client.from('dentist_suggestions').insert({
         'request_id': requestId,
-        'dentist_id': doctor.id,
+        'dentist_id': targetDentistTableId,
         'status': 'SUGGESTED',
         'notes': adminNotes,
       });
@@ -2042,13 +2045,20 @@ class PatientProblemService extends ChangeNotifier {
     final cleanCity = city.trim();
     final cleanPincode = pincode.trim();
 
-    final existingDoc = _allDoctors.firstWhere((d) => d.email.trim().toLowerCase() == email.trim().toLowerCase(), orElse: () => DoctorModel(id: '', name: '', specialty: '', qualification: '', experienceYears: 0, rating: 0, reviewCount: 0, clinicName: '', phone: '', email: '', status: '', nextAvailableSlots: [], consultationFee: ''));
-    final doctorId = id.trim().isNotEmpty
-        ? id.trim()
-        : (existingDoc.id.isNotEmpty ? existingDoc.id : (Supabase.instance.client.auth.currentUser?.id ?? 'DOC-${100 + _allDoctors.length + 1}'));
+    final existingDoc = _allDoctors.firstWhere(
+      (d) => d.email.trim().toLowerCase() == email.trim().toLowerCase() || (d.userId.isNotEmpty && d.userId == id) || (d.id.isNotEmpty && d.id == id),
+      orElse: () => DoctorModel(id: '', name: '', specialty: '', qualification: '', experienceYears: 0, rating: 0, reviewCount: 0, clinicName: '', phone: '', email: '', status: '', nextAvailableSlots: [], consultationFee: ''),
+    );
+    final doctorId = existingDoc.id.isNotEmpty
+        ? existingDoc.id
+        : (id.trim().isNotEmpty ? id.trim() : (Supabase.instance.client.auth.currentUser?.id ?? 'DOC-${100 + _allDoctors.length + 1}'));
+    final doctorUserId = existingDoc.userId.isNotEmpty
+        ? existingDoc.userId
+        : (id.trim().isNotEmpty ? id.trim() : (Supabase.instance.client.auth.currentUser?.id ?? ''));
 
     final newDoctor = DoctorModel(
       id: doctorId,
+      userId: doctorUserId,
       name: formattedName.isEmpty ? (email.isNotEmpty ? email : 'Dentist') : formattedName,
       specialty: cleanSpecialty,
       qualification: qualification.trim().isEmpty ? 'BDS, MDS' : qualification.trim(),

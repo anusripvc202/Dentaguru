@@ -1088,17 +1088,29 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     final currentDocUserId = (currentDoc?.userId ?? '').trim();
     final currentDocEmail = (currentDoc?.email ?? '').trim().toLowerCase();
     final authUser = Supabase.instance.client.auth.currentUser;
-    final authUserId = authUser?.id ?? '';
-    final authEmail = authUser?.email?.trim().toLowerCase() ?? '';
+    final authUserId = (authUser?.id ?? '').trim();
+    final authEmail = (authUser?.email ?? '').trim().toLowerCase();
+
+    final myDoctorIds = <String>{
+      if (currentDocId.isNotEmpty) currentDocId,
+      if (currentDocUserId.isNotEmpty) currentDocUserId,
+      if (authUserId.isNotEmpty) authUserId,
+      if (currentDocEmail.isNotEmpty) currentDocEmail,
+      if (authEmail.isNotEmpty) authEmail,
+    };
+
+    for (final d in _patientService.allDoctors) {
+      if (myDoctorIds.contains(d.id) || (d.userId.isNotEmpty && myDoctorIds.contains(d.userId)) || (d.email.isNotEmpty && myDoctorIds.contains(d.email.toLowerCase()))) {
+        if (d.id.isNotEmpty) myDoctorIds.add(d.id);
+        if (d.userId.isNotEmpty) myDoctorIds.add(d.userId);
+        if (d.email.isNotEmpty) myDoctorIds.add(d.email.toLowerCase());
+      }
+    }
 
     bool isAssignedToMe(PatientConsultationRequest r) {
       final aId = r.assignedDoctorId?.trim();
-      if (aId != null && aId.isNotEmpty) {
-        if (currentDocId.isNotEmpty && aId == currentDocId) return true;
-        if (currentDocUserId.isNotEmpty && aId == currentDocUserId) return true;
-        if (authUserId.isNotEmpty && aId == authUserId) return true;
-        if (currentDocEmail.isNotEmpty && aId.toLowerCase() == currentDocEmail) return true;
-        if (authEmail.isNotEmpty && aId.toLowerCase() == authEmail) return true;
+      if (aId != null && aId.isNotEmpty && myDoctorIds.contains(aId)) {
+        return true;
       }
       
       final aName = r.assignedDoctorName?.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
@@ -1113,7 +1125,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
 
     // 1. Add all requests assigned directly to this dentist from backend
     for (final r in _patientService.dentistAssignedRequests) {
-      if (isAssignedToMe(r) && r.id.isNotEmpty) {
+      if (r.id.isNotEmpty) {
         final key = (r.id.startsWith('PR-'))
             ? '${r.patientName.trim().toLowerCase()}_${r.problemCategory.trim().toLowerCase()}'
             : r.id;
@@ -1986,17 +1998,29 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     final currentDocUserId = (currentDoc?.userId ?? '').trim();
     final currentDocEmail = (currentDoc?.email ?? '').trim().toLowerCase();
     final authUser = Supabase.instance.client.auth.currentUser;
-    final authUserId = authUser?.id ?? '';
-    final authEmail = authUser?.email?.trim().toLowerCase() ?? '';
+    final authUserId = (authUser?.id ?? '').trim();
+    final authEmail = (authUser?.email ?? '').trim().toLowerCase();
+
+    final myDoctorIds = <String>{
+      if (currentDocId.isNotEmpty) currentDocId,
+      if (currentDocUserId.isNotEmpty) currentDocUserId,
+      if (authUserId.isNotEmpty) authUserId,
+      if (currentDocEmail.isNotEmpty) currentDocEmail,
+      if (authEmail.isNotEmpty) authEmail,
+    };
+
+    for (final d in _patientService.allDoctors) {
+      if (myDoctorIds.contains(d.id) || (d.userId.isNotEmpty && myDoctorIds.contains(d.userId)) || (d.email.isNotEmpty && myDoctorIds.contains(d.email.toLowerCase()))) {
+        if (d.id.isNotEmpty) myDoctorIds.add(d.id);
+        if (d.userId.isNotEmpty) myDoctorIds.add(d.userId);
+        if (d.email.isNotEmpty) myDoctorIds.add(d.email.toLowerCase());
+      }
+    }
 
     bool isAssignedToMe(PatientConsultationRequest r) {
       final aId = r.assignedDoctorId?.trim();
-      if (aId != null && aId.isNotEmpty) {
-        if (currentDocId.isNotEmpty && aId == currentDocId) return true;
-        if (currentDocUserId.isNotEmpty && aId == currentDocUserId) return true;
-        if (authUserId.isNotEmpty && aId == authUserId) return true;
-        if (currentDocEmail.isNotEmpty && aId.toLowerCase() == currentDocEmail) return true;
-        if (authEmail.isNotEmpty && aId.toLowerCase() == authEmail) return true;
+      if (aId != null && aId.isNotEmpty && myDoctorIds.contains(aId)) {
+        return true;
       }
       
       final aName = r.assignedDoctorName?.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
@@ -2009,13 +2033,11 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
 
     final allPool = [
       ..._patientService.dentistAssignedRequests,
-      ..._patientService.requests,
+      ..._patientService.requests.where((r) => isAssignedToMe(r)),
     ];
     final Map<String, PatientConsultationRequest> uniquePatientMap = {};
     for (final req in allPool) {
-      if (isAssignedToMe(req)) {
-        uniquePatientMap[req.patientName.trim().toLowerCase()] = req;
-      }
+      uniquePatientMap[req.patientName.trim().toLowerCase()] = req;
     }
     final myPatients = uniquePatientMap.values.toList();
 
@@ -2099,6 +2121,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     final currentDoc = _patientService.currentDoctor;
     final currentDocName = (currentDoc?.name ?? '').replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
     final currentDocId = (currentDoc?.id ?? '').trim();
+    final currentDocUserId = (currentDoc?.userId ?? '').trim();
 
     return FutureBuilder<List<dynamic>>(
       future: ApiService().fetchMedicalRecords(),
@@ -2108,6 +2131,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
           final dName = (r['doctorName'] ?? r['doctor_name'] ?? '').toString().replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
           final dId = (r['doctorId'] ?? r['doctor_id'] ?? '').toString();
           if (currentDocId.isNotEmpty && dId == currentDocId) return true;
+          if (currentDocUserId.isNotEmpty && dId == currentDocUserId) return true;
           if (currentDocName.isNotEmpty && currentDocName != 'dentist' && dName == currentDocName) return true;
           return false;
         }).toList();

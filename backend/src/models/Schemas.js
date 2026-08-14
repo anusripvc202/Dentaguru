@@ -234,6 +234,28 @@ const Dentist = {
         }
     },
 
+    async findById(id) {
+        if (!id) return null;
+        try {
+            const isUUID = (str) => typeof str === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str.trim());
+            const str = String(id).trim();
+            if (!isUUID(str)) {
+                return await this.findOne({ $or: [{ name: str }, { email: str }] });
+            }
+            const { data, error } = await supabaseAdmin.from('dentists')
+                .select('*, users(name, email, phone, state, city, pincode), clinics(clinic_name, location)')
+                .or(`id.eq.${str},user_id.eq.${str}`)
+                .maybeSingle();
+            if (error || !data) {
+                const simple = await supabaseAdmin.from('dentists').select('*').or(`id.eq.${str},user_id.eq.${str}`).maybeSingle();
+                return simple.data || null;
+            }
+            return data;
+        } catch (_) {
+            return null;
+        }
+    },
+
     async create(dentistData) {
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
         const payload = {
@@ -252,6 +274,39 @@ const Dentist = {
 
 // 4. APPOINTMENT MODEL (Supabase PostgreSQL)
 const isUUID = (str) => typeof str === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str.trim());
+
+async function resolveDentistIds(input) {
+    if (!input) return { dentistTableId: null, userTableId: null, allIds: [] };
+    const str = String(input).trim();
+    let dentistTableId = null;
+    let userTableId = null;
+
+    if (isUUID(str)) {
+        try {
+            const { data: d } = await supabaseAdmin.from('dentists').select('id, user_id').or(`id.eq.${str},user_id.eq.${str}`).maybeSingle();
+            if (d) {
+                dentistTableId = d.id;
+                userTableId = d.user_id;
+            }
+        } catch (_) {}
+    }
+
+    if (!dentistTableId) {
+        try {
+            const { data: u } = await supabaseAdmin.from('users').select('id').or(`email.eq.${str},name.eq.${str}`).maybeSingle();
+            if (u) {
+                userTableId = u.id;
+                const { data: d } = await supabaseAdmin.from('dentists').select('id, user_id').eq('user_id', u.id).maybeSingle();
+                if (d) {
+                    dentistTableId = d.id;
+                }
+            }
+        } catch (_) {}
+    }
+
+    const allIds = [dentistTableId, userTableId, str].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
+    return { dentistTableId: dentistTableId || str, userTableId, allIds };
+}
 
 async function resolveUserUuid(input) {
     if (!input) return null;
@@ -287,21 +342,8 @@ async function resolveDentistUuid(input) {
         }
         return uuids;
     }
-    const str = String(input).trim();
-    if (isUUID(str)) return str;
-
-    try {
-        let user = await User.findOne({ name: str });
-        if (!user) user = await User.findOne({ email: str });
-        if (user) {
-            let d = await supabaseAdmin.from('dentists').select('id, user_id').eq('user_id', user.id).maybeSingle();
-            if (d && d.data && d.data.id) return d.data.id;
-            return user.id;
-        }
-    } catch (e) {
-        console.error('Error resolving dentist UUID:', e.message);
-    }
-    return null;
+    const { dentistTableId } = await resolveDentistIds(input);
+    return dentistTableId;
 }
 
 async function resolveClinicUuid(input) {
