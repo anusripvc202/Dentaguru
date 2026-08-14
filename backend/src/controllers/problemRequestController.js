@@ -169,6 +169,13 @@ exports.getAdminProblemRequests = async (req, res) => {
             let realPincode = r.pincode || (u ? u.pincode : '') || '';
             let realState = r.state || (u ? u.state : '') || '';
 
+            const d = r.suggested_dentist || {};
+            const dUser = d.users || {};
+            const dClinic = d.clinics || {};
+            const docName = dUser.name ? (dUser.name.startsWith('Dr.') ? dUser.name : `Dr. ${dUser.name}`) : (r.assigned_doctor_name || '');
+            const docSpecialty = d.speciality || d.specialty || r.assigned_doctor_specialty || 'General Dentistry';
+            const docClinic = dClinic.clinic_name || r.assigned_doctor_clinic || 'DentaGuru Care Center';
+
             return {
                 ...reqObj,
                 patientName: realName,
@@ -176,6 +183,17 @@ exports.getAdminProblemRequests = async (req, res) => {
                 city: realCity,
                 pincode: realPincode,
                 state: realState,
+                assigned_doctor_name: docName || reqObj.assigned_doctor_name,
+                assigned_doctor_specialty: docSpecialty || reqObj.assigned_doctor_specialty,
+                assigned_doctor_clinic: docClinic || reqObj.assigned_doctor_clinic,
+                dentist: {
+                    id: d.id || r.suggested_dentist_id,
+                    name: docName,
+                    specialty: docSpecialty,
+                    clinicName: docClinic,
+                    email: dUser.email || '',
+                    phone: dUser.phone || '',
+                },
                 patient: {
                     id: u ? u.id : r.patient_id,
                     name: realName,
