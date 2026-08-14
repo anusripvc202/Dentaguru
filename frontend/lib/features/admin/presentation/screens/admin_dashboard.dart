@@ -3603,16 +3603,42 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   Widget _buildDashboardPanel() {
     final Map<String, PatientConsultationRequest> uniqueMap = {};
     for (final r in _problemService.requests) {
-      final key = (r.id.isNotEmpty && !r.id.startsWith('PR-'))
-          ? r.id
-          : '${r.patientName.trim().toLowerCase()}_${r.problemCategory.trim().toLowerCase()}';
+      final pKey = (r.patientId != null && r.patientId!.isNotEmpty && !r.patientId!.startsWith('USR-'))
+          ? r.patientId!.trim().toLowerCase()
+          : (r.patientName.isNotEmpty && r.patientName.toLowerCase() != 'patient' && r.patientName != 'Patient Consultation' ? r.patientName.trim().toLowerCase() : '');
+      final catKey = r.problemCategory.trim().toLowerCase();
+      final key = (pKey.isNotEmpty && catKey.isNotEmpty) ? '${pKey}_$catKey' : r.id;
+
       if (!uniqueMap.containsKey(key)) {
         uniqueMap[key] = r;
       } else {
         final existing = uniqueMap[key]!;
-        if (r.status == 'Confirmed' || r.status == 'Doctor Assigned' || (r.assignedDoctorName != null && r.assignedDoctorName!.isNotEmpty)) {
-          uniqueMap[key] = r;
-        }
+        final hasRealUuid = r.id.isNotEmpty && !r.id.startsWith('PR-') && !r.id.startsWith('REQ-');
+        final hasAssignedDoctor = (r.assignedDoctorName != null && r.assignedDoctorName!.isNotEmpty && r.assignedDoctorName != 'null');
+        final isConfirmed = (r.status == 'Confirmed' || r.status == 'Accepted' || r.status == 'Doctor Assigned');
+
+        uniqueMap[key] = PatientConsultationRequest(
+          id: hasRealUuid ? r.id : existing.id,
+          patientId: (r.patientId != null && r.patientId!.isNotEmpty) ? r.patientId : existing.patientId,
+          patientName: (r.patientName.isNotEmpty && r.patientName != 'Patient' && r.patientName != 'Patient Consultation') ? r.patientName : existing.patientName,
+          patientPhone: r.patientPhone.isNotEmpty ? r.patientPhone : existing.patientPhone,
+          problemCategory: r.problemCategory.isNotEmpty ? r.problemCategory : existing.problemCategory,
+          problemDescription: (r.problemDescription.isNotEmpty && r.problemDescription != 'Scheduled dental consultation') ? r.problemDescription : existing.problemDescription,
+          symptoms: r.symptoms.isNotEmpty ? r.symptoms : existing.symptoms,
+          preferredLocation: (r.preferredLocation != null && r.preferredLocation!.isNotEmpty) ? r.preferredLocation : existing.preferredLocation,
+          severity: r.severity.isNotEmpty ? r.severity : existing.severity,
+          submittedAt: r.submittedAt,
+          status: (isConfirmed || r.status.isNotEmpty) ? r.status : existing.status,
+          adminNotes: (r.adminNotes != null && r.adminNotes!.isNotEmpty) ? r.adminNotes : existing.adminNotes,
+          assignedDoctorId: (r.assignedDoctorId != null && r.assignedDoctorId!.isNotEmpty) ? r.assignedDoctorId : existing.assignedDoctorId,
+          assignedDoctorName: hasAssignedDoctor ? r.assignedDoctorName : existing.assignedDoctorName,
+          assignedDoctorSpecialty: (r.assignedDoctorSpecialty != null && r.assignedDoctorSpecialty!.isNotEmpty) ? r.assignedDoctorSpecialty : existing.assignedDoctorSpecialty,
+          assignedDoctorClinic: (r.assignedDoctorClinic != null && r.assignedDoctorClinic!.isNotEmpty) ? r.assignedDoctorClinic : existing.assignedDoctorClinic,
+          confirmedTimeSlot: (r.confirmedTimeSlot != null && r.confirmedTimeSlot!.isNotEmpty) ? r.confirmedTimeSlot : existing.confirmedTimeSlot,
+          city: r.city.isNotEmpty ? r.city : existing.city,
+          pincode: r.pincode.isNotEmpty ? r.pincode : existing.pincode,
+          state: r.state.isNotEmpty ? r.state : existing.state,
+        );
       }
     }
     final requests = uniqueMap.values.toList();

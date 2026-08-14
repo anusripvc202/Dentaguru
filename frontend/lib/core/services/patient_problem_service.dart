@@ -1085,6 +1085,8 @@ class PatientProblemService extends ChangeNotifier {
         final existingIdx = _requests.indexWhere((r) =>
             r.id == prId ||
             (r.id.isNotEmpty && prId.isNotEmpty && (r.id.contains(prId) || prId.contains(r.id))) ||
+            (reqPatientId.isNotEmpty && r.patientId != null && r.patientId == reqPatientId && r.problemCategory.trim().toLowerCase() == category.trim().toLowerCase()) ||
+            (pName.isNotEmpty && pName.toLowerCase() != 'patient' && r.patientName.trim().toLowerCase() == pName.trim().toLowerCase() && r.problemCategory.trim().toLowerCase() == category.trim().toLowerCase()) ||
             (r.id.startsWith('PR-') &&
                 r.patientName.trim().toLowerCase() == pName.trim().toLowerCase() &&
                 r.problemCategory.trim().toLowerCase() == category.trim().toLowerCase()));
@@ -1129,16 +1131,42 @@ class PatientProblemService extends ChangeNotifier {
       // Final deduplication pass to ensure 0 duplicate cards exist in memory
       final Map<String, PatientConsultationRequest> deduplicated = {};
       for (final r in _requests) {
-        final key = (r.id.isNotEmpty && !r.id.startsWith('PR-'))
-            ? r.id
-            : '${r.patientName.trim().toLowerCase()}_${r.problemCategory.trim().toLowerCase()}';
+        final pKey = (r.patientId != null && r.patientId!.isNotEmpty && !r.patientId!.startsWith('USR-'))
+            ? r.patientId!.trim().toLowerCase()
+            : (r.patientName.isNotEmpty && r.patientName.toLowerCase() != 'patient' && r.patientName != 'Patient Consultation' ? r.patientName.trim().toLowerCase() : '');
+        final catKey = r.problemCategory.trim().toLowerCase();
+        final key = (pKey.isNotEmpty && catKey.isNotEmpty) ? '${pKey}_$catKey' : r.id;
+
         if (!deduplicated.containsKey(key)) {
           deduplicated[key] = r;
         } else {
           final existing = deduplicated[key]!;
-          if (r.status == 'Confirmed' || r.status == 'Accepted' || (r.assignedDoctorName != null && r.assignedDoctorName!.isNotEmpty)) {
-            deduplicated[key] = r;
-          }
+          final hasRealUuid = r.id.isNotEmpty && !r.id.startsWith('PR-') && !r.id.startsWith('REQ-');
+          final hasAssignedDoctor = (r.assignedDoctorName != null && r.assignedDoctorName!.isNotEmpty && r.assignedDoctorName != 'null');
+          final isConfirmed = (r.status == 'Confirmed' || r.status == 'Accepted' || r.status == 'Doctor Assigned');
+
+          deduplicated[key] = PatientConsultationRequest(
+            id: hasRealUuid ? r.id : existing.id,
+            patientId: (r.patientId != null && r.patientId!.isNotEmpty) ? r.patientId : existing.patientId,
+            patientName: (r.patientName.isNotEmpty && r.patientName != 'Patient' && r.patientName != 'Patient Consultation') ? r.patientName : existing.patientName,
+            patientPhone: r.patientPhone.isNotEmpty ? r.patientPhone : existing.patientPhone,
+            problemCategory: r.problemCategory.isNotEmpty ? r.problemCategory : existing.problemCategory,
+            problemDescription: (r.problemDescription.isNotEmpty && r.problemDescription != 'Scheduled dental consultation') ? r.problemDescription : existing.problemDescription,
+            symptoms: r.symptoms.isNotEmpty ? r.symptoms : existing.symptoms,
+            preferredLocation: (r.preferredLocation != null && r.preferredLocation!.isNotEmpty) ? r.preferredLocation : existing.preferredLocation,
+            severity: r.severity.isNotEmpty ? r.severity : existing.severity,
+            submittedAt: r.submittedAt,
+            status: (isConfirmed || r.status.isNotEmpty) ? r.status : existing.status,
+            adminNotes: (r.adminNotes != null && r.adminNotes!.isNotEmpty) ? r.adminNotes : existing.adminNotes,
+            assignedDoctorId: (r.assignedDoctorId != null && r.assignedDoctorId!.isNotEmpty) ? r.assignedDoctorId : existing.assignedDoctorId,
+            assignedDoctorName: hasAssignedDoctor ? r.assignedDoctorName : existing.assignedDoctorName,
+            assignedDoctorSpecialty: (r.assignedDoctorSpecialty != null && r.assignedDoctorSpecialty!.isNotEmpty) ? r.assignedDoctorSpecialty : existing.assignedDoctorSpecialty,
+            assignedDoctorClinic: (r.assignedDoctorClinic != null && r.assignedDoctorClinic!.isNotEmpty) ? r.assignedDoctorClinic : existing.assignedDoctorClinic,
+            confirmedTimeSlot: (r.confirmedTimeSlot != null && r.confirmedTimeSlot!.isNotEmpty) ? r.confirmedTimeSlot : existing.confirmedTimeSlot,
+            city: r.city.isNotEmpty ? r.city : existing.city,
+            pincode: r.pincode.isNotEmpty ? r.pincode : existing.pincode,
+            state: r.state.isNotEmpty ? r.state : existing.state,
+          );
         }
       }
       _requests.clear();
@@ -1516,9 +1544,14 @@ class PatientProblemService extends ChangeNotifier {
         final slot = item['time_slot'] ?? item['timeSlot'];
         final statusStr = (item['status'] ?? 'CONFIRMED').toString();
 
-        final existingIndex = _requests.indexWhere((r) => r.id == reqId || (r.patientName == pName && r.assignedDoctorName != null && r.confirmedTimeSlot == slot?.toString()));
+        final existingIndex = _requests.indexWhere((r) =>
+            r.id == reqId ||
+            (itemPatientId != null && itemPatientId.isNotEmpty && r.patientId != null && r.patientId == itemPatientId && r.problemCategory.trim().toLowerCase() == treatment.toString().trim().toLowerCase()) ||
+            (pName.isNotEmpty && pName.toLowerCase() != 'patient' && r.patientName.trim().toLowerCase() == pName.trim().toLowerCase() && r.problemCategory.trim().toLowerCase() == treatment.toString().trim().toLowerCase()) ||
+            (r.patientName == pName && r.assignedDoctorName != null && r.confirmedTimeSlot == slot?.toString()));
+
         if (existingIndex != -1) {
-          if (pName != 'Patient Consultation') {
+          if (pName != 'Patient Consultation' && pName != 'Patient') {
             _requests[existingIndex].patientName = pName;
           }
           if (pPhone.isNotEmpty) {
@@ -1541,12 +1574,13 @@ class PatientProblemService extends ChangeNotifier {
           _requests.add(
             PatientConsultationRequest(
               id: reqId,
+              patientId: itemPatientId,
               patientName: pName,
               patientPhone: pPhone,
               problemCategory: treatment.toString(),
               problemDescription: 'Scheduled dental consultation',
               severity: 'Moderate',
-              submittedAt: item['created_at'] != null ? DateTime.parse(item['created_at']) : DateTime.now(),
+              submittedAt: item['created_at'] != null ? DateTime.tryParse(item['created_at'].toString()) ?? DateTime.now() : DateTime.now(),
               status: statusStr,
               assignedDoctorId: itemDentistId ?? dId,
               assignedDoctorName: assignedDocName,
@@ -1559,6 +1593,50 @@ class PatientProblemService extends ChangeNotifier {
           );
         }
       }
+
+      // Final deduplication pass to ensure 0 duplicate cards exist in memory
+      final Map<String, PatientConsultationRequest> deduplicated = {};
+      for (final r in _requests) {
+        final pKey = (r.patientId != null && r.patientId!.isNotEmpty && !r.patientId!.startsWith('USR-'))
+            ? r.patientId!.trim().toLowerCase()
+            : (r.patientName.isNotEmpty && r.patientName.toLowerCase() != 'patient' && r.patientName != 'Patient Consultation' ? r.patientName.trim().toLowerCase() : '');
+        final catKey = r.problemCategory.trim().toLowerCase();
+        final key = (pKey.isNotEmpty && catKey.isNotEmpty) ? '${pKey}_$catKey' : r.id;
+
+        if (!deduplicated.containsKey(key)) {
+          deduplicated[key] = r;
+        } else {
+          final existing = deduplicated[key]!;
+          final hasRealUuid = r.id.isNotEmpty && !r.id.startsWith('PR-') && !r.id.startsWith('REQ-');
+          final hasAssignedDoctor = (r.assignedDoctorName != null && r.assignedDoctorName!.isNotEmpty && r.assignedDoctorName != 'null');
+          final isConfirmed = (r.status == 'Confirmed' || r.status == 'Accepted' || r.status == 'Doctor Assigned');
+
+          deduplicated[key] = PatientConsultationRequest(
+            id: hasRealUuid ? r.id : existing.id,
+            patientId: (r.patientId != null && r.patientId!.isNotEmpty) ? r.patientId : existing.patientId,
+            patientName: (r.patientName.isNotEmpty && r.patientName != 'Patient' && r.patientName != 'Patient Consultation') ? r.patientName : existing.patientName,
+            patientPhone: r.patientPhone.isNotEmpty ? r.patientPhone : existing.patientPhone,
+            problemCategory: r.problemCategory.isNotEmpty ? r.problemCategory : existing.problemCategory,
+            problemDescription: (r.problemDescription.isNotEmpty && r.problemDescription != 'Scheduled dental consultation') ? r.problemDescription : existing.problemDescription,
+            symptoms: r.symptoms.isNotEmpty ? r.symptoms : existing.symptoms,
+            preferredLocation: (r.preferredLocation != null && r.preferredLocation!.isNotEmpty) ? r.preferredLocation : existing.preferredLocation,
+            severity: r.severity.isNotEmpty ? r.severity : existing.severity,
+            submittedAt: r.submittedAt,
+            status: (isConfirmed || r.status.isNotEmpty) ? r.status : existing.status,
+            adminNotes: (r.adminNotes != null && r.adminNotes!.isNotEmpty) ? r.adminNotes : existing.adminNotes,
+            assignedDoctorId: (r.assignedDoctorId != null && r.assignedDoctorId!.isNotEmpty) ? r.assignedDoctorId : existing.assignedDoctorId,
+            assignedDoctorName: hasAssignedDoctor ? r.assignedDoctorName : existing.assignedDoctorName,
+            assignedDoctorSpecialty: (r.assignedDoctorSpecialty != null && r.assignedDoctorSpecialty!.isNotEmpty) ? r.assignedDoctorSpecialty : existing.assignedDoctorSpecialty,
+            assignedDoctorClinic: (r.assignedDoctorClinic != null && r.assignedDoctorClinic!.isNotEmpty) ? r.assignedDoctorClinic : existing.assignedDoctorClinic,
+            confirmedTimeSlot: (r.confirmedTimeSlot != null && r.confirmedTimeSlot!.isNotEmpty) ? r.confirmedTimeSlot : existing.confirmedTimeSlot,
+            city: r.city.isNotEmpty ? r.city : existing.city,
+            pincode: r.pincode.isNotEmpty ? r.pincode : existing.pincode,
+            state: r.state.isNotEmpty ? r.state : existing.state,
+          );
+        }
+      }
+      _requests.clear();
+      _requests.addAll(deduplicated.values);
 
       _saveToStorage();
       notifyListeners();
