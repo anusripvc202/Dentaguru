@@ -1119,8 +1119,8 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                     final patientEmailLower = patient.email.trim().toLowerCase();
 
                     // 1. Direct match by patient profile ID or authId
-                    if (authId.isNotEmpty && (req.id.contains(authId) || req.patientPhone.contains(authId))) return true;
-                    if (patient.id.isNotEmpty && (req.id.contains(patient.id) || req.patientPhone.contains(patient.id))) return true;
+                    if (authId.isNotEmpty && (req.patientId == authId || req.id.contains(authId) || req.patientPhone.contains(authId))) return true;
+                    if (patient.id.isNotEmpty && (req.patientId == patient.id || req.id.contains(patient.id) || req.patientPhone.contains(patient.id))) return true;
 
                     // 2. Direct match by email
                     if (authEmail.isNotEmpty && (reqNameLower.contains(authEmail.split('@').first) || authEmail.contains(reqNameLower))) return true;
@@ -1489,14 +1489,33 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   Widget _buildNextVisitCard() {
     final requests = _patientService.requests;
     final patient = _patientService.currentPatient;
+    final authUser = Supabase.instance.client.auth.currentUser;
+    final authId = authUser?.id ?? '';
+    final authEmail = authUser?.email?.trim().toLowerCase() ?? '';
+
     final myRequests = requests.where((r) {
+      if (r.patientId != null && r.patientId!.isNotEmpty) {
+        if (r.patientId == authId || r.patientId == patient.id) return true;
+      }
       if (patient.name.isNotEmpty && patient.name != 'Patient' && r.patientName.trim().toLowerCase() == patient.name.trim().toLowerCase()) return true;
       if (patient.name.isNotEmpty && patient.name != 'Patient' && (r.patientName.toLowerCase().contains(patient.name.toLowerCase()) || patient.name.toLowerCase().contains(r.patientName.toLowerCase()))) return true;
       if (patient.id.isNotEmpty && r.id.contains(patient.id)) return true;
-      if (patient.name.isEmpty || patient.name == 'Patient' || requests.length <= 5) return true;
+      if (authEmail.isNotEmpty && r.patientName.toLowerCase().contains(authEmail.split('@').first)) return true;
+      if (patient.name.isEmpty || patient.name == 'Patient' || requests.length <= 1) return true;
       return false;
     }).toList();
-    final assignedReq = myRequests.where((r) => r.assignedDoctorName != null && r.assignedDoctorName!.isNotEmpty && (r.status == 'Confirmed' || r.status == 'Accepted')).firstOrNull;
+    final assignedReq = myRequests.where((r) {
+      final hasDocName = r.assignedDoctorName != null &&
+          r.assignedDoctorName!.isNotEmpty &&
+          r.assignedDoctorName != 'null' &&
+          r.assignedDoctorName != 'None';
+      final statusUpper = r.status.toUpperCase();
+      final isAssignedOrConfirmed = statusUpper.contains('ASSIGN') ||
+          statusUpper.contains('SUGGEST') ||
+          statusUpper.contains('CONFIRM') ||
+          statusUpper.contains('ACCEPT');
+      return hasDocName || isAssignedOrConfirmed;
+    }).firstOrNull;
 
     if (assignedReq == null) {
       return Container(

@@ -1382,10 +1382,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                         children: [
                           Icon(Icons.person_search_rounded, size: 36, color: Colors.grey),
                           SizedBox(height: 8),
-                          Text('No Patient Consultations Yet', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          Text('No Patients Assigned Yet', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                           SizedBox(height: 4),
                           Text(
-                            'Patient consultation requests submitted by patients will appear here for your review.',
+                            'Patients assigned by Admin will appear here.',
                             style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
                             textAlign: TextAlign.center,
                           ),

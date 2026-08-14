@@ -845,7 +845,6 @@ class ApiService {
   }
 
   /// Dentist: Fetch ONLY problem requests assigned to the logged-in dentist
-  /// Dentist: Fetch ONLY problem requests assigned to the logged-in dentist
   Future<List<dynamic>> fetchDentistAssignedRequests({String? dentistId, String? dentistName}) async {
     // 1. Try Supabase direct first
     try {

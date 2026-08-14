@@ -265,6 +265,7 @@ class PatientProfile {
 /// Model representing a dental problem submitted by a patient for admin review
 class PatientConsultationRequest {
   final String id;
+  String? patientId;
   String patientName;
   String patientPhone;
   final String problemCategory;
@@ -291,6 +292,7 @@ class PatientConsultationRequest {
 
   PatientConsultationRequest({
     required this.id,
+    this.patientId,
     required this.patientName,
     required this.patientPhone,
     required this.problemCategory,
@@ -371,6 +373,8 @@ class PatientConsultationRequest {
 
   Map<String, dynamic> toJson() => {
         'id': id,
+        'patientId': patientId,
+        'patient_id': patientId,
         'patientName': patientName,
         'patientPhone': patientPhone,
         'problemCategory': problemCategory,
@@ -400,6 +404,7 @@ class PatientConsultationRequest {
     final patientObj = json['patient'] is Map ? json['patient'] : {};
     return PatientConsultationRequest(
       id: (json['id'] ?? json['_id'] ?? '').toString(),
+      patientId: (json['patientId'] ?? json['patient_id'] ?? patientObj['id'])?.toString(),
       patientName: json['patientName'] ?? json['patient_name'] ?? (patientObj['name'] ?? ''),
       patientPhone: json['patientPhone'] ?? json['patient_phone'] ?? (patientObj['phone'] ?? ''),
       problemCategory: json['problemCategory'] ?? json['problem_category'] ?? '',
@@ -657,10 +662,7 @@ class PatientProblemService extends ChangeNotifier {
         final List list = jsonDecode(reqStr);
         _requests.clear();
         for (final item in list) {
-          final req = PatientConsultationRequest.fromJson(item);
-          if (req.patientName.trim().toLowerCase() != 'anusha' && req.patientName.trim().toLowerCase() != 't') {
-            _requests.add(req);
-          }
+          _requests.add(PatientConsultationRequest.fromJson(item));
         }
       }
 
@@ -679,9 +681,7 @@ class PatientProblemService extends ChangeNotifier {
         _allPatients.clear();
         for (final item in list) {
           final p = PatientProfile.fromJson(item);
-          final pName = p.name.trim().toLowerCase();
-          final pEmail = p.email.trim().toLowerCase();
-          if (pName != 'anusha' && pName != 't' && pName != 'anusri' && !pEmail.contains('admin')) {
+          if (!p.email.toLowerCase().contains('admin')) {
             _allPatients.add(p);
           }
         }
@@ -729,6 +729,25 @@ class PatientProblemService extends ChangeNotifier {
     } catch (e) {
       debugPrint('Sync sub-admins error: $e');
     }
+  }
+
+  Future<void> clearAllDataAndStorage() async {
+    _requests.clear();
+    _dentistAssignedRequests.clear();
+    _medicalRecords.clear();
+    _allPatients.clear();
+    _allDoctors.clear();
+    _allClinics.clear();
+    _appNotifications.clear();
+    currentPatient = PatientProfile();
+    currentDoctor = null;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear();
+    } catch (_) {}
+
+    notifyListeners();
   }
 
   Future<void> syncPatientsFromApi() async {
@@ -859,10 +878,10 @@ class PatientProblemService extends ChangeNotifier {
       for (final pr in problemReqs) {
         final prId = (pr['_id'] ?? pr['id'] ?? '').toString();
         if (prId.isEmpty) continue;
+        final reqPatientId = (pr['patient_id'] ?? pr['patientId'] ?? pr['patient']?['id'])?.toString() ?? '';
 
         // ✅ If NOT admin and NOT dentist, enforce strict patient ownership verification
         if (!isAdmin && !_isDentistMode) {
-          final reqPatientId = (pr['patient_id'] ?? pr['patientId'] ?? pr['patient']?['id'])?.toString() ?? '';
           final reqPatientEmail = (pr['patient_email'] ?? pr['patientEmail'] ?? pr['patient']?['email'])?.toString() ?? '';
           final reqPatientName = (pr['patient_name'] ?? pr['patientName'] ?? pr['patient']?['name'])?.toString() ?? '';
 
@@ -943,6 +962,7 @@ class PatientProblemService extends ChangeNotifier {
         _requests.add(
           PatientConsultationRequest(
             id: prId,
+            patientId: reqPatientId.isNotEmpty ? reqPatientId : pId,
             patientName: pName,
             patientPhone: pPhone,
             problemCategory: category,
@@ -985,6 +1005,7 @@ class PatientProblemService extends ChangeNotifier {
       for (final pr in problemReqs) {
         final prId = (pr['_id'] ?? pr['id'] ?? '').toString();
         if (prId.isEmpty) continue;
+        final reqPatientId = (pr['patient_id'] ?? pr['patientId'] ?? pr['patient']?['id'])?.toString() ?? '';
         final category = (pr['problem_category'] ?? pr['problemCategory'] ?? 'Dental Issue').toString();
         final desc = (pr['problem_description'] ?? pr['problemDescription'] ?? '').toString();
         final rawStatus = (pr['status'] ?? 'SUBMITTED').toString();
@@ -1049,6 +1070,7 @@ class PatientProblemService extends ChangeNotifier {
         _dentistAssignedRequests.add(
           PatientConsultationRequest(
             id: prId,
+            patientId: reqPatientId.isNotEmpty ? reqPatientId : null,
             patientName: pName,
             patientPhone: pPhone,
             problemCategory: category,
@@ -1432,8 +1454,10 @@ class PatientProblemService extends ChangeNotifier {
 
     // Insert a temp record immediately for optimistic UI feedback
     final tempId = 'PR-${DateTime.now().millisecondsSinceEpoch}';
+    final pId = currentPatient.id.isNotEmpty ? currentPatient.id : Supabase.instance.client.auth.currentUser?.id;
     final newReq = PatientConsultationRequest(
       id: tempId,
+      patientId: pId,
       patientName: pName,
       patientPhone: pPhone,
       problemCategory: problemCategory,

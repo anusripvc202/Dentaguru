@@ -107,6 +107,8 @@ exports.getPatientProblemRequests = async (req, res) => {
 
             return {
                 ...reqObj,
+                patientId: r.patient_id || (u ? u.id : targetId),
+                patient_id: r.patient_id || (u ? u.id : targetId),
                 patientName: realName,
                 patientPhone: realPhone || (u ? u.phone : ''),
                 city: realCity,
@@ -370,6 +372,7 @@ exports.getDentistAssignedRequests = async (req, res) => {
             if (docUser && docUser.name) {
                 orConditions.push({ assigned_doctor_name: new RegExp(docUser.name.replace('Dr. ', ''), 'i') });
             }
+            filterQuery = { $or: orConditions };
         } else {
             return res.json({ success: true, count: 0, requests: [] });
         }
