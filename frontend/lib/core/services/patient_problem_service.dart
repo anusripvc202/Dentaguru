@@ -326,7 +326,8 @@ class PatientConsultationRequest {
     if (city.trim().isNotEmpty) return city.trim();
     if (allPatients.isNotEmpty) {
       final match = allPatients.firstWhere(
-        (p) => (p.name.isNotEmpty && patientName.isNotEmpty && p.name.trim().toLowerCase() == patientName.trim().toLowerCase()) ||
+        (p) => (patientId != null && patientId!.isNotEmpty && p.id == patientId) ||
+               (p.name.isNotEmpty && patientName.isNotEmpty && p.name.trim().toLowerCase() == patientName.trim().toLowerCase()) ||
                (p.phone.isNotEmpty && patientPhone.isNotEmpty && p.phone.trim() == patientPhone.trim()),
         orElse: () => PatientProfile(),
       );
@@ -339,7 +340,8 @@ class PatientConsultationRequest {
     if (pincode.trim().isNotEmpty) return pincode.trim();
     if (allPatients.isNotEmpty) {
       final match = allPatients.firstWhere(
-        (p) => (p.name.isNotEmpty && patientName.isNotEmpty && p.name.trim().toLowerCase() == patientName.trim().toLowerCase()) ||
+        (p) => (patientId != null && patientId!.isNotEmpty && p.id == patientId) ||
+               (p.name.isNotEmpty && patientName.isNotEmpty && p.name.trim().toLowerCase() == patientName.trim().toLowerCase()) ||
                (p.phone.isNotEmpty && patientPhone.isNotEmpty && p.phone.trim() == patientPhone.trim()),
         orElse: () => PatientProfile(),
       );
@@ -731,6 +733,28 @@ class PatientProblemService extends ChangeNotifier {
         }
       }
 
+      // 5b. Load Sub-Admin Session
+      final subAdminSessionStr = prefs.getString('dentaguru_sub_admin_session');
+      if (subAdminSessionStr != null && subAdminSessionStr.isNotEmpty) {
+        try {
+          final Map<String, dynamic> saMap = jsonDecode(subAdminSessionStr);
+          _isSubAdminMode = saMap['isSubAdminMode'] == true;
+          _subAdminId = (saMap['id'] ?? '').toString();
+          _subAdminName = (saMap['name'] ?? '').toString();
+          _subAdminEmail = (saMap['email'] ?? '').toString();
+          _subAdminPhone = (saMap['phone'] ?? '').toString();
+          _subAdminStatus = (saMap['status'] ?? 'ACTIVE').toString();
+          _subAdminPermissions.clear();
+          if (saMap['permissions'] is List) {
+            for (final p in saMap['permissions']) {
+              if (p != null && p.toString().trim().isNotEmpty) {
+                _subAdminPermissions.add(p.toString().trim().toUpperCase());
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
       // 6. Sync live patients, appointments, clinics, doctors, records, and requests directly from Supabase DB API
       syncAllDataFromApi();
 
@@ -742,6 +766,68 @@ class PatientProblemService extends ChangeNotifier {
 
   final List<Map<String, dynamic>> _subAdmins = [];
   List<Map<String, dynamic>> get subAdmins => List.unmodifiable(_subAdmins);
+
+  // Sub-Admin RBAC Session State
+  bool _isSubAdminMode = false;
+  final Set<String> _subAdminPermissions = {};
+  String _subAdminStatus = 'ACTIVE';
+  String _subAdminName = '';
+  String _subAdminEmail = '';
+  String _subAdminPhone = '';
+  String _subAdminId = '';
+
+  bool get isSubAdminMode => _isSubAdminMode;
+  Set<String> get subAdminPermissions => Set.unmodifiable(_subAdminPermissions);
+  String get subAdminStatus => _subAdminStatus;
+  String get subAdminName => _subAdminName;
+  String get subAdminEmail => _subAdminEmail;
+  String get subAdminPhone => _subAdminPhone;
+  String get subAdminId => _subAdminId;
+
+  bool hasPermission(String permission) {
+    if (!_isSubAdminMode) return true; // Primary admin has full access
+    if (_subAdminStatus == 'INACTIVE' || _subAdminStatus == 'DEACTIVATED') return false;
+    final pUpper = permission.trim().toUpperCase();
+    return _subAdminPermissions.contains('*') ||
+           _subAdminPermissions.contains('ALL') ||
+           _subAdminPermissions.contains(pUpper);
+  }
+
+  void setSubAdminSession({
+    required String id,
+    required String name,
+    required String email,
+    required String phone,
+    required List<String> permissions,
+    String status = 'ACTIVE',
+  }) {
+    _isSubAdminMode = true;
+    _subAdminId = id.trim();
+    _subAdminName = name.trim();
+    _subAdminEmail = email.trim();
+    _subAdminPhone = phone.trim();
+    _subAdminStatus = status.trim().toUpperCase();
+    _subAdminPermissions.clear();
+    for (final p in permissions) {
+      if (p.trim().isNotEmpty) {
+        _subAdminPermissions.add(p.trim().toUpperCase());
+      }
+    }
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  void clearSubAdminSession() {
+    _isSubAdminMode = false;
+    _subAdminId = '';
+    _subAdminName = '';
+    _subAdminEmail = '';
+    _subAdminPhone = '';
+    _subAdminStatus = 'ACTIVE';
+    _subAdminPermissions.clear();
+    _saveToStorage();
+    notifyListeners();
+  }
 
   Future<void> syncAllDataFromApi() async {
     try {
@@ -940,16 +1026,6 @@ class PatientProblemService extends ChangeNotifier {
               : await ApiService().fetchPatientProblemRequests(patientId: pId));
 
       if (problemReqs.isEmpty) {
-        if (_isDentistMode) {
-          _dentistAssignedRequests.clear();
-          _requests.removeWhere((r) => r.assignedDoctorId != null && r.assignedDoctorId!.isNotEmpty);
-          _saveToStorage();
-          notifyListeners();
-        } else if (!isAdmin) {
-          _requests.clear();
-          _saveToStorage();
-          notifyListeners();
-        }
         return;
       }
 
@@ -1001,14 +1077,41 @@ class PatientProblemService extends ChangeNotifier {
         String? confirmedSlot = pr['confirmed_time_slot']?.toString() ?? pr['confirmedTimeSlot']?.toString();
         final symptoms = (pr['symptoms'] ?? '').toString();
         final preferredLocation = (pr['preferred_location'] ?? pr['preferredLocation'] ?? '').toString();
-        final city = (pr['city'] ?? pr['patient']?['city'] ?? '').toString();
-        final pincode = (pr['pincode'] ?? pr['patient']?['pincode'] ?? '').toString();
-        final state = (pr['state'] ?? pr['patient']?['state'] ?? '').toString();
+        final patientObj = pr['patient'] is Map ? pr['patient'] : {};
+        final dentistObj = pr['dentist'] is Map ? pr['dentist'] : {};
 
-        final assignedDocId = (pr['assigned_doctor_id'] ?? pr['suggested_dentist_id'] ?? pr['dentist']?['id'])?.toString();
-        String? assignedDocName = (pr['assigned_doctor_name'] ?? pr['assignedDoctorName'] ?? pr['dentist']?['name'])?.toString();
-        String? assignedDocSpecialty = (pr['assigned_doctor_specialty'] ?? pr['assignedDoctorSpecialty'] ?? pr['dentist']?['specialty'])?.toString();
-        String? assignedDocClinic = (pr['assigned_doctor_clinic'] ?? pr['assignedDoctorClinic'] ?? pr['dentist']?['clinicName'])?.toString();
+        final city = (pr['city'] != null && pr['city'].toString().isNotEmpty
+                ? pr['city']
+                : (patientObj['city'] ?? ''))
+            .toString();
+        final pincode = (pr['pincode'] != null && pr['pincode'].toString().isNotEmpty
+                ? pr['pincode']
+                : (patientObj['pincode'] ?? ''))
+            .toString();
+        final state = (pr['state'] != null && pr['state'].toString().isNotEmpty
+                ? pr['state']
+                : (patientObj['state'] ?? ''))
+            .toString();
+
+        final assignedDocId = (pr['assigned_doctor_id'] ?? pr['suggested_dentist_id'] ?? dentistObj['id'])?.toString();
+        String? assignedDocName = (pr['assigned_doctor_name'] ?? pr['assignedDoctorName'] ?? dentistObj['name'])?.toString();
+        String? assignedDocSpecialty = (pr['assigned_doctor_specialty'] ?? pr['assignedDoctorSpecialty'] ?? dentistObj['speciality'] ?? dentistObj['specialty'])?.toString();
+        String? assignedDocClinic = (pr['assigned_doctor_clinic'] ?? pr['assignedDoctorClinic'] ?? dentistObj['clinicName'])?.toString();
+
+        if ((assignedDocName == null || assignedDocName.isEmpty || assignedDocName == 'null' || assignedDocName == 'Dr. Specialist') && dentistObj.isNotEmpty) {
+          final dUser = dentistObj['users'] is Map ? dentistObj['users'] : (dentistObj['user'] is Map ? dentistObj['user'] : {});
+          final dClinic = dentistObj['clinics'] is Map ? dentistObj['clinics'] : (dentistObj['clinic'] is Map ? dentistObj['clinic'] : {});
+          if (dUser['name'] != null && dUser['name'].toString().isNotEmpty) {
+            final dn = dUser['name'].toString().trim();
+            assignedDocName = dn.startsWith('Dr.') ? dn : 'Dr. $dn';
+          }
+          if (dentistObj['speciality'] != null && dentistObj['speciality'].toString().isNotEmpty) {
+            assignedDocSpecialty = dentistObj['speciality'].toString().trim();
+          }
+          if (dClinic['clinic_name'] != null && dClinic['clinic_name'].toString().isNotEmpty) {
+            assignedDocClinic = dClinic['clinic_name'].toString().trim();
+          }
+        }
 
         if (assignedDocName == null || assignedDocName.isEmpty || assignedDocName == 'null' || assignedDocName == 'Dr. Specialist') {
           if (assignedDocId != null && assignedDocId.isNotEmpty) {
@@ -1038,7 +1141,7 @@ class PatientProblemService extends ChangeNotifier {
         } else if (rawStatusUpper == 'DENTIST_ASSIGNED' ||
             rawStatusUpper == 'DENTIST_SUGGESTED' ||
             rawStatusUpper == 'PENDING_DENTIST_CONFIRMATION' ||
-            (assignedDocName != null && assignedDocName.isNotEmpty)) {
+            (assignedDocName.isNotEmpty)) {
           normalizedStatus = 'Doctor Assigned';
         } else if (rawStatusUpper == 'ADMIN_REVIEWED' || rawStatusUpper == 'ADMIN_REVIEW') {
           normalizedStatus = 'Admin Review';
@@ -1046,9 +1149,21 @@ class PatientProblemService extends ChangeNotifier {
           normalizedStatus = 'Submitted'; // SUBMITTED / PENDING_ADMIN_REVIEW / anything else
         }
 
-        final patientObj = pr['patient'] ?? {};
         String pName = (pr['patientName'] ?? pr['patient_name'] ?? patientObj['name'] ?? '').toString().trim();
         String pPhone = (pr['patientPhone'] ?? pr['patient_phone'] ?? patientObj['phone'] ?? '').toString().trim();
+
+        if (pName.isEmpty || pName.toLowerCase() == 'patient') {
+          if (reqPatientId.isNotEmpty) {
+            final matchById = _allPatients.firstWhere(
+              (p) => p.id == reqPatientId,
+              orElse: () => PatientProfile(name: ''),
+            );
+            if (matchById.name.isNotEmpty && matchById.name.toLowerCase() != 'patient') {
+              pName = matchById.name;
+              if (pPhone.isEmpty) pPhone = matchById.phone;
+            }
+          }
+        }
 
         if (pName.isEmpty || pName.toLowerCase() == 'patient') {
           final matchingPatient = _allPatients.firstWhere(
@@ -1660,6 +1775,19 @@ class PatientProblemService extends ChangeNotifier {
       await prefs.setString('dentaguru_all_doctors', jsonEncode(_allDoctors.map((d) => d.toJson()).toList()));
       await prefs.setString('dentaguru_all_patients', jsonEncode(_allPatients.map((p) => p.toJson()).toList()));
       await prefs.setString('dentaguru_medical_records', jsonEncode(_medicalRecords));
+      if (_isSubAdminMode) {
+        await prefs.setString('dentaguru_sub_admin_session', jsonEncode({
+          'isSubAdminMode': _isSubAdminMode,
+          'id': _subAdminId,
+          'name': _subAdminName,
+          'email': _subAdminEmail,
+          'phone': _subAdminPhone,
+          'status': _subAdminStatus,
+          'permissions': _subAdminPermissions.toList(),
+        }));
+      } else {
+        await prefs.remove('dentaguru_sub_admin_session');
+      }
     } catch (e) {
       debugPrint('Error saving PatientProblemService state to storage: $e');
     }
@@ -1701,9 +1829,6 @@ class PatientProblemService extends ChangeNotifier {
       _userPhotoCache[email.trim().toLowerCase()] = photoBytes;
     }
     final cachedPhoto = photoBytes ?? _userPhotoCache[email.trim().toLowerCase()];
-
-    // Clear old patient requests cache on user profile change
-    _requests.clear();
 
     currentPatient = PatientProfile(
       id: id.trim(),

@@ -5,6 +5,7 @@ import '../../features/patient/presentation/screens/patient_dashboard.dart';
 import '../../features/dentist/presentation/screens/dentist_timeline.dart';
 import '../../features/clinic/presentation/screens/clinic_dashboard.dart';
 import '../../features/admin/presentation/screens/admin_dashboard.dart';
+import '../../features/admin/presentation/screens/sub_admin_dashboard.dart';
 import '../../features/auth/presentation/screens/auth_screen.dart';
 
 class LoginScreen extends StatelessWidget {
@@ -55,6 +56,10 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: '/admin',
       builder: (context, state) => const AdminDashboardScreen(),
+    ),
+    GoRoute(
+      path: '/sub-admin',
+      builder: (context, state) => const SubAdminDashboardScreen(),
     ),
   ],
 );

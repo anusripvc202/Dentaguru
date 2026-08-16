@@ -7,9 +7,36 @@ const hashPassword = async (password) => {
     return await bcrypt.hash(password, salt);
 };
 
-// Helper to compare password
+// Helper to compare password (supports bcrypt hash and plaintext fallback)
 const comparePassword = async (plainPassword, hashedPassword) => {
-    return await bcrypt.compare(plainPassword, hashedPassword);
+    if (!hashedPassword) return false;
+    if (plainPassword === hashedPassword) return true;
+    try {
+        return await bcrypt.compare(plainPassword, hashedPassword);
+    } catch (_) {
+        return plainPassword === hashedPassword;
+    }
+};
+
+const PERMISSION_CONSTANTS = {
+    PATIENT_VIEW: 'PATIENT_VIEW',
+    PATIENT_ADD: 'PATIENT_ADD',
+    PATIENT_EDIT: 'PATIENT_EDIT',
+
+    DENTIST_VIEW: 'DENTIST_VIEW',
+    DENTIST_CREATE: 'DENTIST_CREATE',
+    DENTIST_EDIT: 'DENTIST_EDIT',
+
+    ASSIGNMENT_VIEW: 'ASSIGNMENT_VIEW',
+    ASSIGNMENT_CREATE: 'ASSIGNMENT_CREATE',
+
+    APPOINTMENT_VIEW: 'APPOINTMENT_VIEW',
+    APPOINTMENT_MANAGE: 'APPOINTMENT_MANAGE',
+
+    PROBLEM_VIEW: 'PROBLEM_VIEW',
+    PROBLEM_UPDATE: 'PROBLEM_UPDATE',
+
+    REPORT_VIEW: 'REPORT_VIEW',
 };
 
 // 1. USER MODEL (Supabase PostgreSQL)
@@ -21,6 +48,18 @@ const User = {
         }
         const { data, error } = await req.maybeSingle();
         if (error) throw error;
+        if (data && (data.role === 'Sub-Admin' || data.role === 'SUB_ADMIN')) {
+            if (!data.permissions || data.permissions.length === 0) {
+                data.permissions = await SubAdminPermission.getPermissionsForUser(data.id);
+            }
+            if ((!data.permissions || data.permissions.length === 0) && data.device_token && data.device_token.startsWith('{')) {
+                try {
+                    const meta = JSON.parse(data.device_token);
+                    if (meta.permissions && Array.isArray(meta.permissions)) data.permissions = meta.permissions;
+                    if (meta.status && !data.status) data.status = meta.status;
+                } catch (_) {}
+            }
+        }
         return data;
     },
 
@@ -60,6 +99,18 @@ const User = {
     async findById(id) {
         const { data, error } = await supabaseAdmin.from('users').select('*').eq('id', id).single();
         if (error) return null;
+        if (data && (data.role === 'Sub-Admin' || data.role === 'SUB_ADMIN')) {
+            if (!data.permissions || data.permissions.length === 0) {
+                data.permissions = await SubAdminPermission.getPermissionsForUser(data.id);
+            }
+            if ((!data.permissions || data.permissions.length === 0) && data.device_token && data.device_token.startsWith('{')) {
+                try {
+                    const meta = JSON.parse(data.device_token);
+                    if (meta.permissions && Array.isArray(meta.permissions)) data.permissions = meta.permissions;
+                    if (meta.status && !data.status) data.status = meta.status;
+                } catch (_) {}
+            }
+        }
         return data;
     },
 
@@ -73,24 +124,105 @@ const User = {
                 payload[key] = val;
             }
         }
-        const { data, error } = await supabaseAdmin.from('users').insert(payload).select().single();
-        if (error) {
-            console.error('❌ Supabase User Insert Error:', error.message);
-            throw error;
+        
+        let insertedData = null;
+        try {
+            const { data, error } = await supabaseAdmin.from('users').insert(payload).select().single();
+            if (error) throw error;
+            insertedData = data;
+        } catch (err) {
+            // Fallback if schema doesn't have permissions or status column yet
+            const safePayload = { ...payload };
+            delete safePayload.permissions;
+            delete safePayload.status;
+            const { data, error } = await supabaseAdmin.from('users').insert(safePayload).select().single();
+            if (error) {
+                console.error('❌ Supabase User Insert Error:', error.message);
+                throw error;
+            }
+            insertedData = data;
         }
-        return data;
+
+        if (insertedData && userData.permissions && Array.isArray(userData.permissions)) {
+            await SubAdminPermission.setPermissionsForUser(insertedData.id, userData.permissions);
+            insertedData.permissions = userData.permissions;
+        }
+
+        return insertedData;
     },
 
     async findByIdAndUpdate(id, updateData) {
         if (updateData.password && !updateData.password.startsWith('$2a$') && !updateData.password.startsWith('$2b$')) {
             updateData.password = await hashPassword(updateData.password);
         }
-        const { data, error } = await supabaseAdmin.from('users').update(updateData).eq('id', id).select().single();
-        if (error) throw error;
-        return data;
+        let updatedData = null;
+        try {
+            const { data, error } = await supabaseAdmin.from('users').update(updateData).eq('id', id).select().maybeSingle();
+            if (error) throw error;
+            updatedData = data;
+        } catch (err) {
+            const safeUpdate = { ...updateData };
+            delete safeUpdate.permissions;
+            delete safeUpdate.status;
+            if (Object.keys(safeUpdate).length > 0) {
+                const { data, error } = await supabaseAdmin.from('users').update(safeUpdate).eq('id', id).select().maybeSingle();
+                if (error) throw error;
+                updatedData = data;
+            } else {
+                updatedData = await this.findById(id);
+            }
+        }
+
+        if (!updatedData) {
+            updatedData = await this.findById(id);
+        }
+
+        if (updateData.permissions && Array.isArray(updateData.permissions)) {
+            await SubAdminPermission.setPermissionsForUser(id, updateData.permissions);
+            if (updatedData) updatedData.permissions = updateData.permissions;
+        }
+
+        return updatedData;
     },
 
     comparePassword
+};
+
+// 1b. SUB-ADMIN PERMISSIONS MODEL (Supabase PostgreSQL)
+const SubAdminPermission = {
+    async getPermissionsForUser(userId) {
+        try {
+            const { data, error } = await supabaseAdmin
+                .from('sub_admin_permissions')
+                .select('permission')
+                .eq('user_id', userId);
+            if (error || !data) return [];
+            return data.map(d => d.permission);
+        } catch (_) {
+            return [];
+        }
+    },
+
+    async setPermissionsForUser(userId, permissions = []) {
+        try {
+            await supabaseAdmin
+                .from('sub_admin_permissions')
+                .delete()
+                .eq('user_id', userId);
+
+            if (permissions && permissions.length > 0) {
+                const rows = permissions.map(p => ({
+                    user_id: userId,
+                    permission: (p || '').toString().trim().toUpperCase()
+                })).filter(r => r.permission.length > 0);
+                if (rows.length > 0) {
+                    await supabaseAdmin.from('sub_admin_permissions').insert(rows);
+                }
+            }
+        } catch (e) {
+            console.warn('⚠️ sub_admin_permissions sync warning:', e.message);
+        }
+    }
 };
 
 // 2. CLINIC MODEL (Supabase PostgreSQL)
@@ -776,6 +908,8 @@ const Notification = {
 
 module.exports = {
     User,
+    SubAdminPermission,
+    PERMISSION_CONSTANTS,
     Clinic,
     Dentist,
     Appointment,

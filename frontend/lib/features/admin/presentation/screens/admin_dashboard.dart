@@ -8,6 +8,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
+import '../../../../core/constants/permissions.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -1565,8 +1566,31 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   // ==========================================
   // PANEL: SUB-ADMIN MANAGEMENT
   // ==========================================
+  String _subAdminSearch = '';
+  String _subAdminStatusFilter = 'All'; // 'All', 'Active', 'Inactive'
+
   Widget _buildSubAdminsPanel() {
-    final subAdminList = _problemService.subAdmins;
+    final rawList = _problemService.subAdmins;
+    final subAdminList = rawList.where((sa) {
+      final name = (sa['name'] ?? '').toString().toLowerCase();
+      final email = (sa['email'] ?? '').toString().toLowerCase();
+      final phone = (sa['phone'] ?? '').toString().toLowerCase();
+      final status = (sa['status'] ?? 'ACTIVE').toString().toUpperCase();
+
+      final matchesSearch = _subAdminSearch.isEmpty ||
+          name.contains(_subAdminSearch.toLowerCase()) ||
+          email.contains(_subAdminSearch.toLowerCase()) ||
+          phone.contains(_subAdminSearch.toLowerCase());
+
+      final matchesStatus = _subAdminStatusFilter == 'All' ||
+          (_subAdminStatusFilter == 'Active' && status == 'ACTIVE') ||
+          (_subAdminStatusFilter == 'Inactive' && status != 'ACTIVE');
+
+      return matchesSearch && matchesStatus;
+    }).toList();
+
+    final activeCount = rawList.where((s) => (s['status'] ?? 'ACTIVE').toString().toUpperCase() == 'ACTIVE').length;
+    final inactiveCount = rawList.length - activeCount;
 
     return FadeTransition(
       opacity: _fadeAnimation,
@@ -1578,7 +1602,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Header
+              // Header Banner
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(18),
@@ -1602,10 +1626,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.1),
+                        color: Colors.white.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(14),
                       ),
-                      child: const Icon(Icons.supervisor_account_rounded, color: Colors.white, size: 28),
+                      child: const Icon(Icons.shield_outlined, color: Colors.white, size: 28),
                     ),
                     const SizedBox(width: 14),
                     Expanded(
@@ -1613,12 +1637,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text(
-                            '🛡️ Sub-Admin Management',
+                            '🛡️ Sub-Admin & Role-Based Access Control',
                             style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
                           ),
                           const SizedBox(height: 3),
                           Text(
-                            '${subAdminList.length} Sub-Admin${subAdminList.length == 1 ? '' : 's'} registered • Manage portal access roles',
+                            '${rawList.length} Sub-Admin${rawList.length == 1 ? '' : 's'} ($activeCount Active • $inactiveCount Deactivated)',
                             style: const TextStyle(color: Colors.white70, fontSize: 11),
                           ),
                         ],
@@ -1627,65 +1651,50 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   ],
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
 
-              // Top Action Bar
+              // Search & Status Filter Bar
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Registered Sub-Admins',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        Text(
-                          'Sub-Admins can log in to the Admin Portal with limited access',
-                          style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
+                  Expanded(
+                    child: TextField(
+                      onChanged: (v) => setState(() => _subAdminSearch = v),
+                      decoration: InputDecoration(
+                        hintText: 'Search sub-admins by name, email, phone...',
+                        prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                        filled: true,
+                        fillColor: Colors.white,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 10),
                   ElevatedButton.icon(
                     icon: const Icon(Icons.person_add_rounded, size: 16),
                     label: const Text('+ Add Sub-Admin', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF6366F1),
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                     onPressed: () => _showRegisterSubAdminModal(context),
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
 
-              // Info Banner
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF0F0FF),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFF6366F1).withValues(alpha: 0.25)),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.info_outline_rounded, size: 18, color: Color(0xFF6366F1)),
-                    SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Sub-Admins can log into the Admin Portal using the "Admin" tab with their registered email and password.',
-                        style: TextStyle(fontSize: 11, color: Color(0xFF4338CA), fontWeight: FontWeight.w500),
-                      ),
-                    ),
-                  ],
-                ),
+              // Filter Chips
+              Row(
+                children: [
+                  _buildSubAdminFilterChip('All (${rawList.length})', 'All'),
+                  const SizedBox(width: 8),
+                  _buildSubAdminFilterChip('Active ($activeCount)', 'Active'),
+                  const SizedBox(width: 8),
+                  _buildSubAdminFilterChip('Inactive ($inactiveCount)', 'Inactive'),
+                ],
               ),
               const SizedBox(height: 16),
 
@@ -1710,28 +1719,30 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         child: const Icon(Icons.supervisor_account_outlined, size: 40, color: Color(0xFF6366F1)),
                       ),
                       const SizedBox(height: 14),
-                      const Text(
-                        'No Sub-Admins Created Yet',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark),
+                      Text(
+                        rawList.isEmpty ? 'No Sub-Admins Created Yet' : 'No Sub-Admins Match Filter',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark),
                       ),
                       const SizedBox(height: 6),
                       const Text(
-                        'Click "+ Add Sub-Admin" above to create a sub-admin account.\nSub-admins can log into the Admin Portal to help manage the platform.',
+                        'Create sub-admins and assign granular permissions for patients, dentists, doctor assignments, appointments, problems, and reports.',
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 12, color: AppTheme.textMuted, height: 1.5),
                       ),
-                      const SizedBox(height: 18),
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.person_add_rounded, size: 16),
-                        label: const Text('Create First Sub-Admin', style: TextStyle(fontWeight: FontWeight.bold)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF6366F1),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      if (rawList.isEmpty) ...[
+                        const SizedBox(height: 18),
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.person_add_rounded, size: 16),
+                          label: const Text('Create First Sub-Admin', style: TextStyle(fontWeight: FontWeight.bold)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF6366F1),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          onPressed: () => _showRegisterSubAdminModal(context),
                         ),
-                        onPressed: () => _showRegisterSubAdminModal(context),
-                      ),
+                      ],
                     ],
                   ),
                 )
@@ -1740,13 +1751,25 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   itemCount: subAdminList.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  separatorBuilder: (_, __) => const SizedBox(height: 12),
                   itemBuilder: (context, index) {
                     final sa = subAdminList[index];
-                    final String saId = sa['id']?.toString() ?? '';
-                    final String name = sa['name']?.toString() ?? 'Sub-Admin';
-                    final String email = sa['email']?.toString() ?? '';
-                    final String phone = sa['phone']?.toString() ?? '';
+                    final String saId = (sa['id'] ?? '').toString();
+                    final String name = (sa['name'] ?? 'Sub-Admin').toString();
+                    final String email = (sa['email'] ?? '').toString();
+                    final String phone = (sa['phone'] ?? '').toString();
+                    final String status = (sa['status'] ?? 'ACTIVE').toString().toUpperCase();
+                    final bool isActive = status == 'ACTIVE';
+
+                    List<String> permissions = [];
+                    if (sa['permissions'] is List) {
+                      for (final p in sa['permissions']) {
+                        if (p != null && p.toString().trim().isNotEmpty) {
+                          permissions.add(p.toString().trim().toUpperCase());
+                        }
+                      }
+                    }
+
                     final initials = name
                         .trim()
                         .split(' ')
@@ -1754,12 +1777,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         .take(2)
                         .map((w) => w[0].toUpperCase())
                         .join();
+
                     return Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        border: Border.all(color: isActive ? const Color(0xFFE2E8F0) : const Color(0xFFFCA5A5)),
                         boxShadow: [
                           BoxShadow(
                             color: Colors.black.withValues(alpha: 0.03),
@@ -1768,93 +1792,137 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           ),
                         ],
                       ),
-                      child: Row(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Avatar
-                          Container(
-                            width: 48,
-                            height: 48,
-                            decoration: const BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [Color(0xFF6366F1), Color(0xFF818CF8)],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              shape: BoxShape.circle,
-                            ),
-                            child: Center(
-                              child: Text(
-                                initials.isNotEmpty ? initials : 'SA',
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          // Info
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  name,
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
-                                  overflow: TextOverflow.ellipsis,
+                          // Top Row: Avatar, Info, Status & Toggle
+                          Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 22,
+                                backgroundColor: isActive ? const Color(0xFF6366F1) : const Color(0xFF94A3B8),
+                                child: Text(
+                                  initials.isNotEmpty ? initials : 'SA',
+                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
                                 ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  email,
-                                  style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 4),
-                                Row(
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFEDE9FE),
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: const Text(
-                                        'Sub-Admin',
-                                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF6D28D9)),
-                                      ),
+                                    Row(
+                                      children: [
+                                        Flexible(
+                                          child: Text(
+                                            name,
+                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: isActive ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Text(
+                                            isActive ? '✓ Active' : '⛔ Deactivated',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                              color: isActive ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                    if (phone.isNotEmpty) ...[
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        '📞 $phone',
-                                        style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ],
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      '✉️ $email ${phone.isNotEmpty ? "• 📞 $phone" : ""}',
+                                      style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ],
                                 ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          // Badge + Delete
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFDCFCE7),
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: const Text(
-                                  '✓ Active',
-                                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF16A34A)),
-                                ),
                               ),
-                              const SizedBox(height: 8),
+                              Switch(
+                                value: isActive,
+                                activeColor: const Color(0xFF10B981),
+                                onChanged: (val) async {
+                                  final newStatus = val ? 'ACTIVE' : 'INACTIVE';
+                                  await ApiService().toggleSubAdminStatus(saId, status: newStatus);
+                                  await _problemService.syncSubAdminsFromApi();
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(val ? '✓ Sub-Admin "$name" activated.' : '⛔ Sub-Admin "$name" deactivated.'),
+                                        backgroundColor: val ? const Color(0xFF10B981) : const Color(0xFFD97706),
+                                      ),
+                                    );
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          const Divider(height: 1, color: Color(0xFFF1F5F9)),
+                          const SizedBox(height: 10),
+
+                          // Assigned Permissions Chips
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Roles:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.textMuted)),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: permissions.isEmpty
+                                    ? const Text('None assigned (Restricted)', style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Color(0xFFDC2626)))
+                                    : Wrap(
+                                        spacing: 6,
+                                        runSpacing: 6,
+                                        children: permissions.map((p) {
+                                          return Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFFEEF2FF),
+                                              borderRadius: BorderRadius.circular(8),
+                                              border: Border.all(color: const Color(0xFFC7D2FE)),
+                                            ),
+                                            child: Text(
+                                              AppPermissions.getLabel(p),
+                                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF4338CA)),
+                                            ),
+                                          );
+                                        }).toList(),
+                                      ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+
+                          // Action Buttons: Edit Permissions & Remove
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              OutlinedButton.icon(
+                                icon: const Icon(Icons.edit_rounded, size: 14),
+                                label: const Text('Edit Details & Roles', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: const Color(0xFF6366F1),
+                                  side: const BorderSide(color: Color(0xFF6366F1)),
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                                onPressed: () => _showEditSubAdminModal(context, sa),
+                              ),
+                              const SizedBox(width: 8),
                               InkWell(
                                 borderRadius: BorderRadius.circular(8),
                                 onTap: () => _confirmRemoveSubAdmin(context, saId, name),
                                 child: Container(
-                                  padding: const EdgeInsets.all(6),
+                                  padding: const EdgeInsets.all(7),
                                   decoration: BoxDecoration(
                                     color: Colors.red.withValues(alpha: 0.08),
                                     borderRadius: BorderRadius.circular(8),
@@ -1876,6 +1944,30 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     );
   }
 
+  Widget _buildSubAdminFilterChip(String label, String value) {
+    final isSelected = _subAdminStatusFilter == value;
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: () => setState(() => _subAdminStatusFilter = value),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF6366F1) : Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: isSelected ? const Color(0xFF6366F1) : const Color(0xFFE2E8F0)),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+            color: isSelected ? Colors.white : const Color(0xFF475569),
+          ),
+        ),
+      ),
+    );
+  }
+
   void _confirmRemoveSubAdmin(BuildContext context, String subAdminId, String name) {
     showDialog(
       context: context,
@@ -1886,16 +1978,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
             const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 22),
             const SizedBox(width: 8),
             Expanded(
-              child: Text('Remove $name?', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), overflow: TextOverflow.ellipsis),
+              child: Text('Delete $name?', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), overflow: TextOverflow.ellipsis),
             ),
           ],
         ),
-        content: Text('Are you sure you want to remove $name from sub-admins? They will lose admin portal access.'),
+        content: Text('Are you sure you want to permanently delete $name from Sub-Admins? They will lose all portal access.'),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
           ElevatedButton.icon(
             icon: const Icon(Icons.delete_forever_rounded, size: 16),
-            label: const Text('Remove', style: TextStyle(fontWeight: FontWeight.bold)),
+            label: const Text('Delete Sub-Admin', style: TextStyle(fontWeight: FontWeight.bold)),
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
             onPressed: () async {
               Navigator.of(ctx).pop();
@@ -1904,7 +1996,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('🗑️ $name removed from sub-admins.'),
+                    content: Text('🗑️ Sub-Admin "$name" removed successfully.'),
                     backgroundColor: Colors.red,
                   ),
                 );
@@ -1920,20 +2012,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     final nameCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
-    final deptCtrl = TextEditingController();
     final passwordCtrl = TextEditingController();
     bool showPassword = false;
     bool isLoading = false;
+    String status = 'ACTIVE';
 
-    const departments = [
-      'General Administration',
-      'Patient Support',
-      'Clinical Operations',
-      'Billing & Finance',
-      'IT & Technical',
-      'Marketing & Outreach',
-    ];
-    String selectedDept = departments.first;
+    final Set<String> selectedPerms = Set.from(AppPermissions.defaultPermissions);
 
     showDialog(
       context: context,
@@ -1945,7 +2029,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               backgroundColor: Colors.white,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
               child: Container(
-                constraints: const BoxConstraints(maxWidth: 500, maxHeight: 660),
+                constraints: const BoxConstraints(maxWidth: 580, maxHeight: 720),
                 padding: const EdgeInsets.all(22),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -1960,7 +2044,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             color: const Color(0xFF6366F1).withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: const Icon(Icons.supervisor_account_rounded, color: Color(0xFF6366F1), size: 22),
+                          child: const Icon(Icons.shield_outlined, color: Color(0xFF6366F1), size: 22),
                         ),
                         const SizedBox(width: 12),
                         const Expanded(
@@ -1973,7 +2057,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 overflow: TextOverflow.ellipsis,
                               ),
                               Text(
-                                'Sub-admin can log in via Admin Portal tab',
+                                'Configure user credentials and assign module permissions',
                                 style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -1986,7 +2070,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         ),
                       ],
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
                     const Divider(color: Color(0xFFF1F5F9)),
                     const SizedBox(height: 10),
 
@@ -2000,7 +2084,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               controller: nameCtrl,
                               decoration: InputDecoration(
                                 labelText: 'Full Name *',
-                                hintText: 'e.g. Priya Sharma',
+                                hintText: 'e.g. Rahul Sharma',
                                 prefixIcon: const Icon(Icons.person_outline_rounded, size: 18),
                                 filled: true,
                                 fillColor: const Color(0xFFF8FAFC),
@@ -2030,46 +2114,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               keyboardType: TextInputType.phone,
                               decoration: InputDecoration(
                                 labelText: 'Phone Number',
-                                hintText: '+91 99999 00000',
+                                hintText: '+91 98765 43210',
                                 prefixIcon: const Icon(Icons.phone_outlined, size: 18),
                                 filled: true,
                                 fillColor: const Color(0xFFF8FAFC),
                                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-
-                            // Department Dropdown
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF8FAFC),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: const Color(0xFFCBD5E1)),
-                              ),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.business_center_outlined, size: 18, color: AppTheme.textMuted),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: DropdownButtonHideUnderline(
-                                      child: DropdownButton<String>(
-                                        value: selectedDept,
-                                        isExpanded: true,
-                                        hint: const Text('Select Department', style: TextStyle(fontSize: 13)),
-                                        items: departments
-                                            .map((d) => DropdownMenuItem(value: d, child: Text(d, style: const TextStyle(fontSize: 13))))
-                                            .toList(),
-                                        onChanged: (val) {
-                                          if (val != null) {
-                                            setModalState(() => selectedDept = val);
-                                            deptCtrl.text = val;
-                                          }
-                                        },
-                                      ),
-                                    ),
-                                  ),
-                                ],
                               ),
                             ),
                             const SizedBox(height: 12),
@@ -2091,106 +2140,462 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                               ),
                             ),
-                            const SizedBox(height: 18),
+                            const SizedBox(height: 16),
 
-                            // Register Button
-                            SizedBox(
-                              height: 48,
-                              child: ElevatedButton.icon(
-                                icon: isLoading
-                                    ? const SizedBox(
-                                        width: 18,
-                                        height: 18,
-                                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                      )
-                                    : const Icon(Icons.check_circle_rounded, size: 18),
-                                label: Text(
-                                  isLoading ? 'Creating Account...' : 'Create Sub-Admin Account',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                                ),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF6366F1),
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                ),
-                                onPressed: isLoading
-                                    ? null
-                                    : () async {
-                                        final name = nameCtrl.text.trim();
-                                        final email = emailCtrl.text.trim();
-                                        final password = passwordCtrl.text.trim();
-                                        final phone = phoneCtrl.text.trim();
-
-                                        if (name.isEmpty || email.isEmpty || password.isEmpty) {
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            const SnackBar(
-                                              content: Text('⚠️ Please fill in Full Name, Email, and Password.'),
-                                              backgroundColor: Color(0xFFD97706),
-                                            ),
-                                          );
-                                          return;
-                                        }
-
-                                        if (password.length < 6) {
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            const SnackBar(
-                                              content: Text('⚠️ Password must be at least 6 characters.'),
-                                              backgroundColor: Color(0xFFD97706),
-                                            ),
-                                          );
-                                          return;
-                                        }
-
-                                        setModalState(() => isLoading = true);
-
-                                        try {
-                                          final res = await ApiService().createSubAdmin(
-                                            name: name,
-                                            email: email,
-                                            password: password,
-                                            phone: phone.isEmpty ? '0000000000' : phone,
-                                          );
-
-                                          await _problemService.syncSubAdminsFromApi();
-
-                                          setModalState(() => isLoading = false);
-
-                                          if (!dialogCtx.mounted) return;
-                                          Navigator.of(dialogCtx).pop();
-
-                                          if (res['success'] == true) {
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              SnackBar(
-                                                content: Text('✅ Sub-Admin "$name" created successfully! They can now log in via the Admin tab.'),
-                                                backgroundColor: const Color(0xFF10B981),
-                                                duration: const Duration(seconds: 4),
-                                              ),
-                                            );
-                                          } else {
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              SnackBar(
-                                                content: Text('⚠️ Backend notice: ${res['message'] ?? 'Unable to create Sub-Admin account.'}'),
-                                                backgroundColor: const Color(0xFFD97706),
-                                                duration: const Duration(seconds: 4),
-                                              ),
-                                            );
+                            // Permission Selector Section
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text('Module Permissions', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark)),
+                                Row(
+                                  children: [
+                                    TextButton(
+                                      child: const Text('Select All', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                      onPressed: () {
+                                        setModalState(() {
+                                          for (final g in AppPermissions.groups) {
+                                            for (final p in g.permissions) {
+                                              selectedPerms.add(p.key);
+                                            }
                                           }
-                                        } catch (e) {
-                                          setModalState(() => isLoading = false);
-                                          if (!dialogCtx.mounted) return;
-                                          Navigator.of(dialogCtx).pop();
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            SnackBar(
-                                              content: Text('⚠️ Exception during Sub-Admin creation: $e'),
-                                              backgroundColor: const Color(0xFFEF4444),
-                                            ),
-                                          );
-                                        }
+                                        });
                                       },
-                              ),
+                                    ),
+                                    TextButton(
+                                      child: const Text('Clear', style: TextStyle(fontSize: 11, color: Colors.red)),
+                                      onPressed: () => setModalState(() => selectedPerms.clear()),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
+                            const SizedBox(height: 8),
+
+                            // Groups of permissions
+                            ...AppPermissions.groups.map((group) {
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 10),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Text(group.icon, style: const TextStyle(fontSize: 14)),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            group.title,
+                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    ...group.permissions.map((perm) {
+                                      final isChecked = selectedPerms.contains(perm.key);
+                                      return CheckboxListTile(
+                                        dense: true,
+                                        contentPadding: EdgeInsets.zero,
+                                        title: Text(perm.label, style: const TextStyle(fontSize: 12)),
+                                        value: isChecked,
+                                        activeColor: const Color(0xFF6366F1),
+                                        onChanged: (val) {
+                                          setModalState(() {
+                                            if (val == true) {
+                                              selectedPerms.add(perm.key);
+                                            } else {
+                                              selectedPerms.remove(perm.key);
+                                            }
+                                          });
+                                        },
+                                      );
+                                    }),
+                                  ],
+                                ),
+                              );
+                            }),
                           ],
                         ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Submit Button
+                    SizedBox(
+                      height: 48,
+                      child: ElevatedButton.icon(
+                        icon: isLoading
+                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.check_circle_rounded, size: 18),
+                        label: Text(isLoading ? 'Creating Sub-Admin...' : 'Create Sub-Admin Account', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF6366F1),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: isLoading
+                            ? null
+                            : () async {
+                                final name = nameCtrl.text.trim();
+                                final email = emailCtrl.text.trim();
+                                final password = passwordCtrl.text.trim();
+                                final phone = phoneCtrl.text.trim();
+
+                                if (name.isEmpty || email.isEmpty || password.isEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('⚠️ Please fill in Full Name, Email, and Password.'), backgroundColor: Color(0xFFD97706)),
+                                  );
+                                  return;
+                                }
+
+                                if (password.length < 6) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('⚠️ Password must be at least 6 characters.'), backgroundColor: Color(0xFFD97706)),
+                                  );
+                                  return;
+                                }
+
+                                setModalState(() => isLoading = true);
+
+                                try {
+                                  final res = await ApiService().createSubAdmin(
+                                    name: name,
+                                    email: email,
+                                    password: password,
+                                    phone: phone.isEmpty ? '0000000000' : phone,
+                                    permissions: selectedPerms.toList(),
+                                    status: status,
+                                  );
+
+                                  await _problemService.syncSubAdminsFromApi();
+                                  setModalState(() => isLoading = false);
+
+                                  if (!dialogCtx.mounted) return;
+                                  Navigator.of(dialogCtx).pop();
+
+                                  if (res['success'] == true) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('✅ Sub-Admin "$name" created successfully with ${selectedPerms.length} permissions.'),
+                                        backgroundColor: const Color(0xFF10B981),
+                                      ),
+                                    );
+                                  } else {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('⚠️ ${res['message'] ?? 'Notice during creation'}'), backgroundColor: const Color(0xFFD97706)),
+                                    );
+                                  }
+                                } catch (e) {
+                                  setModalState(() => isLoading = false);
+                                  if (!dialogCtx.mounted) return;
+                                  Navigator.of(dialogCtx).pop();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('⚠️ Error creating Sub-Admin: $e'), backgroundColor: const Color(0xFFEF4444)),
+                                  );
+                                }
+                              },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showEditSubAdminModal(BuildContext context, Map<String, dynamic> sa) {
+    final String saId = (sa['id'] ?? '').toString();
+    final nameCtrl = TextEditingController(text: (sa['name'] ?? '').toString());
+    final phoneCtrl = TextEditingController(text: (sa['phone'] ?? '').toString());
+    final passwordCtrl = TextEditingController();
+    bool showPassword = false;
+    bool isLoading = false;
+    String status = (sa['status'] ?? 'ACTIVE').toString().toUpperCase();
+
+    final Set<String> selectedPerms = {};
+    if (sa['permissions'] is List) {
+      for (final p in sa['permissions']) {
+        if (p != null && p.toString().trim().isNotEmpty) {
+          selectedPerms.add(p.toString().trim().toUpperCase());
+        }
+      }
+    }
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Dialog(
+              insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+              backgroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 580, maxHeight: 720),
+                padding: const EdgeInsets.all(22),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Header
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF6366F1).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.edit_rounded, color: Color(0xFF6366F1), size: 22),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Edit ${nameCtrl.text.isNotEmpty ? nameCtrl.text : "Sub-Admin"}',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textDark),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                '${sa['email']} • Update details and assigned roles',
+                                style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded, color: AppTheme.textMuted),
+                          onPressed: () => Navigator.of(dialogCtx).pop(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    const Divider(color: Color(0xFFF1F5F9)),
+                    const SizedBox(height: 10),
+
+                    Expanded(
+                      child: SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // Full Name
+                            TextField(
+                              controller: nameCtrl,
+                              decoration: InputDecoration(
+                                labelText: 'Full Name',
+                                prefixIcon: const Icon(Icons.person_outline_rounded, size: 18),
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+
+                            // Phone
+                            TextField(
+                              controller: phoneCtrl,
+                              keyboardType: TextInputType.phone,
+                              decoration: InputDecoration(
+                                labelText: 'Phone Number',
+                                prefixIcon: const Icon(Icons.phone_outlined, size: 18),
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+
+                            // New Password (Optional)
+                            TextField(
+                              controller: passwordCtrl,
+                              obscureText: !showPassword,
+                              decoration: InputDecoration(
+                                labelText: 'Reset Password (Leave blank to keep unchanged)',
+                                hintText: 'New password',
+                                prefixIcon: const Icon(Icons.lock_outline_rounded, size: 18),
+                                suffixIcon: IconButton(
+                                  icon: Icon(showPassword ? Icons.visibility_off_rounded : Icons.visibility_rounded, size: 18),
+                                  onPressed: () => setModalState(() => showPassword = !showPassword),
+                                ),
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+
+                            // Status Selector
+                            Row(
+                              children: [
+                                const Text('Account Status:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                const SizedBox(width: 12),
+                                ChoiceChip(
+                                  label: const Text('Active'),
+                                  selected: status == 'ACTIVE',
+                                  selectedColor: const Color(0xFFDCFCE7),
+                                  onSelected: (val) => setModalState(() => status = 'ACTIVE'),
+                                ),
+                                const SizedBox(width: 8),
+                                ChoiceChip(
+                                  label: const Text('Deactivated'),
+                                  selected: status != 'ACTIVE',
+                                  selectedColor: const Color(0xFFFEE2E2),
+                                  onSelected: (val) => setModalState(() => status = 'INACTIVE'),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+
+                            // Permission Selector
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text('Module Permissions', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark)),
+                                Row(
+                                  children: [
+                                    TextButton(
+                                      child: const Text('Select All', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                      onPressed: () {
+                                        setModalState(() {
+                                          for (final g in AppPermissions.groups) {
+                                            for (final p in g.permissions) {
+                                              selectedPerms.add(p.key);
+                                            }
+                                          }
+                                        });
+                                      },
+                                    ),
+                                    TextButton(
+                                      child: const Text('Clear', style: TextStyle(fontSize: 11, color: Colors.red)),
+                                      onPressed: () => setModalState(() => selectedPerms.clear()),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+
+                            ...AppPermissions.groups.map((group) {
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 10),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Text(group.icon, style: const TextStyle(fontSize: 14)),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            group.title,
+                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    ...group.permissions.map((perm) {
+                                      final isChecked = selectedPerms.contains(perm.key);
+                                      return CheckboxListTile(
+                                        dense: true,
+                                        contentPadding: EdgeInsets.zero,
+                                        title: Text(perm.label, style: const TextStyle(fontSize: 12)),
+                                        value: isChecked,
+                                        activeColor: const Color(0xFF6366F1),
+                                        onChanged: (val) {
+                                          setModalState(() {
+                                            if (val == true) {
+                                              selectedPerms.add(perm.key);
+                                            } else {
+                                              selectedPerms.remove(perm.key);
+                                            }
+                                          });
+                                        },
+                                      );
+                                    }),
+                                  ],
+                                ),
+                              );
+                            }),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Update Button
+                    SizedBox(
+                      height: 48,
+                      child: ElevatedButton.icon(
+                        icon: isLoading
+                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.save_rounded, size: 18),
+                        label: Text(isLoading ? 'Saving Changes...' : 'Save Sub-Admin Changes', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF6366F1),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: isLoading
+                            ? null
+                            : () async {
+                                setModalState(() => isLoading = true);
+
+                                try {
+                                  final res = await ApiService().updateSubAdmin(
+                                    id: saId,
+                                    name: nameCtrl.text.trim(),
+                                    phone: phoneCtrl.text.trim(),
+                                    password: passwordCtrl.text.trim().isNotEmpty ? passwordCtrl.text.trim() : null,
+                                    status: status,
+                                    permissions: selectedPerms.toList(),
+                                  );
+
+                                  await _problemService.syncSubAdminsFromApi();
+                                  setModalState(() => isLoading = false);
+
+                                  if (!dialogCtx.mounted) return;
+                                  Navigator.of(dialogCtx).pop();
+
+                                  if (res['success'] == true) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('✅ Sub-Admin "${nameCtrl.text.trim()}" updated successfully.'),
+                                        backgroundColor: const Color(0xFF10B981),
+                                      ),
+                                    );
+                                  } else {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('⚠️ ${res['message'] ?? 'Notice during update'}'), backgroundColor: const Color(0xFFD97706)),
+                                    );
+                                  }
+                                } catch (e) {
+                                  setModalState(() => isLoading = false);
+                                  if (!dialogCtx.mounted) return;
+                                  Navigator.of(dialogCtx).pop();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('⚠️ Error updating Sub-Admin: $e'), backgroundColor: const Color(0xFFEF4444)),
+                                  );
+                                }
+                              },
                       ),
                     ),
                   ],
@@ -3828,16 +4233,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
                                           Text(
-                                            (req.patientName.trim().isEmpty || req.patientName.trim().toLowerCase() == 'patient')
-                                                ? (_problemService.allPatients.any((p) => p.name.isNotEmpty && p.name.toLowerCase() != 'patient')
-                                                    ? _problemService.allPatients.firstWhere((p) => p.name.isNotEmpty && p.name.toLowerCase() != 'patient').name
-                                                    : 'anusha')
-                                                : req.patientName,
+                                            req.patientName.trim().isNotEmpty && req.patientName.trim().toLowerCase() != 'patient'
+                                                ? req.patientName
+                                                : (_problemService.allPatients.any((p) => (req.patientId != null && p.id == req.patientId) || (p.name.isNotEmpty && p.name.toLowerCase() != 'patient'))
+                                                    ? _problemService.allPatients.firstWhere((p) => (req.patientId != null && p.id == req.patientId) || (p.name.isNotEmpty && p.name.toLowerCase() != 'patient')).name
+                                                    : 'Patient'),
                                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
                                             overflow: TextOverflow.ellipsis,
                                           ),
                                           Text(
-                                            '📞 Phone: ${req.patientPhone.isNotEmpty ? req.patientPhone : (_problemService.currentPatient.phone.isNotEmpty ? _problemService.currentPatient.phone : 'Not Provided')}',
+                                            '📞 Phone: ${req.patientPhone.isNotEmpty ? req.patientPhone : (_problemService.allPatients.firstWhere((p) => p.id == req.patientId || p.name == req.patientName, orElse: () => PatientProfile()).phone.isNotEmpty ? _problemService.allPatients.firstWhere((p) => p.id == req.patientId || p.name == req.patientName, orElse: () => PatientProfile()).phone : 'Not Provided')}',
                                             style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                             overflow: TextOverflow.ellipsis,
                                           ),

@@ -31,6 +31,18 @@ ALTER TABLE public.users ADD COLUMN IF NOT EXISTS age VARCHAR(20) DEFAULT '';
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS gender VARCHAR(50) DEFAULT '';
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS blood_group VARCHAR(50) DEFAULT '';
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS emergency_contact VARCHAR(50) DEFAULT '';
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'ACTIVE';
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS permissions TEXT[] DEFAULT '{}';
+
+-- 1b. SUB-ADMIN PERMISSIONS TABLE
+CREATE TABLE IF NOT EXISTS public.sub_admin_permissions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+    permission VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_sub_admin_permissions_user_id ON public.sub_admin_permissions(user_id);
 
 -- 2. CLINICS TABLE
 CREATE TABLE IF NOT EXISTS public.clinics (

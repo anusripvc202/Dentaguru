@@ -12,7 +12,7 @@ const problemRequests = require('../controllers/problemRequestController');
 const verification = require('../controllers/verificationController');
 
 // Middlewares
-const { authenticateJWT, optionalAuth, requireRole } = require('../middleware/auth');
+const { authenticateJWT, optionalAuth, requireRole, requireMainAdmin, requirePermission } = require('../middleware/auth');
 
 // ─────────────────────────────────────────────
 // 1. AUTHENTICATION ENDPOINTS
@@ -41,28 +41,30 @@ router.patch('/problem-requests/:id/accept', optionalAuth, problemRequests.accep
 router.post('/problem-requests/:id/accept', optionalAuth, problemRequests.acceptProblemRequest);
 router.patch('/dentist/problem-requests/:id/accept', optionalAuth, problemRequests.acceptProblemRequest);
 
-router.get('/admin/problem-requests', optionalAuth, problemRequests.getAdminProblemRequests);
-router.patch('/admin/problem-requests/:id/review', optionalAuth, problemRequests.markAdminReviewed);
-router.patch('/problem-requests/:id/review', optionalAuth, problemRequests.markAdminReviewed);
-router.post('/admin/problem-requests/:id/suggest-dentist', optionalAuth, problemRequests.suggestDentist);
-router.post('/problem-requests/:id/suggest-dentist', optionalAuth, problemRequests.suggestDentist);
-router.delete('/admin/problem-requests/:id', optionalAuth, problemRequests.deleteProblemRequest);
+router.get('/admin/problem-requests', optionalAuth, requirePermission('ASSIGNMENT_VIEW', ['PROBLEM_VIEW']), problemRequests.getAdminProblemRequests);
+router.patch('/admin/problem-requests/:id/review', optionalAuth, requirePermission('PROBLEM_UPDATE', ['ASSIGNMENT_CREATE']), problemRequests.markAdminReviewed);
+router.patch('/problem-requests/:id/review', optionalAuth, requirePermission('PROBLEM_UPDATE', ['ASSIGNMENT_CREATE']), problemRequests.markAdminReviewed);
+router.post('/admin/problem-requests/:id/suggest-dentist', optionalAuth, requirePermission('ASSIGNMENT_CREATE'), problemRequests.suggestDentist);
+router.post('/problem-requests/:id/suggest-dentist', optionalAuth, requirePermission('ASSIGNMENT_CREATE'), problemRequests.suggestDentist);
+router.delete('/admin/problem-requests/:id', optionalAuth, requirePermission('PROBLEM_UPDATE'), problemRequests.deleteProblemRequest);
 router.delete('/patient/problem-requests/:id', optionalAuth, problemRequests.deleteProblemRequest);
-router.get('/admin/patients', optionalAuth, auth.getPatients);
+router.get('/admin/patients', optionalAuth, requirePermission('PATIENT_VIEW'), auth.getPatients);
 router.get('/patients', optionalAuth, auth.getPatients);
 
-// Sub-Admin Management Routes
-router.post('/admin/sub-admins', optionalAuth, auth.createSubAdmin);
-router.get('/admin/sub-admins', optionalAuth, auth.getSubAdmins);
-router.delete('/admin/sub-admins/:id', optionalAuth, auth.deleteSubAdmin);
+// Sub-Admin Management Routes (Strictly Primary Main Admin Only)
+router.post('/admin/sub-admins', optionalAuth, requireMainAdmin, auth.createSubAdmin);
+router.get('/admin/sub-admins', optionalAuth, requireMainAdmin, auth.getSubAdmins);
+router.put('/admin/sub-admins/:id', optionalAuth, requireMainAdmin, auth.updateSubAdmin);
+router.patch('/admin/sub-admins/:id/status', optionalAuth, requireMainAdmin, auth.toggleSubAdminStatus);
+router.delete('/admin/sub-admins/:id', optionalAuth, requireMainAdmin, auth.deleteSubAdmin);
 
 // ─────────────────────────────────────────────
 // 3. ADMIN VERIFICATION ENDPOINTS
 // ─────────────────────────────────────────────
-router.get('/admin/dentists/verification', optionalAuth, verification.getDentistsForVerification);
-router.patch('/admin/dentists/:id/verify', optionalAuth, verification.verifyDentist);
-router.get('/admin/clinics/verification', optionalAuth, verification.getClinicsForVerification);
-router.patch('/admin/clinics/:id/verify', optionalAuth, verification.verifyClinic);
+router.get('/admin/dentists/verification', optionalAuth, requirePermission('DENTIST_VIEW'), verification.getDentistsForVerification);
+router.patch('/admin/dentists/:id/verify', optionalAuth, requirePermission('DENTIST_EDIT'), verification.verifyDentist);
+router.get('/admin/clinics/verification', optionalAuth, requirePermission('DENTIST_VIEW'), verification.getClinicsForVerification);
+router.patch('/admin/clinics/:id/verify', optionalAuth, requirePermission('DENTIST_EDIT'), verification.verifyClinic);
 
 // ─────────────────────────────────────────────
 // 4. APPOINTMENTS STATE MACHINE ENDPOINTS

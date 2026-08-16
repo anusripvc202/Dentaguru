@@ -251,6 +251,14 @@ exports.login = async (req, res) => {
         const reqRoleStr = (role || '').toString().trim().toLowerCase();
         const isSubAdminUser = userRoleStr === 'sub-admin' || userRoleStr === 'subadmin' || userRoleStr === 'sub_admin';
 
+        // Check active status for Sub-Admins
+        if (isSubAdminUser && (user.status === 'INACTIVE' || user.status === 'DEACTIVATED')) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access Denied: Your Sub-Admin account has been deactivated by the Main Admin. Please contact the administrator.'
+            });
+        }
+
         // Enforce Portal Role Matching
         if (role && role.trim().length > 0) {
             const requestedRole = role.trim().toLowerCase();
@@ -296,6 +304,12 @@ exports.login = async (req, res) => {
             } catch (_) {}
         }
 
+        let userPermissions = user.permissions || [];
+        if (isSubAdminUser && (!userPermissions || userPermissions.length === 0)) {
+            const { SubAdminPermission } = require('../models/Schemas');
+            userPermissions = await SubAdminPermission.getPermissionsForUser(user.id);
+        }
+
         const { accessToken, refreshToken } = generateTokens(user);
         await User.findByIdAndUpdate(user.id, {
             refresh_tokens: [refreshToken]
@@ -312,11 +326,12 @@ exports.login = async (req, res) => {
                 email: user.email,
                 phone: user.phone,
                 role: user.role,
+                status: user.status || 'ACTIVE',
+                permissions: userPermissions,
                 age: userAge,
                 gender: userGender,
                 bloodGroup: userBloodGroup,
                 emergencyContact: userEmergency,
-                permissions: user.permissions || [],
                 city: user.city || '',
                 pincode: user.pincode || '',
                 profilePhoto: user.biometric_token
@@ -515,7 +530,7 @@ exports.getPatients = async (req, res) => {
 
 // 10. CREATE SUB-ADMIN (Primary Admin only)
 exports.createSubAdmin = async (req, res) => {
-    const { name, email, password, phone, permissions } = req.body;
+    const { name, email, password, phone, permissions, status } = req.body;
     try {
         const normalizedEmail = (email || '').toString().trim().toLowerCase();
         if (!normalizedEmail || !password) {
@@ -534,14 +549,38 @@ exports.createSubAdmin = async (req, res) => {
             }
         }
 
+        const cleanPerms = Array.isArray(permissions)
+            ? permissions.map(p => (p || '').toString().trim().toUpperCase()).filter(p => p.length > 0)
+            : ['PATIENT_VIEW', 'DENTIST_VIEW', 'ASSIGNMENT_VIEW', 'APPOINTMENT_VIEW', 'PROBLEM_VIEW', 'REPORT_VIEW'];
+
+        const subAdminStatus = (status || 'ACTIVE').toString().trim().toUpperCase();
+
         const subAdmin = await User.create({
             name: name || 'Sub-Admin',
             email: normalizedEmail,
             password,
             phone: phone || '',
             role: 'Sub-Admin',
-            permissions: permissions || ['patients', 'dentists', 'clinics', 'appointments', 'reports']
+            status: subAdminStatus,
+            permissions: cleanPerms
         });
+
+        // Also ensure Supabase Auth User exists for Sub-Admin
+        try {
+            await supabaseAdmin.auth.admin.createUser({
+                email: normalizedEmail,
+                password: password,
+                email_confirm: true,
+                user_metadata: {
+                    name: subAdmin.name,
+                    role: 'Sub-Admin',
+                    status: subAdminStatus,
+                    permissions: cleanPerms
+                }
+            });
+        } catch (sbErr) {
+            console.log('Notice: Sub-Admin Supabase auth auto-create notice:', sbErr.message);
+        }
 
         res.status(201).json({
             success: true,
@@ -552,7 +591,8 @@ exports.createSubAdmin = async (req, res) => {
                 email: subAdmin.email,
                 phone: subAdmin.phone,
                 role: subAdmin.role,
-                permissions: subAdmin.permissions,
+                status: subAdmin.status || 'ACTIVE',
+                permissions: cleanPerms,
                 created_at: subAdmin.created_at
             }
         });
@@ -562,19 +602,34 @@ exports.createSubAdmin = async (req, res) => {
     }
 };
 
-// 11. GET ALL SUB-ADMINS
+// 11. GET ALL SUB-ADMINS (Primary Admin only)
 exports.getSubAdmins = async (req, res) => {
     try {
-        const subAdmins = await User.find({ role: 'Sub-Admin' });
-        const cleanList = subAdmins.map(s => ({
-            id: s.id,
-            name: s.name,
-            email: s.email,
-            phone: s.phone || '',
-            role: s.role || 'Sub-Admin',
-            permissions: s.permissions || ['patients', 'dentists', 'clinics', 'appointments', 'reports'],
-            created_at: s.created_at
-        }));
+        const { SubAdminPermission } = require('../models/Schemas');
+        const allUsers = await User.find();
+        const subAdmins = allUsers.filter(u => {
+            const r = (u.role || '').toLowerCase();
+            return r === 'sub-admin' || r === 'subadmin' || r === 'sub_admin';
+        });
+
+        const cleanList = [];
+        for (const s of subAdmins) {
+            let perms = s.permissions || [];
+            if (!perms || perms.length === 0) {
+                perms = await SubAdminPermission.getPermissionsForUser(s.id);
+            }
+            cleanList.push({
+                id: s.id,
+                name: s.name,
+                email: s.email,
+                phone: s.phone || '',
+                role: s.role || 'Sub-Admin',
+                status: s.status || 'ACTIVE',
+                permissions: perms,
+                created_at: s.created_at
+            });
+        }
+
         res.json({ success: true, count: cleanList.length, subAdmins: cleanList });
     } catch (err) {
         console.error('Get Sub-Admins Error:', err.message);
@@ -582,7 +637,93 @@ exports.getSubAdmins = async (req, res) => {
     }
 };
 
-// 12. DELETE SUB-ADMIN
+// 11b. UPDATE SUB-ADMIN DETAILS & PERMISSIONS (Primary Admin only)
+exports.updateSubAdmin = async (req, res) => {
+    const { id } = req.params;
+    const { name, phone, password, permissions, status } = req.body;
+    try {
+        const target = await User.findById(id);
+        if (!target) {
+            return res.status(404).json({ success: false, message: 'Sub-Admin not found.' });
+        }
+        if (target.role && target.role.toLowerCase() === 'admin') {
+            return res.status(403).json({ success: false, message: 'Cannot modify Primary Admin through Sub-Admin endpoints.' });
+        }
+
+        const updatePayload = {};
+        if (name !== undefined) updatePayload.name = name;
+        if (phone !== undefined) updatePayload.phone = phone;
+        if (status !== undefined) updatePayload.status = status.toString().trim().toUpperCase();
+        if (password && password.trim().length > 0) updatePayload.password = password;
+
+        if (permissions && Array.isArray(permissions)) {
+            const cleanPerms = permissions.map(p => (p || '').toString().trim().toUpperCase()).filter(p => p.length > 0);
+            updatePayload.permissions = cleanPerms;
+        }
+
+        const updated = await User.findByIdAndUpdate(id, updatePayload);
+
+        res.json({
+            success: true,
+            message: 'Sub-Admin updated successfully.',
+            subAdmin: {
+                id: updated.id,
+                name: updated.name,
+                email: updated.email,
+                phone: updated.phone,
+                role: updated.role,
+                status: updated.status || 'ACTIVE',
+                permissions: updated.permissions || [],
+                updated_at: updated.updated_at
+            }
+        });
+    } catch (err) {
+        console.error('Update Sub-Admin Error:', err.message);
+        res.status(500).json({ success: false, message: err.message || 'Failed to update sub-admin.' });
+    }
+};
+
+// 11c. TOGGLE SUB-ADMIN STATUS (Activate / Deactivate)
+exports.toggleSubAdminStatus = async (req, res) => {
+    const { id } = req.params;
+    const { status, is_active } = req.body;
+    try {
+        const target = await User.findById(id);
+        if (!target) {
+            return res.status(404).json({ success: false, message: 'Sub-Admin not found.' });
+        }
+        if (target.role && target.role.toLowerCase() === 'admin') {
+            return res.status(403).json({ success: false, message: 'Cannot deactivate Primary Admin.' });
+        }
+
+        let newStatus = 'ACTIVE';
+        if (status) {
+            newStatus = status.toString().trim().toUpperCase();
+        } else if (is_active !== undefined) {
+            newStatus = is_active ? 'ACTIVE' : 'INACTIVE';
+        } else {
+            newStatus = target.status === 'INACTIVE' ? 'ACTIVE' : 'INACTIVE';
+        }
+
+        const updated = await User.findByIdAndUpdate(id, { status: newStatus });
+
+        res.json({
+            success: true,
+            message: `Sub-Admin account status updated to '${newStatus}'.`,
+            subAdmin: {
+                id: updated.id,
+                name: updated.name,
+                email: updated.email,
+                status: newStatus
+            }
+        });
+    } catch (err) {
+        console.error('Toggle Sub-Admin Status Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to update Sub-Admin status.' });
+    }
+};
+
+// 12. DELETE SUB-ADMIN (Primary Admin only)
 exports.deleteSubAdmin = async (req, res) => {
     const { id } = req.params;
     try {
@@ -594,8 +735,17 @@ exports.deleteSubAdmin = async (req, res) => {
             return res.status(403).json({ success: false, message: 'Cannot delete the Primary Admin.' });
         }
 
+        const { SubAdminPermission } = require('../models/Schemas');
+        await SubAdminPermission.setPermissionsForUser(id, []);
+
         const { supabaseAdmin } = require('../config/supabase');
         await supabaseAdmin.from('users').delete().eq('id', id);
+
+        // Delete from Supabase Auth if present
+        try {
+            await supabaseAdmin.auth.admin.deleteUser(id);
+        } catch (_) {}
+
         res.json({ success: true, message: 'Sub-Admin deleted successfully.' });
     } catch (err) {
         console.error('Delete Sub-Admin Error:', err.message);
