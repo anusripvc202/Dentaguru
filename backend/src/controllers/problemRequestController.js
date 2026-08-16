@@ -376,16 +376,41 @@ exports.getDentistAssignedRequests = async (req, res) => {
         
         let docUser = null;
         let docDentistRec = null;
-        docUser = await User.findById(dentistId).catch(() => null);
+        
+        // Lookup User by ID, email, or name
+        docUser = await User.findOne({
+            $or: [
+                { id: dentistId },
+                { _id: dentistId },
+                { email: dentistId.toLowerCase() },
+                { name: dentistId },
+                { name: `Dr. ${dentistId}` }
+            ]
+        }).catch(() => null);
+        
         if (!docUser && req.user && req.user.id === dentistId) {
             docUser = req.user;
         }
-        docDentistRec = await Dentist.findOne({ $or: [{ _id: dentistId }, { user_id: dentistId }, { id: dentistId }] }).catch(() => null);
+        
+        // Lookup Dentist record by ID, user_id, or docUser.id
+        docDentistRec = await Dentist.findOne({
+            $or: [
+                { _id: dentistId },
+                { id: dentistId },
+                { user_id: dentistId },
+                ...(docUser ? [{ user_id: docUser.id }, { user_id: docUser._id }] : [])
+            ]
+        }).catch(() => null);
+
+        if (!docUser && docDentistRec && docDentistRec.user_id) {
+            docUser = await User.findById(docDentistRec.user_id).catch(() => null);
+        }
 
         const possibleIds = [
             dentistId,
             docUser ? docUser.id : null,
             docUser ? docUser._id : null,
+            docUser ? docUser.email : null,
             docDentistRec ? docDentistRec.id : null,
             docDentistRec ? docDentistRec._id : null,
             docDentistRec ? docDentistRec.user_id : null,

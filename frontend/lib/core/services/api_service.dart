@@ -983,6 +983,7 @@ class ApiService {
 
       String? altDentistTableId;
       String? altUserId;
+
       if (isUuid(currentUserId)) {
         try {
           final uRes = await client.from('users').select('name').eq('id', currentUserId).maybeSingle();
@@ -996,18 +997,30 @@ class ApiService {
             altUserId = dRes['user_id']?.toString();
           }
         } catch (_) {}
+      } else {
+        // Resolve UUIDs when dentistId is an email or doctor name
+        try {
+          final uRes = await client.from('users').select('id, name, email').or('email.ilike.$currentUserId,name.ilike.$currentUserId').maybeSingle();
+          if (uRes != null && uRes['id'] != null) {
+            final uId = uRes['id'].toString();
+            if (isUuid(uId)) {
+              altUserId = uId;
+              final dRes = await client.from('dentists').select('id, user_id').eq('user_id', uId).maybeSingle();
+              if (dRes != null) {
+                altDentistTableId = dRes['id']?.toString();
+              }
+            }
+          }
+        } catch (_) {}
       }
 
       final idsToMatch = <String>[
         if (currentUserId.isNotEmpty && isUuid(currentUserId)) currentUserId,
-        if (altDentistTableId != null && altDentistTableId.isNotEmpty && isUuid(altDentistTableId) && altDentistTableId != currentUserId) altDentistTableId,
-        if (altUserId != null && altUserId.isNotEmpty && isUuid(altUserId) && altUserId != currentUserId) altUserId,
-      ];
+        if (altDentistTableId != null && altDentistTableId.isNotEmpty && isUuid(altDentistTableId)) altDentistTableId,
+        if (altUserId != null && altUserId.isNotEmpty && isUuid(altUserId)) altUserId,
+      ].toSet().toList();
 
-      final List<String> condList = [];
-      for (final id in idsToMatch) {
-        condList.add('suggested_dentist_id.eq.$id');
-      }
+      final Map<String, dynamic> mergedRequests = {};
 
       const joinedSelect = '''
         *,
@@ -1020,24 +1033,36 @@ class ApiService {
         )
       ''';
 
-      if (condList.isNotEmpty) {
+      if (idsToMatch.isNotEmpty) {
+        final List<String> condList = [];
+        for (final id in idsToMatch) {
+          condList.add('suggested_dentist_id.eq.$id');
+        }
         final orFilter = condList.join(',');
         final res = await client.from('patient_problem_requests').select(joinedSelect).or(orFilter).order('created_at', ascending: false);
-        if (res.isNotEmpty) return List<dynamic>.from(res);
-      }
+        for (final item in res) {
+          final id = item['id']?.toString() ?? item['_id']?.toString() ?? '';
+          if (id.isNotEmpty) mergedRequests[id] = item;
+        }
 
-      // Query dentist_suggestions table in Supabase
-      if (idsToMatch.isNotEmpty) {
+        // Query dentist_suggestions table in Supabase
         final conds = idsToMatch.map((id) => 'dentist_id.eq.$id').join(',');
         final suggRes = await client.from('dentist_suggestions').select('request_id').or(conds);
         if (suggRes.isNotEmpty) {
-          final reqIds = suggRes.map((s) => s['request_id']?.toString() ?? '').where((id) => id.isNotEmpty && isUuid(id)).toList();
+          final reqIds = suggRes.map((s) => s['request_id']?.toString() ?? '').where((id) => id.isNotEmpty && isUuid(id)).toSet().toList();
           if (reqIds.isNotEmpty) {
             final idConds = reqIds.map((id) => 'id.eq.$id').join(',');
-            final res = await client.from('patient_problem_requests').select(joinedSelect).or(idConds).order('created_at', ascending: false);
-            if (res.isNotEmpty) return List<dynamic>.from(res);
+            final sRequests = await client.from('patient_problem_requests').select(joinedSelect).or(idConds).order('created_at', ascending: false);
+            for (final item in sRequests) {
+              final id = item['id']?.toString() ?? item['_id']?.toString() ?? '';
+              if (id.isNotEmpty) mergedRequests[id] = item;
+            }
           }
         }
+      }
+
+      if (mergedRequests.isNotEmpty) {
+        return mergedRequests.values.toList();
       }
     } catch (e) {
       debugPrint('Supabase direct fetch dentist assigned requests notice: $e');

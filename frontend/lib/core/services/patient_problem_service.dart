@@ -835,11 +835,13 @@ class PatientProblemService extends ChangeNotifier {
         syncPatientsFromApi(),
         syncClinicsFromApi(),
         syncDoctorsFromApi(),
+        syncMedicalRecordsFromApi(),
+        syncSubAdminsFromApi(),
+      ]);
+      await Future.wait([
         syncAppointmentsFromApi(),
         syncProblemRequestsFromApi(),
         syncDentistAssignedRequestsFromApi(),
-        syncMedicalRecordsFromApi(),
-        syncSubAdminsFromApi(),
       ]);
     } catch (e) {
       debugPrint('Error in syncAllDataFromApi: $e');
@@ -1296,20 +1298,23 @@ class PatientProblemService extends ChangeNotifier {
 
   Future<void> syncDentistAssignedRequestsFromApi([String? dentistId]) async {
     try {
-      final targetDocId = (dentistId != null && dentistId.trim().isNotEmpty)
-          ? dentistId.trim()
-          : (currentDoctor != null && currentDoctor!.id.trim().isNotEmpty
-              ? currentDoctor!.id.trim()
-              : (Supabase.instance.client.auth.currentUser?.id ?? ''));
-      
-      final List problemReqs = await ApiService().fetchDentistAssignedRequests(dentistId: targetDocId);
-
-      if (problemReqs.isEmpty) {
-        _dentistAssignedRequests.clear();
-        _saveToStorage();
-        notifyListeners();
-        return;
+      String targetDocId = '';
+      if (dentistId != null && dentistId.trim().isNotEmpty) {
+        targetDocId = dentistId.trim();
+      } else if (currentDoctor != null) {
+        targetDocId = currentDoctor!.id.isNotEmpty
+            ? currentDoctor!.id
+            : (currentDoctor!.userId.isNotEmpty ? currentDoctor!.userId : currentDoctor!.email);
+      } else if (Supabase.instance.client.auth.currentUser?.id != null) {
+        targetDocId = Supabase.instance.client.auth.currentUser!.id;
+      } else if (_allDoctors.isNotEmpty) {
+        targetDocId = _allDoctors.first.id;
       }
+      
+      final List problemReqs = await ApiService().fetchDentistAssignedRequests(
+        dentistId: targetDocId,
+        dentistName: currentDoctor?.name,
+      );
 
       final List<PatientConsultationRequest> freshAssigned = [];
 
@@ -1336,7 +1341,7 @@ class PatientProblemService extends ChangeNotifier {
 
         if ((assignedDocName == null || assignedDocName.isEmpty || assignedDocName == 'null') && assignedDocId != null && assignedDocId.isNotEmpty) {
           final matchedDoc = _allDoctors.firstWhere(
-            (d) => d.id == assignedDocId || d.email == assignedDocId || (d.name.isNotEmpty && assignedDocId.contains(d.name.replaceAll('Dr. ', '').trim())),
+            (d) => d.id == assignedDocId || (d.userId.isNotEmpty && d.userId == assignedDocId) || d.email == assignedDocId || (d.name.isNotEmpty && assignedDocId.contains(d.name.replaceAll('Dr. ', '').trim())),
             orElse: () => DoctorModel(id: '', name: '', specialty: '', qualification: '', experienceYears: 0, rating: 0, reviewCount: 0, clinicName: '', phone: '', email: '', status: '', nextAvailableSlots: [], consultationFee: ''),
           );
           if (matchedDoc.name.isNotEmpty) {
@@ -1421,9 +1426,35 @@ class PatientProblemService extends ChangeNotifier {
         );
       }
 
+      // Also merge any requests in _requests that match this doctor
+      final currentDocName = (currentDoctor?.name ?? '').replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
+      final myDoctorIds = <String>{
+        if (targetDocId.isNotEmpty) targetDocId,
+        if (currentDoctor != null && currentDoctor!.id.isNotEmpty) currentDoctor!.id,
+        if (currentDoctor != null && currentDoctor!.userId.isNotEmpty) currentDoctor!.userId,
+        if (currentDoctor != null && currentDoctor!.email.isNotEmpty) currentDoctor!.email.toLowerCase(),
+      };
+      for (final doc in _allDoctors) {
+        if (myDoctorIds.contains(doc.id) || (doc.userId.isNotEmpty && myDoctorIds.contains(doc.userId)) || (doc.email.isNotEmpty && myDoctorIds.contains(doc.email.toLowerCase()))) {
+          if (doc.id.isNotEmpty) myDoctorIds.add(doc.id);
+          if (doc.userId.isNotEmpty) myDoctorIds.add(doc.userId);
+          if (doc.email.isNotEmpty) myDoctorIds.add(doc.email.toLowerCase());
+        }
+      }
+
+      for (final req in _requests) {
+        final aId = req.assignedDoctorId?.trim();
+        final aName = req.assignedDoctorName?.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
+        final isMatch = (aId != null && aId.isNotEmpty && myDoctorIds.contains(aId)) ||
+            (currentDocName.isNotEmpty && currentDocName != 'dentist' && currentDocName != 'doctor' && aName != null && aName.isNotEmpty && (aName == currentDocName || currentDocName.contains(aName) || aName.contains(currentDocName)));
+        if (isMatch && !freshAssigned.any((r) => r.id == req.id)) {
+          freshAssigned.add(req);
+        }
+      }
+
       _dentistAssignedRequests.clear();
       _dentistAssignedRequests.addAll(freshAssigned);
-
+      _saveToStorage();
       notifyListeners();
     } catch (e) {
       debugPrint('Sync dentist assigned requests error: $e');
@@ -1529,6 +1560,18 @@ class PatientProblemService extends ChangeNotifier {
             break;
           }
         }
+      }
+      if (currentDoctor != null) {
+        final match = _allDoctors.firstWhere(
+          (d) => d.id == currentDoctor!.id ||
+              (d.userId.isNotEmpty && d.userId == currentDoctor!.userId) ||
+              (d.email.isNotEmpty && d.email.toLowerCase() == currentDoctor!.email.toLowerCase()) ||
+              (d.name.isNotEmpty && d.name.toLowerCase() == currentDoctor!.name.toLowerCase()),
+          orElse: () => currentDoctor!,
+        );
+        currentDoctor = match;
+      } else if (_isDentistMode && _allDoctors.isNotEmpty) {
+        currentDoctor = _allDoctors.first;
       }
       _saveToStorage();
       notifyListeners();

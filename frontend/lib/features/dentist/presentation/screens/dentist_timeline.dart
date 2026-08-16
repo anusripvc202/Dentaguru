@@ -1082,7 +1082,23 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   // TAB 1: DENTIST TIMELINE & QUEUE DASHBOARD
   // ==========================================
   Widget _buildDashboardTab() {
-    final currentDoc = _patientService.currentDoctor;
+    var currentDoc = _patientService.currentDoctor;
+    if (currentDoc == null && _patientService.allDoctors.isNotEmpty) {
+      final authUser = Supabase.instance.client.auth.currentUser;
+      if (authUser != null && authUser.email != null && authUser.email!.isNotEmpty) {
+        final authEmailLower = authUser.email!.toLowerCase();
+        currentDoc = _patientService.allDoctors.firstWhere(
+          (d) => d.email.toLowerCase() == authEmailLower ||
+              (d.id.isNotEmpty && d.id == authUser.id) ||
+              (d.userId.isNotEmpty && d.userId == authUser.id),
+          orElse: () => _patientService.allDoctors.first,
+        );
+      } else {
+        currentDoc = _patientService.allDoctors.first;
+      }
+      _patientService.currentDoctor = currentDoc;
+    }
+
     final currentDocName = (currentDoc?.name ?? '').replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
     final currentDocId = (currentDoc?.id ?? '').trim();
     final currentDocUserId = (currentDoc?.userId ?? '').trim();
@@ -1114,8 +1130,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
       }
       
       final aName = r.assignedDoctorName?.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
-      if (currentDocName.isNotEmpty && currentDocName != 'dentist' && currentDocName != 'doctor' &&
-          aName != null && aName.isNotEmpty && aName == currentDocName) {
+      if (currentDocName.isNotEmpty &&
+          aName != null && aName.isNotEmpty && (aName == currentDocName || currentDocName.contains(aName) || aName.contains(currentDocName))) {
         return true;
       }
       return false;
@@ -1992,7 +2008,23 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   // TAB 2: PATIENTS TAB
   // ==========================================
   Widget _buildPatientsTab() {
-    final currentDoc = _patientService.currentDoctor;
+    var currentDoc = _patientService.currentDoctor;
+    if (currentDoc == null && _patientService.allDoctors.isNotEmpty) {
+      final authUser = Supabase.instance.client.auth.currentUser;
+      if (authUser != null && authUser.email != null && authUser.email!.isNotEmpty) {
+        final authEmailLower = authUser.email!.toLowerCase();
+        currentDoc = _patientService.allDoctors.firstWhere(
+          (d) => d.email.toLowerCase() == authEmailLower ||
+              (d.id.isNotEmpty && d.id == authUser.id) ||
+              (d.userId.isNotEmpty && d.userId == authUser.id),
+          orElse: () => _patientService.allDoctors.first,
+        );
+      } else {
+        currentDoc = _patientService.allDoctors.first;
+      }
+      _patientService.currentDoctor = currentDoc;
+    }
+
     final currentDocName = (currentDoc?.name ?? '').replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
     final currentDocId = (currentDoc?.id ?? '').trim();
     final currentDocUserId = (currentDoc?.userId ?? '').trim();
@@ -2024,8 +2056,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
       }
       
       final aName = r.assignedDoctorName?.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
-      if (currentDocName.isNotEmpty && currentDocName != 'dentist' && currentDocName != 'doctor' &&
-          aName != null && aName.isNotEmpty && aName == currentDocName) {
+      if (currentDocName.isNotEmpty &&
+          aName != null && aName.isNotEmpty && (aName == currentDocName || currentDocName.contains(aName) || aName.contains(currentDocName))) {
         return true;
       }
       return false;
