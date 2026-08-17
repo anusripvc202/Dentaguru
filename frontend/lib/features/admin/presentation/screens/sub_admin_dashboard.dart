@@ -467,126 +467,134 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                 final displayCity = req.getDisplayCity(_service.allPatients);
                 final displayPincode = req.getDisplayPincode(_service.allPatients);
 
-                return Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
+                return Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: canAssign ? () => _showAssignDoctorModal(ctx, req) : null,
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: isAssigned ? const Color(0xFFE2E8F0) : const Color(0xFF6366F1).withValues(alpha: 0.3)),
-                    boxShadow: [
-                      BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 6, offset: const Offset(0, 2)),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Row(
-                              children: [
-                                CircleAvatar(
-                                  radius: 16,
-                                  backgroundColor: const Color(0xFF6366F1).withValues(alpha: 0.1),
-                                  child: Text(pName.isNotEmpty ? pName[0].toUpperCase() : 'P', style: const TextStyle(color: Color(0xFF6366F1), fontWeight: FontWeight.bold)),
-                                ),
-                                const SizedBox(width: 8),
-                                Flexible(
-                                  child: Text(
-                                    pName,
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: isAssigned ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              isAssigned ? '✓ Doctor Assigned' : '⏳ Pending Doctor',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: isAssigned ? const Color(0xFF16A34A) : const Color(0xFFD97706),
-                              ),
-                            ),
-                          ),
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: isAssigned ? const Color(0xFFE2E8F0) : const Color(0xFF6366F1).withValues(alpha: 0.3)),
+                        boxShadow: [
+                          BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 6, offset: const Offset(0, 2)),
                         ],
                       ),
-                      const SizedBox(height: 10),
-                      Text(
-                        req.problemDescription,
-                        style: const TextStyle(fontSize: 13, color: AppTheme.textDark),
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if (displayCity.isNotEmpty) ...[
-                            const Icon(Icons.location_on_outlined, size: 14, color: AppTheme.textMuted),
-                            const SizedBox(width: 4),
-                            Text('$displayCity ${displayPincode.isNotEmpty ? "($displayPincode)" : ""}', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
-                            const SizedBox(width: 12),
-                          ],
-                          if (req.patientPhone.isNotEmpty) ...[
-                            const Icon(Icons.phone_outlined, size: 14, color: AppTheme.textMuted),
-                            const SizedBox(width: 4),
-                            Text(req.patientPhone, style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
-                          ],
-                        ],
-                      ),
-                      if (isAssigned) ...[
-                        const SizedBox(height: 10),
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF0FDF4),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: const Color(0xFFBBF7D0)),
-                          ),
-                          child: Row(
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              const Icon(Icons.check_circle_rounded, color: Color(0xFF16A34A), size: 16),
-                              const SizedBox(width: 8),
                               Expanded(
+                                child: Row(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 16,
+                                      backgroundColor: const Color(0xFF6366F1).withValues(alpha: 0.1),
+                                      child: Text(pName.isNotEmpty ? pName[0].toUpperCase() : 'P', style: const TextStyle(color: Color(0xFF6366F1), fontWeight: FontWeight.bold)),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Flexible(
+                                      child: Text(
+                                        pName,
+                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: isAssigned ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
                                 child: Text(
-                                  'Assigned Doctor: ${req.assignedDoctorName ?? "Specialist"} (${req.assignedDoctorSpecialty ?? "Dentistry"})',
-                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
-                                  overflow: TextOverflow.ellipsis,
+                                  isAssigned ? '✓ Doctor Assigned' : '⏳ Pending Doctor',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: isAssigned ? const Color(0xFF16A34A) : const Color(0xFFD97706),
+                                  ),
                                 ),
                               ),
                             ],
                           ),
-                        ),
-                      ],
-                      if (canAssign) ...[
-                        const SizedBox(height: 12),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: ElevatedButton.icon(
-                            icon: const Icon(Icons.person_pin_rounded, size: 16),
-                            label: Text(
-                              isAssigned ? 'Change Assigned Doctor' : 'Assign Nearby Doctor',
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF6366F1),
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                            ),
-                            onPressed: () => _showAssignDoctorModal(ctx, req),
+                          const SizedBox(height: 10),
+                          Text(
+                            req.problemDescription,
+                            style: const TextStyle(fontSize: 13, color: AppTheme.textDark),
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                      ],
-                    ],
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              if (displayCity.isNotEmpty) ...[
+                                const Icon(Icons.location_on_outlined, size: 14, color: AppTheme.textMuted),
+                                const SizedBox(width: 4),
+                                Text('$displayCity ${displayPincode.isNotEmpty ? "($displayPincode)" : ""}', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                                const SizedBox(width: 12),
+                              ],
+                              if (req.patientPhone.isNotEmpty) ...[
+                                const Icon(Icons.phone_outlined, size: 14, color: AppTheme.textMuted),
+                                const SizedBox(width: 4),
+                                Text(req.patientPhone, style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                              ],
+                            ],
+                          ),
+                          if (isAssigned) ...[
+                            const SizedBox(height: 10),
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF0FDF4),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: const Color(0xFFBBF7D0)),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.check_circle_rounded, color: Color(0xFF16A34A), size: 16),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'Assigned Doctor: ${req.assignedDoctorName ?? "Specialist"} (${req.assignedDoctorSpecialty ?? "Dentistry"})',
+                                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                          if (canAssign) ...[
+                            const SizedBox(height: 12),
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                icon: Icon(isAssigned ? Icons.swap_horiz_rounded : Icons.person_pin_rounded, size: 16),
+                                label: Text(
+                                  isAssigned ? 'Change Assigned Doctor' : 'Assign Nearby Specialist Doctor',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF6366F1),
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                  elevation: 1,
+                                ),
+                                onPressed: () => _showAssignDoctorModal(ctx, req),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
                   ),
                 );
               },
