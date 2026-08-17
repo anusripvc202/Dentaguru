@@ -216,34 +216,76 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                       ),
                       const SizedBox(height: 12),
 
-                      // Pain Severity Chips
+                      // Pain Severity Segmented Buttons (Single Line)
                       const Text('Pain Severity Level:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: AppTheme.textMuted)),
-                      const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 6,
-                        children: ['Mild', 'Moderate', 'Severe'].map((sev) {
-                          final isSelected = selectedSeverity == sev;
-                          return ChoiceChip(
-                            label: Text(sev, style: TextStyle(fontSize: 12, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
-                            selected: isSelected,
-                            selectedColor: sev == 'Severe'
-                                ? Colors.red.shade100
-                                : sev == 'Moderate'
-                                    ? Colors.orange.shade100
-                                    : Colors.blue.shade100,
-                            labelStyle: TextStyle(
-                              color: sev == 'Severe'
-                                  ? Colors.red.shade900
-                                  : sev == 'Moderate'
-                                      ? Colors.orange.shade900
-                                      : AppTheme.primaryBlue,
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          for (final sev in ['Mild', 'Moderate', 'Severe']) ...[
+                            if (sev != 'Mild') const SizedBox(width: 8),
+                            Expanded(
+                              child: InkWell(
+                                onTap: () => setModalState(() => selectedSeverity = sev),
+                                borderRadius: BorderRadius.circular(10),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 180),
+                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: selectedSeverity == sev
+                                        ? (sev == 'Severe'
+                                            ? const Color(0xFFFEE2E2)
+                                            : sev == 'Moderate'
+                                                ? const Color(0xFFFFEDD5)
+                                                : const Color(0xFFDBEAFE))
+                                        : const Color(0xFFF1F5F9),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: selectedSeverity == sev
+                                          ? (sev == 'Severe'
+                                              ? const Color(0xFFEF4444)
+                                              : sev == 'Moderate'
+                                                  ? const Color(0xFFF97316)
+                                                  : const Color(0xFF3B82F6))
+                                          : const Color(0xFFE2E8F0),
+                                      width: selectedSeverity == sev ? 1.5 : 1,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      if (selectedSeverity == sev) ...[
+                                        Icon(
+                                          Icons.check_circle_rounded,
+                                          size: 14,
+                                          color: sev == 'Severe'
+                                              ? const Color(0xFFB91C1C)
+                                              : sev == 'Moderate'
+                                                  ? const Color(0xFFC2410C)
+                                                  : const Color(0xFF1D4ED8),
+                                        ),
+                                        const SizedBox(width: 4),
+                                      ],
+                                      Text(
+                                        sev,
+                                        style: TextStyle(
+                                          fontSize: 12.5,
+                                          fontWeight: selectedSeverity == sev ? FontWeight.bold : FontWeight.w600,
+                                          color: selectedSeverity == sev
+                                              ? (sev == 'Severe'
+                                                  ? const Color(0xFFB91C1C)
+                                                  : sev == 'Moderate'
+                                                      ? const Color(0xFFC2410C)
+                                                      : const Color(0xFF1D4ED8))
+                                              : const Color(0xFF64748B),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
                             ),
-                            onSelected: (val) {
-                              if (val) setModalState(() => selectedSeverity = sev);
-                            },
-                          );
-                        }).toList(),
+                          ],
+                        ],
                       ),
                       const SizedBox(height: 20),
 
