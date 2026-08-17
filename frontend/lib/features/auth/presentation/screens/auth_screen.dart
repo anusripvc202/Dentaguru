@@ -764,23 +764,57 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   ),
                   if (ApiService.lastGeneratedOtp != null) ...[
                     const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: const Color(0xFF16A34A)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.key_rounded, size: 13, color: Color(0xFF16A34A)),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Instant Security Verification Code: ${ApiService.lastGeneratedOtp}',
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                    InkWell(
+                      onTap: () {
+                        _otpController.text = ApiService.lastGeneratedOtp ?? '';
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('OTP code filled into input field!'),
+                            duration: Duration(seconds: 1),
                           ),
-                        ],
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(6),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: const Color(0xFF16A34A)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.key_rounded, size: 14, color: Color(0xFF16A34A)),
+                            const SizedBox(width: 5),
+                            const Expanded(
+                              child: Text(
+                                'Verification Code:',
+                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFDCFCE7),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: const Color(0xFF86EFAC)),
+                              ),
+                              child: Text(
+                                ApiService.lastGeneratedOtp ?? '',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 1.2,
+                                  color: Color(0xFF15803D),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(Icons.touch_app_rounded, size: 12, color: Color(0xFF16A34A)),
+                          ],
+                        ),
                       ),
                     ),
                   ],
