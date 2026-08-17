@@ -985,68 +985,160 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               ),
                               const SizedBox(height: 16),
 
-                              Row(
+                              // Action buttons: Back, WhatsApp, SMS
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  OutlinedButton(
-                                    onPressed: () => setModalState(() => currentStep = 2),
-                                    style: OutlinedButton.styleFrom(
-                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                    ),
-                                    child: const Text('Back'),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: ElevatedButton.icon(
-                                      icon: const Icon(Icons.send_rounded, size: 16),
-                                      label: const Text(
-                                        'Send Doctor Recommendation',
-                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                                        overflow: TextOverflow.ellipsis,
-                                        maxLines: 1,
-                                      ),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: const Color(0xFF10B981),
-                                        foregroundColor: Colors.white,
-                                        padding: const EdgeInsets.symmetric(vertical: 13),
-                                        elevation: 2,
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                      ),
-                                      onPressed: () async {
-                                        if (selectedDoctor == null) return;
-                                        await _problemService.assignDoctorToRequest(
-                                          requestId: req.id,
-                                          doctor: selectedDoctor!,
-                                          adminNotes: adminNotesController.text.trim(),
-                                        );
-
-                                        String rawPhone = req.patientPhone.replaceAll(RegExp(r'[^0-9]'), '');
-                                        if (rawPhone.startsWith('0') && rawPhone.length == 11) {
-                                          rawPhone = '91${rawPhone.substring(1)}';
-                                        } else if (rawPhone.length == 10) {
-                                          rawPhone = '91$rawPhone';
-                                        }
-
-                                        final waUrl = Uri.parse(rawPhone.isNotEmpty
-                                            ? "https://wa.me/$rawPhone?text=${Uri.encodeComponent(waText)}"
-                                            : "https://wa.me/?text=${Uri.encodeComponent(waText)}");
-                                        try {
-                                          await launchUrl(waUrl, mode: LaunchMode.externalApplication);
-                                        } catch (e) {
-                                          debugPrint('WhatsApp launcher info: $e');
-                                        }
-
-                                        if (!context.mounted) return;
-                                        Navigator.of(dialogContext).pop();
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(
-                                            content: Text('📱 Doctor recommendation sent to ${req.patientName} & ${selectedDoctor?.name}!'),
-                                            backgroundColor: const Color(0xFF10B981),
-                                            duration: const Duration(seconds: 3),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: ElevatedButton.icon(
+                                          icon: const Icon(Icons.chat_rounded, size: 16),
+                                          label: const Text(
+                                            'Send WhatsApp',
+                                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 1,
                                           ),
-                                        );
-                                      },
-                                    ),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: const Color(0xFF10B981),
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(vertical: 12),
+                                            elevation: 2,
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                          ),
+                                          onPressed: () async {
+                                            if (selectedDoctor == null) return;
+                                            await _problemService.assignDoctorToRequest(
+                                              requestId: req.id,
+                                              doctor: selectedDoctor!,
+                                              adminNotes: adminNotesController.text.trim(),
+                                            );
+
+                                            String rawPhone = req.patientPhone.replaceAll(RegExp(r'[^0-9]'), '');
+                                            if (rawPhone.startsWith('0') && rawPhone.length == 11) {
+                                              rawPhone = '91${rawPhone.substring(1)}';
+                                            } else if (rawPhone.length == 10) {
+                                              rawPhone = '91$rawPhone';
+                                            }
+
+                                            final waUrl = Uri.parse(rawPhone.isNotEmpty
+                                                ? "https://wa.me/$rawPhone?text=${Uri.encodeComponent(waText)}"
+                                                : "https://wa.me/?text=${Uri.encodeComponent(waText)}");
+                                            try {
+                                              await launchUrl(waUrl, mode: LaunchMode.externalApplication);
+                                            } catch (e) {
+                                              debugPrint('WhatsApp launcher info: $e');
+                                            }
+
+                                            if (!context.mounted) return;
+                                            Navigator.of(dialogContext).pop();
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(
+                                                content: Text('📱 Recommendation sent via WhatsApp to ${req.patientName}!'),
+                                                backgroundColor: const Color(0xFF10B981),
+                                                duration: const Duration(seconds: 3),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: ElevatedButton.icon(
+                                          icon: const Icon(Icons.sms_rounded, size: 16),
+                                          label: const Text(
+                                            'Send via SMS',
+                                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 1,
+                                          ),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: const Color(0xFF2563EB),
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(vertical: 12),
+                                            elevation: 2,
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                          ),
+                                          onPressed: () async {
+                                            if (selectedDoctor == null) return;
+                                            await _problemService.assignDoctorToRequest(
+                                              requestId: req.id,
+                                              doctor: selectedDoctor!,
+                                              adminNotes: adminNotesController.text.trim(),
+                                            );
+
+                                            String rawPhone = req.patientPhone.replaceAll(RegExp(r'[^0-9]'), '');
+                                            if (rawPhone.startsWith('0') && rawPhone.length == 11) {
+                                              rawPhone = '91${rawPhone.substring(1)}';
+                                            } else if (rawPhone.length == 10) {
+                                              rawPhone = '91$rawPhone';
+                                            }
+
+                                            final smsUrl = Uri.parse(rawPhone.isNotEmpty
+                                                ? "sms:$rawPhone?body=${Uri.encodeComponent(waText)}"
+                                                : "sms:?body=${Uri.encodeComponent(waText)}");
+                                            try {
+                                              await launchUrl(smsUrl, mode: LaunchMode.externalApplication);
+                                            } catch (e) {
+                                              debugPrint('SMS launcher info: $e');
+                                            }
+
+                                            if (!context.mounted) return;
+                                            Navigator.of(dialogContext).pop();
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(
+                                                content: Text('✉️ Recommendation opened in SMS for ${req.patientName}!'),
+                                                backgroundColor: const Color(0xFF2563EB),
+                                                duration: const Duration(seconds: 3),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: OutlinedButton(
+                                          onPressed: () => setModalState(() => currentStep = 2),
+                                          style: OutlinedButton.styleFrom(
+                                            padding: const EdgeInsets.symmetric(vertical: 10),
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                          ),
+                                          child: const Text('Back'),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: TextButton.icon(
+                                          icon: const Icon(Icons.check_circle_outline_rounded, size: 16),
+                                          label: const Text('Assign Only (No Message)', style: TextStyle(fontSize: 11.5)),
+                                          style: TextButton.styleFrom(
+                                            padding: const EdgeInsets.symmetric(vertical: 10),
+                                          ),
+                                          onPressed: () async {
+                                            if (selectedDoctor == null) return;
+                                            await _problemService.assignDoctorToRequest(
+                                              requestId: req.id,
+                                              doctor: selectedDoctor!,
+                                              adminNotes: adminNotesController.text.trim(),
+                                            );
+                                            if (!context.mounted) return;
+                                            Navigator.of(dialogContext).pop();
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(
+                                                content: Text('✅ Doctor ${selectedDoctor?.name} assigned to ${req.patientName}!'),
+                                                backgroundColor: const Color(0xFF10B981),
+                                                duration: const Duration(seconds: 3),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ],
                               ),

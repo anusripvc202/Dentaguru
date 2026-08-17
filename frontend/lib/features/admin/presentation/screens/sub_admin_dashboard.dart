@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/constants/permissions.dart';
 import '../../../../core/services/patient_problem_service.dart';
@@ -1139,38 +1140,141 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                       ),
                     ),
                     const SizedBox(height: 14),
-                    ElevatedButton.icon(
-                      icon: isSubmitting
-                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : const Icon(Icons.check_circle_rounded, size: 18),
-                      label: Text(isSubmitting ? 'Assigning...' : 'Confirm Assignment'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF6366F1),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                      onPressed: (selectedDoctor == null || isSubmitting)
-                          ? null
-                          : () async {
-                              setModalState(() => isSubmitting = true);
-                              await _service.assignDoctorToRequest(
-                                requestId: req.id,
-                                doctor: selectedDoctor!,
-                                adminNotes: notesCtrl.text.trim(),
-                              );
-                              setModalState(() => isSubmitting = false);
-                              if (!dialogCtx.mounted) return;
-                              Navigator.of(dialogCtx).pop();
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('🎉 Doctor ${selectedDoctor!.name} assigned successfully!'),
-                                    backgroundColor: const Color(0xFF10B981),
-                                  ),
-                                );
-                              }
-                            },
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            icon: const Icon(Icons.chat_rounded, size: 15),
+                            label: const Text('WhatsApp', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF10B981),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 11),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            onPressed: (selectedDoctor == null || isSubmitting)
+                                ? null
+                                : () async {
+                                    setModalState(() => isSubmitting = true);
+                                    await _service.assignDoctorToRequest(
+                                      requestId: req.id,
+                                      doctor: selectedDoctor!,
+                                      adminNotes: notesCtrl.text.trim(),
+                                    );
+                                    setModalState(() => isSubmitting = false);
+
+                                    String rawPhone = req.patientPhone.replaceAll(RegExp(r'[^0-9]'), '');
+                                    if (rawPhone.startsWith('0') && rawPhone.length == 11) {
+                                      rawPhone = '91${rawPhone.substring(1)}';
+                                    } else if (rawPhone.length == 10) {
+                                      rawPhone = '91$rawPhone';
+                                    }
+
+                                    final waText = "🦷 *DentaGuru Referral Update*\n\nHello ${req.patientName},\nYour consultation request for *${req.problemCategory}* has been assigned to *${selectedDoctor!.name}* (${selectedDoctor!.specialty}) at *${selectedDoctor!.clinicName}*.\n\n📍 Clinic: ${selectedDoctor!.clinicAddress}\n📞 Contact: ${selectedDoctor!.phone}\n\nOur team is here to assist your smile journey!";
+                                    final waUrl = Uri.parse(rawPhone.isNotEmpty
+                                        ? "https://wa.me/$rawPhone?text=${Uri.encodeComponent(waText)}"
+                                        : "https://wa.me/?text=${Uri.encodeComponent(waText)}");
+                                    try {
+                                      await launchUrl(waUrl, mode: LaunchMode.externalApplication);
+                                    } catch (_) {}
+
+                                    if (!dialogCtx.mounted) return;
+                                    Navigator.of(dialogCtx).pop();
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('📱 Doctor ${selectedDoctor!.name} assigned & WhatsApp launched!'),
+                                          backgroundColor: const Color(0xFF10B981),
+                                        ),
+                                      );
+                                    }
+                                  },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            icon: const Icon(Icons.sms_rounded, size: 15),
+                            label: const Text('SMS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF2563EB),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 11),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            onPressed: (selectedDoctor == null || isSubmitting)
+                                ? null
+                                : () async {
+                                    setModalState(() => isSubmitting = true);
+                                    await _service.assignDoctorToRequest(
+                                      requestId: req.id,
+                                      doctor: selectedDoctor!,
+                                      adminNotes: notesCtrl.text.trim(),
+                                    );
+                                    setModalState(() => isSubmitting = false);
+
+                                    String rawPhone = req.patientPhone.replaceAll(RegExp(r'[^0-9]'), '');
+                                    if (rawPhone.startsWith('0') && rawPhone.length == 11) {
+                                      rawPhone = '91${rawPhone.substring(1)}';
+                                    } else if (rawPhone.length == 10) {
+                                      rawPhone = '91$rawPhone';
+                                    }
+
+                                    final smsText = "DentaGuru: Hello ${req.patientName}, your dental consultation request for ${req.problemCategory} has been assigned to ${selectedDoctor!.name} (${selectedDoctor!.specialty}) at ${selectedDoctor!.clinicName}. Phone: ${selectedDoctor!.phone}";
+                                    final smsUrl = Uri.parse(rawPhone.isNotEmpty
+                                        ? "sms:$rawPhone?body=${Uri.encodeComponent(smsText)}"
+                                        : "sms:?body=${Uri.encodeComponent(smsText)}");
+                                    try {
+                                      await launchUrl(smsUrl, mode: LaunchMode.externalApplication);
+                                    } catch (_) {}
+
+                                    if (!dialogCtx.mounted) return;
+                                    Navigator.of(dialogCtx).pop();
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('✉️ Doctor ${selectedDoctor!.name} assigned & SMS opened!'),
+                                          backgroundColor: const Color(0xFF2563EB),
+                                        ),
+                                      );
+                                    }
+                                  },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF6366F1),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          onPressed: (selectedDoctor == null || isSubmitting)
+                              ? null
+                              : () async {
+                                  setModalState(() => isSubmitting = true);
+                                  await _service.assignDoctorToRequest(
+                                    requestId: req.id,
+                                    doctor: selectedDoctor!,
+                                    adminNotes: notesCtrl.text.trim(),
+                                  );
+                                  setModalState(() => isSubmitting = false);
+                                  if (!dialogCtx.mounted) return;
+                                  Navigator.of(dialogCtx).pop();
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('🎉 Doctor ${selectedDoctor!.name} assigned successfully!'),
+                                        backgroundColor: const Color(0xFF10B981),
+                                      ),
+                                    );
+                                  }
+                                },
+                          child: isSubmitting
+                              ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                              : const Text('Assign', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        ),
+                      ],
                     ),
                   ],
                 ),
