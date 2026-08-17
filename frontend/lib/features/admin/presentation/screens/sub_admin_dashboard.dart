@@ -152,23 +152,27 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
       _selectedTabIndex = 0;
     }
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
-      appBar: _buildSubAdminAppBar(context),
-      body: FadeTransition(
-        opacity: _fadeAnimation,
-        child: SlideTransition(
-          position: _slideAnimation,
-          child: Column(
-            children: [
-              _buildSubAdminHeader(),
-              if (permittedModules.isEmpty)
-                Expanded(child: _buildNoPermissionsRestrictedState())
-              else ...[
-                _buildModuleTabBar(permittedModules),
-                Expanded(child: _buildSelectedModuleContent(permittedModules[_selectedTabIndex].key)),
+    return GestureDetector(
+      onTap: () => FocusScope.of(context).unfocus(),
+      behavior: HitTestBehavior.translucent,
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF8FAFC),
+        appBar: _buildSubAdminAppBar(context),
+        body: FadeTransition(
+          opacity: _fadeAnimation,
+          child: SlideTransition(
+            position: _slideAnimation,
+            child: Column(
+              children: [
+                _buildSubAdminHeader(),
+                if (permittedModules.isEmpty)
+                  Expanded(child: _buildNoPermissionsRestrictedState())
+                else ...[
+                  _buildModuleTabBar(permittedModules),
+                  Expanded(child: _buildSelectedModuleContent(permittedModules[_selectedTabIndex].key)),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
@@ -441,9 +445,16 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
         children: [
           TextField(
             onChanged: (v) => setState(() => _requestSearch = v),
+            textInputAction: TextInputAction.search,
+            onSubmitted: (_) => FocusScope.of(context).unfocus(),
             decoration: InputDecoration(
               hintText: 'Search patient, city, pincode...',
               prefixIcon: const Icon(Icons.search_rounded, size: 18),
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.keyboard_hide_rounded, size: 18, color: AppTheme.textMuted),
+                tooltip: 'Hide Keyboard',
+                onPressed: () => FocusScope.of(context).unfocus(),
+              ),
               filled: true,
               fillColor: Colors.white,
               contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
