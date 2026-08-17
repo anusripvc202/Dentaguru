@@ -292,68 +292,13 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ),
           );
           context.go('/dentist');
-        } else if (registeredRole.contains('sub-admin') || registeredRole.contains('subadmin') || registeredRole.contains('sub_admin')) {
-          Map<String, dynamic> tokenMeta = {};
-          if (userData['device_token'] != null && userData['device_token'].toString().startsWith('{')) {
-            try { tokenMeta = jsonDecode(userData['device_token'].toString()); } catch (_) {}
-          }
-          final saStatus = (userData['status'] ?? tokenMeta['status'] ?? 'ACTIVE').toString().toUpperCase();
-          if (saStatus == 'INACTIVE' || saStatus == 'DEACTIVATED') {
-            if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('⛔ Access Denied: Your Sub-Admin account has been deactivated by the Main Admin.'),
-                backgroundColor: Color(0xFFEF4444),
-              ),
-            );
-            return;
-          }
-
-          final List<String> permissions = [];
-          final rawPerms = userData['permissions'] ?? tokenMeta['permissions'];
-          if (rawPerms is List) {
-            for (final p in rawPerms) {
-              if (p != null && p.toString().trim().isNotEmpty) {
-                permissions.add(p.toString().trim().toUpperCase());
-              }
-            }
-          }
-          if (permissions.isEmpty) {
-            permissions.addAll([
-              'PATIENT_VIEW',
-              'DENTIST_VIEW',
-              'ASSIGNMENT_VIEW',
-              'APPOINTMENT_VIEW',
-              'PROBLEM_VIEW',
-              'REPORT_VIEW',
-            ]);
-          }
-
-          PatientProblemService().setSubAdminSession(
-            id: (userData['id'] ?? Supabase.instance.client.auth.currentUser?.id ?? '').toString(),
-            name: (userData['name'] ?? 'Sub-Admin').toString(),
-            email: (userData['email'] ?? email).toString(),
-            phone: userPhone,
-            permissions: permissions,
-            status: saStatus,
-          );
-
-          await PatientProblemService().syncAllDataFromApi();
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('🎉 Welcome back, ${userData['name'] ?? 'Sub-Admin'}! Opening Sub-Admin Workspace...'),
-              backgroundColor: const Color(0xFF6366F1),
-            ),
-          );
-          context.go('/sub-admin');
-        } else if (registeredRole.contains('admin')) {
+        } else if (registeredRole.contains('admin') || registeredRole.contains('sub-admin') || registeredRole.contains('subadmin') || registeredRole.contains('sub_admin')) {
           PatientProblemService().clearSubAdminSession();
           await PatientProblemService().syncAllDataFromApi();
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('🎉 Welcome back, ${userData['name'] ?? 'Admin'}! Logging into Admin Dashboard...'),
+              content: Text('🎉 Welcome back, ${userData['name'] ?? 'Admin'}! Opening Admin Dashboard...'),
               backgroundColor: const Color(0xFF6366F1),
             ),
           );

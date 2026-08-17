@@ -59,7 +59,7 @@ final GoRouter appRouter = GoRouter(
     ),
     GoRoute(
       path: '/sub-admin',
-      builder: (context, state) => const SubAdminDashboardScreen(),
+      builder: (context, state) => const AdminDashboardScreen(),
     ),
   ],
 );
