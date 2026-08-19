@@ -95,12 +95,13 @@ router.post('/upload', authenticateJWT, upload.uploadFile);
 // ─────────────────────────────────────────────
 // 7. CHAT MESSAGES & CONVERSATIONS ENDPOINTS (Role-Based Access & Audit Logging)
 // ─────────────────────────────────────────────
-router.get('/chat/conversations', authenticateJWT, requireChatAccess, chat.getConversations);
-router.get('/chat/messages', authenticateJWT, requireChatAccess, chat.getMessages);
-router.post('/chat/send', authenticateJWT, requireChatAccess, chat.sendMessage);
-router.post('/chat/clear', authenticateJWT, requireChatAccess, chat.clearMessages);
-router.delete('/chat/clear', authenticateJWT, requireChatAccess, chat.clearMessages);
-router.get('/chat/audit-logs', authenticateJWT, requireMainAdmin, chat.getAuditLogs);
+router.get('/chat/conversations', optionalAuth, requireChatAccess, chat.getConversations);
+router.get('/chat/messages', optionalAuth, requireChatAccess, chat.getMessages);
+router.post('/chat/send', optionalAuth, requireChatAccess, chat.sendMessage);
+router.post('/chat/clear', optionalAuth, requireChatAccess, chat.clearMessages);
+router.delete('/chat/clear', optionalAuth, requireChatAccess, chat.clearMessages);
+router.get('/chat/audit-logs', optionalAuth, requireMainAdmin, chat.getAuditLogs);
+
 
 // ─────────────────────────────────────────────
 // 8. MEDICAL RECORDS & PRESCRIPTIONS ENDPOINTS

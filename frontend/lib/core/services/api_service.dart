@@ -16,10 +16,23 @@ class ApiService {
     _authToken = token;
   }
 
-  Map<String, String> get _headers => {
-        'Content-Type': 'application/json',
-        if (_authToken != null) 'Authorization': 'Bearer $_authToken',
-      };
+  String? get currentToken {
+    if (_authToken != null && _authToken!.isNotEmpty) return _authToken;
+    try {
+      return Supabase.instance.client.auth.currentSession?.accessToken;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Map<String, String> get _headers {
+    final token = currentToken;
+    return {
+      'Content-Type': 'application/json',
+      if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+    };
+  }
+
 
   /// Register a new user (Patient, Dentist, Clinic, Admin) in Supabase via Backend API
   Future<Map<String, dynamic>> registerUser({

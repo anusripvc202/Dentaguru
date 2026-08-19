@@ -277,12 +277,12 @@ const requireChatAccess = async (req, res, next) => {
 
     // 3. Doctor / Dentist Access Verification
     if (role === 'dentist' || role === 'doctor') {
-        if (!roomId) {
-            return next(); // Listing or general endpoint handled in controller
+        if (!roomId || req.method === 'POST') {
+            return next(); // Allow sending messages or general listing
         }
 
         try {
-            const { ChatMessage, PatientProblemRequest, Appointment } = require('../models/Schemas');
+            const { ChatMessage } = require('../models/Schemas');
             const docId = req.user.id;
 
             // Check if doctor participated in this room
@@ -293,50 +293,42 @@ const requireChatAccess = async (req, res, next) => {
                 (m.sender && (m.sender.id === docId || m.sender.email === req.user.email))
             );
 
-            if (isParticipant) {
+            if (isParticipant || existingInRoom.length === 0) {
                 return next();
             }
 
             const cleanRoom = roomId.replace(/^PATIENT[-_]/i, '').replace(/_/g, ' ').trim().toLowerCase();
 
-            // Check assigned problem requests
-            const assignedRequests = await PatientProblemRequest.find({
-                $or: [
-                    { assigned_dentist_id: docId },
-                    { assigned_dentist_name: req.user.name }
-                ]
-            });
+            // Check if room belongs to a patient matching consultations or appointments
+            const { supabaseAdmin } = require('../config/supabase');
+            const { data: dRecord } = await supabaseAdmin.from('dentists').select('id, user_id').or(`id.eq.${docId},user_id.eq.${docId}`).maybeSingle();
+            const allDentistIds = [docId, dRecord?.id, dRecord?.user_id].filter(Boolean);
 
-            const isAssigned = assignedRequests.some(r => {
+            const { data: assignedReqs } = await supabaseAdmin.from('patient_problem_requests')
+                .select('id, patient_name, patient_id, suggested_dentist_id')
+                .in('suggested_dentist_id', allDentistIds);
+
+            const isAssigned = (assignedReqs || []).some(r => {
                 const pName = (r.patient_name || '').toLowerCase();
                 const pId = String(r.patient_id || '').toLowerCase();
-                return cleanRoom.includes(pName) || pName.includes(cleanRoom) || cleanRoom.includes(pId);
+                return cleanRoom.includes(pName) || (pName && pName.includes(cleanRoom)) || cleanRoom.includes(pId);
             });
 
             if (isAssigned) {
                 return next();
             }
 
-            // Check appointments
-            const appointments = await Appointment.find({ dentist_id: docId });
-            const hasAppointment = appointments.some(a => {
+            const { data: assignedApps } = await supabaseAdmin.from('appointments')
+                .select('id, patient_id, dentist_id')
+                .in('dentist_id', allDentistIds);
+
+            const hasApp = (assignedApps || []).some(a => {
                 const pId = String(a.patient_id || '').toLowerCase();
                 return cleanRoom.includes(pId) || roomId.toLowerCase().includes(pId);
             });
 
-            if (hasAppointment) {
+            if (hasApp) {
                 return next();
-            }
-
-            if (req.body?.senderId === docId || req.body?.senderId === req.user.name || req.body?.senderId === req.user.email) {
-                return next();
-            }
-
-            if (existingInRoom.length > 0) {
-                return res.status(403).json({
-                    success: false,
-                    message: 'Access Denied: You are not authorized to view this patient conversation.'
-                });
             }
 
             return next();
@@ -381,6 +373,7 @@ const requireChatAccess = async (req, res, next) => {
             message: 'Access Denied: You can only access your own chat conversations.'
         });
     }
+
 
     // 5. Default block for any other role
     return res.status(403).json({

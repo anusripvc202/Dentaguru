@@ -46,22 +46,25 @@ const User = {
         for (const [key, val] of Object.entries(query)) {
             req = req.eq(key, val);
         }
-        const { data, error } = await req.maybeSingle();
+        req = req.limit(1);
+        const { data, error } = await req;
         if (error) throw error;
-        if (data && (data.role === 'Sub-Admin' || data.role === 'SUB_ADMIN')) {
-            if (!data.permissions || data.permissions.length === 0) {
-                data.permissions = await SubAdminPermission.getPermissionsForUser(data.id);
+        const record = (data && data.length > 0) ? data[0] : null;
+        if (record && (record.role === 'Sub-Admin' || record.role === 'SUB_ADMIN')) {
+            if (!record.permissions || record.permissions.length === 0) {
+                record.permissions = await SubAdminPermission.getPermissionsForUser(record.id);
             }
-            if ((!data.permissions || data.permissions.length === 0) && data.device_token && data.device_token.startsWith('{')) {
+            if ((!record.permissions || record.permissions.length === 0) && record.device_token && record.device_token.startsWith('{')) {
                 try {
-                    const meta = JSON.parse(data.device_token);
-                    if (meta.permissions && Array.isArray(meta.permissions)) data.permissions = meta.permissions;
-                    if (meta.status && !data.status) data.status = meta.status;
+                    const meta = JSON.parse(record.device_token);
+                    if (meta.permissions && Array.isArray(meta.permissions)) record.permissions = meta.permissions;
+                    if (meta.status && !record.status) record.status = meta.status;
                 } catch (_) {}
             }
         }
-        return data;
+        return record;
     },
+
 
     async find(query = {}) {
         try {
@@ -643,7 +646,7 @@ const ChatMessage = {
             }
         }
 
-        if (!senderId) {
+        if (!senderId && rawSender) {
             senderId = await resolveUserUuid(rawSender);
         }
 
@@ -651,20 +654,21 @@ const ChatMessage = {
 
         const payload = {
             room_id: messageData.room_id || messageData.roomId || 'GENERAL-CHAT',
-            sender_id: senderId,
-            receiver_id: receiverId,
+            sender_id: senderId || null,
+            receiver_id: receiverId || null,
             message: messageData.message || '',
             type: messageData.type || 'text',
             read: messageData.read ?? false
         };
 
-        const { data, error } = await supabaseAdmin.from('chat_messages').insert(payload).select().single();
+        const { data, error } = await supabaseAdmin.from('chat_messages').insert(payload).select();
         if (error) {
             console.error('❌ Supabase ChatMessage Insert Error:', error.message);
             throw error;
         }
-        return data;
+        return (data && data.length > 0) ? data[0] : payload;
     },
+
 
     async find(query = {}, options = {}) {
         // Enforce DB/Query-Level Access Control if caller user is passed in options
