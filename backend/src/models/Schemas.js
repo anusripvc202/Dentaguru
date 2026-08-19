@@ -666,7 +666,18 @@ const ChatMessage = {
         return data;
     },
 
-    async find(query = {}) {
+    async find(query = {}, options = {}) {
+        // Enforce DB/Query-Level Access Control if caller user is passed in options
+        if (options.user) {
+            const role = (options.user.role || '').toString().trim().toLowerCase();
+            const isSubAdmin = role === 'sub-admin' || role === 'subadmin' || role === 'sub_admin';
+
+            // Sub-Admins NEVER receive chat messages
+            if (isSubAdmin) {
+                return [];
+            }
+        }
+
         let req = supabaseAdmin.from('chat_messages').select('*, sender:users!sender_id(name, email, role)');
         if (query.room_id || query.roomId) {
             req = req.eq('room_id', query.room_id || query.roomId);
@@ -679,6 +690,93 @@ const ChatMessage = {
         const { data, error } = await req.order('created_at', { ascending: true });
         if (error) throw error;
         return data || [];
+    },
+
+    async getConversations(user) {
+        if (!user) return [];
+        const role = (user.role || '').toString().trim().toLowerCase();
+        const isMainAdmin = role === 'admin' || role === 'primaryadmin' || role === 'primary_admin' || user.email === 'anusripvc202@gmail.com';
+        const isSubAdmin = role === 'sub-admin' || role === 'subadmin' || role === 'sub_admin';
+
+        // Sub-Admins are strictly forbidden
+        if (isSubAdmin) {
+            return [];
+        }
+
+        try {
+            // Fetch all chat messages with sender info
+            const { data: messages, error } = await supabaseAdmin
+                .from('chat_messages')
+                .select('*, sender:users!sender_id(name, email, role)')
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+            if (!messages || messages.length === 0) return [];
+
+            // Group by room_id
+            const roomMap = new Map();
+            for (const msg of messages) {
+                const rId = msg.room_id;
+                if (!roomMap.has(rId)) {
+                    roomMap.set(rId, {
+                        roomId: rId,
+                        lastMessage: msg.message,
+                        lastMessageType: msg.type,
+                        lastMessageTime: msg.created_at,
+                        lastSenderName: msg.sender?.name || (msg.type === 'doctor' ? 'Doctor' : 'Patient'),
+                        lastSenderRole: msg.sender?.role || (msg.type === 'doctor' ? 'Dentist' : 'Patient'),
+                        totalMessages: 0,
+                        unreadCount: 0
+                    });
+                }
+                const thread = roomMap.get(rId);
+                thread.totalMessages += 1;
+                if (!msg.read && msg.sender_id !== user.id) {
+                    thread.unreadCount += 1;
+                }
+            }
+
+            // Extract patient names and doctor names for each room
+            const conversations = [];
+            for (const [roomId, thread] of roomMap.entries()) {
+                let inferredPatientName = roomId.replace(/^PATIENT[-_]/i, '').replace(/_/g, ' ');
+                if (!inferredPatientName || inferredPatientName.length === 0) {
+                    inferredPatientName = 'Patient Consultation';
+                }
+
+                inferredPatientName = inferredPatientName.split(' ')
+                    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                    .join(' ');
+
+                const conversation = {
+                    roomId,
+                    patientName: inferredPatientName,
+                    doctorName: thread.lastSenderRole === 'Dentist' ? (thread.lastSenderName || 'Attending Dentist') : 'Dr. Assigned Dentist',
+                    lastMessage: thread.lastMessage,
+                    lastMessageType: thread.lastMessageType,
+                    lastMessageTime: thread.lastMessageTime,
+                    totalMessages: thread.totalMessages,
+                    unreadCount: thread.unreadCount
+                };
+
+                if (isMainAdmin) {
+                    conversations.push(conversation);
+                } else if (role === 'dentist' || role === 'doctor') {
+                    conversations.push(conversation);
+                } else if (role === 'patient') {
+                    const userNameNorm = (user.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+                    const roomNorm = roomId.toUpperCase().replace(/[^A-Z0-9]/g, '');
+                    if (roomNorm.includes(userNameNorm) || roomNorm.includes(user.id)) {
+                        conversations.push(conversation);
+                    }
+                }
+            }
+
+            return conversations;
+        } catch (e) {
+            console.error('Error in getConversations:', e.message);
+            return [];
+        }
     },
 
     async delete(query = {}) {
@@ -695,6 +793,7 @@ const ChatMessage = {
         return true;
     }
 };
+
 
 // 7. PATIENT PROBLEM REQUEST MODEL (Supabase PostgreSQL)
 const PatientProblemRequest = {
@@ -906,6 +1005,70 @@ const Notification = {
     }
 };
 
+// 10. AUDIT LOG MODEL (Admin Access & Chat Security Audit Trail)
+const _inMemoryAuditLogs = [];
+
+const AuditLog = {
+    async create(logData) {
+        const payload = {
+            id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+            user_id: logData.user_id || logData.userId || null,
+            user_email: logData.user_email || logData.userEmail || null,
+            user_role: logData.user_role || logData.userRole || 'Admin',
+            action: logData.action || 'ACCESS',
+            target_resource: logData.target_resource || logData.targetResource || null,
+            details: logData.details || {},
+            ip_address: logData.ip_address || logData.ipAddress || null,
+            created_at: new Date().toISOString()
+        };
+
+        _inMemoryAuditLogs.unshift(payload);
+        if (_inMemoryAuditLogs.length > 500) _inMemoryAuditLogs.pop();
+
+        try {
+            const { data, error } = await supabaseAdmin.from('audit_logs').insert({
+                user_id: payload.user_id,
+                user_email: payload.user_email,
+                user_role: payload.user_role,
+                action: payload.action,
+                target_resource: payload.target_resource,
+                details: payload.details,
+                ip_address: payload.ip_address,
+                created_at: payload.created_at
+            }).select().maybeSingle();
+
+            if (error) {
+                return payload;
+            }
+            return data || payload;
+        } catch (err) {
+            return payload;
+        }
+    },
+
+    async find(query = {}) {
+        try {
+            let req = supabaseAdmin.from('audit_logs').select('*');
+            if (query.action) req = req.eq('action', query.action);
+            if (query.user_id || query.userId) req = req.eq('user_id', query.user_id || query.userId);
+            if (query.target_resource || query.targetResource) req = req.eq('target_resource', query.target_resource || query.targetResource);
+            const { data, error } = await req.order('created_at', { ascending: false }).limit(query.limit || 100);
+            if (!error && data && data.length > 0) {
+                return data;
+            }
+        } catch (_) {}
+
+        // Fallback to in-memory audit logs
+        let filtered = [..._inMemoryAuditLogs];
+        if (query.action) filtered = filtered.filter(l => l.action === query.action);
+        if (query.user_id || query.userId) filtered = filtered.filter(l => l.user_id === (query.user_id || query.userId));
+        if (query.target_resource || query.targetResource) filtered = filtered.filter(l => l.target_resource === (query.target_resource || query.targetResource));
+        if (query.limit) filtered = filtered.slice(0, parseInt(query.limit, 10));
+        return filtered;
+    }
+};
+
+
 module.exports = {
     User,
     SubAdminPermission,
@@ -918,6 +1081,8 @@ module.exports = {
     PatientProblemRequest,
     DentistSuggestion,
     Notification,
+    AuditLog,
     comparePassword
 };
+
 

@@ -706,8 +706,44 @@ class ApiService {
     return false;
   }
 
+  /// Fetch all active patient-doctor chat conversations (Role-enforced, strictly forbidden for Sub-Admins)
+  Future<List<dynamic>> fetchConversations() async {
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/chat/conversations');
+      final response = await http.get(url, headers: _headers);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['conversations'] ?? [];
+      } else if (response.statusCode == 403) {
+        debugPrint('🔒 Conversations access restricted (403 Forbidden).');
+      }
+    } catch (e) {
+      debugPrint('Fetch conversations error: $e');
+    }
+    return [];
+  }
+
+  /// Fetch Main Admin chat audit logs
+  Future<List<dynamic>> fetchChatAuditLogs({String? action, String? targetResource}) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/chat/audit-logs').replace(queryParameters: {
+        if (action != null) 'action': action,
+        if (targetResource != null) 'targetResource': targetResource,
+      });
+      final response = await http.get(uri, headers: _headers);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['logs'] ?? [];
+      }
+    } catch (e) {
+      debugPrint('Fetch chat audit logs error: $e');
+    }
+    return [];
+  }
+
   /// Fetch medical records and prescriptions from Supabase/Backend API
   Future<List<dynamic>> fetchMedicalRecords({String? patientId}) async {
+
     try {
       final uri = Uri.parse(ApiConstants.records).replace(queryParameters: {
         if (patientId != null && patientId.isNotEmpty) 'patientId': patientId,

@@ -12,7 +12,7 @@ const problemRequests = require('../controllers/problemRequestController');
 const verification = require('../controllers/verificationController');
 
 // Middlewares
-const { authenticateJWT, optionalAuth, requireRole, requireMainAdmin, requirePermission } = require('../middleware/auth');
+const { authenticateJWT, optionalAuth, requireRole, requireMainAdmin, requirePermission, requireChatAccess } = require('../middleware/auth');
 
 // ─────────────────────────────────────────────
 // 1. AUTHENTICATION ENDPOINTS
@@ -93,12 +93,14 @@ router.get('/dentists', optionalAuth, clinics.getAllDentists);
 router.post('/upload', authenticateJWT, upload.uploadFile);
 
 // ─────────────────────────────────────────────
-// 7. CHAT MESSAGES ENDPOINTS (Supabase)
+// 7. CHAT MESSAGES & CONVERSATIONS ENDPOINTS (Role-Based Access & Audit Logging)
 // ─────────────────────────────────────────────
-router.post('/chat/send', optionalAuth, chat.sendMessage);
-router.get('/chat/messages', optionalAuth, chat.getMessages);
-router.post('/chat/clear', optionalAuth, chat.clearMessages);
-router.delete('/chat/clear', optionalAuth, chat.clearMessages);
+router.get('/chat/conversations', authenticateJWT, requireChatAccess, chat.getConversations);
+router.get('/chat/messages', authenticateJWT, requireChatAccess, chat.getMessages);
+router.post('/chat/send', authenticateJWT, requireChatAccess, chat.sendMessage);
+router.post('/chat/clear', authenticateJWT, requireChatAccess, chat.clearMessages);
+router.delete('/chat/clear', authenticateJWT, requireChatAccess, chat.clearMessages);
+router.get('/chat/audit-logs', authenticateJWT, requireMainAdmin, chat.getAuditLogs);
 
 // ─────────────────────────────────────────────
 // 8. MEDICAL RECORDS & PRESCRIPTIONS ENDPOINTS

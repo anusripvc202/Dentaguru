@@ -4,7 +4,7 @@
 // ==========================================================================
 
 const assert = require('assert');
-const { User, Clinic, Dentist, Appointment, MedicalRecord, ChatMessage } = require('../src/models/Schemas');
+const { User, Clinic, Dentist, Appointment, MedicalRecord, ChatMessage, AuditLog } = require('../src/models/Schemas');
 const app = require('../src/app');
 
 console.log('--- STARTING DENTA GURU CORE COMPONENT TESTS ---');
@@ -17,7 +17,9 @@ try {
     assert.ok(Appointment, 'Appointment model compiled successfully.');
     assert.ok(MedicalRecord, 'MedicalRecord model compiled successfully.');
     assert.ok(ChatMessage, 'ChatMessage model compiled successfully.');
+    assert.ok(AuditLog, 'AuditLog model compiled successfully.');
     console.log('✓ SUCCESS: Core Mongoose Schemas loaded and compiled.');
+
 } catch (error) {
     console.error('✗ ERROR: Schema validation failed:', error.message);
     process.exit(1);

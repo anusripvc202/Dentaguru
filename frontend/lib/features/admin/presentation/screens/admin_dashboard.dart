@@ -1492,8 +1492,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 children: [
                   _buildSubNavItem(0, Icons.grid_view_rounded, 'Dashboard Overview'),
                   _buildSubNavItem(0, Icons.mark_chat_read_rounded, 'Patient Problems', badgeCount: pendingCount),
+                  _buildSubNavItem(10, Icons.forum_rounded, 'Patient-Doctor Chats'),
                 ],
               ),
+
               const SizedBox(height: 8),
 
               // CATEGORY 2: CLINICAL MANAGEMENT DROPDOWN
@@ -1650,10 +1652,594 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
         return _buildRevenuePanel();
       case 9:
         return _buildSubAdminsPanel();
+      case 10:
+        return _buildPatientDoctorChatsPanel();
       default:
         return _buildDashboardPanel();
     }
   }
+
+  // ==========================================
+  // PANEL: PATIENT-DOCTOR CHATS & AUDIT (Main Admin Exclusive)
+  // ==========================================
+  String _chatSearchQuery = '';
+  List<dynamic> _adminConversations = [];
+  bool _isLoadingConversations = false;
+  bool _hasLoadedConversationsOnce = false;
+
+  Future<void> _fetchAdminConversations() async {
+    if (!mounted) return;
+    setState(() => _isLoadingConversations = true);
+    final convs = await ApiService().fetchConversations();
+    if (mounted) {
+      setState(() {
+        _adminConversations = convs;
+        _isLoadingConversations = false;
+        _hasLoadedConversationsOnce = true;
+      });
+    }
+  }
+
+  void _showAdminChatInspectionModal(BuildContext context, String roomId, String patientName, String doctorName) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.85,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              child: Column(
+                children: [
+                  // Modal Header
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF0F172A),
+                      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryBlue.withOpacity(0.2),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.security_rounded, color: AppTheme.primaryBlue, size: 20),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      'Chat: $patientName ↔ $doctorName',
+                                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF10B981).withOpacity(0.2),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(color: const Color(0xFF10B981), width: 0.8),
+                                    ),
+                                    child: const Text('AUDIT LOGGED', style: TextStyle(color: Color(0xFF10B981), fontSize: 9, fontWeight: FontWeight.bold)),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 2),
+                              Text('Room ID: $roomId • Main Admin Live Monitor', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFEF4444), size: 20),
+                          tooltip: 'Clear Chat History',
+                          onPressed: () async {
+                            final confirm = await showDialog<bool>(
+                              context: context,
+                              builder: (dCtx) => AlertDialog(
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                title: const Text('Clear Chat History?'),
+                                content: const Text('This will permanently delete this conversation. Are you sure?'),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Cancel')),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
+                                    onPressed: () => Navigator.pop(dCtx, true),
+                                    child: const Text('Clear', style: TextStyle(color: Colors.white)),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (confirm == true) {
+                              await ApiService().clearChatMessages(roomId: roomId);
+                              setModalState(() {});
+                              _fetchAdminConversations();
+                            }
+                          },
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded, color: Colors.white, size: 20),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Messages Stream
+                  Expanded(
+                    child: Container(
+                      color: const Color(0xFFF1F5F9),
+                      child: FutureBuilder<List<dynamic>>(
+                        future: ApiService().fetchChatMessages(roomId: roomId),
+                        builder: (ctx, snapshot) {
+                          if (snapshot.connectionState == ConnectionState.waiting) {
+                            return const Center(child: CircularProgressIndicator());
+                          }
+                          final messages = snapshot.data ?? [];
+                          if (messages.isEmpty) {
+                            return Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.chat_bubble_outline_rounded, size: 48, color: Colors.grey[400]),
+                                  const SizedBox(height: 10),
+                                  Text('No messages found in this room.', style: TextStyle(color: Colors.grey[600], fontSize: 13)),
+                                ],
+                              ),
+                            );
+                          }
+
+                          return ListView.builder(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            itemCount: messages.length,
+                            itemBuilder: (context, i) {
+                              final msg = messages[i];
+                              final text = (msg['message'] ?? '').toString();
+                              final type = (msg['type'] ?? 'text').toString();
+                              final sender = msg['sender'];
+                              final senderName = sender is Map ? (sender['name'] ?? 'User') : (type == 'doctor' ? 'Dentist' : 'Patient');
+                              final senderRole = sender is Map ? (sender['role'] ?? type) : type;
+                              final isDoc = senderRole.toString().toLowerCase().contains('dentist') || senderRole.toString().toLowerCase().contains('doctor') || type == 'doctor';
+                              final isPat = senderRole.toString().toLowerCase().contains('patient') || type == 'patient';
+                              final time = msg['created_at'] != null ? DateTime.tryParse(msg['created_at'].toString()) : null;
+                              final timeStr = time != null ? '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}' : '';
+
+                              return Align(
+                                alignment: isDoc ? Alignment.centerRight : Alignment.centerLeft,
+                                child: Container(
+                                  margin: const EdgeInsets.symmetric(vertical: 4),
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                  constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+                                  decoration: BoxDecoration(
+                                    color: isDoc ? const Color(0xFFE0F2FE) : (isPat ? const Color(0xFFDCFCE7) : Colors.white),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: isDoc ? const Color(0xFFBAE6FD) : (isPat ? const Color(0xFFBBF7D0) : const Color(0xFFE2E8F0)),
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 4, offset: const Offset(0, 2)),
+                                    ],
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            isDoc ? Icons.medical_services_rounded : Icons.person_rounded,
+                                            size: 13,
+                                            color: isDoc ? const Color(0xFF0284C7) : const Color(0xFF16A34A),
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            '$senderName (${isDoc ? 'Dentist' : 'Patient'})',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold,
+                                              color: isDoc ? const Color(0xFF0284C7) : const Color(0xFF16A34A),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(text, style: const TextStyle(fontSize: 13, color: Color(0xFF1E293B))),
+                                      if (timeStr.isNotEmpty) ...[
+                                        const SizedBox(height: 2),
+                                        Align(
+                                          alignment: Alignment.bottomRight,
+                                          child: Text(timeStr, style: TextStyle(fontSize: 10, color: Colors.grey[500])),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showAdminAuditLogsModal(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.8,
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF0F172A),
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.history_rounded, color: AppTheme.primaryBlue, size: 20),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'Admin Chat Access & Privacy Audit Trail',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, color: Colors.white, size: 20),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: FutureBuilder<List<dynamic>>(
+                  future: ApiService().fetchChatAuditLogs(),
+                  builder: (ctx, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    final logs = snapshot.data ?? [];
+                    if (logs.isEmpty) {
+                      return Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.shield_outlined, size: 48, color: Colors.grey[400]),
+                            const SizedBox(height: 10),
+                            Text('No admin chat audit logs recorded yet.', style: TextStyle(color: Colors.grey[600], fontSize: 13)),
+                          ],
+                        ),
+                      );
+                    }
+
+                    return ListView.separated(
+                      padding: const EdgeInsets.all(14),
+                      itemCount: logs.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, i) {
+                        final log = logs[i];
+                        final action = log['action'] ?? 'ACCESS';
+                        final target = log['target_resource'] ?? 'ROOM';
+                        final email = log['user_email'] ?? 'admin@dentaguru.com';
+                        final ip = log['ip_address'] ?? '127.0.0.1';
+                        final time = log['created_at'] != null ? DateTime.tryParse(log['created_at'].toString()) : null;
+                        final dateStr = time != null ? '${time.day}/${time.month}/${time.year} ${time.hour}:${time.minute.toString().padLeft(2, '0')}' : '';
+
+                        return ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          leading: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF3B82F6).withOpacity(0.1),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.security_rounded, size: 18, color: Color(0xFF3B82F6)),
+                          ),
+                          title: Text(
+                            action.toString().replaceAll('_', ' '),
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                          ),
+                          subtitle: Text(
+                            'Admin: $email • Target: $target\nIP: $ip • $dateStr',
+                            style: TextStyle(fontSize: 11, color: Colors.grey[600], height: 1.3),
+                          ),
+                          isThreeLine: true,
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPatientDoctorChatsPanel() {
+    if (!_hasLoadedConversationsOnce && !_isLoadingConversations) {
+      _fetchAdminConversations();
+    }
+
+    final filtered = _adminConversations.where((c) {
+      final pName = (c['patientName'] ?? '').toString().toLowerCase();
+      final dName = (c['doctorName'] ?? '').toString().toLowerCase();
+      final rId = (c['roomId'] ?? '').toString().toLowerCase();
+      final lastMsg = (c['lastMessage'] ?? '').toString().toLowerCase();
+      final q = _chatSearchQuery.toLowerCase();
+      return q.isEmpty || pName.contains(q) || dName.contains(q) || rId.contains(q) || lastMsg.contains(q);
+    }).toList();
+
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: SlideTransition(
+        position: _slideAnimation,
+        child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header Banner
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 10, offset: const Offset(0, 4)),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryBlue.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.forum_rounded, color: AppTheme.primaryBlue, size: 22),
+                        ),
+                        const SizedBox(width: 14),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Patient–Doctor Chat Oversight',
+                                style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                              ),
+                              SizedBox(height: 3),
+                              Text(
+                                'Main Admin Exclusive • Real-time conversation monitoring & compliance audit trail',
+                                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11.5),
+                              ),
+                            ],
+                          ),
+                        ),
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.history_rounded, size: 16),
+                          label: const Text('Audit Trail', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF3B82F6),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          onPressed: () => _showAdminAuditLogsModal(context),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+                          tooltip: 'Refresh Conversations',
+                          onPressed: _fetchAdminConversations,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981).withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFF10B981), width: 0.8),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.shield_rounded, color: Color(0xFF10B981), size: 14),
+                              SizedBox(width: 6),
+                              Text('Sub-Admins Strictly Restricted (403 Forbidden)', style: TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text('${_adminConversations.length} Active Threads', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
+
+              // Search Bar
+              TextField(
+                decoration: InputDecoration(
+                  hintText: 'Search conversations by patient, doctor, or keyword...',
+                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                ),
+                onChanged: (val) => setState(() => _chatSearchQuery = val),
+              ),
+              const SizedBox(height: 16),
+
+              // Conversation Cards List
+              if (_isLoadingConversations)
+                const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator()))
+              else if (filtered.isEmpty)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(32),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.chat_bubble_outline_rounded, size: 48, color: Colors.grey[400]),
+                      const SizedBox(height: 12),
+                      const Text('No Active Patient–Doctor Conversations Found', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark)),
+                      const SizedBox(height: 4),
+                      Text(
+                        _chatSearchQuery.isNotEmpty ? 'No conversations match your search query.' : 'When patients and doctors exchange messages, they will appear here.',
+                        style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: filtered.length,
+                  itemBuilder: (context, i) {
+                    final conv = filtered[i];
+                    final roomId = (conv['roomId'] ?? 'GENERAL-CHAT').toString();
+                    final patientName = (conv['patientName'] ?? 'Patient').toString();
+                    final doctorName = (conv['doctorName'] ?? 'Attending Dentist').toString();
+                    final lastMsg = (conv['lastMessage'] ?? '').toString();
+                    final totalMsgs = conv['totalMessages'] ?? 0;
+                    final time = conv['lastMessageTime'] != null ? DateTime.tryParse(conv['lastMessageTime'].toString()) : null;
+                    final timeStr = time != null ? '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}' : '';
+
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        boxShadow: [
+                          BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 6, offset: const Offset(0, 2)),
+                        ],
+                      ),
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        leading: CircleAvatar(
+                          backgroundColor: AppTheme.primaryBlue.withOpacity(0.12),
+                          child: const Icon(Icons.forum_rounded, color: AppTheme.primaryBlue, size: 20),
+                        ),
+                        title: Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                '$patientName ↔ $doctorName',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF1F5F9),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text('$totalMsgs msgs', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
+                            ),
+                          ],
+                        ),
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                lastMsg.isNotEmpty ? lastMsg : 'No message preview',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                              ),
+                              const SizedBox(height: 4),
+                              Text('Room: $roomId • $timeStr', style: TextStyle(fontSize: 10.5, color: Colors.grey[500])),
+                            ],
+                          ),
+                        ),
+                        trailing: ElevatedButton.icon(
+                          icon: const Icon(Icons.visibility_rounded, size: 14),
+                          label: const Text('Inspect', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.primaryBlue,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                          onPressed: () => _showAdminChatInspectionModal(context, roomId, patientName, doctorName),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
 
   // ==========================================
   // PANEL: SUB-ADMIN MANAGEMENT
