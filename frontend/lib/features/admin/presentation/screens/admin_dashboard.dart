@@ -1718,20 +1718,39 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Row(
+                              Wrap(
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                spacing: 8,
+                                runSpacing: 4,
                                 children: [
-                                  Flexible(
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withValues(alpha: 0.1),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
                                     child: Text(
-                                      'Chat: $patientName ↔ $doctorName',
-                                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                                      overflow: TextOverflow.ellipsis,
+                                      'Patient: $patientName',
+                                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
                                     ),
                                   ),
-                                  const SizedBox(width: 8),
+                                  const Icon(Icons.swap_horiz_rounded, color: Color(0xFF94A3B8), size: 16),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF0284C7).withValues(alpha: 0.25),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(color: const Color(0xFF38BDF8), width: 0.8),
+                                    ),
+                                    child: Text(
+                                      'Doctor: $doctorName',
+                                      style: const TextStyle(color: Color(0xFF38BDF8), fontWeight: FontWeight.bold, fontSize: 13),
+                                    ),
+                                  ),
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFF10B981).withOpacity(0.2),
+                                      color: const Color(0xFF10B981).withValues(alpha: 0.2),
                                       borderRadius: BorderRadius.circular(6),
                                       border: Border.all(color: const Color(0xFF10B981), width: 0.8),
                                     ),
@@ -1739,8 +1758,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 2),
-                              Text('Room ID: $roomId • Main Admin Live Monitor', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+                              const SizedBox(height: 4),
+                              Text('Room ID: $roomId • Consulting Doctor: $doctorName', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
                             ],
                           ),
                         ),
@@ -1811,7 +1830,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               final text = (msg['message'] ?? '').toString();
                               final type = (msg['type'] ?? 'text').toString();
                               final sender = msg['sender'];
-                              final senderName = sender is Map ? (sender['name'] ?? 'User') : (type == 'doctor' ? 'Dentist' : 'Patient');
+                              final senderName = sender is Map ? (sender['name'] ?? 'User') : (type == 'doctor' ? doctorName : patientName);
                               final senderRole = sender is Map ? (sender['role'] ?? type) : type;
                               final isDoc = senderRole.toString().toLowerCase().contains('dentist') || senderRole.toString().toLowerCase().contains('doctor') || type == 'doctor';
                               final isPat = senderRole.toString().toLowerCase().contains('patient') || type == 'patient';
@@ -1823,7 +1842,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 child: Container(
                                   margin: const EdgeInsets.symmetric(vertical: 4),
                                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                  constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+                                  constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.8),
                                   decoration: BoxDecoration(
                                     color: isDoc ? const Color(0xFFE0F2FE) : (isPat ? const Color(0xFFDCFCE7) : Colors.white),
                                     borderRadius: BorderRadius.circular(14),
@@ -1831,21 +1850,22 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                       color: isDoc ? const Color(0xFFBAE6FD) : (isPat ? const Color(0xFFBBF7D0) : const Color(0xFFE2E8F0)),
                                     ),
                                     boxShadow: [
-                                      BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 4, offset: const Offset(0, 2)),
+                                      BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 4, offset: const Offset(0, 2)),
                                     ],
                                   ),
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Row(
-                                        mainAxisSize: MainAxisSize.min,
+                                      Wrap(
+                                        crossAxisAlignment: WrapCrossAlignment.center,
+                                        spacing: 4,
+                                        runSpacing: 2,
                                         children: [
                                           Icon(
                                             isDoc ? Icons.medical_services_rounded : Icons.person_rounded,
                                             size: 13,
                                             color: isDoc ? const Color(0xFF0284C7) : const Color(0xFF16A34A),
                                           ),
-                                          const SizedBox(width: 4),
                                           Text(
                                             '$senderName (${isDoc ? 'Dentist' : 'Patient'})',
                                             style: TextStyle(
@@ -1854,9 +1874,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                               color: isDoc ? const Color(0xFF0284C7) : const Color(0xFF16A34A),
                                             ),
                                           ),
+                                          const Icon(Icons.arrow_forward_rounded, size: 11, color: Color(0xFF94A3B8)),
+                                          Text(
+                                            isDoc ? 'To: $patientName (Patient)' : 'To: $doctorName (Dentist)',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w600,
+                                              color: isDoc ? const Color(0xFF0F766E) : const Color(0xFF0369A1),
+                                            ),
+                                          ),
                                         ],
                                       ),
-                                      const SizedBox(height: 4),
+                                      const SizedBox(height: 5),
                                       Text(text, style: const TextStyle(fontSize: 13, color: Color(0xFF1E293B))),
                                       if (timeStr.isNotEmpty) ...[
                                         const SizedBox(height: 2),
@@ -1873,6 +1902,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           );
                         },
                       ),
+
                     ),
                   ),
                 ],

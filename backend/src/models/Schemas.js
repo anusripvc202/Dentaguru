@@ -717,7 +717,7 @@ const ChatMessage = {
             if (error) throw error;
             if (!messages || messages.length === 0) return [];
 
-            // Group by room_id
+            // Group by room_id and extract doctor sender if present
             const roomMap = new Map();
             for (const msg of messages) {
                 const rId = msg.room_id;
@@ -729,16 +729,55 @@ const ChatMessage = {
                         lastMessageTime: msg.created_at,
                         lastSenderName: msg.sender?.name || (msg.type === 'doctor' ? 'Doctor' : 'Patient'),
                         lastSenderRole: msg.sender?.role || (msg.type === 'doctor' ? 'Dentist' : 'Patient'),
+                        doctorName: null,
                         totalMessages: 0,
                         unreadCount: 0
                     });
                 }
                 const thread = roomMap.get(rId);
                 thread.totalMessages += 1;
-                if (!msg.read && msg.sender_id !== user.id) {
+                if (!msg.read && msg.sender_id !== user?.id) {
                     thread.unreadCount += 1;
                 }
+                if (!thread.doctorName && (msg.type === 'doctor' || msg.sender?.role === 'Dentist')) {
+                    let dName = msg.sender?.name || '';
+                    if (dName && !dName.toLowerCase().startsWith('dr.') && !dName.toLowerCase().startsWith('dr ')) {
+                        dName = `Dr. ${dName}`;
+                    }
+                    if (dName) thread.doctorName = dName;
+                }
             }
+
+            // Fetch consultation requests and appointments to resolve doctor names for all rooms
+            let doctorLookup = new Map();
+            try {
+                const { data: problemReqs } = await supabaseAdmin
+                    .from('patient_problem_requests')
+                    .select('patient_name, patient_id, suggested_dentist:dentists!suggested_dentist_id(users(name))');
+                if (problemReqs) {
+                    for (const pr of problemReqs) {
+                        const dName = pr.suggested_dentist?.users?.name;
+                        if (dName) {
+                            const formatted = dName.toLowerCase().startsWith('dr') ? dName : `Dr. ${dName}`;
+                            if (pr.patient_name) doctorLookup.set(pr.patient_name.toLowerCase(), formatted);
+                            if (pr.patient_id) doctorLookup.set(String(pr.patient_id).toLowerCase(), formatted);
+                        }
+                    }
+                }
+
+                const { data: appointments } = await supabaseAdmin
+                    .from('appointments')
+                    .select('patient_id, dentist:dentists!dentist_id(users(name))');
+                if (appointments) {
+                    for (const ap of appointments) {
+                        const dName = ap.dentist?.users?.name;
+                        if (dName) {
+                            const formatted = dName.toLowerCase().startsWith('dr') ? dName : `Dr. ${dName}`;
+                            if (ap.patient_id) doctorLookup.set(String(ap.patient_id).toLowerCase(), formatted);
+                        }
+                    }
+                }
+            } catch (_) {}
 
             // Extract patient names and doctor names for each room
             const conversations = [];
@@ -752,10 +791,24 @@ const ChatMessage = {
                     .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
                     .join(' ');
 
+                const cleanKey = inferredPatientName.toLowerCase();
+                let resolvedDoc = thread.doctorName;
+                if (!resolvedDoc) {
+                    for (const [k, v] of doctorLookup.entries()) {
+                        if (cleanKey.includes(k) || k.includes(cleanKey) || roomId.toLowerCase().includes(k)) {
+                            resolvedDoc = v;
+                            break;
+                        }
+                    }
+                }
+                if (!resolvedDoc) {
+                    resolvedDoc = 'Dr. Attending Dentist';
+                }
+
                 const conversation = {
                     roomId,
                     patientName: inferredPatientName,
-                    doctorName: thread.lastSenderRole === 'Dentist' ? (thread.lastSenderName || 'Attending Dentist') : 'Dr. Assigned Dentist',
+                    doctorName: resolvedDoc,
                     lastMessage: thread.lastMessage,
                     lastMessageType: thread.lastMessageType,
                     lastMessageTime: thread.lastMessageTime,
@@ -768,13 +821,14 @@ const ChatMessage = {
                 } else if (role === 'dentist' || role === 'doctor') {
                     conversations.push(conversation);
                 } else if (role === 'patient') {
-                    const userNameNorm = (user.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+                    const userNameNorm = (user?.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
                     const roomNorm = roomId.toUpperCase().replace(/[^A-Z0-9]/g, '');
-                    if (roomNorm.includes(userNameNorm) || roomNorm.includes(user.id)) {
+                    if (roomNorm.includes(userNameNorm) || (user?.id && roomNorm.includes(user.id))) {
                         conversations.push(conversation);
                     }
                 }
             }
+
 
             return conversations;
         } catch (e) {
