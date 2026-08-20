@@ -67,6 +67,17 @@ const User = {
 
 
     async find(query = {}) {
+        const unpackUser = (u) => {
+            if (u && u.device_token && typeof u.device_token === 'string' && u.device_token.startsWith('{')) {
+                try {
+                    const meta = JSON.parse(u.device_token);
+                    if (meta.status && !u.status) u.status = meta.status;
+                    if (meta.permissions && (!u.permissions || u.permissions.length === 0)) u.permissions = meta.permissions;
+                } catch (_) {}
+            }
+            return u;
+        };
+
         try {
             let req = supabaseAdmin.from('users').select('*');
             if (query.role) {
@@ -85,9 +96,9 @@ const User = {
                 if (query.role) {
                     result = result.filter(u => u.role && u.role.toLowerCase() === query.role.toLowerCase());
                 }
-                return result;
+                return result.map(unpackUser);
             }
-            return data || [];
+            return (data || []).map(unpackUser);
         } catch (e) {
             console.warn('⚠️ User find exception, falling back to simple select:', e.message);
             const simple = await supabaseAdmin.from('users').select('*');
@@ -95,7 +106,7 @@ const User = {
             if (query.role) {
                 result = result.filter(u => u.role && u.role.toLowerCase() === query.role.toLowerCase());
             }
-            return result;
+            return result.map(unpackUser);
         }
     },
 
@@ -174,6 +185,23 @@ const User = {
             } else {
                 updatedData = await this.findById(id);
             }
+        }
+
+        if (updateData.status || updateData.permissions) {
+            try {
+                const existing = await supabaseAdmin.from('users').select('device_token').eq('id', id).maybeSingle();
+                let meta = {};
+                if (existing.data && existing.data.device_token && existing.data.device_token.startsWith('{')) {
+                    try { meta = JSON.parse(existing.data.device_token); } catch (_) {}
+                }
+                if (updateData.status) meta.status = updateData.status;
+                if (updateData.permissions) meta.permissions = updateData.permissions;
+                await supabaseAdmin.from('users').update({ device_token: JSON.stringify(meta) }).eq('id', id);
+                if (updatedData) {
+                    if (updateData.status) updatedData.status = updateData.status;
+                    if (updateData.permissions) updatedData.permissions = updateData.permissions;
+                }
+            } catch (_) {}
         }
 
         if (!updatedData) {
@@ -440,7 +468,7 @@ async function resolveDentistIds(input) {
     }
 
     const allIds = [dentistTableId, userTableId, str].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
-    return { dentistTableId: dentistTableId || str, userTableId, allIds };
+    return { dentistTableId: dentistTableId, userTableId, allIds };
 }
 
 async function resolveUserUuid(input) {
@@ -460,6 +488,12 @@ async function resolveUserUuid(input) {
         let user = await User.findOne({ email: str });
         if (!user) user = await User.findOne({ phone: str });
         if (!user) user = await User.findOne({ name: str });
+        if (!user) {
+            // Try case-insensitive / partial match without "Dr." or "Dr "
+            const clean = str.replace(/^dr\.?\s+/i, '').trim();
+            const { data } = await supabaseAdmin.from('users').select('id, name, role').or(`name.ilike.%${clean}%,email.ilike.%${clean}%`).limit(1);
+            if (data && data.length > 0) user = data[0];
+        }
         if (user) return user.id;
     } catch (e) {
         console.error('Error resolving user UUID:', e.message);
@@ -498,21 +532,23 @@ async function resolveClinicUuid(input) {
 // 4. APPOINTMENT MODEL (Supabase PostgreSQL)
 const Appointment = {
     async create(appData) {
-        const targetPatientId = await resolveUserUuid(appData.patient_id || appData.patientId);
-        const targetDentistId = await resolveDentistUuid(appData.dentist_id || appData.dentistId);
-        const targetClinicId = await resolveClinicUuid(appData.clinic_id || appData.clinicId);
+        const patientId = await resolveUserUuid(appData.patient_id || appData.patientId);
+        const dentistId = await resolveDentistUuid(appData.dentist_id || appData.dentistId);
+        const clinicId = await resolveClinicUuid(appData.clinic_id || appData.clinicId);
 
         const payload = {
-            patient_id: targetPatientId,
-            dentist_id: targetDentistId,
-            clinic_id: targetClinicId,
-            date: appData.date ? new Date(appData.date).toISOString() : new Date().toISOString(),
-            time_slot: appData.time_slot || appData.timeSlot || 'Today, 2:30 PM',
-            treatment: appData.treatment || 'Dental Consultation',
-            status: appData.status || 'confirmed',
-            payment_status: appData.payment_status || appData.paymentStatus || 'paid',
-            qr_code_string: appData.qr_code_string || appData.qrCodeString || null
+            patient_id: patientId,
+            dentist_id: dentistId,
+            clinic_id: clinicId,
+            appointment_date: appData.appointment_date || appData.appointmentDate || appData.date || new Date().toISOString(),
+            status: appData.status || 'Scheduled',
+            type: appData.type || 'In-Person',
+            notes: appData.notes || '',
+            payment_status: appData.payment_status || appData.paymentStatus || 'Pending',
+            payment_amount: appData.payment_amount || appData.paymentAmount || 0,
+            fee: appData.fee || appData.payment_amount || appData.paymentAmount || 0
         };
+
         const { data, error } = await supabaseAdmin.from('appointments').insert(payload).select().single();
         if (error) {
             console.error('❌ Supabase Appointment Insert Error:', error.message);
@@ -522,45 +558,43 @@ const Appointment = {
     },
 
     async find(query = {}) {
-        let req = supabaseAdmin.from('appointments').select('*, patient:users!patient_id(name, email, phone), clinic:clinics!clinic_id(clinic_name, location)');
-        const pId = query.patientId || query.patient_id;
-        const dId = query.dentistId || query.dentist_id;
-        const cId = query.clinicId || query.clinic_id;
-
+        let req = supabaseAdmin.from('appointments').select('*, patient:users!patient_id(name, email, phone), dentist:dentists!dentist_id(*, users(name, phone, email)), clinic:clinics!clinic_id(*)');
+        const pId = query.patient_id || query.patientId;
         if (pId) {
             const resolvedP = await resolveUserUuid(pId);
             if (Array.isArray(resolvedP) && resolvedP.length > 0) {
                 req = req.in('patient_id', resolvedP);
             } else if (typeof resolvedP === 'string' && resolvedP.length > 0) {
                 req = req.eq('patient_id', resolvedP);
+            } else {
+                return [];
             }
         }
+        const dId = query.dentist_id || query.dentistId;
         if (dId) {
-            const resolvedD = await resolveDentistUuid(dId);
-            if (Array.isArray(resolvedD) && resolvedD.length > 0) {
-                req = req.in('dentist_id', resolvedD);
-            } else if (typeof resolvedD === 'string' && resolvedD.length > 0) {
-                req = req.eq('dentist_id', resolvedD);
+            const { dentistTableId, userTableId } = await resolveDentistIds(dId);
+            if (dentistTableId && userTableId && dentistTableId !== userTableId) {
+                req = req.or(`dentist_id.eq.${dentistTableId},dentist_id.eq.${userTableId}`);
+            } else if (dentistTableId) {
+                req = req.eq('dentist_id', dentistTableId);
+            } else {
+                return [];
             }
         }
-        if (cId) {
-            const resolvedC = await resolveClinicUuid(cId);
-            if (typeof resolvedC === 'string' && resolvedC.length > 0) {
-                req = req.eq('clinic_id', resolvedC);
-            }
+        if (query.status) {
+            req = req.eq('status', query.status);
         }
-
-        const { data, error } = await req.order('date', { ascending: true });
+        const { data, error } = await req.order('created_at', { ascending: false });
         if (error) {
-            console.warn('⚠️ Appointment find warning, fallback to simple select:', error.message);
-            const simple = await supabaseAdmin.from('appointments').select('*').order('date', { ascending: false });
+            console.warn('⚠️ Appointment query error, falling back to simple select:', error.message);
+            const simple = await supabaseAdmin.from('appointments').select('*').order('created_at', { ascending: false });
             return simple.data || [];
         }
         return data || [];
     },
 
     async findById(id) {
-        const { data, error } = await supabaseAdmin.from('appointments').select('*').eq('id', id).single();
+        const { data, error } = await supabaseAdmin.from('appointments').select('*, patient:users!patient_id(name, email, phone), dentist:dentists!dentist_id(*, users(name, phone, email)), clinic:clinics!clinic_id(*)').eq('id', id).single();
         if (error) return null;
         return data;
     },
@@ -575,26 +609,19 @@ const Appointment = {
 // 5. MEDICAL RECORD MODEL (Supabase PostgreSQL)
 const MedicalRecord = {
     async create(recordData) {
-        const targetPatientId = await resolveUserUuid(recordData.patient_id || recordData.patientId);
-        const targetDentistId = await resolveDentistUuid(recordData.dentist_id || recordData.dentistId);
-
-        const diag = recordData.diagnosis || recordData.title || recordData.subtitle || 'Dental Consultation & Prescription';
-        const docName = recordData.doctor_name || recordData.doctorName || 'Attending Dentist';
-        const clinicName = recordData.clinic_name || recordData.clinicName || 'DentaGuru Practice';
-        const rxItems = recordData.prescriptions || recordData.items || recordData.details || [];
+        const patientId = await resolveUserUuid(recordData.patient_id || recordData.patientId);
+        const dentistId = await resolveDentistUuid(recordData.dentist_id || recordData.dentistId);
+        const appointmentId = recordData.appointment_id || recordData.appointmentId;
 
         const payload = {
-            patient_id: targetPatientId,
-            dentist_id: targetDentistId,
-            diagnosis: diag,
-            prescriptions: typeof rxItems === 'string' ? JSON.parse(rxItems) : rxItems,
-            notes: JSON.stringify({
-                type: recordData.type || 'prescription',
-                title: recordData.title || 'Digital Prescription Slip',
-                subtitle: recordData.subtitle || diag,
-                doctor_name: docName,
-                clinic_name: clinicName
-            })
+            patient_id: patientId,
+            dentist_id: dentistId,
+            appointment_id: (appointmentId && isUUID(appointmentId)) ? appointmentId : null,
+            diagnosis: recordData.diagnosis || '',
+            prescription: recordData.prescription || '',
+            treatment_plan: recordData.treatment_plan || recordData.treatmentPlan || '',
+            clinical_notes: recordData.clinical_notes || recordData.clinicalNotes || '',
+            attachments: recordData.attachments || []
         };
 
         const { data, error } = await supabaseAdmin.from('medical_records').insert(payload).select().single();
@@ -623,6 +650,12 @@ const MedicalRecord = {
 };
 
 // 6. CHAT MESSAGE MODEL (Supabase PostgreSQL)
+const normalizeChatRoomId = (roomId) => {
+    if (!roomId) return 'PATIENT_GENERAL';
+    const str = String(roomId).trim().toUpperCase();
+    return str.replace(/[-]/g, '_');
+};
+
 const ChatMessage = {
     async create(messageData) {
         const rawSender = messageData.sender_id || messageData.senderId || '';
@@ -633,27 +666,25 @@ const ChatMessage = {
             if (isUUID(str)) {
                 senderId = str;
             } else {
-                let user = await User.findOne({ email: str }) || await User.findOne({ name: str });
-                if (!user) {
-                    const lower = str.toLowerCase();
-                    if (lower.includes('doctor') || lower.includes('dentist') || lower.includes('dr')) {
-                        user = await User.findOne({ role: 'Dentist' });
-                    } else {
-                        user = await User.findOne({ role: 'Patient' });
-                    }
-                }
-                if (user) senderId = user.id;
+                senderId = await resolveUserUuid(str);
             }
         }
 
-        if (!senderId && rawSender) {
-            senderId = await resolveUserUuid(rawSender);
+        let receiverId = null;
+        const rawReceiver = messageData.receiver_id || messageData.receiverId;
+        if (rawReceiver) {
+            const strR = String(rawReceiver).trim();
+            if (isUUID(strR)) {
+                receiverId = strR;
+            } else {
+                receiverId = await resolveUserUuid(strR);
+            }
         }
 
-        const receiverId = await resolveUserUuid(messageData.receiver_id || messageData.receiverId);
+        const normalizedRoom = normalizeChatRoomId(messageData.room_id || messageData.roomId);
 
         const payload = {
-            room_id: messageData.room_id || messageData.roomId || 'GENERAL-CHAT',
+            room_id: normalizedRoom,
             sender_id: senderId || null,
             receiver_id: receiverId || null,
             message: messageData.message || '',
@@ -661,14 +692,13 @@ const ChatMessage = {
             read: messageData.read ?? false
         };
 
-        const { data, error } = await supabaseAdmin.from('chat_messages').insert(payload).select();
+        const { data, error } = await supabaseAdmin.from('chat_messages').insert(payload).select('*, sender:users!sender_id(id, name, email, role), receiver:users!receiver_id(id, name, email, role)');
         if (error) {
             console.error('❌ Supabase ChatMessage Insert Error:', error.message);
             throw error;
         }
         return (data && data.length > 0) ? data[0] : payload;
     },
-
 
     async find(query = {}, options = {}) {
         // Enforce DB/Query-Level Access Control if caller user is passed in options
@@ -682,9 +712,12 @@ const ChatMessage = {
             }
         }
 
-        let req = supabaseAdmin.from('chat_messages').select('*, sender:users!sender_id(name, email, role)');
-        if (query.room_id || query.roomId) {
-            req = req.eq('room_id', query.room_id || query.roomId);
+        let req = supabaseAdmin.from('chat_messages').select('*, sender:users!sender_id(id, name, email, role), receiver:users!receiver_id(id, name, email, role)');
+        const rawRoom = query.room_id || query.roomId;
+        if (rawRoom) {
+            const normalized = normalizeChatRoomId(rawRoom);
+            const hyphenated = normalized.replace(/_/g, '-');
+            req = req.or(`room_id.eq.${normalized},room_id.eq.${hyphenated},room_id.eq.${rawRoom}`);
         }
         const sId = query.sender_id || query.senderId;
         if (sId) {
@@ -692,7 +725,16 @@ const ChatMessage = {
             if (typeof resolvedS === 'string' && resolvedS.length > 0) req = req.eq('sender_id', resolvedS);
         }
         const { data, error } = await req.order('created_at', { ascending: true });
-        if (error) throw error;
+        if (error) {
+            // Fallback to simple sender select if receiver foreign key is missing
+            const fallback = await supabaseAdmin.from('chat_messages').select('*, sender:users!sender_id(id, name, email, role)').order('created_at', { ascending: true });
+            let msgs = fallback.data || [];
+            if (rawRoom) {
+                const norm = normalizeChatRoomId(rawRoom);
+                msgs = msgs.filter(m => normalizeChatRoomId(m.room_id) === norm);
+            }
+            return msgs;
+        }
         return data || [];
     },
 
@@ -711,130 +753,189 @@ const ChatMessage = {
             // Fetch all chat messages with sender info
             const { data: messages, error } = await supabaseAdmin
                 .from('chat_messages')
-                .select('*, sender:users!sender_id(name, email, role)')
+                .select('*, sender:users!sender_id(id, name, email, role), receiver:users!receiver_id(id, name, email, role)')
                 .order('created_at', { ascending: false });
 
-            if (error) throw error;
+            if (error) {
+                const fallback = await supabaseAdmin
+                    .from('chat_messages')
+                    .select('*, sender:users!sender_id(id, name, email, role)')
+                    .order('created_at', { ascending: false });
+                if (!fallback.data || fallback.data.length === 0) return [];
+                return this._assembleConversations(fallback.data, user, isMainAdmin, role);
+            }
+
             if (!messages || messages.length === 0) return [];
-
-            // Group by room_id and extract doctor sender if present
-            const roomMap = new Map();
-            for (const msg of messages) {
-                const rId = msg.room_id;
-                if (!roomMap.has(rId)) {
-                    roomMap.set(rId, {
-                        roomId: rId,
-                        lastMessage: msg.message,
-                        lastMessageType: msg.type,
-                        lastMessageTime: msg.created_at,
-                        lastSenderName: msg.sender?.name || (msg.type === 'doctor' ? 'Doctor' : 'Patient'),
-                        lastSenderRole: msg.sender?.role || (msg.type === 'doctor' ? 'Dentist' : 'Patient'),
-                        doctorName: null,
-                        totalMessages: 0,
-                        unreadCount: 0
-                    });
-                }
-                const thread = roomMap.get(rId);
-                thread.totalMessages += 1;
-                if (!msg.read && msg.sender_id !== user?.id) {
-                    thread.unreadCount += 1;
-                }
-                if (!thread.doctorName && (msg.type === 'doctor' || msg.sender?.role === 'Dentist')) {
-                    let dName = msg.sender?.name || '';
-                    if (dName && !dName.toLowerCase().startsWith('dr.') && !dName.toLowerCase().startsWith('dr ')) {
-                        dName = `Dr. ${dName}`;
-                    }
-                    if (dName) thread.doctorName = dName;
-                }
-            }
-
-            // Fetch consultation requests and appointments to resolve doctor names for all rooms
-            let doctorLookup = new Map();
-            try {
-                const { data: problemReqs } = await supabaseAdmin
-                    .from('patient_problem_requests')
-                    .select('patient_name, patient_id, suggested_dentist:dentists!suggested_dentist_id(users(name))');
-                if (problemReqs) {
-                    for (const pr of problemReqs) {
-                        const dName = pr.suggested_dentist?.users?.name;
-                        if (dName) {
-                            const formatted = dName.toLowerCase().startsWith('dr') ? dName : `Dr. ${dName}`;
-                            if (pr.patient_name) doctorLookup.set(pr.patient_name.toLowerCase(), formatted);
-                            if (pr.patient_id) doctorLookup.set(String(pr.patient_id).toLowerCase(), formatted);
-                        }
-                    }
-                }
-
-                const { data: appointments } = await supabaseAdmin
-                    .from('appointments')
-                    .select('patient_id, dentist:dentists!dentist_id(users(name))');
-                if (appointments) {
-                    for (const ap of appointments) {
-                        const dName = ap.dentist?.users?.name;
-                        if (dName) {
-                            const formatted = dName.toLowerCase().startsWith('dr') ? dName : `Dr. ${dName}`;
-                            if (ap.patient_id) doctorLookup.set(String(ap.patient_id).toLowerCase(), formatted);
-                        }
-                    }
-                }
-            } catch (_) {}
-
-            // Extract patient names and doctor names for each room
-            const conversations = [];
-            for (const [roomId, thread] of roomMap.entries()) {
-                let inferredPatientName = roomId.replace(/^PATIENT[-_]/i, '').replace(/_/g, ' ');
-                if (!inferredPatientName || inferredPatientName.length === 0) {
-                    inferredPatientName = 'Patient Consultation';
-                }
-
-                inferredPatientName = inferredPatientName.split(' ')
-                    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-                    .join(' ');
-
-                const cleanKey = inferredPatientName.toLowerCase();
-                let resolvedDoc = thread.doctorName;
-                if (!resolvedDoc) {
-                    for (const [k, v] of doctorLookup.entries()) {
-                        if (cleanKey.includes(k) || k.includes(cleanKey) || roomId.toLowerCase().includes(k)) {
-                            resolvedDoc = v;
-                            break;
-                        }
-                    }
-                }
-                if (!resolvedDoc) {
-                    resolvedDoc = 'Dr. Attending Dentist';
-                }
-
-                const conversation = {
-                    roomId,
-                    patientName: inferredPatientName,
-                    doctorName: resolvedDoc,
-                    lastMessage: thread.lastMessage,
-                    lastMessageType: thread.lastMessageType,
-                    lastMessageTime: thread.lastMessageTime,
-                    totalMessages: thread.totalMessages,
-                    unreadCount: thread.unreadCount
-                };
-
-                if (isMainAdmin) {
-                    conversations.push(conversation);
-                } else if (role === 'dentist' || role === 'doctor') {
-                    conversations.push(conversation);
-                } else if (role === 'patient') {
-                    const userNameNorm = (user?.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-                    const roomNorm = roomId.toUpperCase().replace(/[^A-Z0-9]/g, '');
-                    if (roomNorm.includes(userNameNorm) || (user?.id && roomNorm.includes(user.id))) {
-                        conversations.push(conversation);
-                    }
-                }
-            }
-
-
-            return conversations;
+            return this._assembleConversations(messages, user, isMainAdmin, role);
         } catch (e) {
             console.error('Error in getConversations:', e.message);
             return [];
         }
+    },
+
+    async _assembleConversations(messages, user, isMainAdmin, role) {
+        // Group by normalized room_id
+        const roomMap = new Map();
+        for (const msg of messages) {
+            const rId = normalizeChatRoomId(msg.room_id);
+            if (!roomMap.has(rId)) {
+                roomMap.set(rId, {
+                    roomId: rId,
+                    lastMessage: msg.message,
+                    lastMessageType: msg.type,
+                    lastMessageTime: msg.created_at,
+                    lastSenderName: msg.sender?.name || (msg.type === 'doctor' ? 'Doctor' : 'Patient'),
+                    lastSenderRole: msg.sender?.role || (msg.type === 'doctor' ? 'Dentist' : 'Patient'),
+                    doctorName: null,
+                    patientName: null,
+                    totalMessages: 0,
+                    unreadCount: 0
+                });
+            }
+            const thread = roomMap.get(rId);
+            thread.totalMessages += 1;
+            if (!msg.read && msg.sender_id !== user?.id) {
+                thread.unreadCount += 1;
+            }
+            thread.senderIds = thread.senderIds || new Set();
+            thread.receiverIds = thread.receiverIds || new Set();
+            if (msg.sender_id) thread.senderIds.add(msg.sender_id);
+            if (msg.receiver_id) thread.receiverIds.add(msg.receiver_id);
+
+            // Resolve doctor name from messages
+            if (!thread.doctorName && (msg.type === 'doctor' || msg.sender?.role === 'Dentist')) {
+                let dName = msg.sender?.name || '';
+                if (dName && !dName.toLowerCase().startsWith('dr.') && !dName.toLowerCase().startsWith('dr ')) {
+                    dName = `Dr. ${dName}`;
+                }
+                if (dName) thread.doctorName = dName;
+            }
+            // Resolve patient name from messages
+            if (!thread.patientName && (msg.type === 'patient' || msg.sender?.role === 'Patient')) {
+                if (msg.sender?.name) thread.patientName = msg.sender.name;
+            }
+        }
+
+        // Fetch consultation requests and appointments to resolve doctor names and patient names
+        let doctorLookup = new Map();
+        let patientLookup = new Map();
+        try {
+            const { data: problemReqs } = await supabaseAdmin
+                .from('patient_problem_requests')
+                .select('patient_name, patient_id, suggested_dentist_id, suggested_dentist:dentists!suggested_dentist_id(id, user_id, users(name))');
+            if (problemReqs) {
+                for (const pr of problemReqs) {
+                    const dName = pr.suggested_dentist?.users?.name;
+                    if (dName) {
+                        const formatted = dName.toLowerCase().startsWith('dr') ? dName : `Dr. ${dName}`;
+                        if (pr.patient_name) doctorLookup.set(pr.patient_name.toLowerCase(), formatted);
+                        if (pr.patient_id) doctorLookup.set(String(pr.patient_id).toLowerCase(), formatted);
+                    }
+                    if (pr.patient_name && pr.patient_id) {
+                        patientLookup.set(String(pr.patient_id).toLowerCase(), pr.patient_name);
+                    }
+                }
+            }
+
+            const { data: appointments } = await supabaseAdmin
+                .from('appointments')
+                .select('patient_id, dentist_id, dentist:dentists!dentist_id(id, user_id, users(name)), patient:users!patient_id(name)');
+            if (appointments) {
+                for (const ap of appointments) {
+                    const dName = ap.dentist?.users?.name;
+                    if (dName) {
+                        const formatted = dName.toLowerCase().startsWith('dr') ? dName : `Dr. ${dName}`;
+                        if (ap.patient_id) doctorLookup.set(String(ap.patient_id).toLowerCase(), formatted);
+                    }
+                    if (ap.patient?.name && ap.patient_id) {
+                        patientLookup.set(String(ap.patient_id).toLowerCase(), ap.patient.name);
+                    }
+                }
+            }
+        } catch (_) {}
+
+        // Extract clean patient names and doctor names for each room
+        const conversations = [];
+        for (const [roomId, thread] of roomMap.entries()) {
+            let inferredPatientName = thread.patientName;
+            let inferredDoctorName = thread.doctorName;
+
+            // Handle pair room syntax: CHAT_PATIENTNAME_DOCTORNAME
+            if (roomId.startsWith('CHAT_')) {
+                const parts = roomId.replace(/^CHAT_/, '').split('_');
+                if (parts.length >= 2) {
+                    if (!inferredPatientName) {
+                        inferredPatientName = parts[0].charAt(0).toUpperCase() + parts[0].slice(1).toLowerCase();
+                    }
+                    if (!inferredDoctorName) {
+                        const dToken = parts.slice(1).join(' ');
+                        inferredDoctorName = dToken.toLowerCase().startsWith('dr') ? dToken : `Dr. ${dToken.charAt(0).toUpperCase() + dToken.slice(1).toLowerCase()}`;
+                    }
+                }
+            }
+
+            if (!inferredPatientName) {
+                inferredPatientName = roomId.replace(/^PATIENT[-_]/i, '').replace(/_/g, ' ');
+                if (!inferredPatientName || inferredPatientName.length === 0) {
+                    inferredPatientName = 'Patient Consultation';
+                }
+                inferredPatientName = inferredPatientName.split(' ')
+                    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                    .join(' ');
+            }
+
+            const cleanKey = inferredPatientName.toLowerCase();
+            let resolvedDoc = inferredDoctorName;
+            if (!resolvedDoc) {
+                for (const [k, v] of doctorLookup.entries()) {
+                    if (cleanKey.includes(k) || k.includes(cleanKey) || roomId.toLowerCase().includes(k)) {
+                        resolvedDoc = v;
+                        break;
+                    }
+                }
+            }
+            if (!resolvedDoc) {
+                resolvedDoc = 'Attending Dentist';
+            }
+
+            const conversation = {
+                roomId,
+                patientName: inferredPatientName,
+                doctorName: resolvedDoc,
+                lastMessage: thread.lastMessage,
+                lastMessageType: thread.lastMessageType,
+                lastMessageTime: thread.lastMessageTime,
+                totalMessages: thread.totalMessages,
+                unreadCount: thread.unreadCount
+            };
+
+            if (isMainAdmin) {
+                conversations.push(conversation);
+            } else if (role === 'dentist' || role === 'doctor') {
+                const userDocName = (user?.name || '').replace(/^Dr\.\s*/i, '').trim().toLowerCase();
+                const roomNorm = roomId.toLowerCase();
+                const threadHasUser = (thread.senderIds && thread.senderIds.has(user.id)) ||
+                                      (thread.receiverIds && thread.receiverIds.has(user.id));
+                const nameMatches = userDocName.length > 0 && (
+                    resolvedDoc.toLowerCase().includes(userDocName) ||
+                    roomNorm.includes(userDocName)
+                );
+
+                if (threadHasUser || nameMatches) {
+                    conversations.push(conversation);
+                }
+            } else if (role === 'patient') {
+                const userNameNorm = (user?.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+                const roomNorm = roomId.toUpperCase().replace(/[^A-Z0-9]/g, '');
+                const threadHasUser = (thread.senderIds && thread.senderIds.has(user.id)) ||
+                                      (thread.receiverIds && thread.receiverIds.has(user.id));
+                if (threadHasUser || roomNorm.includes(userNameNorm) || (user?.id && roomNorm.includes(user.id))) {
+                    conversations.push(conversation);
+                }
+            }
+        }
+
+        return conversations;
     },
 
     async delete(query = {}) {
@@ -842,7 +943,10 @@ const ChatMessage = {
         if (query.messageId || query.id) {
             req = req.eq('id', query.messageId || query.id);
         } else if (query.roomId || query.room_id) {
-            req = req.eq('room_id', query.roomId || query.room_id);
+            const raw = query.roomId || query.room_id;
+            const norm = normalizeChatRoomId(raw);
+            const hyph = norm.replace(/_/g, '-');
+            req = req.or(`room_id.eq.${norm},room_id.eq.${hyph},room_id.eq.${raw}`);
         } else {
             return false;
         }

@@ -1830,24 +1830,36 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               final text = (msg['message'] ?? '').toString();
                               final type = (msg['type'] ?? 'text').toString();
                               final sender = msg['sender'];
-                              final senderName = sender is Map ? (sender['name'] ?? 'User') : (type == 'doctor' ? doctorName : patientName);
-                              final senderRole = sender is Map ? (sender['role'] ?? type) : type;
-                              final isDoc = senderRole.toString().toLowerCase().contains('dentist') || senderRole.toString().toLowerCase().contains('doctor') || type == 'doctor';
-                              final isPat = senderRole.toString().toLowerCase().contains('patient') || type == 'patient';
+                              final senderRoleStr = (sender is Map ? (sender['role'] ?? type) : type).toString().toLowerCase();
+                              final isDoc = senderRoleStr.contains('dentist') || senderRoleStr.contains('doctor') || type == 'doctor';
+                              
+                              String fromName = sender is Map ? (sender['name'] ?? (isDoc ? doctorName : patientName)) : (isDoc ? doctorName : patientName);
+                              if (isDoc && !fromName.toLowerCase().startsWith('dr')) {
+                                fromName = 'Dr. $fromName';
+                              }
+                              final String fromRole = isDoc ? 'Dentist' : 'Patient';
+                              final String toName = isDoc ? patientName : doctorName;
+                              final String toRole = isDoc ? 'Patient' : 'Dentist';
+
                               final time = msg['created_at'] != null ? DateTime.tryParse(msg['created_at'].toString()) : null;
-                              final timeStr = time != null ? '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}' : '';
+                              final timeStr = time != null 
+                                  ? '${time.hour > 12 ? time.hour - 12 : (time.hour == 0 ? 12 : time.hour)}:${time.minute.toString().padLeft(2, '0')} ${time.hour >= 12 ? 'PM' : 'AM'}'
+                                  : '';
 
                               return Align(
                                 alignment: isDoc ? Alignment.centerRight : Alignment.centerLeft,
                                 child: Container(
                                   margin: const EdgeInsets.symmetric(vertical: 4),
                                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                  constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.8),
+                                  constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.82),
                                   decoration: BoxDecoration(
-                                    color: isDoc ? const Color(0xFFE0F2FE) : (isPat ? const Color(0xFFDCFCE7) : Colors.white),
-                                    borderRadius: BorderRadius.circular(14),
+                                    color: isDoc ? const Color(0xFFE0F2FE) : const Color(0xFFDCFCE7),
+                                    borderRadius: BorderRadius.circular(14).copyWith(
+                                      topRight: isDoc ? const Radius.circular(2) : const Radius.circular(14),
+                                      topLeft: isDoc ? const Radius.circular(14) : const Radius.circular(2),
+                                    ),
                                     border: Border.all(
-                                      color: isDoc ? const Color(0xFFBAE6FD) : (isPat ? const Color(0xFFBBF7D0) : const Color(0xFFE2E8F0)),
+                                      color: isDoc ? const Color(0xFFBAE6FD) : const Color(0xFFBBF7D0),
                                     ),
                                     boxShadow: [
                                       BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 4, offset: const Offset(0, 2)),
@@ -1867,7 +1879,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                             color: isDoc ? const Color(0xFF0284C7) : const Color(0xFF16A34A),
                                           ),
                                           Text(
-                                            '$senderName (${isDoc ? 'Dentist' : 'Patient'})',
+                                            '$fromName ($fromRole)',
                                             style: TextStyle(
                                               fontSize: 11,
                                               fontWeight: FontWeight.bold,
@@ -1876,7 +1888,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                           ),
                                           const Icon(Icons.arrow_forward_rounded, size: 11, color: Color(0xFF94A3B8)),
                                           Text(
-                                            isDoc ? 'To: $patientName (Patient)' : 'To: $doctorName (Dentist)',
+                                            'To: $toName ($toRole)',
                                             style: TextStyle(
                                               fontSize: 11,
                                               fontWeight: FontWeight.w600,
@@ -1885,13 +1897,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                           ),
                                         ],
                                       ),
-                                      const SizedBox(height: 5),
-                                      Text(text, style: const TextStyle(fontSize: 13, color: Color(0xFF1E293B))),
+                                      const SizedBox(height: 6),
+                                      Text(text, style: const TextStyle(fontSize: 13, color: Color(0xFF1E293B), height: 1.3)),
                                       if (timeStr.isNotEmpty) ...[
-                                        const SizedBox(height: 2),
+                                        const SizedBox(height: 4),
                                         Align(
                                           alignment: Alignment.bottomRight,
-                                          child: Text(timeStr, style: TextStyle(fontSize: 10, color: Colors.grey[500])),
+                                          child: Text(timeStr, style: TextStyle(fontSize: 10, color: Colors.grey[600])),
                                         ),
                                       ],
                                     ],
@@ -2056,86 +2068,152 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 10, offset: const Offset(0, 4)),
                   ],
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isNarrow = constraints.maxWidth < 650;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primaryBlue.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Icon(Icons.forum_rounded, color: AppTheme.primaryBlue, size: 22),
-                        ),
-                        const SizedBox(width: 14),
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                        if (isNarrow) ...[
+                          Row(
                             children: [
-                              Text(
-                                'Patient–Doctor Chat Oversight',
-                                style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primaryBlue.withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: const Icon(Icons.forum_rounded, color: AppTheme.primaryBlue, size: 20),
                               ),
-                              SizedBox(height: 3),
-                              Text(
-                                'Main Admin Exclusive • Real-time conversation monitoring & compliance audit trail',
-                                style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11.5),
+                              const SizedBox(width: 10),
+                              const Expanded(
+                                child: Text(
+                                  'Patient–Doctor Chat Oversight',
+                                  style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.refresh_rounded, color: Colors.white, size: 20),
+                                tooltip: 'Refresh Conversations',
+                                onPressed: _fetchAdminConversations,
                               ),
                             ],
                           ),
-                        ),
-                        ElevatedButton.icon(
-                          icon: const Icon(Icons.history_rounded, size: 16),
-                          label: const Text('Audit Trail', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF3B82F6),
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          const SizedBox(height: 6),
+                          const Text(
+                            'Main Admin Exclusive • Real-time conversation monitoring & compliance audit trail',
+                            style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
                           ),
-                          onPressed: () => _showAdminAuditLogsModal(context),
-                        ),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          icon: const Icon(Icons.refresh_rounded, color: Colors.white),
-                          tooltip: 'Refresh Conversations',
-                          onPressed: _fetchAdminConversations,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF10B981).withOpacity(0.15),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: const Color(0xFF10B981), width: 0.8),
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              icon: const Icon(Icons.history_rounded, size: 16),
+                              label: const Text('Audit Trail', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF3B82F6),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              onPressed: () => _showAdminAuditLogsModal(context),
+                            ),
                           ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
+                        ] else ...[
+                          Row(
                             children: [
-                              Icon(Icons.shield_rounded, color: Color(0xFF10B981), size: 14),
-                              SizedBox(width: 6),
-                              Text('Sub-Admins Strictly Restricted (403 Forbidden)', style: TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.bold)),
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primaryBlue.withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: const Icon(Icons.forum_rounded, color: AppTheme.primaryBlue, size: 22),
+                              ),
+                              const SizedBox(width: 14),
+                              const Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Patient–Doctor Chat Oversight',
+                                      style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    SizedBox(height: 3),
+                                    Text(
+                                      'Main Admin Exclusive • Real-time conversation monitoring & compliance audit trail',
+                                      style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11.5),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              ElevatedButton.icon(
+                                icon: const Icon(Icons.history_rounded, size: 16),
+                                label: const Text('Audit Trail', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF3B82F6),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                ),
+                                onPressed: () => _showAdminAuditLogsModal(context),
+                              ),
+                              const SizedBox(width: 8),
+                              IconButton(
+                                icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+                                tooltip: 'Refresh Conversations',
+                                onPressed: _fetchAdminConversations,
+                              ),
                             ],
                           ),
-                        ),
-                        const SizedBox(width: 10),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text('${_adminConversations.length} Active Threads', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                        ],
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: const Color(0xFF10B981), width: 0.8),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.shield_rounded, color: Color(0xFF10B981), size: 14),
+                                  SizedBox(width: 6),
+                                  Flexible(
+                                    child: Text(
+                                      'Sub-Admins Strictly Restricted (403 Forbidden)',
+                                      style: TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.bold),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                '${_adminConversations.length} Active Threads',
+                                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
-                    ),
-                  ],
+                    );
+                  },
                 ),
               ),
               const SizedBox(height: 18),
@@ -2557,16 +2635,22 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               ),
                               Switch(
                                 value: isActive,
-                                activeColor: const Color(0xFF10B981),
+                                activeThumbColor: const Color(0xFF10B981),
                                 onChanged: (val) async {
                                   final newStatus = val ? 'ACTIVE' : 'INACTIVE';
+                                  _problemService.updateSubAdminStatusLocally(saId, newStatus);
+                                  if (mounted) setState(() {});
+
                                   await ApiService().toggleSubAdminStatus(saId, status: newStatus);
                                   await _problemService.syncSubAdminsFromApi();
+                                  if (mounted) setState(() {});
+
                                   if (context.mounted) {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
                                         content: Text(val ? '✓ Sub-Admin "$name" activated.' : '⛔ Sub-Admin "$name" deactivated.'),
                                         backgroundColor: val ? const Color(0xFF10B981) : const Color(0xFFD97706),
+                                        duration: const Duration(seconds: 2),
                                       ),
                                     );
                                   }
@@ -2699,13 +2783,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
             onPressed: () async {
               Navigator.of(ctx).pop();
+              _problemService.removeSubAdminLocally(subAdminId);
+              if (mounted) setState(() {});
               await ApiService().deleteSubAdmin(subAdminId);
               await _problemService.syncSubAdminsFromApi();
+              if (mounted) setState(() {});
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text('🗑️ Sub-Admin "$name" removed successfully.'),
                     backgroundColor: Colors.red,
+                    duration: const Duration(seconds: 2),
                   ),
                 );
               }
@@ -3278,6 +3366,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   );
 
                                   await _problemService.syncSubAdminsFromApi();
+                                  if (mounted) setState(() {});
                                   setModalState(() => isLoading = false);
 
                                   if (!dialogCtx.mounted) return;

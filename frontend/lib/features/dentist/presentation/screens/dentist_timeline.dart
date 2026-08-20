@@ -6,6 +6,7 @@ import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/widgets/dental_ads_banner.dart';
+import '../../../../core/widgets/whatsapp_chat_modal.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class DentistTimelineScreen extends StatefulWidget {
@@ -116,10 +117,27 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   }
 
   void _showUpdateMyFeeAndSlotsDialog(BuildContext context) {
-    final currentDoc = _patientService.currentDoctor ?? _patientService.allDoctors.first;
-    final feeCtrl = TextEditingController(text: currentDoc.consultationFee);
+    final authUser = Supabase.instance.client.auth.currentUser;
+    final currentDoc = _patientService.currentDoctor ?? (
+      authUser != null ? DoctorModel(
+        id: authUser.id,
+        name: authUser.userMetadata?['name'] ?? 'Doctor',
+        email: authUser.email ?? '',
+        phone: '',
+        specialty: 'General Dentistry',
+        qualification: 'BDS, MDS',
+        experienceYears: 5,
+        rating: 5.0,
+        reviewCount: 0,
+        clinicName: 'Dental Practice',
+        status: 'Available',
+        nextAvailableSlots: ['Today, 2:00 PM'],
+        consultationFee: '\$75',
+      ) : null
+    );
+    final feeCtrl = TextEditingController(text: currentDoc?.consultationFee ?? '\$75');
     final slotCtrl = TextEditingController(
-      text: currentDoc.nextAvailableSlots.isNotEmpty ? currentDoc.nextAvailableSlots.first : 'Today, 2:00 PM',
+      text: (currentDoc?.nextAvailableSlots.isNotEmpty == true) ? currentDoc!.nextAvailableSlots.first : 'Today, 2:00 PM',
     );
 
     showDialog(
@@ -172,8 +190,9 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 foregroundColor: Colors.white,
               ),
               onPressed: () {
+                final docId = currentDoc?.id ?? (authUser?.id ?? '');
                 _patientService.updateDoctorFeeAndSlots(
-                  doctorId: currentDoc.id,
+                  doctorId: docId,
                   consultationFee: feeCtrl.text.trim(),
                   availableSlot: slotCtrl.text.trim(),
                 );
@@ -475,380 +494,12 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
 
   void _showDoctorChatModal(BuildContext context, String patientName, String roomId) {
     final doctor = _patientService.currentDoctor;
-    final msgController = TextEditingController();
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (modalContext) {
-        return StatefulBuilder(
-          builder: (stCtx, setModalState) {
-            return Container(
-              height: MediaQuery.of(context).size.height * 0.9,
-              decoration: const BoxDecoration(
-                color: Color(0xFFE5DDD5),
-                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-              ),
-              child: Column(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF075E54),
-                      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                    ),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 22),
-                          onPressed: () => Navigator.of(modalContext).pop(),
-                        ),
-                        const SizedBox(width: 8),
-                        Stack(
-                          children: [
-                            CircleAvatar(
-                              radius: 18,
-                              backgroundColor: Colors.white.withValues(alpha: 0.2),
-                              child: Text(
-                                patientName.isNotEmpty ? patientName[0].toUpperCase() : 'P',
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-                              ),
-                            ),
-                            Positioned(
-                              right: 0,
-                              bottom: 0,
-                              child: Container(
-                                width: 10,
-                                height: 10,
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF25D366),
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: const Color(0xFF075E54), width: 1.5),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                patientName.isNotEmpty ? patientName : 'Patient',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              const Text(
-                                'online',
-                                style: TextStyle(fontSize: 11, color: Color(0xFFB9E5E1), fontWeight: FontWeight.w400),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const Icon(Icons.videocam_rounded, color: Colors.white, size: 20),
-                        const SizedBox(width: 12),
-                        IconButton(
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          icon: const Icon(Icons.delete_outline_rounded, color: Colors.white, size: 20),
-                          tooltip: 'Clear Chat History',
-                          onPressed: () {
-                            showDialog(
-                              context: context,
-                              builder: (confirmCtx) => AlertDialog(
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                                title: const Row(
-                                  children: [
-                                    Icon(Icons.delete_forever_rounded, color: Color(0xFFEF4444)),
-                                    SizedBox(width: 8),
-                                    Text('Clear Chat History?', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                                  ],
-                                ),
-                                content: const Text('This will permanently delete all messages in this conversation. Are you sure?'),
-                                actions: [
-                                  TextButton(onPressed: () => Navigator.pop(confirmCtx), child: const Text('Cancel')),
-                                  ElevatedButton(
-                                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444), foregroundColor: Colors.white),
-                                    onPressed: () async {
-                                      Navigator.pop(confirmCtx);
-                                      final ok = await ApiService().clearChatMessages(roomId: roomId);
-                                      if (ok && context.mounted) {
-                                        setModalState(() {});
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text('🗑️ Chat history cleared!'), backgroundColor: Color(0xFF10B981)),
-                                        );
-                                      }
-                                    },
-                                    child: const Text('Clear Chat', style: TextStyle(fontWeight: FontWeight.bold)),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                        const SizedBox(width: 10),
-                        PopupMenuButton<String>(
-                          icon: const Icon(Icons.more_vert_rounded, color: Colors.white, size: 20),
-                          onSelected: (val) async {
-                            if (val == 'clear') {
-                              final ok = await ApiService().clearChatMessages(roomId: roomId);
-                              if (ok && context.mounted) {
-                                setModalState(() {});
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('🗑️ Chat history cleared!'), backgroundColor: Color(0xFF10B981)),
-                                );
-                              }
-                            }
-                          },
-                          itemBuilder: (ctx) => [
-                            const PopupMenuItem(
-                              value: 'clear',
-                              child: Row(
-                                children: [
-                                  Icon(Icons.delete_sweep_rounded, color: Color(0xFFEF4444), size: 18),
-                                  SizedBox(width: 8),
-                                  Text('Clear Chat History', style: TextStyle(fontSize: 13, color: Color(0xFFEF4444), fontWeight: FontWeight.bold)),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: Container(
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFE5DDD5),
-                      ),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      child: FutureBuilder<List<dynamic>>(
-                        future: ApiService().fetchChatMessages(roomId: roomId),
-                        builder: (fbCtx, snapshot) {
-                          final msgs = snapshot.data ?? [];
-                          if (snapshot.connectionState == ConnectionState.waiting && msgs.isEmpty) {
-                            return const Center(child: CircularProgressIndicator(color: Color(0xFF075E54)));
-                          }
-                          if (msgs.isEmpty) {
-                            return Center(
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFFFF5C4),
-                                  borderRadius: BorderRadius.circular(10),
-                                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4)],
-                                ),
-                                child: const Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.lock_rounded, size: 14, color: Color(0xFF856404)),
-                                    SizedBox(width: 6),
-                                    Text(
-                                      'Messages are end-to-end encrypted.',
-                                      style: TextStyle(fontSize: 11, color: Color(0xFF856404), fontWeight: FontWeight.w500),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          }
-                          return ListView.builder(
-                            itemCount: msgs.length,
-                            padding: const EdgeInsets.symmetric(vertical: 6),
-                            itemBuilder: (itemCtx, index) {
-                              final m = msgs[index];
-                              final text = (m['message'] ?? '').toString();
-                              final mType = (m['type'] ?? '').toString();
-                              final msgId = (m['id'] ?? m['_id'] ?? '').toString();
-                              final senderObj = m['sender'] ?? {};
-                              final senderRole = (senderObj['role'] ?? '').toString();
-                              final senderName = (senderObj['name'] ?? m['sender_id'] ?? m['senderId'] ?? '').toString();
-                              final createdAt = m['created_at'] != null ? DateTime.tryParse(m['created_at'].toString()) : null;
-
-                              final String timeStr = createdAt != null 
-                                  ? '${createdAt.hour > 12 ? createdAt.hour - 12 : (createdAt.hour == 0 ? 12 : createdAt.hour)}:${createdAt.minute.toString().padLeft(2, '0')} ${createdAt.hour >= 12 ? 'PM' : 'AM'}'
-                                  : 'Just now';
-
-                              final bool isSentByMe = mType == 'doctor' ||
-                                  senderRole == 'Dentist' ||
-                                  senderName.startsWith('Dr.') ||
-                                  (doctor?.name != null && doctor!.name.isNotEmpty && senderName.contains(doctor.name));
-
-                              return Align(
-                                alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
-                                child: GestureDetector(
-                                  onLongPress: () {
-                                    showModalBottomSheet(
-                                      context: context,
-                                      builder: (bCtx) => Container(
-                                        padding: const EdgeInsets.all(16),
-                                        child: Column(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            ListTile(
-                                              leading: const Icon(Icons.delete_outline, color: Colors.red),
-                                              title: const Text('Delete Message'),
-                                              onTap: () async {
-                                                Navigator.pop(bCtx);
-                                                final ok = await ApiService().clearChatMessages(roomId: roomId, messageId: msgId);
-                                                if (ok) {
-                                                  setModalState(() {});
-                                                }
-                                              },
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                  child: Container(
-                                    margin: const EdgeInsets.symmetric(vertical: 3),
-                                    padding: const EdgeInsets.fromLTRB(12, 8, 10, 6),
-                                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.76),
-                                    decoration: BoxDecoration(
-                                      color: isSentByMe ? const Color(0xFFDCF8C6) : Colors.white,
-                                      borderRadius: BorderRadius.circular(12).copyWith(
-                                        topRight: isSentByMe ? const Radius.circular(2) : const Radius.circular(12),
-                                        topLeft: isSentByMe ? const Radius.circular(12) : const Radius.circular(2),
-                                      ),
-                                      boxShadow: [
-                                        BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 3, offset: const Offset(0, 1)),
-                                      ],
-                                    ),
-                                    child: Wrap(
-                                      alignment: WrapAlignment.end,
-                                      crossAxisAlignment: WrapCrossAlignment.end,
-                                      children: [
-                                        Text(
-                                          text,
-                                          style: const TextStyle(fontSize: 14, color: Color(0xFF111B21), height: 1.3),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Padding(
-                                          padding: const EdgeInsets.only(top: 4),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Text(
-                                                timeStr,
-                                                style: const TextStyle(fontSize: 10, color: Color(0xFF667781)),
-                                              ),
-                                              if (isSentByMe) ...[
-                                                const SizedBox(width: 3),
-                                                const Icon(Icons.done_all_rounded, size: 14, color: Color(0xFF34B7F1)),
-                                              ],
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              );
-                            },
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  SafeArea(
-                    top: false,
-                    child: Container(
-                      padding: EdgeInsets.only(
-                        left: 8,
-                        right: 8,
-                        top: 8,
-                        bottom: MediaQuery.of(modalContext).viewInsets.bottom + 8,
-                      ),
-                      color: const Color(0xFFF0F2F5),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.sentiment_satisfied_alt_rounded, color: Color(0xFF54656F), size: 24),
-                          const SizedBox(width: 8),
-                          const Icon(Icons.attach_file_rounded, color: Color(0xFF54656F), size: 22),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(24),
-                              ),
-                              child: TextField(
-                                controller: msgController,
-                                style: const TextStyle(fontSize: 14, color: Color(0xFF111B21)),
-                                textInputAction: TextInputAction.send,
-                                onSubmitted: (val) async {
-                                  final text = val.trim();
-                                  if (text.isEmpty) return;
-                                  msgController.clear();
-                                  final dSender = doctor?.name ?? 'Doctor';
-                                  await ApiService().sendMessage(
-                                    senderId: dSender,
-                                    message: text,
-                                    roomId: roomId,
-                                    type: 'doctor',
-                                  );
-                                  _patientService.addNotification(
-                                    recipientRole: 'Patient',
-                                    recipientId: patientName,
-                                    title: '💬 Doctor Reply',
-                                    message: '$dSender: "$text"',
-                                  );
-                                  setModalState(() {});
-                                },
-                                decoration: const InputDecoration(
-                                  hintText: 'Message',
-                                  hintStyle: TextStyle(fontSize: 14, color: Color(0xFF8696A0)),
-                                  border: InputBorder.none,
-                                  contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          CircleAvatar(
-                            radius: 20,
-                            backgroundColor: const Color(0xFF075E54),
-                            child: IconButton(
-                              icon: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
-                              onPressed: () async {
-                                final text = msgController.text.trim();
-                                if (text.isEmpty) return;
-                                msgController.clear();
-
-                                final dSender = doctor?.name ?? 'Doctor';
-                                await ApiService().sendMessage(
-                                  senderId: dSender,
-                                  message: text,
-                                  roomId: roomId,
-                                  type: 'doctor',
-                                );
-
-                                _patientService.addNotification(
-                                  recipientRole: 'Patient',
-                                  recipientId: patientName,
-                                  title: '💬 Doctor Reply',
-                                  message: '$dSender: "$text"',
-                                );
-
-                                setModalState(() {});
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+    WhatsAppChatModal.show(
+      context,
+      patientName: patientName,
+      doctorName: doctor?.name ?? 'Doctor',
+      currentUserRole: 'Dentist',
+      doctorId: doctor?.id,
     );
   }
 
@@ -1083,27 +734,26 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   // ==========================================
   Widget _buildDashboardTab() {
     var currentDoc = _patientService.currentDoctor;
-    if (currentDoc == null && _patientService.allDoctors.isNotEmpty) {
-      final authUser = Supabase.instance.client.auth.currentUser;
-      if (authUser != null && authUser.email != null && authUser.email!.isNotEmpty) {
-        final authEmailLower = authUser.email!.toLowerCase();
-        currentDoc = _patientService.allDoctors.firstWhere(
-          (d) => d.email.toLowerCase() == authEmailLower ||
-              (d.id.isNotEmpty && d.id == authUser.id) ||
-              (d.userId.isNotEmpty && d.userId == authUser.id),
-          orElse: () => _patientService.allDoctors.first,
-        );
-      } else {
-        currentDoc = _patientService.allDoctors.first;
+    final authUser = Supabase.instance.client.auth.currentUser;
+    if (authUser != null && authUser.email != null && authUser.email!.isNotEmpty) {
+      final authEmailLower = authUser.email!.toLowerCase();
+      final authName = (authUser.userMetadata?['name'] ?? '').toString().toLowerCase();
+      final match = _patientService.allDoctors.where(
+        (d) => d.email.toLowerCase() == authEmailLower ||
+            (d.id.isNotEmpty && d.id == authUser.id) ||
+            (d.userId.isNotEmpty && d.userId == authUser.id) ||
+            (authName.isNotEmpty && d.name.toLowerCase().contains(authName)),
+      ).firstOrNull;
+      if (match != null) {
+        currentDoc = match;
+        _patientService.currentDoctor = currentDoc;
       }
-      _patientService.currentDoctor = currentDoc;
     }
 
     final currentDocName = (currentDoc?.name ?? '').replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
     final currentDocId = (currentDoc?.id ?? '').trim();
     final currentDocUserId = (currentDoc?.userId ?? '').trim();
     final currentDocEmail = (currentDoc?.email ?? '').trim().toLowerCase();
-    final authUser = Supabase.instance.client.auth.currentUser;
     final authUserId = (authUser?.id ?? '').trim();
     final authEmail = (authUser?.email ?? '').trim().toLowerCase();
 
@@ -1555,7 +1205,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                         ),
                                         onPressed: () {
-                                          final rId = 'PATIENT_${req.patientName.toUpperCase().replaceAll(' ', '_')}';
+                                          final docName = _patientService.currentDoctor?.name ?? 'DOCTOR';
+                                          final rId = ApiService.getChatRoomId(patientIdOrName: req.patientName, dentistIdOrName: docName);
                                           _showDoctorChatModal(context, req.patientName, rId);
                                         },
                                       ),
@@ -1991,7 +1642,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                     onPressed: () {
-                      final rId = 'PATIENT-${patientName.isNotEmpty ? patientName.toUpperCase().replaceAll(' ', '_') : 'GUEST'}';
+                      final docName = _patientService.currentDoctor?.name ?? 'DOCTOR';
+                      final rId = ApiService.getChatRoomId(patientIdOrName: patientName, dentistIdOrName: docName);
                       _showDoctorChatModal(context, patientName, rId);
                     },
                   ),
@@ -2009,27 +1661,26 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   // ==========================================
   Widget _buildPatientsTab() {
     var currentDoc = _patientService.currentDoctor;
-    if (currentDoc == null && _patientService.allDoctors.isNotEmpty) {
-      final authUser = Supabase.instance.client.auth.currentUser;
-      if (authUser != null && authUser.email != null && authUser.email!.isNotEmpty) {
-        final authEmailLower = authUser.email!.toLowerCase();
-        currentDoc = _patientService.allDoctors.firstWhere(
-          (d) => d.email.toLowerCase() == authEmailLower ||
-              (d.id.isNotEmpty && d.id == authUser.id) ||
-              (d.userId.isNotEmpty && d.userId == authUser.id),
-          orElse: () => _patientService.allDoctors.first,
-        );
-      } else {
-        currentDoc = _patientService.allDoctors.first;
+    final authUser = Supabase.instance.client.auth.currentUser;
+    if (authUser != null && authUser.email != null && authUser.email!.isNotEmpty) {
+      final authEmailLower = authUser.email!.toLowerCase();
+      final authName = (authUser.userMetadata?['name'] ?? '').toString().toLowerCase();
+      final match = _patientService.allDoctors.where(
+        (d) => d.email.toLowerCase() == authEmailLower ||
+            (d.id.isNotEmpty && d.id == authUser.id) ||
+            (d.userId.isNotEmpty && d.userId == authUser.id) ||
+            (authName.isNotEmpty && d.name.toLowerCase().contains(authName)),
+      ).firstOrNull;
+      if (match != null) {
+        currentDoc = match;
+        _patientService.currentDoctor = currentDoc;
       }
-      _patientService.currentDoctor = currentDoc;
     }
 
     final currentDocName = (currentDoc?.name ?? '').replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
     final currentDocId = (currentDoc?.id ?? '').trim();
     final currentDocUserId = (currentDoc?.userId ?? '').trim();
     final currentDocEmail = (currentDoc?.email ?? '').trim().toLowerCase();
-    final authUser = Supabase.instance.client.auth.currentUser;
     final authUserId = (authUser?.id ?? '').trim();
     final authEmail = (authUser?.email ?? '').trim().toLowerCase();
 

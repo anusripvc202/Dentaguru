@@ -686,10 +686,19 @@ class PatientProblemService extends ChangeNotifier {
         currentPatient = PatientProfile.fromJson(jsonDecode(pStr));
       }
 
-      // 2. Load Doctor Profile
-      final dStr = prefs.getString('dentaguru_current_doctor');
+      // 2. Load Doctor Profile scoped to authenticated email
+      final authEmail = Supabase.instance.client.auth.currentUser?.email?.trim().toLowerCase();
+      String? dStr;
+      if (authEmail != null && authEmail.isNotEmpty) {
+        dStr = prefs.getString('dentaguru_current_doctor_$authEmail');
+      }
+      dStr ??= prefs.getString('dentaguru_current_doctor');
+
       if (dStr != null && dStr.isNotEmpty) {
-        currentDoctor = DoctorModel.fromJson(jsonDecode(dStr));
+        final parsedDoc = DoctorModel.fromJson(jsonDecode(dStr));
+        if (authEmail == null || parsedDoc.email.trim().toLowerCase() == authEmail) {
+          currentDoctor = parsedDoc;
+        }
       }
 
       // 3. Load Consultation Requests
@@ -861,6 +870,19 @@ class PatientProblemService extends ChangeNotifier {
     } catch (e) {
       debugPrint('Sync sub-admins error: $e');
     }
+  }
+
+  void updateSubAdminStatusLocally(String id, String status) {
+    final idx = _subAdmins.indexWhere((s) => (s['id'] ?? '').toString() == id);
+    if (idx != -1) {
+      _subAdmins[idx]['status'] = status;
+      notifyListeners();
+    }
+  }
+
+  void removeSubAdminLocally(String id) {
+    _subAdmins.removeWhere((s) => (s['id'] ?? '').toString() == id);
+    notifyListeners();
   }
 
   Future<void> clearAllDataAndStorage() async {
@@ -1551,11 +1573,12 @@ class PatientProblemService extends ChangeNotifier {
       final authUser = Supabase.instance.client.auth.currentUser;
       if (authUser != null && authUser.email != null && authUser.email!.isNotEmpty) {
         final authEmailLower = authUser.email!.toLowerCase();
+        final authName = (authUser.userMetadata?['name'] ?? '').toString().toLowerCase();
         for (final d in _allDoctors) {
           if (d.email.toLowerCase() == authEmailLower ||
               (d.id.isNotEmpty && d.id == authUser.id) ||
               (d.userId.isNotEmpty && d.userId == authUser.id) ||
-              (d.name.isNotEmpty && authEmailLower.contains(d.name.replaceAll('Dr. ', '').trim().toLowerCase()))) {
+              (authName.isNotEmpty && d.name.toLowerCase().contains(authName))) {
             currentDoctor = d;
             break;
           }
@@ -1563,15 +1586,13 @@ class PatientProblemService extends ChangeNotifier {
       }
       if (currentDoctor != null) {
         final match = _allDoctors.firstWhere(
-          (d) => d.id == currentDoctor!.id ||
+          (d) => (currentDoctor!.id.isNotEmpty && d.id == currentDoctor!.id) ||
               (d.userId.isNotEmpty && d.userId == currentDoctor!.userId) ||
               (d.email.isNotEmpty && d.email.toLowerCase() == currentDoctor!.email.toLowerCase()) ||
               (d.name.isNotEmpty && d.name.toLowerCase() == currentDoctor!.name.toLowerCase()),
           orElse: () => currentDoctor!,
         );
         currentDoctor = match;
-      } else if (_isDentistMode && _allDoctors.isNotEmpty) {
-        currentDoctor = _allDoctors.first;
       }
       _saveToStorage();
       notifyListeners();
@@ -1812,6 +1833,9 @@ class PatientProblemService extends ChangeNotifier {
       }
       if (currentDoctor != null) {
         await prefs.setString('dentaguru_current_doctor', jsonEncode(currentDoctor!.toJson()));
+        if (currentDoctor!.email.isNotEmpty) {
+          await prefs.setString('dentaguru_current_doctor_${currentDoctor!.email.trim().toLowerCase()}', jsonEncode(currentDoctor!.toJson()));
+        }
       }
       await prefs.setString('dentaguru_requests', jsonEncode(_requests.map((r) => r.toJson()).toList()));
       await prefs.setString('dentaguru_dentist_assigned_requests', jsonEncode(_dentistAssignedRequests.map((r) => r.toJson()).toList()));
@@ -1833,6 +1857,22 @@ class PatientProblemService extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('Error saving PatientProblemService state to storage: $e');
+    }
+  }
+
+  Future<void> clearDoctorSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('dentaguru_current_doctor');
+      if (currentDoctor != null && currentDoctor!.email.isNotEmpty) {
+        await prefs.remove('dentaguru_current_doctor_${currentDoctor!.email.trim().toLowerCase()}');
+      }
+      currentDoctor = null;
+      _dentistAssignedRequests.clear();
+      _isDentistMode = false;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error clearing doctor session: $e');
     }
   }
 

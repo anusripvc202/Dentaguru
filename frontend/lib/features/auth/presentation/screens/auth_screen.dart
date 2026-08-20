@@ -293,7 +293,24 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           );
           context.go('/dentist');
         } else if (registeredRole.contains('admin') || registeredRole.contains('sub-admin') || registeredRole.contains('subadmin') || registeredRole.contains('sub_admin')) {
-          PatientProblemService().clearSubAdminSession();
+          final isSubAdmin = registeredRole.contains('sub-admin') || registeredRole.contains('subadmin') || registeredRole.contains('sub_admin') || (userData['email'] != 'anusripvc202@gmail.com' && (userData['role']?.toString().toLowerCase().contains('sub') ?? false));
+
+          if (isSubAdmin) {
+            List<String> perms = [];
+            if (userData['permissions'] is List) {
+              perms = List<String>.from((userData['permissions'] as List).map((e) => e.toString()));
+            }
+            PatientProblemService().setSubAdminSession(
+              id: userData['id']?.toString() ?? '',
+              name: userData['name']?.toString() ?? 'Sub-Admin',
+              email: userData['email']?.toString() ?? email,
+              phone: userData['phone']?.toString() ?? '',
+              permissions: perms,
+              status: userData['status']?.toString() ?? 'ACTIVE',
+            );
+          } else {
+            PatientProblemService().clearSubAdminSession();
+          }
           await PatientProblemService().syncAllDataFromApi();
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(

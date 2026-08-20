@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
+import '../../../../core/widgets/whatsapp_chat_modal.dart';
 
 class PatientConsultationDetailsScreen extends StatefulWidget {
   final String requestId;
@@ -73,150 +74,18 @@ class _PatientConsultationDetailsScreenState extends State<PatientConsultationDe
   }
 
   void _showDoctorChatModal() {
-    final msgController = TextEditingController();
-    final List<Map<String, String>> localMessages = [
-      {
-        'sender': 'Patient',
-        'text': 'Hello Doctor, I reported ${widget.category} symptoms: "${widget.symptoms}".',
-        'time': 'Just now',
-      },
-      {
-        'sender': 'Doctor',
-        'text': 'Hello ${widget.patientName}, I have accepted your referral for $_currentSlot. How can I help you further?',
-        'time': 'Just now',
-      },
-    ];
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (modalCtx) => StatefulBuilder(
-        builder: (ctx, setChatState) {
-          return Padding(
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.of(modalCtx).viewInsets.bottom,
-              top: 16,
-              left: 16,
-              right: 16,
-            ),
-            child: SizedBox(
-              height: MediaQuery.of(modalCtx).size.height * 0.75,
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      CircleAvatar(
-                        backgroundColor: AppTheme.primaryBlue.withValues(alpha: 0.12),
-                        child: Text(
-                          widget.patientName.isNotEmpty ? widget.patientName[0].toUpperCase() : 'P',
-                          style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Chat with ${widget.patientName}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textDark)),
-                            Text('Consultation: $_currentSlot', style: const TextStyle(fontSize: 11, color: AppTheme.primaryBlue, fontWeight: FontWeight.bold)),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close_rounded, color: AppTheme.textMuted),
-                        onPressed: () => Navigator.pop(modalCtx),
-                      ),
-                    ],
-                  ),
-                  const Divider(height: 20),
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: localMessages.length,
-                      itemBuilder: (context, idx) {
-                        final msg = localMessages[idx];
-                        final isMe = msg['sender'] == 'Doctor';
-
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Align(
-                            alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                            child: Container(
-                              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                              decoration: BoxDecoration(
-                                color: isMe ? AppTheme.primaryBlue : const Color(0xFFF1F5F9),
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    msg['text'] ?? '',
-                                    style: TextStyle(color: isMe ? Colors.white : AppTheme.textDark, fontSize: 13),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    msg['time'] ?? '',
-                                    style: TextStyle(color: isMe ? Colors.white70 : AppTheme.textMuted, fontSize: 9),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: msgController,
-                            decoration: InputDecoration(
-                              hintText: 'Type clinical advice...',
-                              filled: true,
-                              fillColor: const Color(0xFFF8FAFC),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          icon: const Icon(Icons.send_rounded, color: AppTheme.primaryBlue),
-                          onPressed: () {
-                            final text = msgController.text.trim();
-                            if (text.isNotEmpty) {
-                              setChatState(() {
-                                localMessages.add({
-                                  'sender': 'Doctor',
-                                  'text': text,
-                                  'time': 'Just now',
-                                });
-                                msgController.clear();
-                              });
-                              _problemService.addNotification(
-                                recipientRole: 'Patient',
-                                recipientId: widget.patientName,
-                                title: '💬 Doctor Message',
-                                message: 'Doctor: $text',
-                              );
-                            }
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
+    final currentDoc = _problemService.currentDoctor;
+    final docName = (currentDoc?.name != null && currentDoc!.name.isNotEmpty) 
+        ? currentDoc.name 
+        : (widget.dentistId.isNotEmpty ? widget.dentistId : 'DOCTOR');
+    
+    WhatsAppChatModal.show(
+      context,
+      patientName: widget.patientName,
+      doctorName: docName,
+      currentUserRole: 'Dentist',
+      patientId: widget.patientId,
+      doctorId: currentDoc?.id ?? widget.dentistId,
     );
   }
 
