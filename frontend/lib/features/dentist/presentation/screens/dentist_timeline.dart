@@ -819,6 +819,11 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     final docSpecialty = currentDoc?.specialty ?? 'Dental Specialist';
     final clinicName = currentDoc?.clinicName ?? 'Registered Clinic';
     final photoBytes = currentDoc?.photoBytes;
+    final docPhone = currentDoc?.phone ?? '';
+    final docEmail = currentDoc?.email ?? '';
+    final docCity = currentDoc?.city ?? '';
+    final docPincode = currentDoc?.pincode ?? '';
+    final docLanguages = (currentDoc?.languages != null && currentDoc!.languages.isNotEmpty) ? currentDoc.languages.join(', ') : 'English';
 
     return FadeTransition(
       opacity: _fadeAnimation,
@@ -848,65 +853,89 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                     ),
                   ],
                 ),
-                child: Row(
+                child: Column(
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: AppTheme.brandOrange, width: 2),
-                      ),
-                      child: photoBytes != null
-                          ? CircleAvatar(
-                              radius: 24,
-                              backgroundImage: MemoryImage(photoBytes),
-                            )
-                          : const CircleAvatar(
-                              radius: 24,
-                              backgroundColor: AppTheme.primaryBlue,
-                              child: Text('DR', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                            ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '$docName 🩺',
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(3),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: AppTheme.brandOrange, width: 2),
                           ),
-                          const SizedBox(height: 2),
-                          Row(
+                          child: photoBytes != null
+                              ? CircleAvatar(
+                                  radius: 24,
+                                  backgroundImage: MemoryImage(photoBytes),
+                                )
+                              : const CircleAvatar(
+                                  radius: 24,
+                                  backgroundColor: AppTheme.primaryBlue,
+                                  child: Text('DR', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                                ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: AppTheme.brandOrange.withValues(alpha: 0.2),
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Text(
-                                  docSpecialty,
-                                  style: const TextStyle(fontSize: 10, color: AppTheme.brandOrange, fontWeight: FontWeight.bold),
-                                ),
+                              Text(
+                                docName,
+                                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.white),
+                                overflow: TextOverflow.ellipsis,
                               ),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                child: Text(
-                                  '• $clinicName',
-                                  style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
+                              const SizedBox(height: 2),
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.brandOrange.withValues(alpha: 0.2),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Text(
+                                      docSpecialty,
+                                      style: const TextStyle(fontSize: 10, color: AppTheme.brandOrange, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      '• $clinicName',
+                                      style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.edit_calendar_rounded, color: Colors.white, size: 22),
+                          tooltip: 'Update Consultation Fee & Available Slots',
+                          onPressed: () => _showUpdateMyFeeAndSlotsDialog(context),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Mobile: ${docPhone.isNotEmpty ? docPhone : "Not provided"} • City: ${docCity.isNotEmpty ? docCity : "Not provided"} • PIN: ${docPincode.isNotEmpty ? docPincode : "Not provided"} • Languages: $docLanguages • Email: ${docEmail.isNotEmpty ? docEmail : "Not provided"}',
+                              style: const TextStyle(fontSize: 10.5, color: Colors.white70),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
                         ],
                       ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.edit_calendar_rounded, color: Colors.white, size: 22),
-                      tooltip: 'Update Consultation Fee & Available Slots',
-                      onPressed: () => _showUpdateMyFeeAndSlotsDialog(context),
                     ),
                   ],
                 ),

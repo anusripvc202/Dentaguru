@@ -9,6 +9,7 @@ import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/constants/permissions.dart';
+import 'patient_details_screen.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -798,7 +799,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                              ),
                                                              const SizedBox(height: 2),
                                                              Text(
-                                                               '🏥 ${doc.clinicName}${doc.city.isNotEmpty ? " • 📍 City: ${doc.city}" : ""}${doc.pincode.isNotEmpty ? " • 📌 Pincode: ${doc.pincode}" : ""} • 💰 ${doc.getFeeForCategory(req.problemCategory)} • ⭐ ${doc.rating}',
+                                                               '${doc.clinicName} • Mobile: ${doc.phone.isNotEmpty ? doc.phone : "Not provided"} • Email: ${doc.email.isNotEmpty ? doc.email : "Not provided"}${doc.city.isNotEmpty ? " • City: ${doc.city}" : ""}${doc.pincode.isNotEmpty ? " • PIN: ${doc.pincode}" : ""} • Languages: ${doc.languages.isNotEmpty ? doc.languages.join(", ") : "English"} • Fee: ${doc.getFeeForCategory(req.problemCategory)} • Rating: ${doc.rating}',
                                                                style: const TextStyle(fontSize: 10.5, color: AppTheme.textDark),
                                                                overflow: TextOverflow.ellipsis,
                                                                maxLines: 1,
@@ -2626,7 +2627,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
-                                      '✉️ $email ${phone.isNotEmpty ? "• 📞 $phone" : ""}',
+                                      'Mobile: ${phone.isNotEmpty ? phone : "Not provided"} • City: ${(sa['city'] != null && sa['city'].toString().trim().isNotEmpty) ? sa['city'].toString().trim() : "Not provided"} • PIN: ${(sa['pincode'] != null && sa['pincode'].toString().trim().isNotEmpty) ? sa['pincode'].toString().trim() : "Not provided"} • Languages: ${(sa['languages'] != null && sa['languages'] is List && (sa['languages'] as List).isNotEmpty) ? (sa['languages'] as List).join(", ") : "English"} • Email: ${email.isNotEmpty ? email : "Not provided"}',
                                       style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                       overflow: TextOverflow.ellipsis,
                                     ),
@@ -2806,14 +2807,28 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
   void _showRegisterSubAdminModal(BuildContext context) {
     final nameCtrl = TextEditingController();
-    final emailCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
-    final passwordCtrl = TextEditingController();
-    bool showPassword = false;
+    final emailCtrl = TextEditingController();
+    final cityCtrl = TextEditingController();
+    final pincodeCtrl = TextEditingController();
+    String selectedSubAdminLanguage = 'English';
     bool isLoading = false;
     String status = 'ACTIVE';
 
     final Set<String> selectedPerms = Set.from(AppPermissions.defaultPermissions);
+
+    const availableLanguages = [
+      'English',
+      'Hindi',
+      'Telugu',
+      'Tamil',
+      'Kannada',
+      'Bengali',
+      'Marathi',
+      'Gujarati',
+      'Malayalam',
+      'Punjabi',
+    ];
 
     showDialog(
       context: context,
@@ -2853,7 +2868,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 overflow: TextOverflow.ellipsis,
                               ),
                               Text(
-                                'Configure user credentials and assign module permissions',
+                                'Mobile identifier authentication • Assign module permissions',
                                 style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -2875,7 +2890,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            // Full Name
+                            // Full Name *
                             TextField(
                               controller: nameCtrl,
                               decoration: InputDecoration(
@@ -2889,13 +2904,28 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             ),
                             const SizedBox(height: 12),
 
-                            // Email
+                            // Mobile Phone Number *
+                            TextField(
+                              controller: phoneCtrl,
+                              keyboardType: TextInputType.phone,
+                              decoration: InputDecoration(
+                                labelText: 'Mobile Phone Number *',
+                                hintText: '+91 98765 43210',
+                                prefixIcon: const Icon(Icons.phone_android_rounded, size: 18),
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+
+                            // Email (Optional)
                             TextField(
                               controller: emailCtrl,
                               keyboardType: TextInputType.emailAddress,
                               decoration: InputDecoration(
-                                labelText: 'Email Address *',
-                                hintText: 'subadmin@dentaguru.com',
+                                labelText: 'Email Address (Optional)',
+                                hintText: 'subadmin@dentaguru.com (Optional)',
                                 prefixIcon: const Icon(Icons.email_outlined, size: 18),
                                 filled: true,
                                 fillColor: const Color(0xFFF8FAFC),
@@ -2904,37 +2934,62 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             ),
                             const SizedBox(height: 12),
 
-                            // Phone
-                            TextField(
-                              controller: phoneCtrl,
-                              keyboardType: TextInputType.phone,
-                              decoration: InputDecoration(
-                                labelText: 'Phone Number',
-                                hintText: '+91 98765 43210',
-                                prefixIcon: const Icon(Icons.phone_outlined, size: 18),
-                                filled: true,
-                                fillColor: const Color(0xFFF8FAFC),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
+                            // City & Pincode
+                            Row(
+                              children: [
+                                Expanded(
+                                  flex: 3,
+                                  child: TextField(
+                                    controller: cityCtrl,
+                                    decoration: InputDecoration(
+                                      labelText: 'City *',
+                                      hintText: 'e.g. Hyderabad',
+                                      prefixIcon: const Icon(Icons.location_city_rounded, size: 18),
+                                      filled: true,
+                                      fillColor: const Color(0xFFF8FAFC),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  flex: 2,
+                                  child: TextField(
+                                    controller: pincodeCtrl,
+                                    keyboardType: TextInputType.number,
+                                    decoration: InputDecoration(
+                                      labelText: 'Pincode *',
+                                      hintText: '500032',
+                                      prefixIcon: const Icon(Icons.pin_drop_outlined, size: 18),
+                                      filled: true,
+                                      fillColor: const Color(0xFFF8FAFC),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                             const SizedBox(height: 12),
 
-                            // Password
-                            TextField(
-                              controller: passwordCtrl,
-                              obscureText: !showPassword,
+                            // Language Dropdown (No symbols)
+                            DropdownButtonFormField<String>(
+                              initialValue: selectedSubAdminLanguage,
+                              dropdownColor: Colors.white,
+                              isExpanded: true,
                               decoration: InputDecoration(
-                                labelText: 'Password *',
-                                hintText: 'Min. 6 characters',
-                                prefixIcon: const Icon(Icons.lock_outline_rounded, size: 18),
-                                suffixIcon: IconButton(
-                                  icon: Icon(showPassword ? Icons.visibility_off_rounded : Icons.visibility_rounded, size: 18),
-                                  onPressed: () => setModalState(() => showPassword = !showPassword),
-                                ),
+                                labelText: 'Languages Known',
                                 filled: true,
                                 fillColor: const Color(0xFFF8FAFC),
                                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                               ),
+                              items: availableLanguages.map((l) {
+                                return DropdownMenuItem(value: l, child: Text(l, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)));
+                              }).toList(),
+                              onChanged: (val) {
+                                if (val != null) {
+                                  setModalState(() => selectedSubAdminLanguage = val);
+                                }
+                              },
                             ),
                             const SizedBox(height: 16),
 
@@ -3039,20 +3094,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             ? null
                             : () async {
                                 final name = nameCtrl.text.trim();
-                                final email = emailCtrl.text.trim();
-                                final password = passwordCtrl.text.trim();
                                 final phone = phoneCtrl.text.trim();
+                                final email = emailCtrl.text.trim();
+                                final city = cityCtrl.text.trim();
+                                final pincode = pincodeCtrl.text.trim();
 
-                                if (name.isEmpty || email.isEmpty || password.isEmpty) {
+                                if (name.isEmpty || phone.isEmpty) {
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('⚠️ Please fill in Full Name, Email, and Password.'), backgroundColor: Color(0xFFD97706)),
-                                  );
-                                  return;
-                                }
-
-                                if (password.length < 6) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('⚠️ Password must be at least 6 characters.'), backgroundColor: Color(0xFFD97706)),
+                                    const SnackBar(content: Text('⚠️ Please fill in Full Name and Mobile Phone Number.'), backgroundColor: Color(0xFFD97706)),
                                   );
                                   return;
                                 }
@@ -3062,9 +3111,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 try {
                                   final res = await ApiService().createSubAdmin(
                                     name: name,
+                                    phone: phone,
                                     email: email,
-                                    password: password,
-                                    phone: phone.isEmpty ? '0000000000' : phone,
+                                    city: city.isNotEmpty ? city : 'Hyderabad',
+                                    pincode: pincode.isNotEmpty ? pincode : '500032',
+                                    languages: [selectedSubAdminLanguage],
                                     permissions: selectedPerms.toList(),
                                     status: status,
                                   );
@@ -3824,9 +3875,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
   void _showRegisterDoctorModal(BuildContext context) {
     final nameCtrl = TextEditingController();
-    final emailCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
-    final passwordCtrl = TextEditingController(text: 'Password123!');
+    final emailCtrl = TextEditingController();
     final qualCtrl = TextEditingController(text: 'BDS, MDS');
     final licenseCtrl = TextEditingController();
     final clinicCtrl = TextEditingController();
@@ -3837,7 +3887,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     final pincodeCtrl = TextEditingController();
     final addressCtrl = TextEditingController();
     String selectedSpecialty = 'General Dentistry';
-    bool obscurePassword = true;
+    String selectedLanguage = 'English';
     bool isSubmitting = false;
 
     showDialog(
@@ -3885,7 +3935,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 overflow: TextOverflow.ellipsis,
                               ),
                               Text(
-                                'Admin Direct Registration • Ready for App Login',
+                                'Mobile identifier authentication • Ready for OTP Sign-In',
                                 style: TextStyle(fontSize: 10, color: AppTheme.textMuted),
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -3911,7 +3961,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            // Doctor Name
+                            // Doctor Name *
                             TextField(
                               controller: nameCtrl,
                               decoration: InputDecoration(
@@ -3926,56 +3976,30 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             ),
                             const SizedBox(height: 8),
 
-                            // Email & Phone
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: TextField(
-                                    controller: emailCtrl,
-                                    keyboardType: TextInputType.emailAddress,
-                                    decoration: InputDecoration(
-                                      labelText: 'Email Address *',
-                                      hintText: 'e.g. jane@dentaguru.com',
-                                      prefixIcon: const Icon(Icons.email_outlined, size: 16),
-                                      filled: true,
-                                      fillColor: const Color(0xFFF8FAFC),
-                                      contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: TextField(
-                                    controller: phoneCtrl,
-                                    keyboardType: TextInputType.phone,
-                                    decoration: InputDecoration(
-                                      labelText: 'Phone Number *',
-                                      hintText: 'e.g. +91 98765 43210',
-                                      prefixIcon: const Icon(Icons.phone_outlined, size: 16),
-                                      filled: true,
-                                      fillColor: const Color(0xFFF8FAFC),
-                                      contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                                    ),
-                                  ),
-                                ),
-                              ],
+                            // Mobile Phone Number *
+                            TextField(
+                              controller: phoneCtrl,
+                              keyboardType: TextInputType.phone,
+                              decoration: InputDecoration(
+                                labelText: 'Mobile Phone Number *',
+                                hintText: 'e.g. +91 98765 43210',
+                                prefixIcon: const Icon(Icons.phone_android_rounded, size: 16),
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
                             ),
                             const SizedBox(height: 8),
 
-                            // Password
+                            // Email Address (Optional)
                             TextField(
-                              controller: passwordCtrl,
-                              obscureText: obscurePassword,
+                              controller: emailCtrl,
+                              keyboardType: TextInputType.emailAddress,
                               decoration: InputDecoration(
-                                labelText: 'Account Password *',
-                                hintText: 'Used for Dentist Portal sign-in',
-                                prefixIcon: const Icon(Icons.lock_outline_rounded, size: 16),
-                                suffixIcon: IconButton(
-                                  icon: Icon(obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined, size: 16),
-                                  onPressed: () => setModalState(() => obscurePassword = !obscurePassword),
-                                ),
+                                labelText: 'Email Address (Optional)',
+                                hintText: 'e.g. jane@dentaguru.com (Optional)',
+                                prefixIcon: const Icon(Icons.email_outlined, size: 16),
                                 filled: true,
                                 fillColor: const Color(0xFFF8FAFC),
                                 contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
@@ -4041,7 +4065,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   child: TextField(
                                     controller: licenseCtrl,
                                     decoration: InputDecoration(
-                                      labelText: 'License Number',
+                                      labelText: 'License Number *',
                                       hintText: 'e.g. DEN-88490',
                                       prefixIcon: const Icon(Icons.badge_outlined, size: 16),
                                       filled: true,
@@ -4094,7 +4118,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   child: TextField(
                                     controller: cityCtrl,
                                     decoration: InputDecoration(
-                                      labelText: 'City',
+                                      labelText: 'City *',
                                       hintText: 'e.g. Hyderabad',
                                       prefixIcon: const Icon(Icons.location_city_outlined, size: 15),
                                       filled: true,
@@ -4110,7 +4134,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     controller: pincodeCtrl,
                                     keyboardType: TextInputType.number,
                                     decoration: InputDecoration(
-                                      labelText: 'Pincode',
+                                      labelText: 'Pincode *',
                                       hintText: 'e.g. 500032',
                                       prefixIcon: const Icon(Icons.pin_drop_outlined, size: 15),
                                       filled: true,
@@ -4132,7 +4156,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   child: TextField(
                                     controller: clinicCtrl,
                                     decoration: InputDecoration(
-                                      labelText: 'Practice / Clinic Name',
+                                      labelText: 'Practice / Clinic Name *',
                                       hintText: 'e.g. Apex Care Dental',
                                       prefixIcon: const Icon(Icons.storefront_outlined, size: 16),
                                       filled: true,
@@ -4175,6 +4199,30 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                               ),
                             ),
+                            const SizedBox(height: 8),
+
+                            // Languages Known Selection Dropdown (No symbol)
+                            DropdownButtonFormField<String>(
+                              initialValue: selectedLanguage,
+                              isExpanded: true,
+                              decoration: InputDecoration(
+                                labelText: 'Languages Known / Spoken',
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              items: const [
+                                'English', 'Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam', 'Marathi', 'Bengali', 'Gujarati', 'Punjabi', 'Spanish'
+                              ].map((lang) {
+                                return DropdownMenuItem(value: lang, child: Text(lang, style: const TextStyle(fontSize: 12)));
+                              }).toList(),
+                              onChanged: (val) {
+                                if (val != null) {
+                                  setModalState(() => selectedLanguage = val);
+                                }
+                              },
+                            ),
                           ],
                         ),
                       ),
@@ -4196,70 +4244,61 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         padding: const EdgeInsets.symmetric(vertical: 12),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
-                        onPressed: isSubmitting
-                            ? null
-                            : () async {
-                                final name = nameCtrl.text.trim();
-                                final email = emailCtrl.text.trim();
-                                final phone = phoneCtrl.text.trim();
-                                final password = passwordCtrl.text.trim();
+                      onPressed: isSubmitting
+                          ? null
+                          : () async {
+                              final name = nameCtrl.text.trim();
+                              final phone = phoneCtrl.text.trim();
+                              final email = emailCtrl.text.trim();
 
-                                if (name.isEmpty) {
-                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter doctor name.')));
-                                  return;
-                                }
-                                if (email.isEmpty || !email.contains('@')) {
-                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a valid email address.')));
-                                  return;
-                                }
-                                if (phone.isEmpty) {
-                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a valid phone number.')));
-                                  return;
-                                }
-                                if (password.length < 6) {
-                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password must be at least 6 characters.')));
-                                  return;
-                                }
+                              if (name.isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter doctor name.')));
+                                return;
+                              }
+                              if (phone.isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter mobile phone number.')));
+                                return;
+                              }
 
-                                setModalState(() => isSubmitting = true);
+                              setModalState(() => isSubmitting = true);
 
-                                final expYears = int.tryParse(expCtrl.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 5;
-                                final doctor = _problemService.registerDoctor(
-                                  name: name,
-                                  email: email,
-                                  phone: phone,
-                                  password: password,
-                                  licenseNumber: licenseCtrl.text,
-                                  specialty: selectedSpecialty,
-                                  qualification: qualCtrl.text,
-                                  clinicName: clinicCtrl.text,
-                                  experienceYears: expYears,
-                                  consultationFee: feeCtrl.text,
-                                  state: stateCtrl.text,
-                                  city: cityCtrl.text,
-                                  pincode: pincodeCtrl.text,
-                                  clinicAddress: addressCtrl.text,
-                                );
+                              final expYears = int.tryParse(expCtrl.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 5;
+                              final doctor = _problemService.registerDoctor(
+                                name: name,
+                                email: email,
+                                phone: phone,
+                                licenseNumber: licenseCtrl.text.isNotEmpty ? licenseCtrl.text : 'DEN-LIC-REG',
+                                specialty: selectedSpecialty,
+                                qualification: qualCtrl.text.isNotEmpty ? qualCtrl.text : 'BDS, MDS',
+                                clinicName: clinicCtrl.text.isNotEmpty ? clinicCtrl.text : 'Dental Practice',
+                                experienceYears: expYears,
+                                consultationFee: feeCtrl.text.isNotEmpty ? feeCtrl.text : '\$75',
+                                state: stateCtrl.text,
+                                city: cityCtrl.text.isNotEmpty ? cityCtrl.text : 'Hyderabad',
+                                pincode: pincodeCtrl.text.isNotEmpty ? pincodeCtrl.text : '500032',
+                                clinicAddress: addressCtrl.text,
+                                languages: [selectedLanguage],
+                              );
 
-                                Navigator.of(dialogContext).pop();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('🎉 Registered ${doctor.name} successfully! Dentist can now sign in using $email.'),
-                                    backgroundColor: const Color(0xFF10B981),
-                                    duration: const Duration(seconds: 4),
-                                  ),
-                                );
-                              },
-                      ),
-                    ],
-                  ),
+                              Navigator.of(dialogContext).pop();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('🎉 Registered ${doctor.name} successfully! Dentist can now sign in using Mobile OTP.'),
+                                  backgroundColor: const Color(0xFF10B981),
+                                  duration: const Duration(seconds: 4),
+                                ),
+                              );
+                            },
+                    ),
+                  ],
                 ),
-              );
-            },
-          );
-        },
-      );
-    }
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 
   void _showEditDoctorFeeAndSlotsDialog(BuildContext context, DoctorModel doc) {
     final feeCtrl = TextEditingController(text: doc.consultationFee);
@@ -4637,30 +4676,28 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         const SizedBox(height: 4),
                         Row(
                           children: [
-                            if (doc.city.isNotEmpty)
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                margin: const EdgeInsets.only(right: 6),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFEFF6FF),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text('🏙️ City: ${doc.city}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue)),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              margin: const EdgeInsets.only(right: 6),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFEFF6FF),
+                                borderRadius: BorderRadius.circular(6),
                               ),
-                            if (doc.pincode.isNotEmpty)
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFFEF3C7),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text('📍 Pin: ${doc.pincode}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFD97706))),
+                              child: Text('City: ${doc.city.isNotEmpty ? doc.city : "Not provided"}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue)),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFEF3C7),
+                                borderRadius: BorderRadius.circular(6),
                               ),
+                              child: Text('PIN: ${doc.pincode.isNotEmpty ? doc.pincode : "Not provided"}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFD97706))),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '📞 ${doc.phone} • ✉️ ${doc.email}',
+                          'Mobile: ${doc.phone.isNotEmpty ? doc.phone : "Not provided"} • Languages: ${doc.languages.isNotEmpty ? doc.languages.join(", ") : "English"} • Email: ${doc.email.isNotEmpty ? doc.email : "Not provided"}',
                           style: const TextStyle(fontSize: 10, color: AppTheme.textMuted),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -5300,169 +5337,170 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
   void _showAddPatientDialog() {
     final nameCtrl = TextEditingController();
-    final emailCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
+    final emailCtrl = TextEditingController();
     final ageCtrl = TextEditingController(text: '28');
-    final locationCtrl = TextEditingController();
+    final cityCtrl = TextEditingController();
     final pincodeCtrl = TextEditingController();
-    final passwordCtrl = TextEditingController(text: 'Password123!');
+    String selectedPatientLanguage = 'English';
+
+    const availableLanguages = [
+      'English', 'Hindi', 'Telugu', 'Tamil', 'Kannada', 'Bengali', 'Marathi', 'Gujarati', 'Malayalam', 'Punjabi'
+    ];
 
     showDialog(
       context: context,
       builder: (dialogContext) {
-        return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          child: Padding(
-            padding: const EdgeInsets.all(22),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Dialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              child: Padding(
+                padding: const EdgeInsets.all(22),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primaryBlue.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Icon(Icons.person_add_rounded, color: AppTheme.primaryBlue, size: 22),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryBlue.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(Icons.person_add_rounded, color: AppTheme.primaryBlue, size: 22),
+                          ),
+                          const SizedBox(width: 10),
+                          const Text('Register New Patient', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppTheme.textDark)),
+                        ],
                       ),
-                      const SizedBox(width: 10),
-                      const Text('Register New Patient', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppTheme.textDark)),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: nameCtrl,
+                        decoration: const InputDecoration(labelText: 'Patient Full Name *', prefixIcon: Icon(Icons.person_outline_rounded)),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: phoneCtrl,
+                        keyboardType: TextInputType.phone,
+                        decoration: const InputDecoration(labelText: 'Mobile Phone Number *', prefixIcon: Icon(Icons.phone_android_rounded)),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: emailCtrl,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: const InputDecoration(labelText: 'Email Address (Optional)', prefixIcon: Icon(Icons.email_outlined)),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 3,
+                            child: TextField(
+                              controller: cityCtrl,
+                              decoration: const InputDecoration(labelText: 'City *', prefixIcon: Icon(Icons.location_city_rounded)),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            flex: 2,
+                            child: TextField(
+                              controller: pincodeCtrl,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(labelText: 'Pincode *', prefixIcon: Icon(Icons.pin_drop_outlined)),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: ageCtrl,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(labelText: 'Age', prefixIcon: Icon(Icons.cake_outlined)),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              initialValue: selectedPatientLanguage,
+                              isExpanded: true,
+                              decoration: const InputDecoration(labelText: 'Language'),
+                              items: availableLanguages.map((l) => DropdownMenuItem(value: l, child: Text(l, style: const TextStyle(fontSize: 12)))).toList(),
+                              onChanged: (val) {
+                                if (val != null) setModalState(() => selectedPatientLanguage = val);
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.cloud_upload_rounded, size: 18),
+                        label: const Text('Register & Save Patient Profile', style: TextStyle(fontWeight: FontWeight.bold)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primaryBlue,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () async {
+                          final name = nameCtrl.text.trim().isEmpty ? 'New Patient' : nameCtrl.text.trim();
+                          final phone = phoneCtrl.text.trim();
+                          final email = emailCtrl.text.trim();
+                          final city = cityCtrl.text.trim().isNotEmpty ? cityCtrl.text.trim() : 'Hyderabad';
+                          final pin = pincodeCtrl.text.trim().isNotEmpty ? pincodeCtrl.text.trim() : '500032';
+
+                          if (phone.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter mobile phone number.')));
+                            return;
+                          }
+
+                          await ApiService().registerUser(
+                            name: name,
+                            phone: phone,
+                            email: email,
+                            role: 'Patient',
+                            city: city,
+                            pincode: pin,
+                            languages: [selectedPatientLanguage],
+                          );
+
+                          await _problemService.syncPatientsFromApi();
+
+                          if (dialogContext.mounted) {
+                            Navigator.of(dialogContext).pop();
+                          }
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('🎉 Registered $name successfully!'),
+                                backgroundColor: const Color(0xFF10B981),
+                              ),
+                            );
+                          }
+                        },
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: nameCtrl,
-                    decoration: const InputDecoration(labelText: 'Patient Full Name', prefixIcon: Icon(Icons.person_outline_rounded)),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: emailCtrl,
-                    decoration: const InputDecoration(labelText: 'Email Address', prefixIcon: Icon(Icons.email_outlined)),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        flex: 3,
-                        child: TextField(
-                          controller: phoneCtrl,
-                          decoration: const InputDecoration(labelText: 'Phone Number', prefixIcon: Icon(Icons.phone_outlined)),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        flex: 2,
-                        child: TextField(
-                          controller: ageCtrl,
-                          decoration: const InputDecoration(labelText: 'Age', prefixIcon: Icon(Icons.cake_outlined)),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        flex: 3,
-                        child: TextField(
-                          controller: locationCtrl,
-                          decoration: const InputDecoration(labelText: 'Location / Address', prefixIcon: Icon(Icons.location_on_outlined)),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        flex: 2,
-                        child: TextField(
-                          controller: pincodeCtrl,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(labelText: 'Pincode', prefixIcon: Icon(Icons.pin_drop_outlined)),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: passwordCtrl,
-                    obscureText: true,
-                    decoration: const InputDecoration(labelText: 'Set Account Password', prefixIcon: Icon(Icons.lock_outline)),
-                  ),
-                  const SizedBox(height: 18),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.cloud_upload_rounded, size: 18),
-                    label: const Text('Register & Save Patient Profile', style: TextStyle(fontWeight: FontWeight.bold)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primaryBlue,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                    onPressed: () async {
-                      final name = nameCtrl.text.trim().isEmpty ? 'New Patient' : nameCtrl.text.trim();
-                      final email = emailCtrl.text.trim().isEmpty ? 'patient_${DateTime.now().millisecondsSinceEpoch}@dentaguru.com' : emailCtrl.text.trim();
-                      final phone = phoneCtrl.text.trim().isEmpty ? '+12025550000' : phoneCtrl.text.trim();
-                      final pass = passwordCtrl.text.trim().isEmpty ? 'Password123!' : passwordCtrl.text.trim();
-                      final loc = locationCtrl.text.trim();
-                      final pin = pincodeCtrl.text.trim();
-
-                      await ApiService().registerUser(
-                        name: name,
-                        email: email,
-                        password: pass,
-                        phone: phone,
-                        role: 'Patient',
-                        location: loc,
-                        pincode: pin,
-                      );
-
-                    await _problemService.syncPatientsFromApi();
-
-                    if (dialogContext.mounted) {
-                      Navigator.of(dialogContext).pop();
-                    }
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('🎉 Registered $name successfully!'),
-                          backgroundColor: const Color(0xFF10B981),
-                        ),
-                      );
-                    }
-                  },
                 ),
-              ],
-            ),
-          ),
-        ),
-      );
-    },
-  );
-}
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 
   // ==========================================
   // PANEL 2: PATIENTS MANAGEMENT DATA TABLE
   // ==========================================
   Widget _buildPatientsPanel() {
     final List<PatientProfile> allPatientsFromDb = _problemService.allPatients;
-    final List<Map<String, String>> patientEntries = [];
-
-    for (final p in allPatientsFromDb) {
-      final displayName = p.name.isNotEmpty
-          ? p.name
-          : (p.email.isNotEmpty ? p.email.split('@').first : 'Patient');
-
-      patientEntries.add({
-        'name': displayName,
-        'email': p.email,
-        'phone': p.phone.isNotEmpty ? p.phone : '--',
-        'city': p.city.isNotEmpty ? p.city : '--',
-        'pincode': p.pincode.isNotEmpty ? p.pincode : '--',
-        'status': 'Active',
-      });
-    }
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -5492,7 +5530,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
           ),
           const SizedBox(height: 14),
 
-          if (patientEntries.isEmpty)
+          if (allPatientsFromDb.isEmpty)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(32),
@@ -5502,12 +5540,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 border: Border.all(color: const Color(0xFFE2E8F0)),
               ),
               child: Column(
-                children: [
-                  const Icon(Icons.people_outline_rounded, size: 42, color: AppTheme.textMuted),
-                  const SizedBox(height: 10),
-                  const Text('No Registered Patients Found', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark)),
-                  const SizedBox(height: 4),
-                  const Text('Click "+ Add Patient" above to register a patient directly into the platform.',
+                children: const [
+                  Icon(Icons.people_outline_rounded, size: 42, color: AppTheme.textMuted),
+                  SizedBox(height: 10),
+                  Text('No Registered Patients Found', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark)),
+                  SizedBox(height: 4),
+                  Text('Click "+ Add Patient" above to register a patient directly into the platform.',
                       textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
                 ],
               ),
@@ -5523,23 +5561,28 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: DataTable(
+                  showCheckboxColumn: false,
                   columns: const [
                     DataColumn(label: Text('Name', style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('Email', style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('Phone', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Mobile', style: TextStyle(fontWeight: FontWeight.bold))),
                     DataColumn(label: Text('City', style: TextStyle(fontWeight: FontWeight.bold))),
                     DataColumn(label: Text('Pincode', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Language', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Email', style: TextStyle(fontWeight: FontWeight.bold))),
                     DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.bold))),
                     DataColumn(label: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold))),
                   ],
-                  rows: patientEntries.map((patient) {
-                    final String name = patient['name'] ?? 'Patient';
-                    final String email = patient['email'] ?? '--';
-                    final String phone = patient['phone'] ?? '--';
-                    final String city = patient['city'] ?? '--';
-                    final String pincode = patient['pincode'] ?? '--';
-                    final String status = patient['status'] ?? 'Active';
-                    return _buildPatientDataRow(name, email, phone, city, pincode, status, const Color(0xFFDCFCE7), const Color(0xFF16A34A));
+                  rows: allPatientsFromDb.map((patient) {
+                    final String name = patient.name.trim().isNotEmpty ? patient.name.trim() : (patient.email.isNotEmpty ? patient.email.split('@').first : 'Patient');
+                    final String phone = patient.phone.trim().isNotEmpty ? patient.phone.trim() : 'Not provided';
+                    final String email = (patient.email.trim().isNotEmpty && patient.email != '--') ? patient.email.trim() : 'Not provided';
+                    final String city = (patient.city.trim().isNotEmpty && patient.city != '--') ? patient.city.trim() : 'Not provided';
+                    final String pincode = (patient.pincode.trim().isNotEmpty && patient.pincode != '--') ? patient.pincode.trim() : 'Not provided';
+                    const String status = 'Active';
+                    final String language = patient.languages.isNotEmpty
+                        ? patient.languages.join(', ')
+                        : 'English';
+                    return _buildPatientDataRow(patient, name, phone, city, pincode, language, email, status, const Color(0xFFDCFCE7), const Color(0xFF16A34A));
                   }).toList(),
                 ),
               ),
@@ -5589,38 +5632,64 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     );
   }
 
-  DataRow _buildPatientDataRow(String name, String email, String phone, String city, String pincode, String status, Color bg, Color text) {
+  DataRow _buildPatientDataRow(PatientProfile patient, String name, String phone, String city, String pincode, String language, String email, String status, Color bg, Color text) {
     return DataRow(
+      onSelectChanged: (_) => _navigateToPatientDetails(patient),
       cells: [
         DataCell(
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 12,
-                backgroundColor: AppTheme.softBlueCard,
-                child: Text(name.isNotEmpty ? name[0].toUpperCase() : 'P', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue)),
+          InkWell(
+            onTap: () => _navigateToPatientDetails(patient),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircleAvatar(
+                    radius: 13,
+                    backgroundColor: AppTheme.softBlueCard,
+                    backgroundImage: patient.photoBytes != null ? MemoryImage(patient.photoBytes!) : null,
+                    child: patient.photoBytes == null
+                        ? Text(
+                            name.isNotEmpty ? name[0].toUpperCase() : 'P',
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
+                          )
+                        : null,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    name,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12.5,
+                      color: AppTheme.primaryBlue,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.arrow_forward_ios_rounded, size: 10, color: AppTheme.primaryBlue),
+                ],
               ),
-              const SizedBox(width: 8),
-              Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-            ],
+            ),
           ),
         ),
-        DataCell(Text(email, style: const TextStyle(fontSize: 12))),
-        DataCell(Text(phone, style: const TextStyle(fontSize: 12))),
+        DataCell(Text(phone, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
         DataCell(
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(6)),
-            child: Text(city.isNotEmpty ? city : '--', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue)),
+            child: Text(city, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue)),
           ),
         ),
         DataCell(
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(color: const Color(0xFFFEF3C7), borderRadius: BorderRadius.circular(6)),
-            child: Text(pincode.isNotEmpty ? pincode : '--', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFD97706))),
+            child: Text(pincode, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFD97706))),
           ),
         ),
+        DataCell(Text(language, style: const TextStyle(fontSize: 12))),
+        DataCell(Text(email, style: const TextStyle(fontSize: 12, color: AppTheme.textMuted))),
         DataCell(
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -5629,13 +5698,34 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
           ),
         ),
         DataCell(
-          IconButton(
-            icon: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 18),
-            tooltip: 'Remove Patient',
-            onPressed: () => _confirmRemovePatient(context, email, name),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.visibility_outlined, color: AppTheme.primaryBlue, size: 18),
+                tooltip: 'View Patient Details',
+                onPressed: () => _navigateToPatientDetails(patient),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 18),
+                tooltip: 'Remove Patient',
+                onPressed: () => _confirmRemovePatient(context, email, name),
+              ),
+            ],
           ),
         ),
       ],
+    );
+  }
+
+  void _navigateToPatientDetails(PatientProfile patient) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => PatientDetailsScreen(
+          patient: patient,
+          onAssignDoctor: _showAssignDoctorDialog,
+        ),
+      ),
     );
   }
 

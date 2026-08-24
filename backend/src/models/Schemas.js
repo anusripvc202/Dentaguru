@@ -50,6 +50,12 @@ const User = {
         const { data, error } = await req;
         if (error) throw error;
         const record = (data && data.length > 0) ? data[0] : null;
+        if (record && record.device_token && typeof record.device_token === 'string' && record.device_token.startsWith('{')) {
+            try {
+                const meta = JSON.parse(record.device_token);
+                if (meta.languages && (!record.languages || record.languages.length === 0)) record.languages = meta.languages;
+            } catch (_) {}
+        }
         if (record && (record.role === 'Sub-Admin' || record.role === 'SUB_ADMIN')) {
             if (!record.permissions || record.permissions.length === 0) {
                 record.permissions = await SubAdminPermission.getPermissionsForUser(record.id);
@@ -73,6 +79,7 @@ const User = {
                     const meta = JSON.parse(u.device_token);
                     if (meta.status && !u.status) u.status = meta.status;
                     if (meta.permissions && (!u.permissions || u.permissions.length === 0)) u.permissions = meta.permissions;
+                    if (meta.languages && (!u.languages || u.languages.length === 0)) u.languages = meta.languages;
                 } catch (_) {}
             }
             return u;
@@ -113,6 +120,12 @@ const User = {
     async findById(id) {
         const { data, error } = await supabaseAdmin.from('users').select('*').eq('id', id).single();
         if (error) return null;
+        if (data && data.device_token && typeof data.device_token === 'string' && data.device_token.startsWith('{')) {
+            try {
+                const meta = JSON.parse(data.device_token);
+                if (meta.languages && (!data.languages || data.languages.length === 0)) data.languages = meta.languages;
+            } catch (_) {}
+        }
         if (data && (data.role === 'Sub-Admin' || data.role === 'SUB_ADMIN')) {
             if (!data.permissions || data.permissions.length === 0) {
                 data.permissions = await SubAdminPermission.getPermissionsForUser(data.id);
@@ -145,10 +158,11 @@ const User = {
             if (error) throw error;
             insertedData = data;
         } catch (err) {
-            // Fallback if schema doesn't have permissions or status column yet
+            // Fallback if schema doesn't have permissions, status, or languages column yet
             const safePayload = { ...payload };
             delete safePayload.permissions;
             delete safePayload.status;
+            delete safePayload.languages;
             const { data, error } = await supabaseAdmin.from('users').insert(safePayload).select().single();
             if (error) {
                 console.error('❌ Supabase User Insert Error:', error.message);
@@ -160,6 +174,9 @@ const User = {
         if (insertedData && userData.permissions && Array.isArray(userData.permissions)) {
             await SubAdminPermission.setPermissionsForUser(insertedData.id, userData.permissions);
             insertedData.permissions = userData.permissions;
+        }
+        if (insertedData && userData.languages) {
+            insertedData.languages = userData.languages;
         }
 
         return insertedData;
@@ -362,7 +379,7 @@ const Dentist = {
 
     async find(query = {}) {
         try {
-            let req = supabaseAdmin.from('dentists').select('*, users(name, email, phone, state, city, pincode, latitude, longitude), clinics(clinic_name, location)');
+            let req = supabaseAdmin.from('dentists').select('*, users(name, email, phone, state, city, pincode, latitude, longitude, device_token), clinics(clinic_name, location)');
             // Apply direct dentists table filters
             if (query.state) {
                 req = req.ilike('state', `%${query.state}%`);
@@ -389,7 +406,28 @@ const Dentist = {
                 const simple = await supabaseAdmin.from('dentists').select('*');
                 return simple.data || [];
             }
-            return data || [];
+            let list = data || [];
+            if (query.language && query.language.trim()) {
+                const langLower = query.language.trim().toLowerCase();
+                list = list.filter(d => {
+                    if (d.languages && Array.isArray(d.languages)) {
+                        return d.languages.some(l => (l || '').toLowerCase().includes(langLower));
+                    }
+                    if (typeof d.languages === 'string') {
+                        return d.languages.toLowerCase().includes(langLower);
+                    }
+                    if (d.users?.device_token && d.users.device_token.startsWith('{')) {
+                        try {
+                            const meta = JSON.parse(d.users.device_token);
+                            if (meta.languages && Array.isArray(meta.languages)) {
+                                return meta.languages.some(l => (l || '').toLowerCase().includes(langLower));
+                            }
+                        } catch (_) {}
+                    }
+                    return false;
+                });
+            }
+            return list;
         } catch (e) {
             console.warn('⚠️ Dentist query error, falling back to simple select:', e.message);
             const simple = await supabaseAdmin.from('dentists').select('*');
@@ -406,7 +444,7 @@ const Dentist = {
                 return await this.findOne({ $or: [{ name: str }, { email: str }] });
             }
             const { data, error } = await supabaseAdmin.from('dentists')
-                .select('*, users(name, email, phone, state, city, pincode), clinics(clinic_name, location)')
+                .select('*, users(name, email, phone, state, city, pincode, device_token), clinics(clinic_name, location)')
                 .or(`id.eq.${str},user_id.eq.${str}`)
                 .maybeSingle();
             if (error || !data) {
@@ -426,12 +464,24 @@ const Dentist = {
             user_id: (dentistData.user_id && uuidRegex.test(dentistData.user_id.toString())) ? dentistData.user_id.toString() : null,
             clinic_id: (dentistData.clinic_id && uuidRegex.test(dentistData.clinic_id.toString())) ? dentistData.clinic_id.toString() : null,
         };
-        const { data, error } = await supabaseAdmin.from('dentists').insert(payload).select().single();
-        if (error) {
-            console.error('❌ Supabase Dentist Insert Error:', error.message);
-            throw error;
+        try {
+            const { data, error } = await supabaseAdmin.from('dentists').insert(payload).select().single();
+            if (error) throw error;
+            return data;
+        } catch (err) {
+            // Fallback if schema doesn't have languages column
+            const safePayload = { ...payload };
+            delete safePayload.languages;
+            const { data, error } = await supabaseAdmin.from('dentists').insert(safePayload).select().single();
+            if (error) {
+                console.error('❌ Supabase Dentist Insert Error:', error.message);
+                throw error;
+            }
+            if (dentistData.languages) {
+                data.languages = dentistData.languages;
+            }
+            return data;
         }
-        return data;
     }
 };
 
@@ -961,22 +1011,47 @@ const ChatMessage = {
 const PatientProblemRequest = {
     async create(reqData) {
         const patientId = await resolveUserUuid(reqData.patient_id || reqData.patientId);
+        const suggestedDentistId = reqData.suggested_dentist_id || reqData.suggestedDentistId ? await resolveDentistUuid(reqData.suggested_dentist_id || reqData.suggestedDentistId) : null;
         const payload = {
             patient_id: patientId,
+            patient_name: reqData.patient_name || reqData.patientName || null,
+            patient_phone: reqData.patient_phone || reqData.patientPhone || null,
+            city: reqData.city || null,
+            pincode: reqData.pincode || null,
+            state: reqData.state || null,
             problem_category: reqData.problem_category || reqData.problemCategory || 'General Dental Problem',
             problem_description: reqData.problem_description || reqData.problemDescription || '',
             symptoms: reqData.symptoms || '',
             preferred_location: reqData.preferred_location || reqData.preferredLocation || null,
             attachments: reqData.attachments || [],
-            status: reqData.status || 'PENDING_ADMIN_REVIEW',
+            status: reqData.status || (suggestedDentistId ? 'DENTIST_ASSIGNED' : 'PENDING_ADMIN_REVIEW'),
+            suggested_dentist_id: suggestedDentistId,
             admin_notes: reqData.admin_notes || reqData.adminNotes || null
         };
-        const { data, error } = await supabaseAdmin.from('patient_problem_requests').insert(payload).select().single();
-        if (error) {
-            console.error('❌ Supabase PatientProblemRequest Insert Error:', error.message);
-            throw error;
+        try {
+            const { data, error } = await supabaseAdmin.from('patient_problem_requests').insert(payload).select().single();
+            if (error) throw error;
+            return data;
+        } catch (err) {
+            // Fallback if some columns don't exist in schema
+            const safePayload = {
+                patient_id: patientId,
+                problem_category: reqData.problem_category || reqData.problemCategory || 'General Dental Problem',
+                problem_description: reqData.problem_description || reqData.problemDescription || '',
+                symptoms: reqData.symptoms || '',
+                preferred_location: reqData.preferred_location || reqData.preferredLocation || null,
+                attachments: reqData.attachments || [],
+                status: reqData.status || (suggestedDentistId ? 'DENTIST_ASSIGNED' : 'PENDING_ADMIN_REVIEW'),
+                suggested_dentist_id: suggestedDentistId,
+                admin_notes: reqData.admin_notes || reqData.adminNotes || null
+            };
+            const { data, error } = await supabaseAdmin.from('patient_problem_requests').insert(safePayload).select().single();
+            if (error) {
+                console.error('❌ Supabase PatientProblemRequest Insert Error:', error.message);
+                throw error;
+            }
+            return data;
         }
-        return data;
     },
 
     async find(query = {}) {

@@ -54,10 +54,10 @@ exports.getClinicDentists = async (req, res) => {
     }
 };
 
-// 4. GET ALL DENTISTS (with optional state/city/pincode/specialty/availability filters)
+// 4. GET ALL DENTISTS (with optional state/city/pincode/specialty/availability/language filters)
 exports.getAllDentists = async (req, res) => {
     try {
-        const { state, city, pincode, specialty, availability } = req.query;
+        const { state, city, pincode, specialty, availability, language } = req.query;
 
         // Build filter query for dentists table
         const filterQuery = {};
@@ -66,6 +66,7 @@ exports.getAllDentists = async (req, res) => {
         if (pincode && pincode.trim()) filterQuery.pincode = pincode.trim();
         if (specialty && specialty.trim()) filterQuery.speciality = specialty.trim();
         if (availability && availability.trim()) filterQuery.availability_status = availability.trim();
+        if (language && language.trim()) filterQuery.language = language.trim();
 
         const dentists = await Dentist.find(filterQuery);
         const { User } = require('../models/Schemas');
@@ -90,6 +91,13 @@ exports.getAllDentists = async (req, res) => {
         for (const u of dentistUsers) {
             const emailClean = (u.email || '').toLowerCase();
             if (emailClean && !existingEmails.has(emailClean)) {
+                let userLangs = u.languages || ['English'];
+                if (u.device_token && u.device_token.startsWith('{')) {
+                    try {
+                        const meta = JSON.parse(u.device_token);
+                        if (meta.languages && Array.isArray(meta.languages)) userLangs = meta.languages;
+                    } catch (_) {}
+                }
                 dentists.push({
                     id: u.id,
                     name: u.name.startsWith('Dr.') ? u.name : `Dr. ${u.name}`,
@@ -105,21 +113,38 @@ exports.getAllDentists = async (req, res) => {
                     state: u.state || '',
                     city: u.city || '',
                     pincode: u.pincode || '',
+                    languages: userLangs,
                     latitude: u.latitude || null,
                     longitude: u.longitude || null,
                     availability_status: 'Available',
                     license_number: 'DEN-LIC-REG',
-                    users: { name: u.name, email: u.email, phone: u.phone, state: u.state || '', city: u.city || '', pincode: u.pincode || '', latitude: u.latitude, longitude: u.longitude }
+                    users: { name: u.name, email: u.email, phone: u.phone, state: u.state || '', city: u.city || '', pincode: u.pincode || '', languages: userLangs, latitude: u.latitude, longitude: u.longitude }
                 });
                 existingEmails.add(emailClean);
             }
         }
 
-        const formattedDentists = dentists.map(d => {
+        let formattedDentists = dentists.map(d => {
             const uObj = d.users || {};
             const cObj = d.clinics || {};
             const name = d.name || uObj.name || 'Dentist';
             const formattedName = name.startsWith('Dr.') ? name : `Dr. ${name}`;
+
+            let doctorLangs = d.languages || uObj.languages;
+            if (!doctorLangs || (Array.isArray(doctorLangs) && doctorLangs.length === 0)) {
+                if (uObj.device_token && typeof uObj.device_token === 'string' && uObj.device_token.startsWith('{')) {
+                    try {
+                        const meta = JSON.parse(uObj.device_token);
+                        if (meta.languages && Array.isArray(meta.languages)) doctorLangs = meta.languages;
+                    } catch (_) {}
+                }
+            }
+            if (!doctorLangs || (Array.isArray(doctorLangs) && doctorLangs.length === 0)) {
+                doctorLangs = ['English'];
+            } else if (typeof doctorLangs === 'string') {
+                doctorLangs = doctorLangs.split(',').map(s => s.trim()).filter(Boolean);
+            }
+
             return {
                 id: d.id,
                 user_id: d.user_id || uObj.id,
@@ -140,6 +165,7 @@ exports.getAllDentists = async (req, res) => {
                 state: d.state || uObj.state || '',
                 city: d.city || uObj.city || '',
                 pincode: d.pincode || uObj.pincode || '',
+                languages: doctorLangs,
                 latitude: d.latitude || uObj.latitude || null,
                 longitude: d.longitude || uObj.longitude || null,
                 availability_status: d.availability_status || d.status || 'Available',
@@ -149,6 +175,13 @@ exports.getAllDentists = async (req, res) => {
                 clinics: cObj
             };
         });
+
+        if (language && language.trim()) {
+            const langLower = language.trim().toLowerCase();
+            formattedDentists = formattedDentists.filter(d => {
+                return (d.languages || []).some(l => (l || '').toLowerCase().includes(langLower));
+            });
+        }
 
         const pCity = (req.query.patientCity || req.query.city || '').trim().toLowerCase();
         const pPin = (req.query.patientPincode || req.query.pincode || '').trim();

@@ -40,6 +40,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   final _loginPasswordController = TextEditingController();
   bool _showLoginPassword = false;
   bool _isLoggingIn = false;
+  bool _isDirectMobileLoginMode = true; // Fast direct mobile sign-in
 
   // Controllers for Registration
   final _registerFormKey = GlobalKey<FormState>();
@@ -47,7 +48,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
-  bool _showRegPassword = false;
   bool _isRegistering = false;
 
   // Common & Location Fields
@@ -71,6 +71,13 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   // Role-Specific Fields - Admin
   final _adminEmployeeIdController = TextEditingController();
   final _adminDeptController = TextEditingController();
+
+  // Languages Selection
+  static const List<String> _availableLanguages = [
+    'English', 'Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam', 'Marathi', 'Bengali', 'Gujarati', 'Punjabi', 'Spanish'
+  ];
+  String _selectedPatientLanguage = 'English';
+  String _selectedDentistLanguage = 'English';
 
   // Profile Image Picker Bytes
   Uint8List? _pickedImageBytes;
@@ -190,25 +197,21 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     }
   }
 
+
+
   Future<void> _handleLogin() async {
     if (!_loginFormKey.currentState!.validate()) return;
 
-    setState(() => _isLoggingIn = true);
-    final email = _loginEmailController.text.trim();
+    final identifier = _loginEmailController.text.trim();
     final password = _loginPasswordController.text.trim();
 
-    // Allow primary admin AND sub-admins to log in via Admin tab
-    // Sub-admins are created by the main admin and have role 'Sub-Admin'
-    if (_selectedRole == UserRole.admin && email.toLowerCase() != 'anusripvc202@gmail.com') {
-      // Don't block yet - let the server decide. The server allows sub-admins.
-      // We only show a pre-check warning if the email seems completely unrelated,
-      // but we allow the API call to proceed and validate.
-    }
+    setState(() => _isLoggingIn = true);
 
     try {
       final res = await ApiService().loginUser(
-        email: email,
-        password: password,
+        email: identifier,
+        phone: identifier,
+        password: _isDirectMobileLoginMode ? null : (password.isNotEmpty ? password : null),
         role: _roleName,
       );
 
@@ -262,20 +265,20 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ? userData['phone'].toString()
             : (_phoneController.text.trim().isNotEmpty
                 ? _phoneController.text.trim()
-                : (!email.contains('@') && email.isNotEmpty ? email : ''));
+                : (!identifier.contains('@') && identifier.isNotEmpty ? identifier : ''));
 
-        AnalyticsService.logLogin(method: 'Email_Password', role: _roleName);
+        AnalyticsService.logLogin(method: _isDirectMobileLoginMode ? 'Direct_Mobile' : 'Email_Password', role: _roleName);
 
         if (registeredRole.contains('dentist') || registeredRole.contains('doctor')) {
           final docName = (userData['name'] != null && userData['name'].toString().trim().isNotEmpty)
               ? userData['name'].toString().trim()
-              : (userData['email'] != null ? userData['email'].toString() : email);
+              : (userData['email'] != null ? userData['email'].toString() : identifier);
           final docId = (userData['id'] ?? Supabase.instance.client.auth.currentUser?.id ?? '').toString();
           
           PatientProblemService().registerDoctor(
             id: docId,
             name: docName,
-            email: userData['email'] ?? email,
+            email: userData['email'] ?? (identifier.contains('@') ? identifier : ''),
             phone: userPhone,
             licenseNumber: 'DEN-LIC-REGISTERED',
             specialty: 'General Dentistry',
@@ -303,8 +306,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             PatientProblemService().setSubAdminSession(
               id: userData['id']?.toString() ?? '',
               name: userData['name']?.toString() ?? 'Sub-Admin',
-              email: userData['email']?.toString() ?? email,
-              phone: userData['phone']?.toString() ?? '',
+              email: userData['email']?.toString() ?? (identifier.contains('@') ? identifier : ''),
+              phone: userData['phone']?.toString() ?? userPhone,
               permissions: perms,
               status: userData['status']?.toString() ?? 'ACTIVE',
             );
@@ -323,7 +326,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         } else {
           // Patient Role
           final prefs = await SharedPreferences.getInstance();
-          final cachedProfileStr = prefs.getString('dentaguru_patient_profile_${email.trim().toLowerCase()}') ?? prefs.getString('dentaguru_patient_profile');
+          final userEmailKey = (userData['email'] ?? (identifier.contains('@') ? identifier : '')).toString().trim().toLowerCase();
+          final cachedProfileStr = prefs.getString('dentaguru_patient_profile_$userEmailKey') ?? prefs.getString('dentaguru_patient_profile');
           Map<String, dynamic> cachedMap = {};
           if (cachedProfileStr != null && cachedProfileStr.isNotEmpty) {
             try {
@@ -333,7 +337,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
           Map<String, dynamic> dbProfileMeta = {};
           try {
-            final uRow = await Supabase.instance.client.from('users').select('device_token, city, pincode, state').ilike('email', email.trim()).maybeSingle();
+            var q = Supabase.instance.client.from('users').select('device_token, city, pincode, state');
+            final uRow = identifier.contains('@') ? await q.ilike('email', identifier).maybeSingle() : await q.eq('phone', identifier).maybeSingle();
             if (uRow != null && uRow['device_token'] != null && uRow['device_token'].toString().startsWith('{')) {
               dbProfileMeta = jsonDecode(uRow['device_token'].toString());
             }
@@ -347,8 +352,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
           PatientProblemService().updatePatientProfile(
             id: userData['id']?.toString() ?? '',
-            name: userData['name'] ?? email.split('@').first,
-            email: userData['email'] ?? email,
+            name: userData['name'] ?? (identifier.contains('@') ? identifier.split('@').first : 'Patient'),
+            email: userData['email'] ?? (identifier.contains('@') ? identifier : ''),
             phone: userPhone,
             age: loginAge.isNotEmpty ? loginAge : '',
             gender: loginGender.isNotEmpty ? loginGender : 'Female',
@@ -396,11 +401,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
     final name = _nameController.text.trim();
     final email = _emailController.text.trim();
-    final password = _passwordController.text.trim();
     final phone = _phoneController.text.trim();
     final registeredAge = _ageController.text.trim();
 
-    if (_selectedRole == UserRole.admin && email.toLowerCase() != 'anusripvc202@gmail.com') {
+    if (_selectedRole == UserRole.admin && email.isNotEmpty && email.toLowerCase() != 'anusripvc202@gmail.com') {
       setState(() => _isRegistering = false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -421,12 +425,12 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     final city = _cityController.text.trim();
     final pincode = _pincodeController.text.trim();
     final clinicAddress = _clinicAddressController.text.trim();
+    final selectedLangs = _selectedRole == UserRole.dentist ? [_selectedDentistLanguage] : [_selectedPatientLanguage];
 
     try {
       final res = await ApiService().registerUser(
         name: name,
         email: email,
-        password: password,
         phone: phone,
         role: _roleName,
         age: registeredAge,
@@ -441,6 +445,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         city: city,
         pincode: pincode,
         profilePhoto: photoBase64,
+        languages: selectedLangs,
       );
 
       if (!mounted) return;
@@ -478,12 +483,13 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             qualification: 'BDS, MDS',
             experienceYears: exp,
             photoBytes: _pickedImageBytes,
+            languages: [_selectedDentistLanguage],
           );
         }
 
         await PatientProblemService().syncAllDataFromApi();
         if (!mounted) return;
-        AnalyticsService.logRegistration(method: 'Email_Password', role: _roleName);
+        AnalyticsService.logRegistration(method: 'Mobile_OTP', role: _roleName);
 
         ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1005,14 +1011,26 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   void _autoFillDemo(UserRole role) {
     setState(() {
       _selectedRole = role;
-      if (role == UserRole.patient) {
-        _loginEmailController.text = 'patient@dentaguru.com';
-      } else if (role == UserRole.dentist) {
-        _loginEmailController.text = 'dr.nikhil@dentaguru.com';
+      if (_isDirectMobileLoginMode) {
+        if (role == UserRole.admin) {
+          _loginEmailController.text = '+91 98765 43210';
+        } else if (role == UserRole.dentist) {
+          _loginEmailController.text = '+91 98765 12345';
+        } else {
+          _loginEmailController.text = '+91 98765 67890';
+        }
       } else {
-        _loginEmailController.text = 'admin@dentaguru.com';
+        if (role == UserRole.admin) {
+          _loginEmailController.text = 'anusripvc202@gmail.com';
+          _loginPasswordController.text = 'admin123';
+        } else if (role == UserRole.dentist) {
+          _loginEmailController.text = 'doctor@dentaguru.com';
+          _loginPasswordController.text = 'doctor123';
+        } else {
+          _loginEmailController.text = 'patient@dentaguru.com';
+          _loginPasswordController.text = 'patient123';
+        }
       }
-      _loginPasswordController.text = 'Password123!';
     });
   }
 
@@ -1277,7 +1295,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Tap to auto-fill $_roleName demo credentials',
+                        _isDirectMobileLoginMode
+                            ? 'Tap to auto-fill $_roleName demo mobile'
+                            : 'Tap to auto-fill $_roleName demo credentials',
                         style: TextStyle(fontSize: 11, color: _accentColor, fontWeight: FontWeight.bold),
                       ),
                     ),
@@ -1287,84 +1307,137 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ),
             const SizedBox(height: 16),
 
-            // Email or Mobile Field
-            TextFormField(
-              controller: _loginEmailController,
-              keyboardType: TextInputType.emailAddress,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-              validator: (val) {
-                if (val == null || val.trim().isEmpty) {
-                  return 'Please enter your registered email or mobile number';
-                }
-                return null;
-              },
-              decoration: _buildInputDecoration(
-                label: 'Email or Mobile Number',
-                hint: 'e.g. user@dentaguru.com',
-                icon: Icons.alternate_email_rounded,
-              ),
-            ),
-            const SizedBox(height: 14),
-
-            // Password Field
-            TextFormField(
-              controller: _loginPasswordController,
-              obscureText: !_showLoginPassword,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-              validator: (val) {
-                if (val == null || val.trim().isEmpty) {
-                  return 'Please enter your password';
-                }
-                if (val.trim().length < 6) {
-                  return 'Password must be at least 6 characters';
-                }
-                return null;
-              },
-              decoration: _buildInputDecoration(
-                label: 'Account Password',
-                hint: '••••••••',
-                icon: Icons.lock_outline_rounded,
-                suffixIcon: IconButton(
-                  icon: Icon(
-                    _showLoginPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                    size: 20,
-                    color: AppTheme.textMuted,
-                  ),
-                  onPressed: () => setState(() => _showLoginPassword = !_showLoginPassword),
+            if (_isDirectMobileLoginMode) ...[
+              // Fast Direct Login Flow (Mobile Number OR Email Address - No OTP required)
+              TextFormField(
+                controller: _loginEmailController,
+                keyboardType: TextInputType.emailAddress,
+                style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                validator: (val) {
+                  if (val == null || val.trim().isEmpty) {
+                    return 'Please enter your registered mobile number or email address';
+                  }
+                  return null;
+                },
+                decoration: _buildInputDecoration(
+                  label: 'Registered Mobile Number or Email *',
+                  hint: 'e.g. +91 98765 43210 or user@dentaguru.com',
+                  icon: Icons.phone_android_rounded,
                 ),
               ),
-            ),
-            const SizedBox(height: 8),
+              const SizedBox(height: 16),
 
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: () => _showForgotPasswordDialog(context),
-                child: Text(
-                  'Forgot Password?',
+              // Direct Sign In Button
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _accentColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                onPressed: _isLoggingIn ? null : _handleLogin,
+                child: _isLoggingIn
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                      )
+                    : Text('Sign In as $_roleName', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              ),
+            ] else ...[
+              // Password Login Flow (Fallback)
+              TextFormField(
+                controller: _loginEmailController,
+                keyboardType: TextInputType.emailAddress,
+                style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                validator: (val) {
+                  if (val == null || val.trim().isEmpty) {
+                    return 'Please enter your registered email or mobile number';
+                  }
+                  return null;
+                },
+                decoration: _buildInputDecoration(
+                  label: 'Email or Mobile Number',
+                  hint: 'e.g. user@dentaguru.com',
+                  icon: Icons.alternate_email_rounded,
+                ),
+              ),
+              const SizedBox(height: 14),
+
+              TextFormField(
+                controller: _loginPasswordController,
+                obscureText: !_showLoginPassword,
+                style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                validator: (val) {
+                  if (val == null || val.trim().isEmpty) {
+                    return 'Please enter your password';
+                  }
+                  return null;
+                },
+                decoration: _buildInputDecoration(
+                  label: 'Account Password',
+                  hint: '••••••••',
+                  icon: Icons.lock_outline_rounded,
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _showLoginPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                      size: 20,
+                      color: AppTheme.textMuted,
+                    ),
+                    onPressed: () => setState(() => _showLoginPassword = !_showLoginPassword),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => _showForgotPasswordDialog(context),
+                  child: Text(
+                    'Forgot Password?',
+                    style: TextStyle(color: _accentColor, fontWeight: FontWeight.w600, fontSize: 12),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _accentColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                onPressed: _isLoggingIn ? null : _handleLogin,
+                child: _isLoggingIn
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                      )
+                    : Text('Sign In with Password', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              ),
+            ],
+
+            const SizedBox(height: 14),
+
+            // Toggle Between Direct Mobile and Password Sign In
+            Center(
+              child: TextButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _isDirectMobileLoginMode = !_isDirectMobileLoginMode;
+                  });
+                },
+                icon: Icon(_isDirectMobileLoginMode ? Icons.lock_outline_rounded : Icons.phone_android_rounded, size: 15, color: _accentColor),
+                label: Text(
+                  _isDirectMobileLoginMode ? 'Sign In with Password instead' : 'Sign In with Mobile Number instead',
                   style: TextStyle(color: _accentColor, fontWeight: FontWeight.w600, fontSize: 12),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-
-            // Sign In Button
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _accentColor,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 15),
-                elevation: 2,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-              onPressed: _isLoggingIn ? null : _handleLogin,
-              child: _isLoggingIn
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                    )
-                  : Text('Sign In as $_roleName', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
             ),
           ],
         ),
@@ -1437,36 +1510,51 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ),
             const SizedBox(height: 14),
 
-            // Common Field: Name
+            // Mandatory Primary Identifier: Full Name
             TextFormField(
               controller: _nameController,
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-              validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter your full name' : null,
+              validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter full name' : null,
               decoration: _buildInputDecoration(
                 label: _selectedRole == UserRole.dentist
-                    ? 'Practitioner Full Name & Title'
+                    ? 'Practitioner Full Name & Title *'
                     : _selectedRole == UserRole.admin
-                        ? 'Administrator Full Name'
-                        : 'Patient Full Name',
+                        ? 'Administrator Full Name *'
+                        : 'Patient Full Name *',
                 hint: _selectedRole == UserRole.dentist ? 'e.g. Dr. Nikhil' : 'e.g. Jane Smith',
                 icon: Icons.person_outline_rounded,
               ),
             ),
             const SizedBox(height: 12),
 
-            // Common Field: Email
+            // Mandatory Primary Identifier: Mobile Phone Number
+            TextFormField(
+              controller: _phoneController,
+              keyboardType: TextInputType.phone,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              validator: (val) => (val == null || val.trim().isEmpty) ? 'Mobile phone number is mandatory *' : null,
+              decoration: _buildInputDecoration(
+                label: 'Mobile Phone Number *',
+                hint: '+91 98765 43210',
+                icon: Icons.phone_android_rounded,
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // Optional Field: Email Address
             TextFormField(
               controller: _emailController,
               keyboardType: TextInputType.emailAddress,
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
               validator: (val) {
-                if (val == null || val.trim().isEmpty) return 'Please enter an email address';
-                if (!val.contains('@')) return 'Enter a valid email address';
+                if (val != null && val.trim().isNotEmpty && !val.contains('@')) {
+                  return 'Enter a valid email address';
+                }
                 return null;
               },
               decoration: _buildInputDecoration(
-                label: 'Email Address',
-                hint: 'user@dentaguru.com',
+                label: 'Email Address (Optional)',
+                hint: 'user@dentaguru.com (Optional)',
                 icon: Icons.email_outlined,
               ),
             ),
@@ -1478,32 +1566,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               child: _buildRoleSpecificFields(),
             ),
 
-            const SizedBox(height: 12),
-
-            // Common Field: Password
-            TextFormField(
-              controller: _passwordController,
-              obscureText: !_showRegPassword,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-              validator: (val) {
-                if (val == null || val.trim().isEmpty) return 'Please set a password';
-                if (val.trim().length < 6) return 'Password must be at least 6 characters';
-                return null;
-              },
-              decoration: _buildInputDecoration(
-                label: 'Set Account Password',
-                hint: '••••••••',
-                icon: Icons.lock_outline_rounded,
-                suffixIcon: IconButton(
-                  icon: Icon(
-                    _showRegPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                    size: 20,
-                    color: AppTheme.textMuted,
-                  ),
-                  onPressed: () => setState(() => _showRegPassword = !_showRegPassword),
-                ),
-              ),
-            ),
             const SizedBox(height: 12),
 
             // OTP Verification Box Before Creating Account
@@ -1534,7 +1596,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                         child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                       )
                     : Text(
-                        _isOtpVerified ? 'Create $_roleName Account' : 'Complete OTP to Activate Account Creation',
+                        _isOtpVerified ? 'Create $_roleName Account' : 'Verify Mobile OTP to Complete Registration',
                         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                       ),
               ),
@@ -1555,22 +1617,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             Row(
               children: [
                 Expanded(
-                  flex: 3,
-                  child: TextFormField(
-                    controller: _phoneController,
-                    keyboardType: TextInputType.phone,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter phone' : null,
-                    decoration: _buildInputDecoration(
-                      label: 'Phone Number',
-                      hint: '+1 202 555 0142',
-                      icon: Icons.phone_outlined,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 2,
                   child: TextFormField(
                     controller: _ageController,
                     keyboardType: TextInputType.number,
@@ -1582,22 +1628,24 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     ),
                   ),
                 ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _selectedGender,
+                    dropdownColor: Colors.white,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
+                    decoration: _buildInputDecoration(
+                      label: 'Gender',
+                      hint: 'Select Gender',
+                      icon: Icons.people_outline_rounded,
+                    ),
+                    items: ['Female', 'Male', 'Other', 'Prefer not to say'].map((g) {
+                      return DropdownMenuItem(value: g, child: Text(g, style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600)));
+                    }).toList(),
+                    onChanged: (val) => setState(() => _selectedGender = val ?? 'Female'),
+                  ),
+                ),
               ],
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              initialValue: _selectedGender,
-              dropdownColor: Colors.white,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
-              decoration: _buildInputDecoration(
-                label: 'Gender',
-                hint: 'Select Gender',
-                icon: Icons.people_outline_rounded,
-              ),
-              items: ['Female', 'Male', 'Other', 'Prefer not to say'].map((g) {
-                return DropdownMenuItem(value: g, child: Text(g, style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600)));
-              }).toList(),
-              onChanged: (val) => setState(() => _selectedGender = val ?? 'Female'),
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
@@ -1629,9 +1677,19 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               keyboardType: TextInputType.phone,
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
               decoration: _buildInputDecoration(
-                label: 'Emergency Contact Phone',
-                hint: '+1 202 555 9988',
+                label: 'Emergency Contact (Optional)',
+                hint: '+91 98765 99880',
                 icon: Icons.contact_phone_outlined,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _locationController,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              decoration: _buildInputDecoration(
+                label: 'Address / Street Location',
+                hint: 'e.g. Door No / Street Name',
+                icon: Icons.location_on_outlined,
               ),
             ),
             const SizedBox(height: 12),
@@ -1639,20 +1697,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               children: [
                 Expanded(
                   flex: 3,
-                  child: TextFormField(
-                    controller: _locationController,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter address' : null,
-                    decoration: _buildInputDecoration(
-                      label: 'Address / Location *',
-                      hint: 'e.g. Door No / Street Name',
-                      icon: Icons.location_on_outlined,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 2,
                   child: TextFormField(
                     controller: _cityController,
                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
@@ -1664,19 +1708,44 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     ),
                   ),
                 ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 2,
+                  child: TextFormField(
+                    controller: _pincodeController,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter Pincode' : null,
+                    decoration: _buildInputDecoration(
+                      label: 'Pincode *',
+                      hint: 'e.g. 6-Digit PIN',
+                      icon: Icons.pin_drop_outlined,
+                    ),
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 12),
-            TextFormField(
-              controller: _pincodeController,
-              keyboardType: TextInputType.number,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-              validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter 6-digit Pincode' : null,
+            DropdownButtonFormField<String>(
+              initialValue: _selectedPatientLanguage,
+              dropdownColor: Colors.white,
+              isExpanded: true,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
               decoration: _buildInputDecoration(
-                label: 'Pincode / Postal Code *',
-                hint: 'e.g. 6-Digit Pincode',
-                icon: Icons.pin_drop_outlined,
+                label: 'Preferred Language',
+                hint: 'Select Language',
               ),
+              items: _availableLanguages.map((lang) {
+                return DropdownMenuItem(
+                  value: lang,
+                  child: Text(lang, style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600)),
+                );
+              }).toList(),
+              onChanged: (val) {
+                if (val != null) {
+                  setState(() => _selectedPatientLanguage = val);
+                }
+              },
             ),
           ],
         );
@@ -1686,24 +1755,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           key: const ValueKey('dentist_fields'),
           children: [
             TextFormField(
-              controller: _phoneController,
-              keyboardType: TextInputType.phone,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-              validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter phone' : null,
-              decoration: _buildInputDecoration(
-                label: 'Practitioner Phone Number',
-                hint: '+1 202 555 0142',
-                icon: Icons.phone_outlined,
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            TextFormField(
               controller: _licenseNoController,
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
               validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter Dental License Number' : null,
               decoration: _buildInputDecoration(
-                label: 'Dental Council License Number',
+                label: 'Dental Council License Number *',
                 hint: 'DEN-LIC-88490',
                 icon: Icons.badge_outlined,
               ),
@@ -1769,9 +1825,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             TextFormField(
               controller: _clinicAddressController,
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-              validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter clinic location / address' : null,
               decoration: _buildInputDecoration(
-                label: 'Clinic Location / Address *',
+                label: 'Clinic Location / Address (Optional)',
                 hint: 'e.g. Area / Landmark',
                 icon: Icons.location_on_outlined,
               ),
@@ -1800,12 +1855,34 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter Pincode' : null,
                     decoration: _buildInputDecoration(
                       label: 'Pincode *',
-                      hint: 'e.g. 6-Digit Pincode',
+                      hint: 'e.g. 6-Digit PIN',
                       icon: Icons.pin_drop_outlined,
                     ),
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _selectedDentistLanguage,
+              dropdownColor: Colors.white,
+              isExpanded: true,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
+              decoration: _buildInputDecoration(
+                label: 'Languages Known / Spoken',
+                hint: 'Select Language',
+              ),
+              items: _availableLanguages.map((lang) {
+                return DropdownMenuItem(
+                  value: lang,
+                  child: Text(lang, style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600)),
+                );
+              }).toList(),
+              onChanged: (val) {
+                if (val != null) {
+                  setState(() => _selectedDentistLanguage = val);
+                }
+              },
             ),
           ],
         );
@@ -1817,29 +1894,26 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             Row(
               children: [
                 Expanded(
-                  flex: 3,
                   child: TextFormField(
-                    controller: _phoneController,
-                    keyboardType: TextInputType.phone,
+                    controller: _cityController,
                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter phone' : null,
                     decoration: _buildInputDecoration(
-                      label: 'Contact Phone',
-                      hint: '+1 202 555 0199',
-                      icon: Icons.phone_outlined,
+                      label: 'City (Optional)',
+                      hint: 'e.g. City Name',
+                      icon: Icons.location_city_rounded,
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  flex: 2,
                   child: TextFormField(
-                    controller: _adminEmployeeIdController,
+                    controller: _pincodeController,
+                    keyboardType: TextInputType.number,
                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
                     decoration: _buildInputDecoration(
-                      label: 'Admin ID',
-                      hint: 'ADM-901',
-                      icon: Icons.badge_outlined,
+                      label: 'Pincode (Optional)',
+                      hint: 'e.g. 6-Digit PIN',
+                      icon: Icons.pin_drop_outlined,
                     ),
                   ),
                 ),
@@ -1847,10 +1921,20 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ),
             const SizedBox(height: 12),
             TextFormField(
+              controller: _adminEmployeeIdController,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              decoration: _buildInputDecoration(
+                label: 'Admin ID / Employee ID (Optional)',
+                hint: 'ADM-901',
+                icon: Icons.badge_outlined,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
               controller: _adminDeptController,
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
               decoration: _buildInputDecoration(
-                label: 'Department / Key Code',
+                label: 'Department / Key Code (Optional)',
                 hint: 'Clinical Operations',
                 icon: Icons.admin_panel_settings_outlined,
               ),
@@ -1863,7 +1947,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   InputDecoration _buildInputDecoration({
     required String label,
     required String hint,
-    required IconData icon,
+    IconData? icon,
     Widget? suffixIcon,
   }) {
     return InputDecoration(
@@ -1871,7 +1955,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       labelStyle: const TextStyle(color: Color(0xFF475569), fontSize: 13),
       hintText: hint,
       hintStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
-      prefixIcon: Icon(icon, color: _accentColor, size: 20),
+      prefixIcon: icon != null ? Icon(icon, color: _accentColor, size: 20) : null,
       suffixIcon: suffixIcon,
       filled: true,
       fillColor: const Color(0xFFF8FAFC),

@@ -28,6 +28,7 @@ class DoctorModel {
   final String pincode;
   final String city;
   final String state;
+  final List<String> languages;
   final double? latitude;
   final double? longitude;
   final Map<String, String> procedureFees;
@@ -54,6 +55,7 @@ class DoctorModel {
     this.pincode = '',
     this.city = '',
     this.state = '',
+    this.languages = const ['English'],
     this.latitude,
     this.longitude,
     Map<String, String>? procedureFees,
@@ -101,6 +103,7 @@ class DoctorModel {
         'pincode': pincode,
         'city': city,
         'state': state,
+        'languages': languages,
         'latitude': latitude,
         'longitude': longitude,
         'procedureFees': procedureFees,
@@ -118,6 +121,20 @@ class DoctorModel {
     if (json['procedureFees'] != null && json['procedureFees'] is Map) {
       (json['procedureFees'] as Map).forEach((k, v) => pFees[k.toString()] = v.toString());
     }
+
+    List<String> parsedLanguages = ['English'];
+    final rawLangs = json['languages'] ?? (json['users'] is Map ? json['users']['languages'] : null);
+    if (rawLangs != null) {
+      if (rawLangs is List) {
+        parsedLanguages = rawLangs.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+      } else if (rawLangs is String && rawLangs.trim().isNotEmpty) {
+        parsedLanguages = rawLangs.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+      }
+    }
+    if (parsedLanguages.isEmpty) {
+      parsedLanguages = ['English'];
+    }
+
     return DoctorModel(
       id: (json['id'] ?? json['_id'] ?? '').toString(),
       userId: (json['userId'] ?? json['user_id'] ?? (json['users'] != null ? json['users']['id'] : '') ?? '').toString(),
@@ -140,6 +157,7 @@ class DoctorModel {
       pincode: json['pincode'] ?? json['postal_code'] ?? (json['users'] != null ? (json['users']['pincode'] ?? '') : '') ?? '',
       city: json['city'] ?? (json['users'] != null ? (json['users']['city'] ?? '') : '') ?? '',
       state: json['state'] ?? (json['users'] != null ? (json['users']['state'] ?? '') : '') ?? '',
+      languages: parsedLanguages,
       latitude: (json['latitude'] ?? json['lat'] ?? (json['users'] != null ? json['users']['latitude'] : null)) != null
           ? double.tryParse((json['latitude'] ?? json['lat'] ?? json['users']['latitude']).toString())
           : null,
@@ -207,6 +225,7 @@ class PatientProfile {
   String city;
   String state;
   String pincode;
+  List<String> languages;
   Uint8List? photoBytes;
 
   PatientProfile({
@@ -222,6 +241,7 @@ class PatientProfile {
     this.city = '',
     this.state = '',
     this.pincode = '',
+    this.languages = const ['English'],
     this.photoBytes,
   });
 
@@ -238,6 +258,7 @@ class PatientProfile {
         'city': city,
         'state': state,
         'pincode': pincode,
+        'languages': languages,
         'photoBase64': photoBytes != null ? base64Encode(photoBytes!) : null,
       };
 
@@ -248,6 +269,20 @@ class PatientProfile {
         bytes = base64Decode(json['photoBase64']);
       } catch (_) {}
     }
+
+    List<String> parsedLangs = ['English'];
+    final rawLangs = json['languages'];
+    if (rawLangs != null) {
+      if (rawLangs is List) {
+        parsedLangs = rawLangs.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+      } else if (rawLangs is String && rawLangs.trim().isNotEmpty) {
+        parsedLangs = rawLangs.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+      }
+    }
+    if (parsedLangs.isEmpty) {
+      parsedLangs = ['English'];
+    }
+
     return PatientProfile(
       id: json['id'] ?? '',
       name: json['name'] ?? '',
@@ -261,6 +296,7 @@ class PatientProfile {
       city: json['city'] ?? '',
       state: json['state'] ?? '',
       pincode: json['pincode'] ?? json['postal_code'] ?? '',
+      languages: parsedLangs,
       photoBytes: bytes,
     );
   }
@@ -872,6 +908,39 @@ class PatientProblemService extends ChangeNotifier {
     }
   }
 
+  Future<bool> registerSubAdmin({
+    required String name,
+    required String phone,
+    String? email,
+    String? password,
+    String? city,
+    String? pincode,
+    List<String>? languages,
+    List<String>? permissions,
+    String status = 'ACTIVE',
+  }) async {
+    try {
+      final res = await ApiService().createSubAdmin(
+        name: name,
+        phone: phone,
+        email: email,
+        password: password,
+        city: city,
+        pincode: pincode,
+        languages: languages,
+        permissions: permissions,
+        status: status,
+      );
+      if (res['success'] == true) {
+        await syncSubAdminsFromApi();
+        return true;
+      }
+    } catch (e) {
+      debugPrint('registerSubAdmin error: $e');
+    }
+    return false;
+  }
+
   void updateSubAdminStatusLocally(String id, String status) {
     final idx = _subAdmins.indexWhere((s) => (s['id'] ?? '').toString() == id);
     if (idx != -1) {
@@ -949,6 +1018,17 @@ class PatientProblemService extends ChangeNotifier {
             name = 'Patient';
           }
 
+          List<String> userLangs = ['English'];
+          final rawLangs = item['languages'] ?? tokenMeta['languages'];
+          if (rawLangs != null) {
+            if (rawLangs is List) {
+              userLangs = rawLangs.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+            } else if (rawLangs is String && rawLangs.trim().isNotEmpty) {
+              userLangs = rawLangs.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+            }
+          }
+          if (userLangs.isEmpty) userLangs = ['English'];
+
           final pProfile = PatientProfile(
             id: id,
             name: name,
@@ -962,6 +1042,7 @@ class PatientProblemService extends ChangeNotifier {
             pincode: pincode,
             state: state,
             address: address,
+            languages: userLangs,
           );
           _allPatients.add(pProfile);
 
@@ -987,6 +1068,7 @@ class PatientProblemService extends ChangeNotifier {
             if (pincode.isNotEmpty) currentPatient.pincode = pincode;
             if (state.isNotEmpty) currentPatient.state = state;
             if (address.isNotEmpty) currentPatient.address = address;
+            if (userLangs.isNotEmpty) currentPatient.languages = userLangs;
           }
         }
       }
@@ -1542,6 +1624,27 @@ class PatientProblemService extends ChangeNotifier {
           final lat = (dMap['latitude'] ?? userObj['latitude']) != null ? double.tryParse((dMap['latitude'] ?? userObj['latitude']).toString()) : null;
           final lng = (dMap['longitude'] ?? userObj['longitude']) != null ? double.tryParse((dMap['longitude'] ?? userObj['longitude']).toString()) : null;
 
+          List<String> doctorLangs = ['English'];
+          final rawLangs = dMap['languages'] ?? userObj['languages'];
+          if (rawLangs != null) {
+            if (rawLangs is List) {
+              doctorLangs = rawLangs.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+            } else if (rawLangs is String && rawLangs.trim().isNotEmpty) {
+              doctorLangs = rawLangs.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+            }
+          }
+          if (doctorLangs.isEmpty) {
+            if (userObj['device_token'] != null && userObj['device_token'].toString().startsWith('{')) {
+              try {
+                final meta = jsonDecode(userObj['device_token'].toString());
+                if (meta['languages'] is List) {
+                  doctorLangs = List<String>.from((meta['languages'] as List).map((e) => e.toString().trim()).where((e) => e.isNotEmpty));
+                }
+              } catch (_) {}
+            }
+          }
+          if (doctorLangs.isEmpty) doctorLangs = ['English'];
+
           final formattedName = name.startsWith('Dr.') ? name : 'Dr. $name';
           final doctorUserId = (dMap['user_id'] ?? userObj['id'] ?? '').toString();
 
@@ -1565,6 +1668,7 @@ class PatientProblemService extends ChangeNotifier {
             state: doctorState,
             city: doctorCity,
             pincode: doctorPincode,
+            languages: doctorLangs,
             latitude: lat,
             longitude: lng,
           ));
@@ -1604,11 +1708,11 @@ class PatientProblemService extends ChangeNotifier {
     }
   }
 
-  /// Fetch doctors from API filtered by state, city, pincode, specialty, availability.
+  /// Fetch doctors from API filtered by state, city, pincode, specialty, availability, language.
   /// Returns filtered list without modifying the global [_allDoctors] cache.
-  Future<List<DoctorModel>> fetchDoctorsFiltered({String? state, String? city, String? pincode, String? specialty, String? availability}) async {
+  Future<List<DoctorModel>> fetchDoctorsFiltered({String? state, String? city, String? pincode, String? specialty, String? availability, String? language}) async {
     try {
-      final apiDentists = await ApiService().fetchDentists(state: state, city: city, pincode: pincode, specialty: specialty, availability: availability);
+      final apiDentists = await ApiService().fetchDentists(state: state, city: city, pincode: pincode, specialty: specialty, availability: availability, language: language);
       final filtered = <DoctorModel>[];
       for (final dMap in apiDentists) {
         final id = dMap['id']?.toString() ?? dMap['_id']?.toString() ?? '';
@@ -1626,6 +1730,27 @@ class PatientProblemService extends ChangeNotifier {
         final doctorPincode = (dMap['pincode'] ?? userObj['pincode'] ?? dMap['postal_code'] ?? '').toString();
         final lat = (dMap['latitude'] ?? userObj['latitude']) != null ? double.tryParse((dMap['latitude'] ?? userObj['latitude']).toString()) : null;
         final lng = (dMap['longitude'] ?? userObj['longitude']) != null ? double.tryParse((dMap['longitude'] ?? userObj['longitude']).toString()) : null;
+
+        List<String> doctorLangs = ['English'];
+        final rawLangs = dMap['languages'] ?? userObj['languages'];
+        if (rawLangs != null) {
+          if (rawLangs is List) {
+            doctorLangs = rawLangs.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+          } else if (rawLangs is String && rawLangs.trim().isNotEmpty) {
+            doctorLangs = rawLangs.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+          }
+        }
+        if (doctorLangs.isEmpty) {
+          if (userObj['device_token'] != null && userObj['device_token'].toString().startsWith('{')) {
+            try {
+              final meta = jsonDecode(userObj['device_token'].toString());
+              if (meta['languages'] is List) {
+                doctorLangs = List<String>.from((meta['languages'] as List).map((e) => e.toString().trim()).where((e) => e.isNotEmpty));
+              }
+            } catch (_) {}
+          }
+        }
+        if (doctorLangs.isEmpty) doctorLangs = ['English'];
 
         final formattedName = name.startsWith('Dr.') ? name : 'Dr. $name';
 
@@ -1648,6 +1773,7 @@ class PatientProblemService extends ChangeNotifier {
           state: doctorState,
           city: doctorCity,
           pincode: doctorPincode,
+          languages: doctorLangs,
           latitude: lat,
           longitude: lng,
         ));
@@ -2128,6 +2254,71 @@ class PatientProblemService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Retrieves the latest dental consultation / problem request for a given patient
+  PatientConsultationRequest? getLatestRequestForPatient(PatientProfile patient) {
+    final matchingRequests = _requests.where((r) {
+      if (patient.id.isNotEmpty && r.patientId != null && r.patientId == patient.id) return true;
+      if (patient.phone.isNotEmpty && r.patientPhone.isNotEmpty && r.patientPhone.trim() == patient.phone.trim()) return true;
+      if (patient.name.isNotEmpty && r.patientName.isNotEmpty && r.patientName.trim().toLowerCase() == patient.name.trim().toLowerCase()) return true;
+      if (patient.email.isNotEmpty && r.patientPhone.isNotEmpty && r.patientPhone.toLowerCase() == patient.email.toLowerCase()) return true;
+      return false;
+    }).toList();
+
+    if (matchingRequests.isEmpty) return null;
+
+    matchingRequests.sort((a, b) => b.submittedAt.compareTo(a.submittedAt));
+    return matchingRequests.first;
+  }
+
+  /// Retrieves the currently assigned dentist for a patient
+  DoctorModel? getAssignedDoctorForPatient(PatientProfile patient) {
+    final req = getLatestRequestForPatient(patient);
+    if (req == null) return null;
+
+    final docId = req.assignedDoctorId;
+    final docName = req.assignedDoctorName;
+
+    if ((docId == null || docId.trim().isEmpty || docId == 'null') &&
+        (docName == null || docName.trim().isEmpty || docName == 'null')) {
+      return null;
+    }
+
+    // Lookup in _allDoctors
+    for (final doc in _allDoctors) {
+      if (docId != null && docId.isNotEmpty) {
+        if (doc.id == docId || doc.userId == docId) return doc;
+      }
+      if (docName != null && docName.isNotEmpty) {
+        if (doc.name.trim().toLowerCase() == docName.trim().toLowerCase()) return doc;
+      }
+    }
+
+    // If assigned doctor has basic info stored in request model, build DoctorModel
+    if (docName != null && docName.trim().isNotEmpty && docName != 'null') {
+      return DoctorModel(
+        id: docId ?? 'doc_${DateTime.now().millisecondsSinceEpoch}',
+        name: docName,
+        specialty: req.assignedDoctorSpecialty ?? 'General Dentistry',
+        qualification: 'BDS, MDS',
+        experienceYears: 5,
+        rating: 5.0,
+        reviewCount: 0,
+        clinicName: req.assignedDoctorClinic ?? 'DentaGuru Care Center',
+        phone: '',
+        email: '',
+        status: 'Available',
+        nextAvailableSlots: ['10:00 AM', '02:00 PM', '04:30 PM'],
+        consultationFee: '₹500',
+        city: req.city.isNotEmpty ? req.city : 'Hyderabad',
+        state: req.state,
+        pincode: req.pincode,
+        languages: const ['English', 'Telugu', 'Hindi'],
+      );
+    }
+
+    return null;
+  }
+
   Future<void> acceptReferralByDentist(String requestId, {String? timeSlot, String? date}) async {
     final slotText = (timeSlot != null && timeSlot.trim().isNotEmpty) ? timeSlot.trim() : 'Today, 2:30 PM';
 
@@ -2317,6 +2508,7 @@ class PatientProblemService extends ChangeNotifier {
     String state = '',
     String city = '',
     String pincode = '',
+    List<String>? languages,
   }) {
     if (photoBytes != null) {
       _userPhotoCache[email.trim().toLowerCase()] = photoBytes;
@@ -2330,6 +2522,7 @@ class PatientProblemService extends ChangeNotifier {
     final cleanAddress = clinicAddress.trim();
     final cleanCity = city.trim();
     final cleanPincode = pincode.trim();
+    final doctorLangs = (languages != null && languages.isNotEmpty) ? languages : const ['English'];
 
     final existingDoc = _allDoctors.firstWhere(
       (d) => d.email.trim().toLowerCase() == email.trim().toLowerCase() || (d.userId.isNotEmpty && d.userId == id) || (d.id.isNotEmpty && d.id == id),
@@ -2362,6 +2555,7 @@ class PatientProblemService extends ChangeNotifier {
       clinicAddress: cleanAddress,
       city: cleanCity,
       pincode: cleanPincode,
+      languages: doctorLangs,
     );
 
     if (!_allDoctors.any((d) => d.email.toLowerCase() == newDoctor.email.toLowerCase())) {
@@ -2409,6 +2603,7 @@ class PatientProblemService extends ChangeNotifier {
       pincode: cleanPincode,
       qualification: qualification.trim().isEmpty ? 'BDS, MDS' : qualification.trim(),
       experienceYears: experienceYears <= 0 ? 5 : experienceYears,
+      languages: doctorLangs,
     ).then((res) {
       if (res['success'] == true) {
         syncClinicsFromApi();
@@ -2419,6 +2614,26 @@ class PatientProblemService extends ChangeNotifier {
     });
 
     return newDoctor;
+  }
+
+  DoctorModel? getReferringDoctorForPatient([String? patientId]) {
+    // 1. Look in patient's assigned requests
+    for (final req in _requests) {
+      if (req.assignedDoctorId != null && req.assignedDoctorId!.isNotEmpty) {
+        final doc = _allDoctors.firstWhere(
+          (d) => d.id == req.assignedDoctorId || d.userId == req.assignedDoctorId || (d.name.isNotEmpty && req.assignedDoctorName != null && req.assignedDoctorName!.contains(d.name.replaceAll('Dr. ', '').trim())),
+          orElse: () => DoctorModel(id: '', name: '', specialty: '', qualification: '', experienceYears: 0, rating: 0, reviewCount: 0, clinicName: '', phone: '', email: '', status: '', nextAvailableSlots: [], consultationFee: ''),
+        );
+        if (doc.id.isNotEmpty && doc.name.isNotEmpty) {
+          return doc;
+        }
+      }
+    }
+    // 2. Return highest rated doctor or first available
+    if (_allDoctors.isNotEmpty) {
+      return _allDoctors.first;
+    }
+    return null;
   }
 
   void updateDoctorFeeAndSlots({

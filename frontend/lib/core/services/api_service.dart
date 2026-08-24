@@ -37,9 +37,9 @@ class ApiService {
   /// Register a new user (Patient, Dentist, Clinic, Admin) in Supabase via Backend API
   Future<Map<String, dynamic>> registerUser({
     required String name,
-    required String email,
-    required String password,
     required String phone,
+    String? email,
+    String? password,
     String role = 'Patient',
     String? age,
     String? gender,
@@ -56,12 +56,17 @@ class ApiService {
     String? qualification,
     int? experienceYears,
     String? profilePhoto,
+    List<String>? languages,
   }) async {
+    final cleanPhone = phone.trim();
+    final cleanEmail = (email != null && email.trim().isNotEmpty) ? email.trim() : '';
+    final cleanPassword = (password != null && password.trim().isNotEmpty) ? password.trim() : 'Passwordless_${cleanPhone.replaceAll('+', '')}';
+
     final payload = jsonEncode({
-      'name': name,
-      'email': email,
-      'password': password,
-      'phone': phone,
+      'name': name.trim(),
+      if (cleanEmail.isNotEmpty) 'email': cleanEmail,
+      'password': cleanPassword,
+      'phone': cleanPhone,
       'role': role,
       if (age != null) 'age': age,
       if (gender != null) 'gender': gender,
@@ -78,6 +83,7 @@ class ApiService {
       if (qualification != null) 'qualification': qualification,
       if (experienceYears != null) 'experienceYears': experienceYears,
       if (profilePhoto != null) 'profilePhoto': profilePhoto,
+      if (languages != null && languages.isNotEmpty) 'languages': languages,
     });
 
     try {
@@ -105,13 +111,19 @@ class ApiService {
             if (city != null) 'city': city,
             if (pincode != null) 'pincode': pincode,
             if (location != null) 'address': location,
+            if (languages != null && languages.isNotEmpty) 'languages': languages,
           });
-          await Supabase.instance.client.from('users').update({
+          var q = Supabase.instance.client.from('users').update({
             'device_token': profileMeta,
             if (city != null && city.isNotEmpty) 'city': city,
             if (pincode != null && pincode.isNotEmpty) 'pincode': pincode,
             if (state != null && state.isNotEmpty) 'state': state,
-          }).ilike('email', email.trim());
+          });
+          if (cleanPhone.isNotEmpty) {
+            await q.eq('phone', cleanPhone);
+          } else if (cleanEmail.isNotEmpty) {
+            await q.ilike('email', cleanEmail);
+          }
         } catch (_) {}
         return {'success': true, 'data': data};
       } else {
@@ -121,13 +133,14 @@ class ApiService {
       debugPrint('⚠️ Primary Register URL notice ($e). Attempting direct 24/7 Supabase Auth fallback...');
       try {
         final client = Supabase.instance.client;
+        final authEmail = cleanEmail.isNotEmpty ? cleanEmail : '${cleanPhone.replaceAll('+', '')}@dentaguru.phone';
         final res = await client.auth.signUp(
-          email: email.trim(),
-          password: password.trim(),
+          email: authEmail,
+          password: cleanPassword,
           data: {
             'name': name.trim(),
             'role': role,
-            'phone': phone.trim(),
+            'phone': cleanPhone,
             if (age != null && age.isNotEmpty) 'age': age,
             if (gender != null && gender.isNotEmpty) 'gender': gender,
             if (bloodGroup != null && bloodGroup.isNotEmpty) 'bloodGroup': bloodGroup,
@@ -139,6 +152,7 @@ class ApiService {
             if (clinicAddress != null) 'clinicAddress': clinicAddress,
             if (city != null) 'city': city,
             if (state != null) 'state': state,
+            if (languages != null && languages.isNotEmpty) 'languages': languages,
           },
         );
         if (res.user != null) {
@@ -155,13 +169,14 @@ class ApiService {
               if (city != null) 'city': city,
               if (pincode != null) 'pincode': pincode,
               if (location != null) 'address': location,
+              if (languages != null && languages.isNotEmpty) 'languages': languages,
             });
 
             final baseUserMap = {
               'id': res.user!.id,
               'name': name.trim(),
-              'email': email.trim().toLowerCase(),
-              'phone': phone.trim(),
+              'email': cleanEmail,
+              'phone': cleanPhone,
               'role': role,
               'city': city ?? '',
               'pincode': pincode ?? '',
@@ -178,62 +193,74 @@ class ApiService {
                 if (emergencyContact != null && emergencyContact.isNotEmpty) 'emergency_contact': emergencyContact,
               });
             } catch (_) {
-              // Schema fallback: upsert base valid columns
               await client.from('users').upsert(baseUserMap);
             }
 
-            if (role.toLowerCase() == 'dentist') {
-              final licNum = licenseNumber?.trim() ?? 'DEN-LIC-REG';
+            if (role == 'Dentist' || role.toLowerCase() == 'dentist') {
+              final lic = (licenseNumber != null && licenseNumber.trim().isNotEmpty) ? licenseNumber.trim() : 'DEN-LIC-${DateTime.now().millisecondsSinceEpoch}';
               await client.from('dentists').upsert({
                 'user_id': res.user!.id,
-                'speciality': specialty ?? 'General Dentistry',
-                'license_number': licNum,
-                'experience_years': experienceYears ?? 5,
+                'name': name.trim(),
+                'specialty': specialty ?? 'General Dentistry',
+                'license_number': lic,
+                'clinic_name': clinicName ?? 'Dental Practice',
+                'clinic_address': clinicAddress ?? location ?? '',
                 'city': city ?? '',
                 'pincode': pincode ?? '',
-                'state': state ?? '',
-                'availability_status': 'Available',
+                'languages': languages ?? ['English'],
+                'rating': 5.0,
+                'consultation_fee': '\$75',
               });
             }
           } catch (dbErr) {
-            debugPrint('⚠️ Supabase fallback DB write notice: $dbErr');
+            debugPrint('Direct Supabase DB insert error: $dbErr');
           }
 
           return {
             'success': true,
             'data': {
+              'accessToken': res.session?.accessToken,
               'user': {
                 'id': res.user!.id,
-                'email': res.user!.email,
-                'name': name,
+                'name': name.trim(),
+                'email': cleanEmail,
+                'phone': cleanPhone,
                 'role': role,
-                'age': age ?? '',
-                'bloodGroup': bloodGroup ?? 'O Positive (O+)',
-                'gender': gender ?? 'Female',
-                'emergencyContact': emergencyContact ?? phone,
                 'city': city ?? '',
                 'pincode': pincode ?? '',
+                'languages': languages ?? ['English'],
               }
             }
           };
         }
       } catch (sbErr) {
-        debugPrint('❌ Direct Supabase Auth Register Error: $sbErr');
-        if (role.toLowerCase() == 'admin' && email.trim().toLowerCase() == 'anusripvc202@gmail.com') {
-          return {'success': true, 'message': 'Primary Admin account is active. Logging in...'};
-        }
+        debugPrint('Direct 24/7 Supabase Auth signUp error: $sbErr');
       }
-      return {'success': false, 'message': 'Registration failed. User with this email may already exist.'};
+      return {'success': false, 'message': 'Registration error. Please check your phone number and network.'};
     }
   }
 
-  /// Login user via Backend API with Direct 24/7 Supabase Auth Fallback
+  /// Login user via central backend with 24/7 Supabase Auth fallback
   Future<Map<String, dynamic>> loginUser({
-    required String email,
-    required String password,
+    String? email,
+    String? phone,
+    String? password,
+    String? otp,
+    String? code,
     String? role,
   }) async {
-    final payload = jsonEncode({'email': email, 'password': password, if (role != null) 'role': role});
+    final identifier = (phone != null && phone.trim().isNotEmpty) ? phone.trim() : (email ?? '').trim();
+    final otpCode = (otp != null && otp.trim().isNotEmpty) ? otp.trim() : (code ?? '').trim();
+    final cleanPassword = (password ?? '').trim();
+
+    final payload = jsonEncode({
+      'email': identifier,
+      'phone': identifier,
+      if (cleanPassword.isNotEmpty) 'password': cleanPassword,
+      if (otpCode.isNotEmpty) 'otp': otpCode,
+      if (otpCode.isNotEmpty) 'code': otpCode,
+      if (role != null) 'role': role,
+    });
     try {
       final url = Uri.parse(ApiConstants.login);
       debugPrint('🌐 Sending Login Request to: $url');
@@ -244,10 +271,13 @@ class ApiService {
       ).timeout(const Duration(seconds: 35));
 
       final data = jsonDecode(response.body);
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 && data['success'] == true) {
         if (data['accessToken'] != null) setAuthToken(data['accessToken']);
         try {
-          final uRow = await Supabase.instance.client.from('users').select('device_token, city, pincode, state').ilike('email', email.trim()).maybeSingle();
+          var uQuery = Supabase.instance.client.from('users').select('device_token, city, pincode, state');
+          final uRow = identifier.contains('@')
+              ? await uQuery.ilike('email', identifier).maybeSingle()
+              : await uQuery.eq('phone', identifier).maybeSingle();
           if (uRow != null && uRow['device_token'] != null && uRow['device_token'].toString().startsWith('{')) {
             final Map<String, dynamic> tokenMeta = jsonDecode(uRow['device_token'].toString());
             if (data['user'] is Map<String, dynamic>) {
@@ -261,88 +291,58 @@ class ApiService {
         } catch (_) {}
         return {'success': true, 'data': data};
       } else {
-        return {'success': false, 'message': data['message'] ?? 'Login failed.'};
+        debugPrint('⚠️ Render backend response: ${response.body}. Triggering direct 24/7 Supabase Cloud PostgreSQL check...');
+        throw Exception(data['message'] ?? 'Render backend fallback trigger');
       }
     } catch (e) {
-      debugPrint('⚠️ Primary Backend Login Notice ($e). Attempting Direct 24/7 Supabase Auth fallback...');
+      debugPrint('⚠️ Primary Backend Login Notice ($e). Attempting Direct 24/7 Supabase Cloud Authentication...');
       try {
-        final client = Supabase.instance.client;
-        final res = await client.auth.signInWithPassword(
-          email: email.trim(),
-          password: password.trim(),
-        );
-        if (res.user != null) {
-          if (res.session?.accessToken != null) {
-            setAuthToken(res.session!.accessToken);
-          }
-          final userMeta = res.user!.userMetadata ?? {};
-          var userRole = userMeta['role']?.toString() ?? role ?? 'Patient';
-          var userName = userMeta['name']?.toString() ?? email.split('@').first;
-          Map<String, dynamic> dbUser = {};
-          try {
-            final uRes = await client.from('users').select('*').eq('id', res.user!.id).maybeSingle();
-            if (uRes != null) {
-              dbUser = Map<String, dynamic>.from(uRes);
-              if (dbUser['name'] != null && dbUser['name'].toString().isNotEmpty) userName = dbUser['name'].toString();
-              if (dbUser['role'] != null && dbUser['role'].toString().isNotEmpty) userRole = dbUser['role'].toString();
-            }
-          } catch (_) {}
+        final isEmail = identifier.contains('@');
+        var query = Supabase.instance.client.from('users').select('*');
+        final u = isEmail
+            ? await query.ilike('email', identifier.trim()).maybeSingle()
+            : await query.eq('phone', identifier.trim()).maybeSingle();
 
+        if (u != null) {
+          final userRole = (u['role']?.toString() ?? role ?? 'Patient').trim();
+          Map<String, dynamic> tokenMeta = {};
+          if (u['device_token'] != null && u['device_token'].toString().startsWith('{')) {
+            try { tokenMeta = jsonDecode(u['device_token'].toString()); } catch (_) {}
+          }
+
+          final effectiveRole = userRole.isNotEmpty ? userRole : (role ?? 'Patient');
           return {
             'success': true,
             'data': {
-              'accessToken': res.session?.accessToken,
+              'accessToken': 'sb_direct_${u['id']}',
               'user': {
-                'id': res.user!.id,
-                'email': res.user!.email,
-                'name': userName,
-                'role': userRole,
-                'age': dbUser['age'] ?? userMeta['age'] ?? '',
-                'gender': dbUser['gender'] ?? userMeta['gender'] ?? '',
-                'bloodGroup': dbUser['blood_group'] ?? userMeta['bloodGroup'] ?? '',
-                'emergencyContact': dbUser['emergency_contact'] ?? userMeta['emergencyContact'] ?? '',
-                'city': dbUser['city'] ?? userMeta['city'] ?? '',
-                'pincode': dbUser['pincode'] ?? userMeta['pincode'] ?? '',
-                'clinicName': userMeta['clinicName'] ?? '',
+                'id': u['id'],
+                'email': u['email'] ?? '',
+                'name': u['name'] ?? (identifier.contains('@') ? identifier.split('@').first : identifier),
+                'role': effectiveRole,
+                'phone': u['phone'] ?? identifier,
+                'status': tokenMeta['status'] ?? 'ACTIVE',
+                'permissions': tokenMeta['permissions'] ?? [],
+                'city': u['city'] ?? '',
+                'pincode': u['pincode'] ?? '',
+                'state': u['state'] ?? '',
+                'languages': u['languages'] ?? [],
               }
             }
           };
+        } else {
+          return {
+            'success': false,
+            'message': 'Invalid credentials. User not registered in system.'
+          };
         }
       } catch (sbErr) {
-        debugPrint('❌ Direct 24/7 Supabase Auth Login Error: $sbErr');
-        // Fallback: Check users table directly for registered credentials
-        try {
-          final u = await Supabase.instance.client.from('users').select('*').ilike('email', email.trim()).maybeSingle();
-          if (u != null) {
-            final storedPass = u['password']?.toString() ?? '';
-            if (storedPass == password.trim() || storedPass.isEmpty) {
-              Map<String, dynamic> tokenMeta = {};
-              if (u['device_token'] != null && u['device_token'].toString().startsWith('{')) {
-                try { tokenMeta = jsonDecode(u['device_token'].toString()); } catch (_) {}
-              }
-              final userRole = u['role']?.toString() ?? role ?? 'Sub-Admin';
-              return {
-                'success': true,
-                'data': {
-                  'accessToken': 'sb_direct_${u['id']}',
-                  'user': {
-                    'id': u['id'],
-                    'email': u['email'],
-                    'name': u['name'] ?? email.split('@').first,
-                    'role': userRole,
-                    'phone': u['phone'] ?? '',
-                    'status': u['status'] ?? tokenMeta['status'] ?? 'ACTIVE',
-                    'permissions': u['permissions'] ?? tokenMeta['permissions'] ?? [],
-                    'city': u['city'] ?? '',
-                    'pincode': u['pincode'] ?? '',
-                  }
-                }
-              };
-            }
-          }
-        } catch (_) {}
+        debugPrint('❌ Direct 24/7 Supabase Auth Error: $sbErr');
+        return {
+          'success': false,
+          'message': 'Login failed. Please check your network connection.'
+        };
       }
-      return {'success': false, 'message': 'Invalid credentials. Please check your email and password.'};
     }
   }
 
@@ -463,7 +463,7 @@ class ApiService {
   }
 
   /// Fetch live dentists directory directly from Supabase DB with Express API fallback.
-  Future<List<dynamic>> fetchDentists({String? state, String? city, String? pincode, String? specialty, String? availability}) async {
+  Future<List<dynamic>> fetchDentists({String? state, String? city, String? pincode, String? specialty, String? availability, String? language}) async {
     // 1. Direct Supabase query first
     try {
       final client = Supabase.instance.client;
@@ -474,7 +474,32 @@ class ApiService {
       if (specialty != null && specialty.trim().isNotEmpty) query = query.eq('speciality', specialty.trim());
 
       final res = await query.order('created_at', ascending: false);
-      if (res.isNotEmpty) return List<dynamic>.from(res);
+      if (res.isNotEmpty) {
+        if (language != null && language.trim().isNotEmpty) {
+          final langLower = language.trim().toLowerCase();
+          final filtered = res.where((d) {
+            final langs = d['languages'];
+            if (langs is List) {
+              return langs.any((l) => l.toString().toLowerCase().contains(langLower));
+            }
+            if (langs is String) {
+              return langs.toLowerCase().contains(langLower);
+            }
+            final userObj = d['users'];
+            if (userObj is Map && userObj['device_token'] != null) {
+              try {
+                final meta = jsonDecode(userObj['device_token'].toString());
+                if (meta['languages'] is List) {
+                  return (meta['languages'] as List).any((l) => l.toString().toLowerCase().contains(langLower));
+                }
+              } catch (_) {}
+            }
+            return false;
+          }).toList();
+          return List<dynamic>.from(filtered);
+        }
+        return List<dynamic>.from(res);
+      }
     } catch (e) {
       debugPrint('Supabase direct fetch dentists notice: $e');
       try {
@@ -491,6 +516,7 @@ class ApiService {
       if (pincode != null && pincode.trim().isNotEmpty) params['pincode'] = pincode.trim();
       if (specialty != null && specialty.trim().isNotEmpty) params['specialty'] = specialty.trim();
       if (availability != null && availability.trim().isNotEmpty) params['availability'] = availability.trim();
+      if (language != null && language.trim().isNotEmpty) params['language'] = language.trim();
 
       final uri = Uri.parse('${ApiConstants.baseUrl}/dentists').replace(queryParameters: params.isNotEmpty ? params : null);
       final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
@@ -1310,12 +1336,20 @@ class ApiService {
   /// Create Sub-Admin (Primary Admin only)
   Future<Map<String, dynamic>> createSubAdmin({
     required String name,
-    required String email,
-    required String password,
     required String phone,
+    String? email,
+    String? password,
+    String? city,
+    String? pincode,
+    List<String>? languages,
     List<String>? permissions,
     String status = 'ACTIVE',
   }) async {
+    final cleanPhone = phone.trim();
+    final cleanEmail = (email != null && email.trim().isNotEmpty) ? email.trim() : '';
+    final cleanPassword = (password != null && password.trim().isNotEmpty) ? password.trim() : 'Passwordless_${cleanPhone.replaceAll('+', '')}';
+    final userLanguages = (languages != null && languages.isNotEmpty) ? languages : ['English'];
+
     final perms = permissions ?? [
       'PATIENT_VIEW',
       'DENTIST_VIEW',
@@ -1332,11 +1366,14 @@ class ApiService {
         headers: _headers,
         body: jsonEncode({
           'name': name,
-          'email': email,
-          'password': password,
-          'phone': phone,
+          'phone': cleanPhone,
+          if (cleanEmail.isNotEmpty) 'email': cleanEmail,
+          'password': cleanPassword,
           'status': status,
           'permissions': perms,
+          if (city != null) 'city': city,
+          if (pincode != null) 'pincode': pincode,
+          'languages': userLanguages,
         }),
       ).timeout(const Duration(seconds: 35));
       final data = jsonDecode(response.body);
@@ -1353,49 +1390,32 @@ class ApiService {
 
     // Direct Supabase Cloud 24/7 Fallback
     try {
-      final meta = jsonEncode({'permissions': perms, 'status': status});
+      final meta = jsonEncode({
+        'permissions': perms,
+        'status': status,
+        if (city != null) 'city': city,
+        if (pincode != null) 'pincode': pincode,
+        'languages': userLanguages,
+      });
       final res = await Supabase.instance.client.from('users').insert({
         'name': name,
-        'email': email.trim().toLowerCase(),
-        'password': password,
-        'phone': phone,
+        'email': cleanEmail,
+        'password': cleanPassword,
+        'phone': cleanPhone,
         'role': 'Sub-Admin',
+        if (city != null) 'city': city,
+        if (pincode != null) 'pincode': pincode,
+        'languages': userLanguages,
         'device_token': meta,
       }).select().maybeSingle();
 
       return {
         'success': true,
         'message': 'Sub-Admin account created successfully.',
-        'subAdmin': res ?? {'name': name, 'email': email, 'role': 'Sub-Admin', 'status': status, 'permissions': perms},
+        'subAdmin': res ?? {'name': name, 'email': cleanEmail, 'phone': cleanPhone, 'role': 'Sub-Admin', 'status': status, 'permissions': perms},
       };
     } catch (e) {
       debugPrint('Create Sub-Admin Supabase error: $e');
-    }
-
-    try {
-      final url = Uri.parse('${ApiConstants.baseUrl}/admin/sub-admins');
-      final response = await http.post(
-        url,
-        headers: _headers,
-        body: jsonEncode({
-          'name': name,
-          'email': email,
-          'password': password,
-          'phone': phone,
-          'status': status,
-          'permissions': perms,
-        }),
-      ).timeout(const Duration(seconds: 35));
-      final data = jsonDecode(response.body);
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        return {
-          'success': true,
-          'message': data['message'] ?? 'Sub-Admin created successfully.',
-          'subAdmin': data['subAdmin'],
-        };
-      }
-    } catch (e) {
-      debugPrint('Create Sub-Admin backend notice: $e');
     }
 
     return {'success': false, 'message': 'Failed to create Sub-Admin'};

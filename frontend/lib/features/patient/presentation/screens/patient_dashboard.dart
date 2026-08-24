@@ -165,11 +165,11 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Report Dental Problem',
+                                  'Book a Dentist',
                                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppTheme.textDark),
                                 ),
                                 Text(
-                                  'Submit symptoms to Admin & get recommended a specialized Doctor',
+                                  'Submit symptoms & get recommended a specialized Doctor',
                                   style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                 ),
                               ],
@@ -734,7 +734,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                             color: Colors.white.withValues(alpha: 0.2),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.add_alert_rounded, color: Colors.white, size: 26),
+                          child: const Icon(Icons.calendar_month_rounded, color: Colors.white, size: 26),
                         ),
                       ),
                       const SizedBox(width: 14),
@@ -743,12 +743,12 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Have a Dental Problem?',
+                              'Book a Dentist',
                               style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
                             ),
                             SizedBox(height: 3),
                             Text(
-                              'Report symptoms to Admin & get recommended a specialized Doctor',
+                              'Report symptoms & get recommended a specialized Doctor',
                               style: TextStyle(color: Colors.white70, fontSize: 11, height: 1.3),
                             ),
                           ],
@@ -772,11 +772,18 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                 children: [
                   _AnimatedPatientActionTile(
                     icon: Icons.calendar_month_rounded,
-                    title: 'Book Doctor',
+                    title: 'My Appointments',
                     color: AppTheme.primaryBlue,
                     onTap: () => setState(() => _currentIndex = 1),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
+                  _AnimatedPatientActionTile(
+                    icon: Icons.recommend_rounded,
+                    title: 'Referred Patient',
+                    color: const Color(0xFF0D9488),
+                    onTap: () => _showReferredPatientFlow(context),
+                  ),
+                  const SizedBox(width: 8),
                   _AnimatedPatientActionTile(
                     icon: Icons.auto_awesome_rounded,
                     title: 'AI Scan',
@@ -787,7 +794,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                       );
                     },
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   _AnimatedPatientActionTile(
                     icon: Icons.receipt_long_rounded,
                     title: 'Prescriptions',
@@ -1894,8 +1901,27 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                 ),
                 const SizedBox(height: 12),
                 Text(_formatPatientName(patient.name), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
-                Text(patient.email, style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
-                const SizedBox(height: 16),
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryBlue.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text('Role: Patient', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue)),
+                ),
+                const SizedBox(height: 12),
+                const Divider(color: Color(0xFFF1F5F9)),
+                const SizedBox(height: 8),
+
+                // Detailed Info Rows
+                _buildProfileDetailRow('Mobile Number', patient.phone.isNotEmpty ? patient.phone : 'Not provided', Icons.phone_android_rounded),
+                _buildProfileDetailRow('Email Address', patient.email.isNotEmpty ? patient.email : 'Not provided', Icons.email_outlined),
+                _buildProfileDetailRow('City / Location', patient.city.isNotEmpty ? patient.city : 'Not provided', Icons.location_city_rounded),
+                _buildProfileDetailRow('Pincode / Postal Code', patient.pincode.isNotEmpty ? patient.pincode : 'Not provided', Icons.pin_drop_outlined),
+                _buildProfileDetailRow('Preferred Language', patient.languages.isNotEmpty ? patient.languages.join(', ') : 'English', Icons.language_rounded),
+
+                const SizedBox(height: 14),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
@@ -1918,6 +1944,521 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
             ),
             onPressed: () => context.go('/login'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showReferredPatientFlow(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        String selectedLanguage = 'All';
+        final cityFilterCtrl = TextEditingController();
+        final pinFilterCtrl = TextEditingController();
+        final searchFilterCtrl = TextEditingController();
+        bool isSubmitting = false;
+
+        const availableLanguages = [
+          'All',
+          'English',
+          'Hindi',
+          'Telugu',
+          'Tamil',
+          'Kannada',
+          'Malayalam',
+          'Marathi',
+          'Bengali',
+          'Gujarati',
+          'Punjabi',
+          'Spanish',
+        ];
+
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final screenHeight = MediaQuery.of(context).size.height;
+            final screenWidth = MediaQuery.of(context).size.width;
+
+            final referringDoctor = _patientService.getReferringDoctorForPatient();
+            final allDocs = _patientService.allDoctors;
+
+            final remainingDocs = allDocs.where((d) {
+              if (referringDoctor != null && (d.id == referringDoctor.id || (d.userId.isNotEmpty && d.userId == referringDoctor.userId) || (d.name == referringDoctor.name))) {
+                return false;
+              }
+              if (selectedLanguage != 'All') {
+                final dLangs = d.languages.map((l) => l.toLowerCase()).toList();
+                if (!dLangs.contains(selectedLanguage.toLowerCase())) return false;
+              }
+              final cVal = cityFilterCtrl.text.trim().toLowerCase();
+              if (cVal.isNotEmpty && !d.city.toLowerCase().contains(cVal)) return false;
+
+              final pVal = pinFilterCtrl.text.trim();
+              if (pVal.isNotEmpty && !d.pincode.contains(pVal)) return false;
+
+              final sVal = searchFilterCtrl.text.trim().toLowerCase();
+              if (sVal.isNotEmpty) {
+                final match = d.name.toLowerCase().contains(sVal) ||
+                    d.specialty.toLowerCase().contains(sVal) ||
+                    d.clinicName.toLowerCase().contains(sVal) ||
+                    d.city.toLowerCase().contains(sVal);
+                if (!match) return false;
+              }
+              return true;
+            }).toList();
+
+            Future<void> handleSelectDoctor(DoctorModel doc) async {
+              setModalState(() => isSubmitting = true);
+              try {
+                await _patientService.submitProblem(
+                  problemCategory: doc.specialty.isNotEmpty ? doc.specialty : 'General Dentistry',
+                  problemDescription: 'Patient referred/recommended to ${doc.name} (${doc.clinicName}) for specialist consultation.',
+                  severity: 'Moderate',
+                );
+
+                if (_patientService.requests.isNotEmpty) {
+                  final latestReq = _patientService.requests.first;
+                  await _patientService.assignDoctorToRequest(
+                    requestId: latestReq.id,
+                    doctor: doc,
+                    adminNotes: 'Direct patient referral selection to ${doc.name}',
+                  );
+                }
+
+                if (dialogCtx.mounted) Navigator.of(dialogCtx).pop();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('🎉 Doctor Selected: ${doc.name}! Consultation request submitted.'),
+                      backgroundColor: const Color(0xFF10B981),
+                      duration: const Duration(seconds: 4),
+                    ),
+                  );
+                }
+              } catch (e) {
+                setModalState(() => isSubmitting = false);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error selecting doctor: $e'), backgroundColor: Colors.red),
+                  );
+                }
+              }
+            }
+
+            return Dialog(
+              insetPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+              backgroundColor: Colors.white,
+              elevation: 20,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              child: Container(
+                constraints: BoxConstraints(
+                  maxWidth: 580,
+                  maxHeight: screenHeight * 0.88,
+                ),
+                padding: EdgeInsets.all(screenWidth < 400 ? 12 : 18),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Header Bar
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0D9488).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.recommend_rounded, color: Color(0xFF0D9488), size: 22),
+                        ),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Referred a Patient / Friend',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                'Connect with your Referring Doctor & Specialist Network',
+                                style: TextStyle(fontSize: 10.5, color: AppTheme.textMuted),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded, color: AppTheme.textMuted, size: 20),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          onPressed: () => Navigator.of(dialogCtx).pop(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    const Divider(height: 1, color: Color(0xFFE2E8F0)),
+                    const SizedBox(height: 10),
+
+                    // Scrollable Body
+                    Expanded(
+                      child: SingleChildScrollView(
+                        physics: const BouncingScrollPhysics(),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // ── 1. REFERRING DOCTOR HIGHLIGHTED CARD ──
+                            if (referringDoctor != null) ...[
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(
+                                    colors: [Color(0xFFF0FDF4), Color(0xFFEFF6FF)],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                  ),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: const Color(0xFF0D9488), width: 1.5),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFFEF3C7),
+                                            borderRadius: BorderRadius.circular(8),
+                                            border: Border.all(color: const Color(0xFFFDE68A)),
+                                          ),
+                                          child: const Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(Icons.star_rounded, size: 13, color: Color(0xFFD97706)),
+                                              SizedBox(width: 4),
+                                              Text(
+                                                '🌟 Referring Doctor / Recommended Specialist',
+                                                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF92400E)),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        CircleAvatar(
+                                          radius: 24,
+                                          backgroundColor: const Color(0xFF0D9488).withValues(alpha: 0.15),
+                                          backgroundImage: referringDoctor.photoBytes != null ? MemoryImage(referringDoctor.photoBytes!) : null,
+                                          child: referringDoctor.photoBytes == null
+                                              ? Text(
+                                                  referringDoctor.name.isNotEmpty ? referringDoctor.name.replaceAll('Dr. ', '').trim()[0].toUpperCase() : 'D',
+                                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Color(0xFF0D9488)),
+                                                )
+                                              : null,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                referringDoctor.name,
+                                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                              Text(
+                                                '${referringDoctor.specialty} • ${referringDoctor.qualification}',
+                                                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF0D9488)),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                '🏥 ${referringDoctor.clinicName}',
+                                                style: const TextStyle(fontSize: 11, color: AppTheme.textDark),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                              Text(
+                                                '📍 ${referringDoctor.city}${referringDoctor.pincode.isNotEmpty ? " • 📌 PIN: ${referringDoctor.pincode}" : ""}',
+                                                style: const TextStyle(fontSize: 10.5, color: AppTheme.textMuted),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    // Spoken languages
+                                    Wrap(
+                                      spacing: 4,
+                                      runSpacing: 4,
+                                      children: [
+                                        const Text('Languages: ', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF475569))),
+                                        ...(referringDoctor.languages.isNotEmpty ? referringDoctor.languages : ['English']).map((lang) => Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white,
+                                            borderRadius: BorderRadius.circular(6),
+                                            border: Border.all(color: const Color(0xFFCBD5E1)),
+                                          ),
+                                          child: Text(lang, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF0F172A))),
+                                        )),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 10),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: ElevatedButton.icon(
+                                        onPressed: isSubmitting ? null : () => handleSelectDoctor(referringDoctor),
+                                        icon: const Icon(Icons.check_circle_rounded, size: 15),
+                                        label: const Text('Select Referring Doctor', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: const Color(0xFF0D9488),
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(vertical: 10),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                            ],
+
+                            // ── 2. DOCTOR FILTERING BAR ──
+                            Row(
+                              children: [
+                                const Icon(Icons.tune_rounded, size: 16, color: AppTheme.primaryBlue),
+                                const SizedBox(width: 6),
+                                const Text(
+                                  'Find Other Available Doctors',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
+                                ),
+                                const Spacer(),
+                                Text(
+                                  '${remainingDocs.length} doctors found',
+                                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.primaryBlue),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+
+                            // City & Pincode Inputs Row
+                            Row(
+                              children: [
+                                Expanded(
+                                  flex: 3,
+                                  child: TextField(
+                                    controller: cityFilterCtrl,
+                                    onChanged: (val) => setModalState(() {}),
+                                    decoration: InputDecoration(
+                                      hintText: 'Filter by City...',
+                                      prefixIcon: const Icon(Icons.location_city_rounded, size: 15, color: AppTheme.textMuted),
+                                      filled: true,
+                                      fillColor: const Color(0xFFF8FAFC),
+                                      contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  flex: 2,
+                                  child: TextField(
+                                    controller: pinFilterCtrl,
+                                    keyboardType: TextInputType.number,
+                                    onChanged: (val) => setModalState(() {}),
+                                    decoration: InputDecoration(
+                                      hintText: 'Pincode...',
+                                      prefixIcon: const Icon(Icons.pin_drop_rounded, size: 15, color: AppTheme.textMuted),
+                                      filled: true,
+                                      fillColor: const Color(0xFFF8FAFC),
+                                      contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+
+                            // Language Filter Dropdown (No symbol)
+                            DropdownButtonFormField<String>(
+                              value: selectedLanguage,
+                              isExpanded: true,
+                              decoration: InputDecoration(
+                                labelText: 'Language Filter',
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+                              ),
+                              items: availableLanguages.map((lang) {
+                                return DropdownMenuItem(
+                                  value: lang,
+                                  child: Text(
+                                    lang == 'All' ? 'All Languages' : lang,
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                );
+                              }).toList(),
+                              onChanged: (val) {
+                                if (val != null) {
+                                  setModalState(() => selectedLanguage = val);
+                                }
+                              },
+                            ),
+                            const SizedBox(height: 10),
+
+                            // ── 3. REMAINING DOCTORS LIST ──
+                            if (remainingDocs.isEmpty)
+                              Container(
+                                padding: const EdgeInsets.all(20),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                                ),
+                                child: const Column(
+                                  children: [
+                                    Icon(Icons.person_search_rounded, color: AppTheme.textMuted, size: 32),
+                                    SizedBox(height: 6),
+                                    Text('No Other Doctors Match Filter', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textDark)),
+                                    SizedBox(height: 2),
+                                    Text('Try clearing the language or city filter to view all specialists.', textAlign: TextAlign.center, style: TextStyle(fontSize: 10.5, color: AppTheme.textMuted)),
+                                  ],
+                                ),
+                              )
+                            else
+                              ...remainingDocs.map((d) {
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                                  ),
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      CircleAvatar(
+                                        radius: 20,
+                                        backgroundColor: AppTheme.primaryBlue.withValues(alpha: 0.1),
+                                        backgroundImage: d.photoBytes != null ? MemoryImage(d.photoBytes!) : null,
+                                        child: d.photoBytes == null
+                                            ? Text(
+                                                d.name.isNotEmpty ? d.name.replaceAll('Dr. ', '').trim()[0].toUpperCase() : 'D',
+                                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.primaryBlue),
+                                              )
+                                            : null,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Expanded(
+                                                  child: Text(
+                                                    d.name,
+                                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: AppTheme.textDark),
+                                                    overflow: TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                                Text('⭐ ${d.rating}', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFFD97706))),
+                                              ],
+                                            ),
+                                            Text(
+                                              '${d.specialty} • ${d.qualification}',
+                                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.primaryBlue),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                            Text(
+                                              '🏥 ${d.clinicName} • 📍 ${d.city}${d.pincode.isNotEmpty ? " (${d.pincode})" : ""}',
+                                              style: const TextStyle(fontSize: 10.5, color: AppTheme.textMuted),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                            const SizedBox(height: 3),
+                                            // Languages chips (No symbol)
+                                            Wrap(
+                                              spacing: 3,
+                                              runSpacing: 2,
+                                              children: (d.languages.isNotEmpty ? d.languages : ['English']).map((l) => Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(0xFFF1F5F9),
+                                                  borderRadius: BorderRadius.circular(4),
+                                                ),
+                                                child: Text(l, style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w500, color: Color(0xFF334155))),
+                                              )).toList(),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      ElevatedButton(
+                                        onPressed: isSubmitting ? null : () => handleSelectDoctor(d),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: AppTheme.primaryBlue,
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                          visualDensity: VisualDensity.compact,
+                                        ),
+                                        child: const Text('Select', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildProfileDetailRow(String label, String value, IconData icon) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: AppTheme.primaryBlue),
+          const SizedBox(width: 8),
+          Text('$label: ', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 12,
+                color: value == 'Not provided' ? AppTheme.textMuted : AppTheme.textDark,
+                fontWeight: value == 'Not provided' ? FontWeight.normal : FontWeight.w600,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ],
       ),

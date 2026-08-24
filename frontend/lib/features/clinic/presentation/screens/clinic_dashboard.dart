@@ -222,33 +222,55 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
             child: Center(child: Text('No attached doctors in directory.', style: TextStyle(color: Colors.grey))),
           )
         else
-          ...doctors.map((doc) => _buildDoctorListRow(
-                doc.name,
-                doc.specialty,
-                doc.status,
-                doc.status == 'Available' ? Colors.green : Colors.grey,
-              )),
+          ...doctors.map((doc) => _buildDoctorListRow(doc)),
       ],
     );
   }
 
-  Widget _buildDoctorListRow(String name, String spec, String status, Color statusColor) {
+  Widget _buildDoctorListRow(DoctorModel doc) {
+    final isAvailable = doc.status == 'Available';
+    final statusColor = isAvailable ? Colors.green : Colors.grey;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: const Color(0xFF0D9488).withOpacity(0.1),
-          child: const Icon(Icons.person, color: Color(0xFF0D9488)),
-        ),
-        title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(spec),
-        trailing: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: statusColor.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Text(status, style: TextStyle(fontSize: 10, color: statusColor, fontWeight: FontWeight.bold)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  backgroundColor: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                  child: const Icon(Icons.person, color: Color(0xFF0D9488)),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(doc.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      Text(doc.specialty, style: const TextStyle(fontSize: 12, color: Color(0xFF0D9488), fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(doc.status, style: TextStyle(fontSize: 10, color: statusColor, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Mobile: ${doc.phone.isNotEmpty ? doc.phone : "Not provided"} • City: ${doc.city.isNotEmpty ? doc.city : "Not provided"} • PIN: ${doc.pincode.isNotEmpty ? doc.pincode : "Not provided"} • Languages: ${doc.languages.isNotEmpty ? doc.languages.join(", ") : "English"} • Email: ${doc.email.isNotEmpty ? doc.email : "Not provided"}',
+              style: const TextStyle(fontSize: 11, color: Colors.black54),
+            ),
+          ],
         ),
       ),
     );
