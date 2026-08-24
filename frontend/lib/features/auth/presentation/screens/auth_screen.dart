@@ -36,17 +36,13 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   // Controllers for Sign In
   final _loginFormKey = GlobalKey<FormState>();
   final _loginEmailController = TextEditingController();
-  final _loginPasswordController = TextEditingController();
-  bool _showLoginPassword = false;
   bool _isLoggingIn = false;
-  bool _isDirectMobileLoginMode = true; // Fast direct mobile sign-in
 
   // Controllers for Registration
   final _registerFormKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
-  final _passwordController = TextEditingController();
   bool _isRegistering = false;
 
   // Common & Location Fields
@@ -114,11 +110,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   void dispose() {
     _tabController.dispose();
     _loginEmailController.dispose();
-    _loginPasswordController.dispose();
     _nameController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
-    _passwordController.dispose();
     _ageController.dispose();
     _emergencyContactController.dispose();
     _licenseNoController.dispose();
@@ -197,13 +191,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     }
   }
 
-
-
   Future<void> _handleLogin() async {
     if (!_loginFormKey.currentState!.validate()) return;
 
     final identifier = _loginEmailController.text.trim();
-    final password = _loginPasswordController.text.trim();
 
     setState(() => _isLoggingIn = true);
 
@@ -211,7 +202,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       final res = await ApiService().loginUser(
         email: identifier,
         phone: identifier,
-        password: _isDirectMobileLoginMode ? null : (password.isNotEmpty ? password : null),
         role: _roleName,
       );
 
@@ -267,7 +257,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 ? _phoneController.text.trim()
                 : (!identifier.contains('@') && identifier.isNotEmpty ? identifier : ''));
 
-        AnalyticsService.logLogin(method: _isDirectMobileLoginMode ? 'Direct_Mobile' : 'Email_Password', role: _roleName);
+        AnalyticsService.logLogin(method: 'Direct_Contact_Login', role: _roleName);
 
         if (registeredRole.contains('dentist') || registeredRole.contains('doctor')) {
           final docName = (userData['name'] != null && userData['name'].toString().trim().isNotEmpty)
@@ -850,189 +840,15 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     );
   }
 
-  void _showForgotPasswordDialog(BuildContext context) {
-    final emailCtrl = TextEditingController(text: _loginEmailController.text.trim());
-    final otpCtrl = TextEditingController();
-    final newPassCtrl = TextEditingController();
-    bool codeSent = false;
-    bool isSubmitting = false;
-    String? dialogError;
-
-    showDialog(
-      context: context,
-      builder: (dialogCtx) {
-        return StatefulBuilder(
-          builder: (stCtx, setModalState) {
-            return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              title: const Row(
-                children: [
-                  Icon(Icons.lock_reset_rounded, color: AppTheme.primaryBlue, size: 24),
-                  SizedBox(width: 8),
-                  Text('Reset Password', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                ],
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (!codeSent) ...[
-                    const Text(
-                      'Enter your registered email address or phone number to receive a password reset OTP code.',
-                      style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
-                    ),
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: emailCtrl,
-                      decoration: InputDecoration(
-                        labelText: 'Registered Email or Phone',
-                        hintText: 'user@dentaguru.com',
-                        prefixIcon: const Icon(Icons.email_outlined, color: AppTheme.primaryBlue),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
-                  ] else ...[
-                    const Text(
-                      'Enter the 4-digit OTP code sent to your email/phone and set a new password.',
-                      style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
-                    ),
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: otpCtrl,
-                      keyboardType: TextInputType.number,
-                      maxLength: 4,
-                      style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w600),
-                      decoration: InputDecoration(
-                        labelText: 'Enter OTP Code',
-                        hintText: '1234',
-                        counterText: '',
-                        prefixIcon: const Icon(Icons.key_rounded, color: Color(0xFF10B981)),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: newPassCtrl,
-                      obscureText: true,
-                      style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w600),
-                      decoration: InputDecoration(
-                        labelText: 'Set New Password',
-                        hintText: '••••••••',
-                        prefixIcon: const Icon(Icons.lock_outline_rounded, color: AppTheme.primaryBlue),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
-                  ],
-                  if (dialogError != null) ...[
-                    const SizedBox(height: 8),
-                    Text(dialogError!, style: const TextStyle(color: Color(0xFFEF4444), fontSize: 11, fontWeight: FontWeight.bold)),
-                  ],
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(dialogCtx).pop(),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primaryBlue,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  onPressed: isSubmitting
-                      ? null
-                      : () async {
-                          final targetEmail = emailCtrl.text.trim();
-                          if (targetEmail.isEmpty) {
-                            setModalState(() => dialogError = 'Please enter your email or phone.');
-                            return;
-                          }
-
-                          if (!codeSent) {
-                            setModalState(() {
-                              isSubmitting = true;
-                              dialogError = null;
-                            });
-                            await ApiService().forgotPassword(email: targetEmail);
-                            setModalState(() {
-                              isSubmitting = false;
-                              codeSent = true;
-                              otpCtrl.clear();
-                            });
-                          } else {
-                            final code = otpCtrl.text.trim();
-                            final newPass = newPassCtrl.text.trim();
-                            if (code.isEmpty || newPass.isEmpty) {
-                              setModalState(() => dialogError = 'Please enter OTP code and set new password.');
-                              return;
-                            }
-
-                            setModalState(() {
-                              isSubmitting = true;
-                              dialogError = null;
-                            });
-
-                            final res = await ApiService().resetPassword(
-                              email: targetEmail,
-                              code: code,
-                              newPassword: newPass,
-                            );
-
-                            setModalState(() => isSubmitting = false);
-
-                            if (res['success'] == true) {
-                              _loginEmailController.text = targetEmail;
-                              _loginPasswordController.text = newPass;
-                              if (dialogCtx.mounted) Navigator.of(dialogCtx).pop();
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(res['message'] ?? '🎉 Password reset successfully!'),
-                                    backgroundColor: const Color(0xFF10B981),
-                                    duration: const Duration(seconds: 4),
-                                  ),
-                                );
-                              }
-                            } else {
-                              setModalState(() => dialogError = res['message'] ?? 'Password reset failed.');
-                            }
-                          }
-                        },
-                  child: isSubmitting
-                      ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : Text(codeSent ? 'Reset & Save Password' : 'Send Reset OTP', style: const TextStyle(fontWeight: FontWeight.bold)),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
   void _autoFillDemo(UserRole role) {
     setState(() {
       _selectedRole = role;
-      if (_isDirectMobileLoginMode) {
-        if (role == UserRole.admin) {
-          _loginEmailController.text = '+91 98765 43210';
-        } else if (role == UserRole.dentist) {
-          _loginEmailController.text = '+91 98765 12345';
-        } else {
-          _loginEmailController.text = '+91 98765 67890';
-        }
+      if (role == UserRole.admin) {
+        _loginEmailController.text = '8977906566';
+      } else if (role == UserRole.dentist) {
+        _loginEmailController.text = '8977906566';
       } else {
-        if (role == UserRole.admin) {
-          _loginEmailController.text = 'anusripvc202@gmail.com';
-          _loginPasswordController.text = 'admin123';
-        } else if (role == UserRole.dentist) {
-          _loginEmailController.text = 'doctor@dentaguru.com';
-          _loginPasswordController.text = 'doctor123';
-        } else {
-          _loginEmailController.text = 'patient@dentaguru.com';
-          _loginPasswordController.text = 'patient123';
-        }
+        _loginEmailController.text = '7799332395';
       }
     });
   }
@@ -1298,9 +1114,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        _isDirectMobileLoginMode
-                            ? 'Tap to auto-fill $_roleName demo mobile'
-                            : 'Tap to auto-fill $_roleName demo credentials',
+                        'Tap to auto-fill $_roleName demo contact',
                         style: TextStyle(fontSize: 11, color: _accentColor, fontWeight: FontWeight.bold),
                       ),
                     ),
@@ -1310,138 +1124,44 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ),
             const SizedBox(height: 16),
 
-            if (_isDirectMobileLoginMode) ...[
-              // Fast Direct Login Flow (Mobile Number OR Email Address - No OTP required)
-              TextFormField(
-                controller: _loginEmailController,
-                keyboardType: TextInputType.emailAddress,
-                style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-                validator: (val) {
-                  if (val == null || val.trim().isEmpty) {
-                    return 'Please enter your registered mobile number or email address';
-                  }
-                  return null;
-                },
-                decoration: _buildInputDecoration(
-                  label: 'Registered Mobile Number or Email *',
-                  hint: 'e.g. +91 98765 43210 or user@dentaguru.com',
-                  icon: Icons.phone_android_rounded,
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // Direct Sign In Button
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _accentColor,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 15),
-                  elevation: 2,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-                onPressed: _isLoggingIn ? null : _handleLogin,
-                child: _isLoggingIn
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                      )
-                    : Text('Sign In as $_roleName', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              ),
-            ] else ...[
-              // Password Login Flow (Fallback)
-              TextFormField(
-                controller: _loginEmailController,
-                keyboardType: TextInputType.emailAddress,
-                style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-                validator: (val) {
-                  if (val == null || val.trim().isEmpty) {
-                    return 'Please enter your registered email or mobile number';
-                  }
-                  return null;
-                },
-                decoration: _buildInputDecoration(
-                  label: 'Email or Mobile Number',
-                  hint: 'e.g. user@dentaguru.com',
-                  icon: Icons.alternate_email_rounded,
-                ),
-              ),
-              const SizedBox(height: 14),
-
-              TextFormField(
-                controller: _loginPasswordController,
-                obscureText: !_showLoginPassword,
-                style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-                validator: (val) {
-                  if (val == null || val.trim().isEmpty) {
-                    return 'Please enter your password';
-                  }
-                  return null;
-                },
-                decoration: _buildInputDecoration(
-                  label: 'Account Password',
-                  hint: '••••••••',
-                  icon: Icons.lock_outline_rounded,
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _showLoginPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                      size: 20,
-                      color: AppTheme.textMuted,
-                    ),
-                    onPressed: () => setState(() => _showLoginPassword = !_showLoginPassword),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () => _showForgotPasswordDialog(context),
-                  child: Text(
-                    'Forgot Password?',
-                    style: TextStyle(color: _accentColor, fontWeight: FontWeight.w600, fontSize: 12),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _accentColor,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 15),
-                  elevation: 2,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-                onPressed: _isLoggingIn ? null : _handleLogin,
-                child: _isLoggingIn
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                      )
-                    : Text('Sign In with Password', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              ),
-            ],
-
-            const SizedBox(height: 14),
-
-            // Toggle Between Direct Mobile and Password Sign In
-            Center(
-              child: TextButton.icon(
-                onPressed: () {
-                  setState(() {
-                    _isDirectMobileLoginMode = !_isDirectMobileLoginMode;
-                  });
-                },
-                icon: Icon(_isDirectMobileLoginMode ? Icons.lock_outline_rounded : Icons.phone_android_rounded, size: 15, color: _accentColor),
-                label: Text(
-                  _isDirectMobileLoginMode ? 'Sign In with Password instead' : 'Sign In with Mobile Number instead',
-                  style: TextStyle(color: _accentColor, fontWeight: FontWeight.w600, fontSize: 12),
-                ),
+            // Fast Direct Login Flow (Mobile Number OR Email Address - No password/OTP required)
+            TextFormField(
+              controller: _loginEmailController,
+              keyboardType: TextInputType.emailAddress,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              validator: (val) {
+                if (val == null || val.trim().isEmpty) {
+                  return 'Please enter your registered mobile number or email address';
+                }
+                return null;
+              },
+              decoration: _buildInputDecoration(
+                label: 'Registered Mobile Number or Email *',
+                hint: 'e.g. +91 98765 43210 or user@dentaguru.com',
+                icon: Icons.phone_android_rounded,
               ),
             ),
+            const SizedBox(height: 18),
+
+            // Direct Sign In Button
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _accentColor,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 15),
+                elevation: 2,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              onPressed: _isLoggingIn ? null : _handleLogin,
+              child: _isLoggingIn
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                    )
+                  : Text('Sign In as $_roleName', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+            ),
+            const SizedBox(height: 12),
           ],
         ),
       ),
