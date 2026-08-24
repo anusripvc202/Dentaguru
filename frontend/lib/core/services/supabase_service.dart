@@ -84,7 +84,64 @@ class SupabaseService {
       return {'success': false, 'message': 'Invalid or expired OTP.'};
     } catch (e) {
       debugPrint('❌ Supabase Verify OTP Error: $e');
+    }
+  }
+
+  /// Dispatch Mobile SMS OTP code via Supabase Auth
+  Future<Map<String, dynamic>> sendPhoneOtp(String phone) async {
+    final cleanPhone = phone.trim().replaceAll(RegExp(r'[^0-9+]'), '');
+    if (cleanPhone.isEmpty) {
+      return {'success': false, 'message': 'Please enter a valid mobile number.'};
+    }
+    final formattedPhone = cleanPhone.startsWith('+') ? cleanPhone : '+91$cleanPhone';
+
+    try {
+      await client.auth.signInWithOtp(
+        phone: formattedPhone,
+        shouldCreateUser: true,
+      );
+
+      debugPrint('📩 Supabase Auth Phone SMS OTP requested for: $formattedPhone');
+      return {'success': true, 'message': 'OTP sent to mobile number $formattedPhone'};
+    } on AuthException catch (ae) {
+      debugPrint('❌ Supabase Auth Phone OTP Exception [${ae.statusCode}]: ${ae.message}');
+      return {'success': false, 'message': ae.message};
+    } catch (e) {
+      debugPrint('❌ Supabase Auth Phone OTP error: $e');
+      return {'success': false, 'message': 'Unable to send SMS OTP. Please try again.'};
+    }
+  }
+
+  /// Verify Mobile SMS OTP code using Supabase Auth
+  Future<Map<String, dynamic>> verifyPhoneOtp({required String phone, required String token}) async {
+    final cleanPhone = phone.trim().replaceAll(RegExp(r'[^0-9+]'), '');
+    final cleanToken = token.trim();
+
+    if (cleanPhone.isEmpty || cleanToken.isEmpty) {
+      return {'success': false, 'message': 'Please enter both mobile number and OTP code.'};
+    }
+    final formattedPhone = cleanPhone.startsWith('+') ? cleanPhone : '+91$cleanPhone';
+
+    try {
+      final AuthResponse response = await client.auth.verifyOTP(
+        type: OtpType.sms,
+        phone: formattedPhone,
+        token: cleanToken,
+      );
+
+      if (response.user != null || response.session != null) {
+        debugPrint('🎉 Supabase Phone OTP verified successfully for: $formattedPhone');
+        return {'success': true, 'message': 'OTP verified successfully.', 'user': response.user};
+      }
+
+      return {'success': false, 'message': 'Invalid or expired OTP.'};
+    } on AuthException catch (ae) {
+      debugPrint('❌ Supabase Verify Phone OTP Exception: ${ae.message}');
+      return {'success': false, 'message': 'Invalid or expired OTP.'};
+    } catch (e) {
+      debugPrint('❌ Supabase Verify Phone OTP Error: $e');
       return {'success': false, 'message': 'Invalid or expired OTP.'};
     }
   }
 }
+

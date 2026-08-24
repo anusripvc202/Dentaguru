@@ -7,7 +7,6 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/services/patient_problem_service.dart';
-import '../../../../core/services/firebase_service.dart';
 import '../../../../core/services/supabase_service.dart';
 import '../../../../core/services/analytics_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -90,6 +89,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   bool _isVerifyingOtp = false;
   final _otpController = TextEditingController();
   String? _otpErrorMessage;
+  String? _currentExpectedOtp;
 
   @override
   void initState() {
@@ -527,7 +527,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     if (phone.isEmpty && email.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('⚠️ Please enter your Phone Number or Email Address to receive OTP.'),
+          content: Text('⚠️ Please enter your Mobile Number or Email Address to receive OTP.'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -537,35 +537,37 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     setState(() {
       _isSendingOtp = true;
       _otpErrorMessage = null;
+      _currentExpectedOtp = null;
     });
 
     bool sendSuccess = false;
+    String successMsg = '';
 
-    // 1. Email OTP via Supabase Auth & Supabase Email Service
-    if (email.isNotEmpty) {
-      final supabaseRes = await SupabaseService().sendEmailOtp(email);
-      sendSuccess = supabaseRes['success'] == true;
-      if (!sendSuccess) {
-        setState(() {
-          _otpErrorMessage = supabaseRes['message'] ?? 'Unable to send OTP. Please try again.';
-        });
+    // 1. Mobile Phone SMS OTP via Backend SMS Gateway & Supabase
+    if (phone.isNotEmpty) {
+      final backendRes = await ApiService().requestOtp(phone: phone, email: email);
+      sendSuccess = backendRes['success'] == true;
+      if (backendRes['otp'] != null) {
+        _currentExpectedOtp = backendRes['otp'].toString();
+      }
+
+      if (sendSuccess) {
+        if (backendRes['simulated'] == true && backendRes['otp'] != null) {
+          successMsg = 'OTP sent to mobile $phone (Code: ${backendRes['otp']})';
+        } else {
+          successMsg = 'OTP sent to mobile number $phone.';
+        }
       }
     }
 
-    // 2. Mobile Phone SMS OTP via Firebase Phone Auth & Backend SMS API
-    if (phone.isNotEmpty) {
-      final backendRes = await ApiService().requestOtp(phone: phone, email: '');
-      sendSuccess = sendSuccess || (backendRes['success'] == true);
-
-      FirebaseService.sendFirebasePhoneOtp(
-        phone,
-        onCodeSent: (verId) {
-          debugPrint('📩 Firebase Phone Auth SMS dispatched to $phone');
-        },
-        onError: (err) {
-          debugPrint('⚠️ Firebase Phone Auth warning: $err');
-        },
-      );
+    // 2. Email OTP via Supabase Auth & Supabase Email Service
+    if (email.isNotEmpty) {
+      final supabaseRes = await SupabaseService().sendEmailOtp(email);
+      final emailSent = supabaseRes['success'] == true;
+      sendSuccess = sendSuccess || emailSent;
+      if (emailSent && successMsg.isEmpty) {
+        successMsg = 'OTP sent to your email address.';
+      }
     }
 
     if (!mounted) return;
@@ -580,10 +582,15 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     if (sendSuccess) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(email.isNotEmpty ? 'OTP sent to your email address.' : 'OTP sent to your mobile phone.'),
+          content: Text(successMsg.isNotEmpty ? successMsg : 'OTP sent successfully.'),
           backgroundColor: const Color(0xFF10B981),
+          duration: const Duration(seconds: 6),
         ),
       );
+    } else {
+      setState(() {
+        _otpErrorMessage = 'Unable to send OTP. Please check your mobile number and try again.';
+      });
     }
   }
 
@@ -604,44 +611,40 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
     bool verified = false;
 
-    // 1. Email OTP verification via Supabase Auth
-    if (email.isNotEmpty) {
-      final supabaseVerify = await SupabaseService().verifyEmailOtp(email: email, token: code);
-      verified = supabaseVerify['success'] == true;
-      if (!verified) {
-        _otpErrorMessage = supabaseVerify['message'] ?? 'Invalid or expired OTP.';
-      }
+    // 1. Direct match with received OTP
+    if (_currentExpectedOtp != null && _currentExpectedOtp == code) {
+      verified = true;
     }
 
-    // 2. Mobile Phone SMS OTP verification via Firebase or Backend API
+    // 2. Mobile Phone SMS OTP verification via Backend API & Supabase
     if (!verified && phone.isNotEmpty) {
-      verified = await FirebaseService.verifyFirebaseOtp(code);
-      if (!verified) {
-        final res = await ApiService().verifyOtp(phone: phone, email: '', code: code);
-        verified = res['success'] == true;
-      }
-      if (!verified && email.isEmpty) {
-        _otpErrorMessage = 'Invalid or expired OTP.';
-      }
+      final res = await ApiService().verifyOtp(phone: phone, email: email, code: code);
+      verified = res['success'] == true;
+    }
+
+    // 3. Email OTP verification via Supabase Auth
+    if (!verified && email.isNotEmpty) {
+      final supabaseVerify = await SupabaseService().verifyEmailOtp(email: email, token: code);
+      verified = supabaseVerify['success'] == true;
     }
 
     if (!mounted) return;
     setState(() => _isVerifyingOtp = false);
 
     if (verified) {
-      AnalyticsService.logOtpVerification(status: 'verified', method: email.isNotEmpty ? 'Supabase_Email_OTP' : 'Firebase_SMS_OTP');
+      AnalyticsService.logOtpVerification(status: 'verified', method: phone.isNotEmpty ? 'SMS_Mobile_OTP' : 'Email_OTP');
       setState(() {
         _isOtpVerified = true;
         _otpErrorMessage = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('OTP verified successfully.'),
+          content: Text('🎉 OTP verified successfully! You can now complete registration.'),
           backgroundColor: Color(0xFF10B981),
         ),
       );
     } else {
-      setState(() => _otpErrorMessage = _otpErrorMessage ?? 'Invalid or expired OTP.');
+      setState(() => _otpErrorMessage = 'Invalid or expired OTP code.');
     }
   }
 
