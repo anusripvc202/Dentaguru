@@ -71,8 +71,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   static const List<String> _availableLanguages = [
     'English', 'Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam', 'Marathi', 'Bengali', 'Gujarati', 'Punjabi', 'Spanish'
   ];
-  String _selectedPatientLanguage = 'English';
-  String _selectedDentistLanguage = 'English';
+  String? _selectedPatientLanguage;
+  String? _selectedDentistLanguage;
+  String? _selectedAdminLanguage;
 
   // Profile Image Picker Bytes
   Uint8List? _pickedImageBytes;
@@ -411,11 +412,50 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       photoBase64 = 'data:image/png;base64,${base64Encode(_pickedImageBytes!)}';
     }
 
-    final location = _locationController.text.trim();
+    final location = _selectedRole == UserRole.dentist
+        ? _clinicAddressController.text.trim()
+        : _locationController.text.trim();
     final city = _cityController.text.trim();
     final pincode = _pincodeController.text.trim();
     final clinicAddress = _clinicAddressController.text.trim();
-    final selectedLangs = _selectedRole == UserRole.dentist ? [_selectedDentistLanguage] : [_selectedPatientLanguage];
+    final String? chosenLang = _selectedRole == UserRole.dentist
+        ? _selectedDentistLanguage
+        : (_selectedRole == UserRole.admin ? _selectedAdminLanguage : _selectedPatientLanguage);
+
+    // Mandatory Field Validations
+    if (city.isEmpty) {
+      setState(() => _isRegistering = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('⚠️ City is a mandatory field.'), backgroundColor: Color(0xFFEF4444)),
+      );
+      return;
+    }
+
+    if (pincode.isEmpty || pincode.length != 6) {
+      setState(() => _isRegistering = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('⚠️ Please enter a valid 6-digit Pincode.'), backgroundColor: Color(0xFFEF4444)),
+      );
+      return;
+    }
+
+    if (location.isEmpty) {
+      setState(() => _isRegistering = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('⚠️ Location / Address is a mandatory field.'), backgroundColor: Color(0xFFEF4444)),
+      );
+      return;
+    }
+
+    if (chosenLang == null || chosenLang.trim().isEmpty) {
+      setState(() => _isRegistering = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('⚠️ Language selection is mandatory.'), backgroundColor: Color(0xFFEF4444)),
+      );
+      return;
+    }
+
+    final selectedLangs = [chosenLang];
 
     try {
       final res = await ApiService().registerUser(
@@ -473,7 +513,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             qualification: 'BDS, MDS',
             experienceYears: exp,
             photoBytes: _pickedImageBytes,
-            languages: [_selectedDentistLanguage],
+            languages: selectedLangs,
           );
         }
 
@@ -1240,11 +1280,12 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter full name' : null,
               decoration: _buildInputDecoration(
                 label: _selectedRole == UserRole.dentist
-                    ? 'Practitioner Full Name & Title *'
+                    ? 'Practitioner Full Name & Title'
                     : _selectedRole == UserRole.admin
-                        ? 'Administrator Full Name *'
-                        : 'Patient Full Name *',
+                        ? 'Administrator Full Name'
+                        : 'Patient Full Name',
                 hint: _selectedRole == UserRole.dentist ? 'e.g. Dr. Nikhil' : 'e.g. Jane Smith',
+                isRequired: true,
                 icon: Icons.person_outline_rounded,
               ),
             ),
@@ -1255,10 +1296,16 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               controller: _phoneController,
               keyboardType: TextInputType.phone,
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-              validator: (val) => (val == null || val.trim().isEmpty) ? 'Mobile phone number is mandatory *' : null,
+              validator: (val) {
+                if (val == null || val.trim().isEmpty) return 'Mobile phone number is mandatory';
+                final clean = val.replaceAll(RegExp(r'[^0-9]'), '');
+                if (clean.length < 10) return 'Enter valid 10-digit mobile number';
+                return null;
+              },
               decoration: _buildInputDecoration(
-                label: 'Mobile Phone Number *',
+                label: 'Mobile Phone Number',
                 hint: '+91 98765 43210',
+                isRequired: true,
                 icon: Icons.phone_android_rounded,
               ),
             ),
@@ -1278,6 +1325,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               decoration: _buildInputDecoration(
                 label: 'Email Address (Optional)',
                 hint: 'user@dentaguru.com (Optional)',
+                isRequired: false,
                 icon: Icons.email_outlined,
               ),
             ),
@@ -1424,42 +1472,53 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               ),
             ),
             const SizedBox(height: 12),
+            // MANDATORY FIELD 1: Location *
             TextFormField(
               controller: _locationController,
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter Location / Street Address' : null,
               decoration: _buildInputDecoration(
-                label: 'Address / Street Location',
-                hint: 'e.g. Door No / Street Name',
+                label: 'Location / Address',
+                hint: 'e.g. Door No, Street / Area Name',
+                isRequired: true,
                 icon: Icons.location_on_outlined,
               ),
             ),
             const SizedBox(height: 12),
             Row(
               children: [
+                // MANDATORY FIELD 2: City *
                 Expanded(
                   flex: 3,
                   child: TextFormField(
                     controller: _cityController,
                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter City' : null,
+                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter City' : null,
                     decoration: _buildInputDecoration(
-                      label: 'City *',
+                      label: 'City',
                       hint: 'e.g. City Name',
+                      isRequired: true,
                       icon: Icons.location_city_rounded,
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
+                // MANDATORY FIELD 3: Pincode *
                 Expanded(
                   flex: 2,
                   child: TextFormField(
                     controller: _pincodeController,
                     keyboardType: TextInputType.number,
                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter Pincode' : null,
+                    validator: (val) {
+                      if (val == null || val.trim().isEmpty) return 'Enter Pincode';
+                      if (val.trim().length != 6) return '6-digit PIN';
+                      return null;
+                    },
                     decoration: _buildInputDecoration(
-                      label: 'Pincode *',
-                      hint: 'e.g. 6-Digit PIN',
+                      label: 'Pincode',
+                      hint: '6-Digit PIN',
+                      isRequired: true,
                       icon: Icons.pin_drop_outlined,
                     ),
                   ),
@@ -1467,14 +1526,18 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               ],
             ),
             const SizedBox(height: 12),
+            // MANDATORY FIELD 4: Language *
             DropdownButtonFormField<String>(
-              initialValue: _selectedPatientLanguage,
+              value: _selectedPatientLanguage,
               dropdownColor: Colors.white,
               isExpanded: true,
+              validator: (val) => (val == null || val.isEmpty) ? 'Please select a preferred Language' : null,
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
               decoration: _buildInputDecoration(
                 label: 'Preferred Language',
                 hint: 'Select Language',
+                isRequired: true,
+                icon: Icons.translate_rounded,
               ),
               items: _availableLanguages.map((lang) {
                 return DropdownMenuItem(
@@ -1500,8 +1563,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
               validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter Dental License Number' : null,
               decoration: _buildInputDecoration(
-                label: 'Dental Council License Number *',
+                label: 'Dental Council License Number',
                 hint: 'DEN-LIC-88490',
+                isRequired: true,
                 icon: Icons.badge_outlined,
               ),
             ),
@@ -1540,8 +1604,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
                     validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter clinic name' : null,
                     decoration: _buildInputDecoration(
-                      label: 'Primary Clinic / Practice Name *',
+                      label: 'Primary Clinic Name',
                       hint: 'Metro Dental Care Practice',
+                      isRequired: true,
                       icon: Icons.domain_rounded,
                     ),
                   ),
@@ -1563,40 +1628,51 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               ],
             ),
             const SizedBox(height: 12),
+            // MANDATORY FIELD 1: Location / Clinic Address *
             TextFormField(
               controller: _clinicAddressController,
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter Location / Clinic Address' : null,
               decoration: _buildInputDecoration(
-                label: 'Clinic Location / Address (Optional)',
-                hint: 'e.g. Area / Landmark',
+                label: 'Location / Clinic Address',
+                hint: 'e.g. Area / Landmark / Street',
+                isRequired: true,
                 icon: Icons.location_on_outlined,
               ),
             ),
             const SizedBox(height: 12),
             Row(
               children: [
+                // MANDATORY FIELD 2: City *
                 Expanded(
                   child: TextFormField(
                     controller: _cityController,
                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter City' : null,
+                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter City' : null,
                     decoration: _buildInputDecoration(
-                      label: 'City *',
+                      label: 'City',
                       hint: 'e.g. City Name',
+                      isRequired: true,
                       icon: Icons.location_city_rounded,
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
+                // MANDATORY FIELD 3: Pincode *
                 Expanded(
                   child: TextFormField(
                     controller: _pincodeController,
                     keyboardType: TextInputType.number,
                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter Pincode' : null,
+                    validator: (val) {
+                      if (val == null || val.trim().isEmpty) return 'Enter Pincode';
+                      if (val.trim().length != 6) return '6-digit PIN';
+                      return null;
+                    },
                     decoration: _buildInputDecoration(
-                      label: 'Pincode *',
-                      hint: 'e.g. 6-Digit PIN',
+                      label: 'Pincode',
+                      hint: '6-Digit PIN',
+                      isRequired: true,
                       icon: Icons.pin_drop_outlined,
                     ),
                   ),
@@ -1604,14 +1680,18 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               ],
             ),
             const SizedBox(height: 12),
+            // MANDATORY FIELD 4: Language *
             DropdownButtonFormField<String>(
-              initialValue: _selectedDentistLanguage,
+              value: _selectedDentistLanguage,
               dropdownColor: Colors.white,
               isExpanded: true,
+              validator: (val) => (val == null || val.isEmpty) ? 'Please select Languages Known' : null,
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
               decoration: _buildInputDecoration(
                 label: 'Languages Known / Spoken',
                 hint: 'Select Language',
+                isRequired: true,
+                icon: Icons.translate_rounded,
               ),
               items: _availableLanguages.map((lang) {
                 return DropdownMenuItem(
@@ -1632,33 +1712,82 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         return Column(
           key: const ValueKey('admin_fields'),
           children: [
+            // MANDATORY FIELD 1: Location *
+            TextFormField(
+              controller: _locationController,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter Location' : null,
+              decoration: _buildInputDecoration(
+                label: 'Location / Office Address',
+                hint: 'e.g. Headquarters / Branch Area',
+                isRequired: true,
+                icon: Icons.location_on_outlined,
+              ),
+            ),
+            const SizedBox(height: 12),
             Row(
               children: [
+                // MANDATORY FIELD 2: City *
                 Expanded(
                   child: TextFormField(
                     controller: _cityController,
                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter City' : null,
                     decoration: _buildInputDecoration(
-                      label: 'City (Optional)',
+                      label: 'City',
                       hint: 'e.g. City Name',
+                      isRequired: true,
                       icon: Icons.location_city_rounded,
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
+                // MANDATORY FIELD 3: Pincode *
                 Expanded(
                   child: TextFormField(
                     controller: _pincodeController,
                     keyboardType: TextInputType.number,
                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                    validator: (val) {
+                      if (val == null || val.trim().isEmpty) return 'Enter Pincode';
+                      if (val.trim().length != 6) return '6-digit PIN';
+                      return null;
+                    },
                     decoration: _buildInputDecoration(
-                      label: 'Pincode (Optional)',
-                      hint: 'e.g. 6-Digit PIN',
+                      label: 'Pincode',
+                      hint: '6-Digit PIN',
+                      isRequired: true,
                       icon: Icons.pin_drop_outlined,
                     ),
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            // MANDATORY FIELD 4: Language *
+            DropdownButtonFormField<String>(
+              value: _selectedAdminLanguage,
+              dropdownColor: Colors.white,
+              isExpanded: true,
+              validator: (val) => (val == null || val.isEmpty) ? 'Please select Language' : null,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
+              decoration: _buildInputDecoration(
+                label: 'Primary Language',
+                hint: 'Select Language',
+                isRequired: true,
+                icon: Icons.translate_rounded,
+              ),
+              items: _availableLanguages.map((lang) {
+                return DropdownMenuItem(
+                  value: lang,
+                  child: Text(lang, style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600)),
+                );
+              }).toList(),
+              onChanged: (val) {
+                if (val != null) {
+                  setState(() => _selectedAdminLanguage = val);
+                }
+              },
             ),
             const SizedBox(height: 12),
             TextFormField(
@@ -1688,11 +1817,25 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   InputDecoration _buildInputDecoration({
     required String label,
     required String hint,
+    bool isRequired = false,
     IconData? icon,
     Widget? suffixIcon,
   }) {
     return InputDecoration(
-      labelText: label,
+      label: isRequired
+          ? Text.rich(
+              TextSpan(
+                text: label,
+                style: const TextStyle(color: Color(0xFF475569), fontSize: 13),
+                children: const [
+                  TextSpan(
+                    text: ' *',
+                    style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                ],
+              ),
+            )
+          : Text(label, style: const TextStyle(color: Color(0xFF475569), fontSize: 13)),
       labelStyle: const TextStyle(color: Color(0xFF475569), fontSize: 13),
       hintText: hint,
       hintStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),

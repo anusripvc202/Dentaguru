@@ -81,16 +81,37 @@ exports.register = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Phone number already registered. Please sign in with OTP.' });
         }
 
+        // 2. Mandatory Fields Validation: City, Pincode, Language, Location
+        const normalizedCity = (city || '').toString().trim();
+        const normalizedPincode = (pincode || '').toString().trim();
+        const normalizedLocation = (location || clinicAddress || state || '').toString().trim();
+        const rawLanguages = languages || languagesKnown;
+        let cleanLanguages = [];
+        if (Array.isArray(rawLanguages)) {
+            cleanLanguages = rawLanguages.map(l => (l || '').toString().trim()).filter(Boolean);
+        } else if (typeof rawLanguages === 'string' && rawLanguages.trim().length > 0) {
+            cleanLanguages = rawLanguages.split(',').map(s => s.trim()).filter(Boolean);
+        }
+
+        if (!normalizedCity) {
+            return res.status(400).json({ success: false, message: 'City is mandatory for registration.' });
+        }
+        if (!normalizedPincode) {
+            return res.status(400).json({ success: false, message: 'Pincode is mandatory for registration.' });
+        }
+        if (!normalizedLocation) {
+            return res.status(400).json({ success: false, message: 'Location / Address is mandatory for registration.' });
+        }
+        if (cleanLanguages.length === 0) {
+            return res.status(400).json({ success: false, message: 'Language selection is mandatory for registration.' });
+        }
+
         // Passwordless support: if password omitted, generate secure internal hash
         const effectivePassword = (password && password.trim().length >= 4)
             ? password.trim()
             : (`OTP_SECURE_${require('crypto').randomBytes(12).toString('hex')}`);
 
-        const rawLanguages = languages || languagesKnown || ['English'];
-        const cleanLanguages = Array.isArray(rawLanguages)
-            ? rawLanguages.map(l => (l || '').toString().trim()).filter(Boolean)
-            : (typeof rawLanguages === 'string' ? rawLanguages.split(',').map(s => s.trim()).filter(Boolean) : ['English']);
-        const finalLanguages = cleanLanguages.length > 0 ? cleanLanguages : ['English'];
+        const finalLanguages = cleanLanguages;
 
         let user;
         const profileMetaObj = {
@@ -98,8 +119,10 @@ exports.register = async (req, res) => {
             gender: gender || '',
             bloodGroup: bloodGroup || '',
             emergencyContact: emergencyContact || '',
-            city: city || '',
-            pincode: pincode || '',
+            city: normalizedCity,
+            pincode: normalizedPincode,
+            location: normalizedLocation,
+            address: normalizedLocation,
             languages: finalLanguages
         };
         const metaDeviceToken = fcmToken || JSON.stringify(profileMetaObj);
@@ -111,9 +134,9 @@ exports.register = async (req, res) => {
                 password: effectivePassword,
                 phone: normalizedPhone,
                 role: normalizedRole,
-                state: state || '',
-                city: city || '',
-                pincode: pincode || '',
+                state: normalizedLocation,
+                city: normalizedCity,
+                pincode: normalizedPincode,
                 age: age || '',
                 gender: gender || '',
                 blood_group: bloodGroup || '',
@@ -202,9 +225,9 @@ exports.register = async (req, res) => {
                     experience_years: experienceYears ? parseInt(experienceYears) : 5,
                     qualifications: qualification || 'BDS, MDS',
                     availability_status: 'Available',
-                    state: state || '',
-                    city: city || '',
-                    pincode: pincode || '',
+                    state: normalizedLocation,
+                    city: normalizedCity,
+                    pincode: normalizedPincode,
                     languages: finalLanguages,
                     latitude: latitude || null,
                     longitude: longitude || null,
