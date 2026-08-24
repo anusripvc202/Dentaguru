@@ -1620,6 +1620,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             Row(
               children: [
                 Expanded(
+                  flex: 4,
                   child: TextFormField(
                     controller: _ageController,
                     keyboardType: TextInputType.number,
@@ -1633,9 +1634,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 ),
                 const SizedBox(width: 8),
                 Expanded(
+                  flex: 6,
                   child: DropdownButtonFormField<String>(
                     initialValue: _selectedGender,
                     dropdownColor: Colors.white,
+                    isExpanded: true,
                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
                     decoration: _buildInputDecoration(
                       label: 'Gender',
@@ -1643,7 +1646,14 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                       icon: Icons.people_outline_rounded,
                     ),
                     items: ['Female', 'Male', 'Other', 'Prefer not to say'].map((g) {
-                      return DropdownMenuItem(value: g, child: Text(g, style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600)));
+                      return DropdownMenuItem(
+                        value: g,
+                        child: Text(
+                          g,
+                          style: const TextStyle(color: Color(0xFF0F172A), fontSize: 12.5, fontWeight: FontWeight.w600),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      );
                     }).toList(),
                     onChanged: (val) => setState(() => _selectedGender = val ?? 'Female'),
                   ),
@@ -1654,6 +1664,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             DropdownButtonFormField<String>(
               initialValue: _selectedBloodGroup,
               dropdownColor: Colors.white,
+              isExpanded: true,
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
               decoration: _buildInputDecoration(
                 label: 'Blood Group',
@@ -1670,7 +1681,14 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 'B Negative (B-)',
                 'AB Negative (AB-)',
               ].map((bg) {
-                return DropdownMenuItem(value: bg, child: Text(bg, style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600)));
+                return DropdownMenuItem(
+                  value: bg,
+                  child: Text(
+                    bg,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                );
               }).toList(),
               onChanged: (val) => setState(() => _selectedBloodGroup = val ?? 'O Positive (O+)'),
             ),
@@ -1958,11 +1976,12 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       labelStyle: const TextStyle(color: Color(0xFF475569), fontSize: 13),
       hintText: hint,
       hintStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
-      prefixIcon: icon != null ? Icon(icon, color: _accentColor, size: 20) : null,
+      prefixIcon: icon != null ? Icon(icon, color: _accentColor, size: 18) : null,
+      prefixIconConstraints: const BoxConstraints(minWidth: 36, minHeight: 36),
       suffixIcon: suffixIcon,
       filled: true,
       fillColor: const Color(0xFFF8FAFC),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
         borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
