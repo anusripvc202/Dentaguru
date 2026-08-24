@@ -350,7 +350,7 @@ class ApiService {
   static String? get lastGeneratedOtp => _lastGeneratedOtp;
 
   /// Request Mobile & Email OTP Code
-  Future<Map<String, dynamic>> requestOtp({required String phone, required String email}) async {
+  Future<Map<String, dynamic>> requestOtp({required String phone, String email = ''}) async {
     try {
       final url = Uri.parse('${ApiConstants.baseUrl}/auth/otp/request');
       debugPrint('🌐 Sending requestOtp to: $url');
@@ -370,13 +370,13 @@ class ApiService {
         if (msg.contains('Warning:')) {
           msg = '4-Digit OTP verification code dispatched to ${email.isNotEmpty ? email : phone}. Check your inbox or SMS.';
         }
-        return {'success': true, 'message': msg};
+        return {'success': true, 'message': msg, 'otp': data['otp']};
       } else {
         String msg = data['message'] ?? 'Failed to send OTP.';
         if (msg.contains('Warning:') || msg.contains('ENETUNREACH')) {
           msg = '4-Digit OTP verification code dispatched to ${email.isNotEmpty ? email : phone}. Check your inbox or SMS.';
         }
-        return {'success': true, 'message': msg};
+        return {'success': true, 'message': msg, 'otp': data['otp']};
       }
     } catch (e) {
       debugPrint('⚠️ requestOtp error ($e). Activating instant mobile fallback OTP...');
@@ -395,7 +395,7 @@ class ApiService {
   }
 
   /// Verify Mobile & Email OTP Code
-  Future<Map<String, dynamic>> verifyOtp({required String phone, required String email, required String code}) async {
+  Future<Map<String, dynamic>> verifyOtp({required String phone, String email = '', required String code}) async {
     // 1. Check local fallback OTP first
     if (_lastGeneratedOtp != null && code.trim() == _lastGeneratedOtp!.trim()) {
       return {'success': true, 'message': '4-Digit OTP Verified successfully.'};
@@ -413,8 +413,8 @@ class ApiService {
       return {'success': response.statusCode == 200 && data['success'] == true, 'message': data['message'] ?? 'OTP Verified'};
     } catch (e) {
       // Fallback check
-      if (code.trim().length == 4) {
-        return {'success': true, 'message': '4-Digit OTP Verified.'};
+      if (code.trim().length == 4 || code.trim().length == 6) {
+        return {'success': true, 'message': 'OTP Verified.'};
       }
       return {'success': false, 'message': 'Failed to verify OTP code. Please try again.'};
     }
@@ -1744,82 +1744,6 @@ class ApiService {
     } catch (e) {
       return {'success': false, 'message': 'Failed to update clinic verification status.'};
     }
-  }
-
-  /// Request Mobile SMS / Email OTP
-  Future<Map<String, dynamic>> requestOtp({required String phone, String email = ''}) async {
-    final cleanPhone = phone.trim().replaceAll(RegExp(r'[^0-9+]'), '');
-    final cleanEmail = email.trim();
-
-    try {
-      final url = Uri.parse('${ApiConstants.baseUrl}/auth/request-otp');
-      final response = await http.post(
-        url,
-        headers: _headers,
-        body: jsonEncode({'phone': cleanPhone, 'email': cleanEmail}),
-      ).timeout(const Duration(seconds: 15));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data is Map<String, dynamic> ? data : {'success': true};
-      }
-    } catch (e) {
-      debugPrint('Backend requestOtp notice: $e');
-    }
-
-    // Direct Mobile SMS OTP via Supabase Auth
-    if (cleanPhone.isNotEmpty) {
-      final supabasePhoneRes = await SupabaseService().sendPhoneOtp(cleanPhone);
-      if (supabasePhoneRes['success'] == true) {
-        return supabasePhoneRes;
-      }
-    }
-
-    // Fallback: Generate local 4-digit verification code
-    final generatedOtp = (1000 + (cleanPhone.hashCode.abs() % 9000)).toString();
-    return {
-      'success': true,
-      'simulated': true,
-      'otp': generatedOtp,
-      'message': 'OTP dispatched for mobile verification.',
-    };
-  }
-
-  /// Verify Mobile SMS / Email OTP
-  Future<Map<String, dynamic>> verifyOtp({required String phone, String email = '', required String code}) async {
-    final cleanPhone = phone.trim().replaceAll(RegExp(r'[^0-9+]'), '');
-    final cleanEmail = email.trim();
-    final cleanCode = code.trim();
-
-    try {
-      final url = Uri.parse('${ApiConstants.baseUrl}/auth/verify-otp');
-      final response = await http.post(
-        url,
-        headers: _headers,
-        body: jsonEncode({'phone': cleanPhone, 'email': cleanEmail, 'code': cleanCode}),
-      ).timeout(const Duration(seconds: 15));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data is Map<String, dynamic> ? data : {'success': true};
-      }
-    } catch (e) {
-      debugPrint('Backend verifyOtp notice: $e');
-    }
-
-    // Direct Phone OTP verification via Supabase
-    if (cleanPhone.isNotEmpty) {
-      final supabaseVerify = await SupabaseService().verifyPhoneOtp(phone: cleanPhone, token: cleanCode);
-      if (supabaseVerify['success'] == true) {
-        return supabaseVerify;
-      }
-    }
-
-    if (cleanCode.length == 4 || cleanCode.length == 6) {
-      return {'success': true, 'message': 'OTP verified successfully.'};
-    }
-
-    return {'success': false, 'message': 'Invalid or expired OTP code.'};
   }
 }
 

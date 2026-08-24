@@ -84,6 +84,7 @@ class SupabaseService {
       return {'success': false, 'message': 'Invalid or expired OTP.'};
     } catch (e) {
       debugPrint('❌ Supabase Verify OTP Error: $e');
+      return {'success': false, 'message': 'Invalid or expired OTP.'};
     }
   }
 
