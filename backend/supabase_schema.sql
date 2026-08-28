@@ -228,6 +228,24 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 11. REFERRALS TABLE (Refer a Friend Organic Growth System)
+CREATE TABLE IF NOT EXISTS public.referrals (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    referrer_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    referred_user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    referral_code VARCHAR(100) NOT NULL,
+    status VARCHAR(50) DEFAULT 'REGISTERED',
+    appointment_id UUID REFERENCES public.appointments(id) ON DELETE SET NULL,
+    assigned_doctor_id UUID REFERENCES public.dentists(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_referrals_referrer_id ON public.referrals(referrer_id);
+CREATE INDEX IF NOT EXISTS idx_referrals_referred_user_id ON public.referrals(referred_user_id);
+CREATE INDEX IF NOT EXISTS idx_referrals_code ON public.referrals(referral_code);
+
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS referral_code VARCHAR(50);
+
 -- Enable Row Level Security (RLS)
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.clinics ENABLE ROW LEVEL SECURITY;
@@ -239,6 +257,7 @@ ALTER TABLE public.medical_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.referrals ENABLE ROW LEVEL SECURITY;
 
 -- Allow Service Role Access
 DO $$ 
@@ -273,6 +292,10 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow All Audit Logs') THEN
         CREATE POLICY "Allow All Audit Logs" ON public.audit_logs FOR ALL USING (true);
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow All Referrals') THEN
+        CREATE POLICY "Allow All Referrals" ON public.referrals FOR ALL USING (true);
+    END IF;
 END $$;
+
 
 

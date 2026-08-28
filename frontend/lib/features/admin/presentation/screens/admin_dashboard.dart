@@ -9,6 +9,7 @@ import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/constants/permissions.dart';
+import '../../../../core/models/referral_model.dart';
 import 'patient_details_screen.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
@@ -126,7 +127,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     _problemService.markAdminReviewed(req.id);
 
     int currentStep = 1; // 1: Patient Problem, 2: Select Doctor, 3: Review & Send
-    DoctorModel? selectedDoctor = preSelectedDoctor ?? (_problemService.allDoctors.isNotEmpty ? _problemService.allDoctors.first : null);
+    DoctorModel? initialDoc = preSelectedDoctor;
+    if (initialDoc == null && req.preferredDoctorName != null && req.preferredDoctorName!.isNotEmpty) {
+      final pName = req.preferredDoctorName!.toLowerCase();
+      try {
+        initialDoc = _problemService.allDoctors.firstWhere(
+          (d) => d.name.toLowerCase().contains(pName) || pName.contains(d.name.toLowerCase()),
+        );
+      } catch (_) {}
+    }
+    DoctorModel? selectedDoctor = initialDoc ?? (_problemService.allDoctors.isNotEmpty ? _problemService.allDoctors.first : null);
     String searchKeyword = '';
     String selectedSpecialtyFilter = 'All';
     String selectedAvailabilityFilter = 'All';
@@ -135,9 +145,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     final pincodeFilterController = TextEditingController();
     List<DoctorModel>? remoteFilteredDoctors;
     bool isFilteringApi = false;
-    final adminNotesController = TextEditingController(
-      text: 'Recommended for specialized clinical evaluation and care.',
-    );
+    final defaultNote = (req.preferredDoctorName != null && req.preferredDoctorName!.isNotEmpty)
+        ? 'Patient-referred specialist request to ${req.preferredDoctorName} reviewed and clinically approved for consultation.'
+        : 'Recommended for specialized clinical evaluation and care.';
+    final adminNotesController = TextEditingController(text: defaultNote);
 
     showDialog(
       context: context,
@@ -380,8 +391,31 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   ],
                                 ),
                               ),
-                              const SizedBox(height: 14),
+                              if (req.preferredDoctorName != null && req.preferredDoctorName!.isNotEmpty) ...[
+                                const SizedBox(height: 12),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFEF3C7),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: const Color(0xFFFDE68A)),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.recommend_rounded, color: Color(0xFFD97706), size: 20),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          '⭐ Patient Referral Preference: ${req.preferredDoctorName}',
+                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF92400E)),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
 
+                              const SizedBox(height: 14),
                               const Text('Patient Reported Symptoms & Notes:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textDark)),
                               const SizedBox(height: 6),
                               Container(
@@ -755,58 +789,89 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                          activeColor: AppTheme.primaryBlue,
                                                          onChanged: (val) => setModalState(() => selectedDoctor = doc),
                                                        ),
-                                                       const SizedBox(width: 4),
                                                        Expanded(
-                                                         child: Column(
-                                                           crossAxisAlignment: CrossAxisAlignment.start,
-                                                           children: [
-                                                             Row(
-                                                               children: [
-                                                                 Expanded(
-                                                                   child: Text(
-                                                                     doc.name,
-                                                                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
-                                                                     overflow: TextOverflow.ellipsis,
-                                                                     maxLines: 1,
-                                                                   ),
-                                                                 ),
-                                                                 const SizedBox(width: 4),
-                                                                 // Recommendation Badge
-                                                                 Container(
-                                                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                                   decoration: BoxDecoration(color: badgeBg, borderRadius: BorderRadius.circular(6)),
-                                                                   child: Text(badgeLabel, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: badgeFg)),
-                                                                 ),
-                                                                 if (isSpecialtyMatch) ...[
-                                                                   const SizedBox(width: 4),
-                                                                   Container(
-                                                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                                     decoration: BoxDecoration(
-                                                                       color: const Color(0xFFFEF3C7),
-                                                                       borderRadius: BorderRadius.circular(6),
-                                                                     ),
-                                                                     child: const Text('Matched Specialty', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFFB45309))),
-                                                                   ),
-                                                                 ],
-                                                               ],
-                                                             ),
-                                                             const SizedBox(height: 2),
-                                                             Text(
-                                                               '${doc.specialty} • ${doc.qualification} (${doc.status})',
-                                                               style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppTheme.primaryBlue),
-                                                               overflow: TextOverflow.ellipsis,
-                                                               maxLines: 1,
-                                                             ),
-                                                             const SizedBox(height: 2),
-                                                             Text(
-                                                               '${doc.clinicName} • Mobile: ${doc.phone.isNotEmpty ? doc.phone : "Not provided"} • Email: ${doc.email.isNotEmpty ? doc.email : "Not provided"}${doc.city.isNotEmpty ? " • City: ${doc.city}" : ""}${doc.pincode.isNotEmpty ? " • PIN: ${doc.pincode}" : ""} • Languages: ${doc.languages.isNotEmpty ? doc.languages.join(", ") : "English"} • Fee: ${doc.getFeeForCategory(req.problemCategory)} • Rating: ${doc.rating}',
-                                                               style: const TextStyle(fontSize: 10.5, color: AppTheme.textDark),
-                                                               overflow: TextOverflow.ellipsis,
-                                                               maxLines: 1,
-                                                             ),
-                                                           ],
-                                                         ),
-                                                       ),
+                                                          child: Column(
+                                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                                            children: [
+                                                              // 1. DOCTOR NAME & STATUS ROW
+                                                              Row(
+                                                                children: [
+                                                                  const Icon(Icons.medical_services_rounded, size: 15, color: AppTheme.primaryBlue),
+                                                                  const SizedBox(width: 5),
+                                                                  Expanded(
+                                                                    child: Text(
+                                                                      doc.name.isNotEmpty ? doc.name : (doc.clinicName.isNotEmpty ? 'Dr. ${doc.clinicName}' : 'Dr. Specialist'),
+                                                                      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13.5, color: AppTheme.textDark),
+                                                                      overflow: TextOverflow.ellipsis,
+                                                                      maxLines: 1,
+                                                                    ),
+                                                                  ),
+                                                                  const SizedBox(width: 4),
+                                                                  Container(
+                                                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                                    decoration: BoxDecoration(
+                                                                      color: doc.status == 'Available' ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
+                                                                      borderRadius: BorderRadius.circular(6),
+                                                                    ),
+                                                                    child: Text(
+                                                                      doc.status,
+                                                                      style: TextStyle(
+                                                                        fontSize: 9.5,
+                                                                        fontWeight: FontWeight.bold,
+                                                                        color: doc.status == 'Available' ? const Color(0xFF15803D) : const Color(0xFFB45309),
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                                ],
+                                                              ),
+                                                              const SizedBox(height: 4),
+
+                                                              // 2. SPECIALTY & LOCATION MATCH BADGES WRAP
+                                                              Wrap(
+                                                                spacing: 5,
+                                                                runSpacing: 4,
+                                                                crossAxisAlignment: WrapCrossAlignment.center,
+                                                                children: [
+                                                                  Container(
+                                                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                                    decoration: BoxDecoration(
+                                                                      color: AppTheme.primaryBlue.withValues(alpha: 0.1),
+                                                                      borderRadius: BorderRadius.circular(6),
+                                                                    ),
+                                                                    child: Text(
+                                                                      '${doc.specialty} • ${doc.qualification}',
+                                                                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
+                                                                    ),
+                                                                  ),
+                                                                  Container(
+                                                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                                    decoration: BoxDecoration(color: badgeBg, borderRadius: BorderRadius.circular(6)),
+                                                                    child: Text(badgeLabel, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: badgeFg)),
+                                                                  ),
+                                                                  if (isSpecialtyMatch)
+                                                                    Container(
+                                                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                                      decoration: BoxDecoration(
+                                                                        color: const Color(0xFFFEF3C7),
+                                                                        borderRadius: BorderRadius.circular(6),
+                                                                        border: Border.all(color: const Color(0xFFFDE68A)),
+                                                                      ),
+                                                                      child: const Text('Matched Specialty', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFFB45309))),
+                                                                    ),
+                                                                ],
+                                                              ),
+                                                              const SizedBox(height: 4),
+
+                                                              // 3. CLINIC, PHONE, PINCODE & LOCATION
+                                                              Text(
+                                                                '${doc.clinicName.isNotEmpty ? "🏥 ${doc.clinicName} • " : ""}📞 ${doc.phone.isNotEmpty ? doc.phone : "No phone"}${doc.city.isNotEmpty ? " • 📍 ${doc.city}" : ""}${doc.pincode.isNotEmpty ? " (${doc.pincode})" : ""}',
+                                                                style: const TextStyle(fontSize: 10.5, color: AppTheme.textMedium, fontWeight: FontWeight.w500),
+                                                                overflow: TextOverflow.ellipsis,
+                                                                maxLines: 1,
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ),
                                                      ],
                                                    ),
                                                  ),
@@ -1459,6 +1524,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
         return 'System Settings';
       case 9:
         return 'Sub-Admin Management';
+      case 10:
+        return 'Patient-Doctor Chats';
+      case 11:
+        return 'Referral Management & Growth';
       default:
         return 'Admin Dashboard';
     }
@@ -1519,6 +1588,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 children: [
                   _buildSubNavItem(3, Icons.person_search_rounded, 'Patients Directory'),
                   _buildSubNavItem(4, Icons.calendar_month_rounded, 'Appointments'),
+                  _buildSubNavItem(11, Icons.group_add_rounded, 'Referral Management'),
                   _buildSubNavItem(7, Icons.star_rounded, 'Patient Reviews'),
                 ],
               ),
@@ -1655,6 +1725,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
         return _buildSubAdminsPanel();
       case 10:
         return _buildPatientDoctorChatsPanel();
+      case 11:
+        return _buildReferralManagementPanel();
       default:
         return _buildDashboardPanel();
     }
@@ -5497,6 +5569,437 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   }
 
   // ==========================================
+  // PANEL: REFERRAL MANAGEMENT & GROWTH ANALYTICS
+  // ==========================================
+  String _referralSearchQuery = '';
+  bool _isRefreshingReferrals = false;
+
+  Future<void> _refreshAdminReferrals() async {
+    setState(() => _isRefreshingReferrals = true);
+    await _problemService.syncAdminReferralsFromApi();
+    if (mounted) {
+      setState(() => _isRefreshingReferrals = false);
+    }
+  }
+
+  Widget _buildReferralManagementPanel() {
+    final analytics = _problemService.adminReferralAnalytics;
+    final allReferrals = _problemService.adminReferrals;
+
+    if (allReferrals.isEmpty && !_isRefreshingReferrals) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _problemService.syncAdminReferralsFromApi();
+      });
+    }
+
+    final filtered = allReferrals.where((r) {
+      if (_referralSearchQuery.isEmpty) return true;
+      final q = _referralSearchQuery.toLowerCase();
+      return r.referrerName.toLowerCase().contains(q) ||
+          r.referredUserName.toLowerCase().contains(q) ||
+          r.referralCode.toLowerCase().contains(q) ||
+          r.status.toLowerCase().contains(q) ||
+          (r.assignedDoctorName != null && r.assignedDoctorName!.toLowerCase().contains(q)) ||
+          r.referrerPhone.contains(q) ||
+          r.referredUserPhone.contains(q);
+    }).toList();
+
+    return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 1. Header Bar
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF8B5CF6), Color(0xFF6366F1)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF8B5CF6).withValues(alpha: 0.25),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: const Icon(Icons.group_add_rounded, color: Colors.white, size: 24),
+              ),
+              const SizedBox(width: 14),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Referral Management & Growth',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: AppTheme.textDark),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Track organic user acquisition, peer referrals & conversions',
+                      style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              ElevatedButton.icon(
+                onPressed: _isRefreshingReferrals ? null : _refreshAdminReferrals,
+                icon: _isRefreshingReferrals
+                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.refresh_rounded, size: 16),
+                label: const Text('Refresh Data', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF8B5CF6),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+
+          // 2. Growth KPI Metrics Grid
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final w = constraints.maxWidth;
+              final crossCount = w > 850 ? 5 : (w > 500 ? 3 : 2);
+              final childRatio = w > 850 ? 1.5 : (w > 500 ? 1.4 : 1.32);
+
+              final totalReg = analytics.totalRegistered > 0 ? analytics.totalRegistered : allReferrals.length;
+
+              return GridView.count(
+                crossAxisCount: crossCount,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 10,
+                childAspectRatio: childRatio,
+                children: [
+                  _KpiCard(
+                    title: 'Total Referrals',
+                    value: '${allReferrals.length}',
+                    growth: 'Organic Invites',
+                    accentColor: const Color(0xFF8B5CF6),
+                    icon: Icons.share_rounded,
+                  ),
+                  _KpiCard(
+                    title: 'New Registered',
+                    value: '$totalReg',
+                    growth: 'Verified Accounts',
+                    accentColor: const Color(0xFF0284C7),
+                    icon: Icons.how_to_reg_rounded,
+                  ),
+                  _KpiCard(
+                    title: 'Consultations',
+                    value: '${analytics.totalConsultations}',
+                    growth: 'Active Patients',
+                    accentColor: const Color(0xFF10B981),
+                    icon: Icons.event_available_rounded,
+                  ),
+                  _KpiCard(
+                    title: 'Registration Rate',
+                    value: analytics.conversionRateRegistration,
+                    growth: 'Referral-to-Reg',
+                    accentColor: const Color(0xFFF59E0B),
+                    icon: Icons.trending_up_rounded,
+                  ),
+                  _KpiCard(
+                    title: 'Consultation Rate',
+                    value: analytics.conversionRateConsultation,
+                    growth: 'Reg-to-Booking',
+                    accentColor: const Color(0xFFEC4899),
+                    icon: Icons.insights_rounded,
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 24),
+
+          // 3. Top Referring Patients Leaderboard
+          if (analytics.topReferringPatients.isNotEmpty) ...[
+            Row(
+              children: [
+                const Icon(Icons.emoji_events_rounded, size: 18, color: Color(0xFFF59E0B)),
+                const SizedBox(width: 8),
+                const Text(
+                  'Top Referring Patients Leaderboard',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.02),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: analytics.topReferringPatients.length,
+                separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFFF1F5F9)),
+                itemBuilder: (ctx, index) {
+                  final top = analytics.topReferringPatients[index];
+                  final medals = ['🥇', '🥈', '🥉'];
+                  final medal = index < 3 ? medals[index] : '#${index + 1}';
+
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    child: Row(
+                      children: [
+                        Text(medal, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                        const SizedBox(width: 12),
+                        CircleAvatar(
+                          radius: 18,
+                          backgroundColor: const Color(0xFF8B5CF6).withValues(alpha: 0.12),
+                          child: Text(
+                            top.name.isNotEmpty ? top.name[0].toUpperCase() : 'P',
+                            style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF8B5CF6)),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(top.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark), overflow: TextOverflow.ellipsis),
+                              Text('Code: ${top.referralCode} • ${top.phone}', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted), overflow: TextOverflow.ellipsis),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF5F3FF),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFDDD6FE)),
+                          ),
+                          child: Text(
+                            '${top.totalReferrals} Invited',
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF7C3AED)),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF0FDF4),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFBBF7D0)),
+                          ),
+                          child: Text(
+                            '${top.completedConsultations} Completed',
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 24),
+          ],
+
+          // 4. Detailed Referrals Table & Search
+          Row(
+            children: [
+              const Icon(Icons.table_chart_rounded, size: 18, color: AppTheme.primaryBlue),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Referral Records & Attribution',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                width: 220,
+                child: TextField(
+                  onChanged: (val) => setState(() => _referralSearchQuery = val.trim()),
+                  style: const TextStyle(fontSize: 12),
+                  decoration: InputDecoration(
+                    hintText: 'Search referrals...',
+                    prefixIcon: const Icon(Icons.search_rounded, size: 16, color: AppTheme.textMuted),
+                    filled: true,
+                    fillColor: Colors.white,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          if (filtered.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(32),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: const Column(
+                children: [
+                  Icon(Icons.diversity_1_rounded, color: AppTheme.textMuted, size: 42),
+                  SizedBox(height: 10),
+                  Text(
+                    'No Referral Records Found',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'When patients share their referral links and friends register, their attribution records will appear here.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                  ),
+                ],
+              ),
+            )
+          else
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.02),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
+                  headingRowColor: WidgetStateProperty.all(const Color(0xFFF8FAFC)),
+                  columns: const [
+                    DataColumn(label: Text('Referring Patient', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    DataColumn(label: Text('Referred Friend', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    DataColumn(label: Text('Referral Code', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    DataColumn(label: Text('Date', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    DataColumn(label: Text('Registration', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    DataColumn(label: Text('Consultation Status', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    DataColumn(label: Text('Assigned Doctor', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                  ],
+                  rows: filtered.map((ref) {
+                    final isCompleted = ref.status == 'CONSULTATION_COMPLETED';
+                    final isBooked = ref.status == 'CONSULTATION_BOOKED';
+                    final statusColor = isCompleted
+                        ? const Color(0xFF10B981)
+                        : (isBooked ? const Color(0xFF0284C7) : const Color(0xFF6B7280));
+                    final statusText = isCompleted
+                        ? 'Completed'
+                        : (isBooked ? 'Booked' : 'Pending Booking');
+
+                    final dateStr = '${ref.createdAt.day}/${ref.createdAt.month}/${ref.createdAt.year}';
+
+                    return DataRow(
+                      cells: [
+                        DataCell(
+                          Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(ref.referrerName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                              Text(ref.referrerPhone, style: const TextStyle(fontSize: 10.5, color: AppTheme.textMuted)),
+                            ],
+                          ),
+                        ),
+                        DataCell(
+                          Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(ref.referredUserName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                              Text(ref.referredUserPhone, style: const TextStyle(fontSize: 10.5, color: AppTheme.textMuted)),
+                            ],
+                          ),
+                        ),
+                        DataCell(
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF5F3FF),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: const Color(0xFFDDD6FE)),
+                            ),
+                            child: Text(ref.referralCode, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFF6D28D9))),
+                          ),
+                        ),
+                        DataCell(Text(dateStr, style: const TextStyle(fontSize: 11.5))),
+                        DataCell(
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEFF6FF),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: const Color(0xFFBFDBFE)),
+                            ),
+                            child: const Text('Verified', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10.5, color: Color(0xFF1D4ED8))),
+                          ),
+                        ),
+                        DataCell(
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: statusColor.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: statusColor.withValues(alpha: 0.3)),
+                            ),
+                            child: Text(statusText, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10.5, color: statusColor)),
+                          ),
+                        ),
+                        DataCell(
+                          Text(
+                            ref.assignedDoctorName != null && ref.assignedDoctorName!.isNotEmpty
+                                ? '${ref.assignedDoctorName}${ref.assignedClinicName != null ? " (${ref.assignedClinicName})" : ""}'
+                                : '—',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: ref.assignedDoctorName != null ? FontWeight.w600 : FontWeight.normal,
+                              color: ref.assignedDoctorName != null ? const Color(0xFF0D9488) : AppTheme.textMuted,
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ==========================================
   // PANEL 2: PATIENTS MANAGEMENT DATA TABLE
   // ==========================================
   Widget _buildPatientsPanel() {
@@ -5905,10 +6408,10 @@ class _KpiCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: const Color(0xFFE2E8F0)),
         boxShadow: [
           BoxShadow(
@@ -5920,8 +6423,7 @@ class _KpiCard extends StatelessWidget {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -5929,35 +6431,35 @@ class _KpiCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(fontSize: 11, color: AppTheme.textMuted, fontWeight: FontWeight.w600),
+                  style: const TextStyle(fontSize: 10.5, color: AppTheme.textMuted, fontWeight: FontWeight.w600),
                   overflow: TextOverflow.ellipsis,
                   maxLines: 1,
                 ),
               ),
               const SizedBox(width: 4),
               Container(
-                padding: const EdgeInsets.all(6),
+                padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
                   color: accentColor.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(6),
                 ),
-                child: Icon(icon, size: 16, color: accentColor),
+                child: Icon(icon, size: 14, color: accentColor),
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              value,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                value,
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+              ),
             ),
           ),
-          const SizedBox(height: 2),
           Text(
             growth,
-            style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: accentColor),
+            style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: accentColor),
             overflow: TextOverflow.ellipsis,
             maxLines: 1,
           ),

@@ -10,6 +10,7 @@ const chat = require('../controllers/chatController');
 const records = require('../controllers/recordController');
 const problemRequests = require('../controllers/problemRequestController');
 const verification = require('../controllers/verificationController');
+const referrals = require('../controllers/referralController');
 
 // Middlewares
 const { authenticateJWT, optionalAuth, requireRole, requireMainAdmin, requirePermission, requireChatAccess } = require('../middleware/auth');
@@ -108,6 +109,13 @@ router.get('/chat/audit-logs', optionalAuth, requireMainAdmin, chat.getAuditLogs
 // ─────────────────────────────────────────────
 router.get('/records', optionalAuth, records.getPatientRecords);
 router.post('/records', optionalAuth, records.createRecord);
+
+// ─────────────────────────────────────────────
+// 9. REFERRAL MANAGEMENT & GROWTH ENDPOINTS
+// ─────────────────────────────────────────────
+router.get('/referrals/my-referrals', optionalAuth, referrals.getMyReferrals);
+router.get('/referrals/all', optionalAuth, referrals.getAllReferralsAdmin);
+router.get('/referrals/analytics', optionalAuth, referrals.getAdminReferralAnalytics);
 
 module.exports = router;
 

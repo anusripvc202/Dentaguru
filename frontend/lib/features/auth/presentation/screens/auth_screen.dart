@@ -53,6 +53,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   // Role-Specific Fields - Patient
   final _ageController = TextEditingController();
   final _emergencyContactController = TextEditingController();
+  final _referralCodeController = TextEditingController();
   String? _selectedGender;
   String? _selectedBloodGroup;
 
@@ -92,9 +93,15 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this, initialIndex: widget.initialTab);
-    _tabController.addListener(() {
-      if (mounted) setState(() {});
-    });
+    _tabController.addListener(() => setState(() {}));
+
+    // Auto-populate referral code if opened with ?ref=... parameter
+    try {
+      final refParam = Uri.base.queryParameters['ref'];
+      if (refParam != null && refParam.trim().isNotEmpty) {
+        _referralCodeController.text = refParam.trim().toUpperCase();
+      }
+    } catch (_) {}
 
     // Initialize selected role from widget param or default to Patient
     final roleStr = (widget.initialRole ?? 'Patient').toLowerCase();
@@ -116,6 +123,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     _phoneController.dispose();
     _ageController.dispose();
     _emergencyContactController.dispose();
+    _referralCodeController.dispose();
     _licenseNoController.dispose();
     _clinicNameController.dispose();
     _experienceController.dispose();
@@ -476,6 +484,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         pincode: pincode,
         profilePhoto: photoBase64,
         languages: selectedLangs,
+        referralCode: _referralCodeController.text.trim().isNotEmpty ? _referralCodeController.text.trim().toUpperCase() : null,
       );
 
       if (!mounted) return;
@@ -1469,6 +1478,17 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 label: 'Emergency Contact (Optional)',
                 hint: '+91 98765 99880',
                 icon: Icons.contact_phone_outlined,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _referralCodeController,
+              textCapitalization: TextCapitalization.characters,
+              style: const TextStyle(color: Color(0xFF5B21B6), fontSize: 13.5, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+              decoration: _buildInputDecoration(
+                label: 'Referral Code (Optional)',
+                hint: 'e.g. DG-RAH7302',
+                icon: Icons.card_giftcard_rounded,
               ),
             ),
             const SizedBox(height: 12),

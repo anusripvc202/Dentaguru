@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'api_service.dart';
+import '../models/referral_model.dart';
 
 /// Model representing a Doctor/Dentist registered in DentaGuru platform
 class DoctorModel {
@@ -320,6 +321,9 @@ class PatientConsultationRequest {
   String? assignedDoctorName;
   String? assignedDoctorSpecialty;
   String? assignedDoctorClinic;
+  String? preferredDoctorId;
+  String? preferredDoctorName;
+  String? preferredDoctorClinic;
   String? confirmedTimeSlot;
   String? confirmedDate;
   String? adminNotes;
@@ -352,6 +356,9 @@ class PatientConsultationRequest {
     this.assignedDoctorName,
     this.assignedDoctorSpecialty,
     this.assignedDoctorClinic,
+    this.preferredDoctorId,
+    this.preferredDoctorName,
+    this.preferredDoctorClinic,
     this.confirmedTimeSlot,
     this.confirmedDate,
     this.adminNotes,
@@ -466,6 +473,9 @@ class PatientConsultationRequest {
         'assignedDoctorName': assignedDoctorName,
         'assignedDoctorSpecialty': assignedDoctorSpecialty,
         'assignedDoctorClinic': assignedDoctorClinic,
+        'preferredDoctorId': preferredDoctorId,
+        'preferredDoctorName': preferredDoctorName,
+        'preferredDoctorClinic': preferredDoctorClinic,
         'confirmedTimeSlot': confirmedTimeSlot,
         'confirmedDate': confirmedDate,
         'adminNotes': adminNotes,
@@ -474,6 +484,32 @@ class PatientConsultationRequest {
 
   factory PatientConsultationRequest.fromJson(Map<String, dynamic> json) {
     final patientObj = json['patient'] is Map ? json['patient'] : {};
+    final desc = (json['problemDescription'] ?? json['problem_description'] ?? '').toString();
+
+    String? prefDocName = (json['preferredDoctorName'] ?? json['preferred_doctor_name'])?.toString();
+    String? prefDocClinic = (json['preferredDoctorClinic'] ?? json['preferred_doctor_clinic'])?.toString();
+    if (prefDocName == null && desc.contains('Patient referred/recommended to ')) {
+      try {
+        final start = desc.indexOf('Patient referred/recommended to ') + 'Patient referred/recommended to '.length;
+        final end = desc.indexOf('(', start);
+        if (end > start) {
+          prefDocName = desc.substring(start, end).trim();
+        }
+        final clinicStart = desc.indexOf('(', start) + 1;
+        final clinicEnd = desc.indexOf(')', clinicStart);
+        if (clinicEnd > clinicStart) {
+          prefDocClinic = desc.substring(clinicStart, clinicEnd).trim();
+        }
+      } catch (_) {}
+    }
+
+    final rawAssignedName = json['assignedDoctorName'] ?? json['suggested_dentist']?['users']?['name'];
+    final assignedNameClean = (rawAssignedName != null && rawAssignedName.toString() != 'null' && rawAssignedName.toString().trim().isNotEmpty)
+        ? rawAssignedName.toString().trim()
+        : null;
+
+    final rawStatus = (json['status'] ?? 'PENDING_ADMIN_REVIEW').toString();
+
     return PatientConsultationRequest(
       id: (json['id'] ?? json['_id'] ?? '').toString(),
       patientId: (json['patientId'] ?? json['patient_id'] ?? patientObj['id'])?.toString(),
@@ -493,15 +529,14 @@ class PatientConsultationRequest {
       submittedAt: json['submittedAt'] != null 
           ? DateTime.parse(json['submittedAt']) 
           : (json['created_at'] != null ? DateTime.parse(json['created_at']) : DateTime.now()),
-      status: json['status'] ?? 'PENDING_ADMIN_REVIEW',
+      status: rawStatus,
       assignedDoctorId: (json['assignedDoctorId'] ?? json['suggested_dentist_id'])?.toString(),
-      assignedDoctorName: (() {
-        final dName = json['assignedDoctorName'] ?? json['suggested_dentist']?['users']?['name'];
-        if (dName == null || dName.toString() == 'null' || dName.toString().trim().isEmpty) return null;
-        return dName.toString().trim();
-      })(),
+      assignedDoctorName: assignedNameClean,
       assignedDoctorSpecialty: json['assignedDoctorSpecialty'] ?? json['suggested_dentist']?['speciality'],
       assignedDoctorClinic: json['assignedDoctorClinic'] ?? json['suggested_dentist']?['clinics']?['clinic_name'],
+      preferredDoctorId: (json['preferredDoctorId'] ?? json['preferred_doctor_id'])?.toString(),
+      preferredDoctorName: prefDocName,
+      preferredDoctorClinic: prefDocClinic,
       confirmedTimeSlot: json['confirmedTimeSlot'],
       confirmedDate: json['confirmedDate'],
       adminNotes: json['adminNotes'] ?? json['admin_notes'],
@@ -887,6 +922,8 @@ class PatientProblemService extends ChangeNotifier {
         syncAppointmentsFromApi(),
         syncProblemRequestsFromApi(),
         syncDentistAssignedRequestsFromApi(),
+        syncReferralsFromApi(),
+        syncAdminReferralsFromApi(),
       ]);
     } catch (e) {
       debugPrint('Error in syncAllDataFromApi: $e');
@@ -1610,7 +1647,17 @@ class PatientProblemService extends ChangeNotifier {
           final id = dMap['id']?.toString() ?? dMap['_id']?.toString() ?? '';
           final userObj = dMap['users'] ?? dMap['user'] ?? {};
           final clinicObj = dMap['clinics'] ?? dMap['clinic'] ?? {};
-          final name = (userObj['name'] ?? dMap['name'] ?? 'Dentist').toString();
+          
+          var rawName = (userObj['name'] ?? dMap['name'] ?? dMap['dentist_name'] ?? '').toString().trim();
+          if (rawName.isEmpty || rawName.toLowerCase() == 'dentist' || rawName == 'Dr.') {
+            final cNameStr = (clinicObj['clinic_name'] ?? clinicObj['name'] ?? dMap['clinicName'] ?? '').toString().trim();
+            if (cNameStr.isNotEmpty) {
+              rawName = cNameStr;
+            } else {
+              rawName = 'Specialist Dentist';
+            }
+          }
+          final formattedName = rawName.startsWith('Dr.') ? rawName : 'Dr. $rawName';
           final email = (userObj['email'] ?? dMap['email'] ?? '').toString();
           final phone = (userObj['phone'] ?? dMap['phone'] ?? '+1 202 555 0100').toString();
           final specialty = (dMap['speciality'] ?? dMap['specialty'] ?? 'General Dentistry').toString();
@@ -1645,7 +1692,6 @@ class PatientProblemService extends ChangeNotifier {
           }
           if (doctorLangs.isEmpty) doctorLangs = ['English'];
 
-          final formattedName = name.startsWith('Dr.') ? name : 'Dr. $name';
           final doctorUserId = (dMap['user_id'] ?? userObj['id'] ?? '').toString();
 
           _allDoctors.add(DoctorModel(
@@ -2688,9 +2734,73 @@ class PatientProblemService extends ChangeNotifier {
       _requests.clear();
       _allDoctors.clear();
       _medicalRecords.clear();
+      _myReferrals.clear();
+      _adminReferrals.clear();
       notifyListeners();
     } catch (e) {
       debugPrint('Reset error: $e');
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  // REFERRAL STATE & SYNC METHODS
+  // ─────────────────────────────────────────────
+  List<ReferralItem> _myReferrals = [];
+  ReferralStats _myReferralStats = ReferralStats();
+  String _myReferralCode = '';
+  List<ReferralItem> _adminReferrals = [];
+  AdminReferralAnalytics _adminReferralAnalytics = AdminReferralAnalytics();
+
+  List<ReferralItem> get myReferrals => _myReferrals;
+  ReferralStats get myReferralStats => _myReferralStats;
+  String get myReferralCode => _myReferralCode.isNotEmpty
+      ? _myReferralCode
+      : 'DG-${(currentPatient.name.isNotEmpty ? currentPatient.name.substring(0, currentPatient.name.length >= 3 ? 3 : currentPatient.name.length).toUpperCase() : "PAT")}${currentPatient.phone.isNotEmpty && currentPatient.phone.length >= 4 ? currentPatient.phone.substring(currentPatient.phone.length - 4) : "2026"}';
+  List<ReferralItem> get adminReferrals => _adminReferrals;
+  AdminReferralAnalytics get adminReferralAnalytics => _adminReferralAnalytics;
+
+  Future<void> syncReferralsFromApi() async {
+    try {
+      final authUser = Supabase.instance.client.auth.currentUser;
+      final userId = currentPatient.id.isNotEmpty ? currentPatient.id : authUser?.id;
+      final phone = currentPatient.phone.isNotEmpty ? currentPatient.phone : '';
+      final code = myReferralCode;
+
+      final res = await ApiService().fetchMyReferrals(userId: userId, userPhone: phone, referralCode: code);
+      if (res['success'] == true) {
+        if (res['referralCode'] != null && res['referralCode'].toString().isNotEmpty) {
+          _myReferralCode = res['referralCode'].toString();
+        }
+        if (res['stats'] != null) {
+          _myReferralStats = ReferralStats.fromJson(Map<String, dynamic>.from(res['stats']));
+        }
+        if (res['referrals'] is List) {
+          _myReferrals = (res['referrals'] as List)
+              .map((r) => ReferralItem.fromJson(Map<String, dynamic>.from(r)))
+              .toList();
+        }
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Error in syncReferralsFromApi: $e');
+    }
+  }
+
+  Future<void> syncAdminReferralsFromApi() async {
+    try {
+      final res = await ApiService().fetchAllReferralsAdmin();
+      if (res['success'] == true && res['referrals'] is List) {
+        _adminReferrals = (res['referrals'] as List)
+            .map((r) => ReferralItem.fromJson(Map<String, dynamic>.from(r)))
+            .toList();
+      }
+      final analyticsRes = await ApiService().fetchAdminReferralAnalytics();
+      if (analyticsRes['success'] == true && analyticsRes['analytics'] != null) {
+        _adminReferralAnalytics = AdminReferralAnalytics.fromJson(Map<String, dynamic>.from(analyticsRes['analytics']));
+      }
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error in syncAdminReferralsFromApi: $e');
     }
   }
 }

@@ -7,6 +7,7 @@ import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/widgets/dental_ads_banner.dart';
 import '../../../../core/widgets/whatsapp_chat_modal.dart';
+import '../widgets/refer_friend_dialog.dart';
 
 class PatientDashboardScreen extends StatefulWidget {
   const PatientDashboardScreen({super.key});
@@ -768,40 +769,70 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               ),
               const SizedBox(height: 10),
 
-              Row(
-                children: [
-                  _AnimatedPatientActionTile(
-                    icon: Icons.calendar_month_rounded,
-                    title: 'My Appointments',
-                    color: AppTheme.primaryBlue,
-                    onTap: () => setState(() => _currentIndex = 1),
-                  ),
-                  const SizedBox(width: 8),
-                  _AnimatedPatientActionTile(
-                    icon: Icons.recommend_rounded,
-                    title: 'Referred Patient',
-                    color: const Color(0xFF0D9488),
-                    onTap: () => _showReferredPatientFlow(context),
-                  ),
-                  const SizedBox(width: 8),
-                  _AnimatedPatientActionTile(
-                    icon: Icons.auto_awesome_rounded,
-                    title: 'AI Scan',
-                    color: const Color(0xFF8B5CF6),
-                    onTap: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('📸 Opening AI Dental Photo Pre-Screener...')),
-                      );
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                  _AnimatedPatientActionTile(
-                    icon: Icons.receipt_long_rounded,
-                    title: 'Prescriptions',
-                    color: const Color(0xFF10B981),
-                    onTap: () => setState(() => _currentIndex = 2),
-                  ),
-                ],
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  return SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 32) / 5 : 85,
+                          child: _AnimatedPatientActionTile(
+                            icon: Icons.calendar_month_rounded,
+                            title: 'Appointments',
+                            color: AppTheme.primaryBlue,
+                            onTap: () => setState(() => _currentIndex = 1),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 32) / 5 : 85,
+                          child: _AnimatedPatientActionTile(
+                            icon: Icons.recommend_rounded,
+                            title: 'Referred Doctor',
+                            color: const Color(0xFF0D9488),
+                            onTap: () => _showReferredPatientFlow(context),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 32) / 5 : 85,
+                          child: _AnimatedPatientActionTile(
+                            icon: Icons.group_add_rounded,
+                            title: 'Refer a Friend',
+                            color: const Color(0xFF6366F1),
+                            onTap: () => ReferFriendDialog.show(context, _patientService),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 32) / 5 : 85,
+                          child: _AnimatedPatientActionTile(
+                            icon: Icons.auto_awesome_rounded,
+                            title: 'AI Scan',
+                            color: const Color(0xFF8B5CF6),
+                            onTap: () {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('📸 Opening AI Dental Photo Pre-Screener...')),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 32) / 5 : 85,
+                          child: _AnimatedPatientActionTile(
+                            icon: Icons.receipt_long_rounded,
+                            title: 'Prescriptions',
+                            color: const Color(0xFF10B981),
+                            onTap: () => setState(() => _currentIndex = 2),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
               const SizedBox(height: 24),
 
@@ -902,26 +933,25 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
 
                   return Column(
                     children: displayRequests.map((req) {
-                      final bool isConfirmed = req.status == 'Confirmed' ||
-                        req.status == 'Accepted' ||
-                        req.status == 'DENTIST_ACCEPTED' ||
+                      final String rawSt = req.status.toUpperCase().trim();
+                      final bool isConfirmed = rawSt == 'CONFIRMED' ||
+                        rawSt == 'ACCEPTED' ||
+                        rawSt == 'DENTIST_ACCEPTED' ||
+                        rawSt == 'COMPLETED' ||
                         (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.isNotEmpty);
 
-                    final bool isDoctorAssigned = isConfirmed ||
-                        (req.assignedDoctorName != null &&
-                        req.assignedDoctorName!.trim().isNotEmpty &&
-                        req.assignedDoctorName != 'null' &&
-                        req.assignedDoctorName != 'None') ||
-                        req.status == 'Doctor Assigned' ||
-                        req.status == 'Doctor Suggested' ||
-                        req.status == 'DENTIST_ASSIGNED' ||
-                        req.status == 'DENTIST_SUGGESTED';
+                      final bool isDoctorAssigned = isConfirmed ||
+                        ((rawSt == 'DENTIST_ASSIGNED' || rawSt == 'DENTIST_SUGGESTED' || rawSt == 'DOCTOR ASSIGNED' || rawSt == 'DOCTOR SUGGESTED') &&
+                         req.assignedDoctorName != null &&
+                         req.assignedDoctorName!.trim().isNotEmpty &&
+                         req.assignedDoctorName != 'null' &&
+                         req.assignedDoctorName != 'None');
 
-                    final bool isAdminReviewed = isDoctorAssigned ||
-                        req.status == 'Admin Review' ||
-                        req.status == 'ADMIN_REVIEWED' ||
-                        req.status == 'ADMIN_REVIEW' ||
-                        (req.adminNotes != null && req.adminNotes!.trim().isNotEmpty);
+                      final bool isAdminReviewed = isDoctorAssigned ||
+                        (rawSt == 'ADMIN_REVIEWED' ||
+                         rawSt == 'ADMIN REVIEW' ||
+                         rawSt == 'ADMIN_REVIEW' ||
+                         rawSt == 'UNDER_REVIEW');
 
                     return Container(
                       margin: const EdgeInsets.only(bottom: 14),
@@ -1152,36 +1182,43 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                   ),
                                   const SizedBox(height: 8),
                                   OutlinedButton.icon(
-                                    icon: const Icon(Icons.chat_rounded, size: 16, color: Color(0xFF16A34A)),
-                                    label: Text('Chat with ${req.displayDoctorName}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF16A34A))),
+                                    icon: const Icon(Icons.chat_rounded, size: 16),
+                                    label: Text('Chat with ${req.displayDoctorName}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                                     style: OutlinedButton.styleFrom(
-                                      minimumSize: const Size.fromHeight(40),
-                                      side: const BorderSide(color: Color(0xFF16A34A), width: 1.5),
+                                      foregroundColor: const Color(0xFF0369A1),
+                                      side: const BorderSide(color: Color(0xFF0284C7)),
+                                      minimumSize: const Size.fromHeight(42),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                     ),
-                                    onPressed: () => _showChatModal(context, request: req),
+                                    onPressed: () {
+                                      _showChatModal(context, request: req);
+                                    },
                                   ),
                                 ],
                               ),
                             ),
                           ] else ...[
-                            const SizedBox(height: 12),
+                            const SizedBox(height: 14),
                             Container(
                               padding: const EdgeInsets.all(14),
                               decoration: BoxDecoration(
-                                color: isAdminReviewed ? const Color(0xFFF0FDF4) : const Color(0xFFF0F9FF),
+                                color: const Color(0xFFFFFBEB),
                                 borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: isAdminReviewed ? const Color(0xFF86EFAC) : const Color(0xFFBAE6FD),
-                                  width: 1.2,
-                                ),
+                                border: Border.all(color: const Color(0xFFFDE68A), width: 1.5),
                               ),
                               child: Row(
                                 children: [
-                                  Icon(
-                                    isAdminReviewed ? Icons.rate_review_rounded : Icons.hourglass_top_rounded,
-                                    color: isAdminReviewed ? const Color(0xFF16A34A) : const Color(0xFF0284C7),
-                                    size: 22,
+                                  Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFFFEF3C7),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(
+                                      Icons.hourglass_top_rounded,
+                                      color: Color(0xFFD97706),
+                                      size: 20,
+                                    ),
                                   ),
                                   const SizedBox(width: 10),
                                   Expanded(
@@ -1189,23 +1226,21 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
                                         Text(
-                                          isAdminReviewed ? 'Admin Review Completed ✓' : 'Awaiting Admin Specialist Recommendation',
-                                          style: TextStyle(
+                                          (req.preferredDoctorName != null && req.preferredDoctorName!.isNotEmpty)
+                                              ? 'Referred Doctor: ${req.preferredDoctorName}'
+                                              : 'Pending Clinical Triage & Assignment',
+                                          style: const TextStyle(
                                             fontWeight: FontWeight.bold,
                                             fontSize: 13,
-                                            color: isAdminReviewed ? const Color(0xFF14532D) : const Color(0xFF0369A1),
+                                            color: Color(0xFF92400E),
                                           ),
                                         ),
                                         const SizedBox(height: 2),
                                         Text(
-                                          isAdminReviewed
-                                              ? 'Admin has reviewed your symptoms and is selecting a specialized doctor.'
-                                              : 'Your symptoms have been submitted to Admin. A specialized doctor will be recommended shortly.',
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            color: isAdminReviewed ? const Color(0xFF15803D) : const Color(0xFF0284C7),
-                                            height: 1.3,
-                                          ),
+                                          (req.preferredDoctorName != null && req.preferredDoctorName!.isNotEmpty)
+                                              ? 'Your referral recommendation has been submitted. DentaGuru Admin is currently reviewing and verifying the specialist dispatch.'
+                                              : 'Your consultation request has been received. DentaGuru Admin is matching the best specialist for your care.',
+                                          style: const TextStyle(fontSize: 11, color: Color(0xFFB45309), height: 1.35),
                                         ),
                                       ],
                                     ),
@@ -2017,21 +2052,12 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                   severity: 'Moderate',
                 );
 
-                if (_patientService.requests.isNotEmpty) {
-                  final latestReq = _patientService.requests.first;
-                  await _patientService.assignDoctorToRequest(
-                    requestId: latestReq.id,
-                    doctor: doc,
-                    adminNotes: 'Direct patient referral selection to ${doc.name}',
-                  );
-                }
-
                 if (dialogCtx.mounted) Navigator.of(dialogCtx).pop();
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('🎉 Doctor Selected: ${doc.name}! Consultation request submitted.'),
-                      backgroundColor: const Color(0xFF10B981),
+                      content: Text('🎉 Referral Submitted for ${doc.name}! Pending Admin review & specialist assignment.'),
+                      backgroundColor: const Color(0xFF0D9488),
                       duration: const Duration(seconds: 4),
                     ),
                   );
@@ -2040,7 +2066,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                 setModalState(() => isSubmitting = false);
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error selecting doctor: $e'), backgroundColor: Colors.red),
+                    SnackBar(content: Text('Error submitting referral: $e'), backgroundColor: Colors.red),
                   );
                 }
               }

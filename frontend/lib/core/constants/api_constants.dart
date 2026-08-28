@@ -40,4 +40,10 @@ class ApiConstants {
 
   // Medical Records Endpoints
   static String get records => '$baseUrl/records';
+
+  // Referral & Organic Growth Endpoints
+  static String get myReferrals => '$baseUrl/referrals/my-referrals';
+  static String get allReferralsAdmin => '$baseUrl/referrals/all';
+  static String get referralAnalytics => '$baseUrl/referrals/analytics';
 }
+

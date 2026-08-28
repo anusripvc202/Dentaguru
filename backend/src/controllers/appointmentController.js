@@ -1,4 +1,4 @@
-const { Appointment, Clinic, Dentist, User, Notification, MedicalRecord } = require('../models/Schemas');
+const { Appointment, Clinic, Dentist, User, Notification, MedicalRecord, Referral } = require('../models/Schemas');
 const { sendPushNotification } = require('../services/notificationService');
 
 // 1. BOOK APPOINTMENT (Patient -> Dentist) [Initial Status: PENDING]
@@ -17,6 +17,16 @@ exports.bookAppointment = async (req, res) => {
             status: 'PENDING',
             qr_code_string: `DENTAGURU-${targetPatientId || 'PATIENT'}-${Date.now()}`
         });
+
+        // 🔗 Update Referral Attribution if patient was referred
+        if (targetPatientId) {
+            try {
+                await Referral.updateStatusForReferredUser(targetPatientId, 'CONSULTATION_BOOKED', {
+                    appointment_id: appointment.id,
+                    assigned_doctor_id: dentistId || null
+                });
+            } catch (_) {}
+        }
 
         // 🔔 Notification to Dentist & Patient
         await Notification.create({
@@ -264,6 +274,16 @@ exports.completeConsultation = async (req, res) => {
 
         // 1. Mark Appointment Status COMPLETED
         const updatedApp = await Appointment.findByIdAndUpdate(id, { status: 'COMPLETED' });
+
+        // 🔗 Update Referral Attribution to CONSULTATION_COMPLETED
+        if (appointment.patient_id) {
+            try {
+                await Referral.updateStatusForReferredUser(appointment.patient_id, 'CONSULTATION_COMPLETED', {
+                    appointment_id: id,
+                    assigned_doctor_id: appointment.dentist_id || null
+                });
+            } catch (_) {}
+        }
 
         // 2. Create Medical Record & E-Prescription
         const newRecord = await MedicalRecord.create({

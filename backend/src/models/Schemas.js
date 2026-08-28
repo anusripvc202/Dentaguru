@@ -145,6 +145,10 @@ const User = {
         if (userData.password && !userData.password.startsWith('$2a$') && !userData.password.startsWith('$2b$')) {
             userData.password = await hashPassword(userData.password);
         }
+        if (!userData.email || (typeof userData.email === 'string' && userData.email.trim().length === 0)) {
+            const cleanDigits = (userData.phone || '').replace(/[^0-9]/g, '') || Date.now().toString();
+            userData.email = `user_${cleanDigits}@dentaguru.internal`;
+        }
         const payload = {};
         for (const [key, val] of Object.entries(userData)) {
             if (val !== undefined && val !== null) {
@@ -586,25 +590,44 @@ const Appointment = {
         const dentistId = await resolveDentistUuid(appData.dentist_id || appData.dentistId);
         const clinicId = await resolveClinicUuid(appData.clinic_id || appData.clinicId);
 
+        const apptDate = appData.date || appData.appointment_date || appData.appointmentDate || new Date().toISOString();
+        const timeSlot = appData.time_slot || appData.timeSlot || 'Today, 2:30 PM';
+        const treatmentName = appData.treatment || appData.notes || 'Dental Consultation';
+        const statusVal = appData.status || 'PENDING';
+
         const payload = {
             patient_id: patientId,
             dentist_id: dentistId,
             clinic_id: clinicId,
-            appointment_date: appData.appointment_date || appData.appointmentDate || appData.date || new Date().toISOString(),
-            status: appData.status || 'Scheduled',
-            type: appData.type || 'In-Person',
-            notes: appData.notes || '',
-            payment_status: appData.payment_status || appData.paymentStatus || 'Pending',
-            payment_amount: appData.payment_amount || appData.paymentAmount || 0,
-            fee: appData.fee || appData.payment_amount || appData.paymentAmount || 0
+            date: apptDate,
+            time_slot: timeSlot,
+            treatment: treatmentName,
+            status: statusVal,
+            qr_code_string: appData.qr_code_string || `DENTAGURU-${patientId || 'PATIENT'}-${Date.now()}`
         };
 
-        const { data, error } = await supabaseAdmin.from('appointments').insert(payload).select().single();
-        if (error) {
-            console.error('❌ Supabase Appointment Insert Error:', error.message);
-            throw error;
+        try {
+            const { data, error } = await supabaseAdmin.from('appointments').insert(payload).select().single();
+            if (!error && data) return data;
+            if (error) {
+                // Fallback attempt with legacy column names
+                const legacyPayload = {
+                    patient_id: patientId,
+                    dentist_id: dentistId,
+                    clinic_id: clinicId,
+                    appointment_date: apptDate,
+                    status: statusVal,
+                    type: 'In-Person',
+                    notes: treatmentName
+                };
+                const { data: d2, error: e2 } = await supabaseAdmin.from('appointments').insert(legacyPayload).select().single();
+                if (e2) throw e2;
+                return d2;
+            }
+        } catch (err) {
+            console.error('❌ Supabase Appointment Insert Error:', err.message);
+            throw err;
         }
-        return data;
     },
 
     async find(query = {}) {
@@ -1305,6 +1328,107 @@ const AuditLog = {
     }
 };
 
+// 12. REFERRAL MODEL (Refer a Friend & Organic User Acquisition Growth)
+const _inMemoryReferrals = [];
+
+const Referral = {
+    async create(referralData) {
+        const id = referralData.id || require('crypto').randomUUID();
+        const payload = {
+            id,
+            referrer_id: referralData.referrer_id || referralData.referrerId,
+            referred_user_id: referralData.referred_user_id || referralData.referredUserId,
+            referral_code: (referralData.referral_code || referralData.referralCode || '').toString().toUpperCase().trim(),
+            status: referralData.status || 'REGISTERED',
+            appointment_id: referralData.appointment_id || referralData.appointmentId || null,
+            assigned_doctor_id: referralData.assigned_doctor_id || referralData.assignedDoctorId || null,
+            created_at: referralData.created_at || new Date().toISOString(),
+            updated_at: referralData.updated_at || new Date().toISOString()
+        };
+
+        try {
+            const { data, error } = await supabaseAdmin.from('referrals').insert(payload).select().single();
+            if (!error && data) {
+                // Keep local cache synced
+                const existingIdx = _inMemoryReferrals.findIndex(r => r.id === data.id);
+                if (existingIdx !== -1) _inMemoryReferrals[existingIdx] = data;
+                else _inMemoryReferrals.unshift(data);
+                return data;
+            }
+        } catch (e) {
+            console.warn('⚠️ Supabase Referrals table insert notice:', e.message);
+        }
+
+        // In-memory fallback
+        _inMemoryReferrals.unshift(payload);
+        return payload;
+    },
+
+    async find(query = {}) {
+        try {
+            let req = supabaseAdmin.from('referrals').select('*');
+            if (query.referrer_id || query.referrerId) req = req.eq('referrer_id', query.referrer_id || query.referrerId);
+            if (query.referred_user_id || query.referredUserId) req = req.eq('referred_user_id', query.referred_user_id || query.referredUserId);
+            if (query.referral_code || query.referralCode) req = req.eq('referral_code', (query.referral_code || query.referralCode).toString().toUpperCase().trim());
+            if (query.status) req = req.eq('status', query.status);
+            const { data, error } = await req.order('created_at', { ascending: false });
+            if (!error && data && data.length > 0) {
+                return data;
+            }
+        } catch (_) {}
+
+        let filtered = [..._inMemoryReferrals];
+        if (query.referrer_id || query.referrerId) {
+            const refId = query.referrer_id || query.referrerId;
+            filtered = filtered.filter(r => r.referrer_id === refId);
+        }
+        if (query.referred_user_id || query.referredUserId) {
+            const refUserId = query.referred_user_id || query.referredUserId;
+            filtered = filtered.filter(r => r.referred_user_id === refUserId);
+        }
+        if (query.referral_code || query.referralCode) {
+            const code = (query.referral_code || query.referralCode).toString().toUpperCase().trim();
+            filtered = filtered.filter(r => (r.referral_code || '').toUpperCase().trim() === code);
+        }
+        if (query.status) {
+            filtered = filtered.filter(r => r.status === query.status);
+        }
+        return filtered;
+    },
+
+    async findOne(query = {}) {
+        const results = await this.find(query);
+        return (results && results.length > 0) ? results[0] : null;
+    },
+
+    async updateStatusForReferredUser(referredUserId, newStatus, extra = {}) {
+        const payload = {
+            status: newStatus,
+            updated_at: new Date().toISOString(),
+            ...extra
+        };
+
+        try {
+            const { data, error } = await supabaseAdmin
+                .from('referrals')
+                .update(payload)
+                .eq('referred_user_id', referredUserId)
+                .select();
+            if (!error && data && data.length > 0) {
+                return data[0];
+            }
+        } catch (_) {}
+
+        // Fallback update in-memory
+        for (const item of _inMemoryReferrals) {
+            if (item.referred_user_id === referredUserId) {
+                Object.assign(item, payload);
+                return item;
+            }
+        }
+        return null;
+    }
+};
 
 module.exports = {
     User,
@@ -1319,7 +1443,9 @@ module.exports = {
     DentistSuggestion,
     Notification,
     AuditLog,
+    Referral,
     comparePassword
 };
+
 
 

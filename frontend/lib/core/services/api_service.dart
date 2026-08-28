@@ -57,14 +57,18 @@ class ApiService {
     int? experienceYears,
     String? profilePhoto,
     List<String>? languages,
+    String? referralCode,
   }) async {
     final cleanPhone = phone.trim();
-    final cleanEmail = (email != null && email.trim().isNotEmpty) ? email.trim() : '';
+    final cleanDigits = cleanPhone.replaceAll(RegExp(r'[^0-9]'), '');
+    final cleanEmail = (email != null && email.trim().isNotEmpty && email.contains('@'))
+        ? email.trim()
+        : 'user_${cleanDigits.isNotEmpty ? cleanDigits : DateTime.now().millisecondsSinceEpoch}@dentaguru.internal';
     final cleanPassword = (password != null && password.trim().isNotEmpty) ? password.trim() : 'Passwordless_${cleanPhone.replaceAll('+', '')}';
 
     final payload = jsonEncode({
       'name': name.trim(),
-      if (cleanEmail.isNotEmpty) 'email': cleanEmail,
+      'email': cleanEmail,
       'password': cleanPassword,
       'phone': cleanPhone,
       'role': role,
@@ -84,6 +88,7 @@ class ApiService {
       if (experienceYears != null) 'experienceYears': experienceYears,
       if (profilePhoto != null) 'profilePhoto': profilePhoto,
       if (languages != null && languages.isNotEmpty) 'languages': languages,
+      if (referralCode != null && referralCode.trim().isNotEmpty) 'referralCode': referralCode.trim(),
     });
 
     try {
@@ -103,6 +108,10 @@ class ApiService {
         }
         // Persist profile metadata directly to Supabase DB users table
         try {
+          final prefix = name.trim().length >= 3 ? name.trim().substring(0, 3).toUpperCase() : name.trim().toUpperCase();
+          final sfx = cleanDigits.length >= 4 ? cleanDigits.substring(cleanDigits.length - 4) : '2026';
+          final generatedRefCode = 'DG-$prefix$sfx';
+
           final profileMeta = jsonEncode({
             if (age != null && age.isNotEmpty) 'age': age,
             if (bloodGroup != null && bloodGroup.isNotEmpty) 'bloodGroup': bloodGroup,
@@ -112,6 +121,8 @@ class ApiService {
             if (pincode != null) 'pincode': pincode,
             if (location != null) 'address': location,
             if (languages != null && languages.isNotEmpty) 'languages': languages,
+            'referral_code': generatedRefCode,
+            if (referralCode != null && referralCode.trim().isNotEmpty) 'referred_by_code': referralCode.trim().toUpperCase(),
           });
           var q = Supabase.instance.client.from('users').update({
             'device_token': profileMeta,
@@ -1743,6 +1754,328 @@ class ApiService {
       return jsonDecode(response.body);
     } catch (e) {
       return {'success': false, 'message': 'Failed to update clinic verification status.'};
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  // REFERRAL MANAGEMENT & ORGANIC GROWTH
+  // ─────────────────────────────────────────────
+
+  /// Patient: Fetch My Referrals & Stats
+  Future<Map<String, dynamic>> fetchMyReferrals({String? userId, String? userPhone, String? referralCode}) async {
+    // 1. Primary Express backend API attempt
+    try {
+      final queryParam = userId != null ? '?userId=$userId' : '';
+      final url = Uri.parse('${ApiConstants.myReferrals}$queryParam');
+      final response = await http.get(
+        url,
+        headers: {
+          ..._headers,
+          if (userId != null) 'x-user-id': userId,
+        },
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && data['referrals'] is List && (data['referrals'] as List).isNotEmpty) {
+          return data;
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ Express fetch my referrals notice: $e');
+    }
+
+    // 2. Direct 24/7 Supabase Cloud Resolution Fallback
+    try {
+      final client = Supabase.instance.client;
+      final authUser = client.auth.currentUser;
+      final effectiveUserId = userId ?? authUser?.id ?? '';
+
+      // Fetch all users to resolve referrals
+      final allUsersRes = await client.from('users').select('*');
+      final allUsers = List<Map<String, dynamic>>.from(allUsersRes);
+
+      // Find current patient user record
+      Map<String, dynamic>? currentUserMap;
+      if (effectiveUserId.isNotEmpty) {
+        for (final u in allUsers) {
+          if (u['id']?.toString() == effectiveUserId) {
+            currentUserMap = u;
+            break;
+          }
+        }
+      }
+      if (currentUserMap == null && userPhone != null && userPhone.isNotEmpty) {
+        for (final u in allUsers) {
+          if ((u['phone'] ?? '').toString().contains(userPhone)) {
+            currentUserMap = u;
+            break;
+          }
+        }
+      }
+
+      final curName = currentUserMap?['name']?.toString() ?? 'Patient';
+      final curPhone = currentUserMap?['phone']?.toString() ?? '';
+      final myPrefix = curName.length >= 3 ? curName.substring(0, 3).toUpperCase() : curName.toUpperCase();
+      final myPhoneSuffix = curPhone.length >= 4 ? curPhone.substring(curPhone.length - 4) : '2026';
+      final myGeneratedCode = referralCode ?? 'DG-$myPrefix$myPhoneSuffix';
+
+      // Find all users who were referred by this user's code, phone, or id
+      final referredUsers = <Map<String, dynamic>>[];
+      for (final u in allUsers) {
+        if (u['id']?.toString() == effectiveUserId) continue; // Skip self
+
+        String refBy = (u['referral_code'] ?? '').toString().toUpperCase().trim();
+        String refId = '';
+        if (u['device_token'] != null && u['device_token'].toString().startsWith('{')) {
+          try {
+            final meta = jsonDecode(u['device_token'].toString());
+            if (meta['referred_by_code'] != null) {
+              refBy = meta['referred_by_code'].toString().toUpperCase().trim();
+            }
+            if (meta['referrer_id'] != null) {
+              refId = meta['referrer_id'].toString();
+            }
+          } catch (_) {}
+        }
+
+        final isMatch = (refBy.isNotEmpty && refBy == myGeneratedCode.toUpperCase()) ||
+            (curPhone.isNotEmpty && refBy == curPhone) ||
+            (effectiveUserId.isNotEmpty && (refBy == effectiveUserId || refId == effectiveUserId));
+
+        if (isMatch) {
+          referredUsers.add(u);
+        }
+      }
+
+      // Fetch appointments & problem requests to evaluate live status
+      final allAppts = await client.from('appointments').select('*').catchError((_) => []);
+      final allProblems = await client.from('patient_problem_requests').select('*').catchError((_) => []);
+
+      final referralsList = <Map<String, dynamic>>[];
+      int registeredCount = 0;
+      int consultationsCount = 0;
+
+      for (final refUser in referredUsers) {
+        final rId = refUser['id']?.toString() ?? '';
+        final rName = refUser['name']?.toString() ?? 'Friend';
+        final rPhone = refUser['phone']?.toString() ?? '';
+        final rCreatedAt = refUser['created_at']?.toString() ?? DateTime.now().toIso8601String();
+
+        bool hasBooked = false;
+        bool hasCompleted = false;
+
+        if (allAppts is List) {
+          for (final a in allAppts) {
+            if (a['patient_id']?.toString() == rId || a['patient_phone']?.toString() == rPhone) {
+              final st = (a['status'] ?? '').toString().toUpperCase();
+              if (st == 'COMPLETED') hasCompleted = true;
+              else hasBooked = true;
+            }
+          }
+        }
+        if (!hasBooked && !hasCompleted && allProblems is List) {
+          for (final p in allProblems) {
+            if (p['patient_id']?.toString() == rId || p['patient_phone']?.toString() == rPhone) {
+              hasBooked = true;
+            }
+          }
+        }
+
+        String status = 'REGISTERED';
+        if (hasCompleted) {
+          status = 'CONSULTATION_COMPLETED';
+          consultationsCount++;
+        } else if (hasBooked) {
+          status = 'CONSULTATION_BOOKED';
+        }
+        registeredCount++;
+
+        referralsList.add({
+          'id': rId,
+          'referrerId': effectiveUserId,
+          'referrerName': curName,
+          'referrerPhone': curPhone,
+          'referredUserId': rId,
+          'referredUserName': rName,
+          'referredUserPhone': rPhone,
+          'referralCode': myGeneratedCode,
+          'status': status,
+          'createdAt': rCreatedAt,
+        });
+      }
+
+      return {
+        'success': true,
+        'referralCode': myGeneratedCode,
+        'stats': {
+          'totalReferred': registeredCount,
+          'registeredUsers': registeredCount,
+          'consultationsCompleted': consultationsCount,
+        },
+        'referrals': referralsList,
+      };
+    } catch (supaErr) {
+      debugPrint('⚠️ Supabase direct referral resolution notice: $supaErr');
+      return {'success': false, 'message': supaErr.toString()};
+    }
+  }
+
+  /// Admin: Fetch All Platform Referrals
+  Future<Map<String, dynamic>> fetchAllReferralsAdmin() async {
+    try {
+      final url = Uri.parse(ApiConstants.allReferralsAdmin);
+      final response = await http.get(url, headers: _headers).timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && data['referrals'] is List && (data['referrals'] as List).isNotEmpty) {
+          return data;
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ Express admin referrals notice: $e');
+    }
+
+    // Direct Supabase Fallback for Admin
+    try {
+      final client = Supabase.instance.client;
+      final allUsersRes = await client.from('users').select('*');
+      final allUsers = List<Map<String, dynamic>>.from(allUsersRes);
+      final allAppts = await client.from('appointments').select('*').catchError((_) => []);
+      final allProblems = await client.from('patient_problem_requests').select('*').catchError((_) => []);
+
+      final referralsList = <Map<String, dynamic>>[];
+      for (final u in allUsers) {
+        String refBy = (u['referral_code'] ?? '').toString().toUpperCase().trim();
+        String refId = '';
+        if (u['device_token'] != null && u['device_token'].toString().startsWith('{')) {
+          try {
+            final meta = jsonDecode(u['device_token'].toString());
+            if (meta['referred_by_code'] != null) refBy = meta['referred_by_code'].toString().toUpperCase().trim();
+            if (meta['referrer_id'] != null) refId = meta['referrer_id'].toString();
+          } catch (_) {}
+        }
+
+        if (refBy.isNotEmpty || refId.isNotEmpty) {
+          // Find referrer user
+          Map<String, dynamic>? referrer = allUsers.firstWhere(
+            (r) => r['id']?.toString() == refId ||
+                   (r['name'] != null && refBy.contains(r['name'].toString().substring(0, 1).toUpperCase())) ||
+                   (r['phone'] != null && refBy.endsWith(r['phone'].toString().substring(r['phone'].toString().length >= 4 ? r['phone'].toString().length - 4 : 0))),
+            orElse: () => <String, dynamic>{'name': 'Referring Patient', 'phone': ''},
+          );
+
+          final rId = u['id']?.toString() ?? '';
+          final rName = u['name']?.toString() ?? 'Friend';
+          final rPhone = u['phone']?.toString() ?? '';
+
+          bool hasBooked = false;
+          bool hasCompleted = false;
+          if (allAppts is List) {
+            for (final a in allAppts) {
+              if (a['patient_id']?.toString() == rId || a['patient_phone']?.toString() == rPhone) {
+                final st = (a['status'] ?? '').toString().toUpperCase();
+                if (st == 'COMPLETED') hasCompleted = true;
+                else hasBooked = true;
+              }
+            }
+          }
+          if (!hasBooked && !hasCompleted && allProblems is List) {
+            for (final p in allProblems) {
+              if (p['patient_id']?.toString() == rId || p['patient_phone']?.toString() == rPhone) hasBooked = true;
+            }
+          }
+
+          String status = hasCompleted ? 'CONSULTATION_COMPLETED' : (hasBooked ? 'CONSULTATION_BOOKED' : 'REGISTERED');
+
+          referralsList.add({
+            'id': rId,
+            'referrerId': referrer['id'] ?? refId,
+            'referrerName': referrer['name'] ?? 'Referring Patient',
+            'referrerPhone': referrer['phone'] ?? '',
+            'referredUserId': rId,
+            'referredUserName': rName,
+            'referredUserPhone': rPhone,
+            'referralCode': refBy,
+            'status': status,
+            'createdAt': u['created_at'] ?? DateTime.now().toIso8601String(),
+          });
+        }
+      }
+
+      return {'success': true, 'referrals': referralsList};
+    } catch (e) {
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  /// Admin: Fetch Growth Analytics
+  Future<Map<String, dynamic>> fetchAdminReferralAnalytics() async {
+    try {
+      final url = Uri.parse(ApiConstants.referralAnalytics);
+      final response = await http.get(url, headers: _headers).timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && data['analytics'] != null) {
+          return data;
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ Express referral analytics notice: $e');
+    }
+
+    // Direct Supabase Fallback for Analytics
+    try {
+      final allRefRes = await fetchAllReferralsAdmin();
+      final list = (allRefRes['referrals'] as List?) ?? [];
+
+      final total = list.length;
+      final registered = list.length;
+      final completed = list.where((r) => r['status'] == 'CONSULTATION_COMPLETED').length;
+      final booked = list.where((r) => r['status'] == 'CONSULTATION_BOOKED').length;
+
+      final Map<String, Map<String, dynamic>> referrersMap = {};
+      for (final r in list) {
+        final code = (r['referralCode'] ?? '').toString();
+        final name = (r['referrerName'] ?? 'Patient').toString();
+        final phone = (r['referrerPhone'] ?? '').toString();
+        final id = (r['referrerId'] ?? code).toString();
+
+        if (!referrersMap.containsKey(id)) {
+          referrersMap[id] = {
+            'userId': id,
+            'name': name,
+            'phone': phone,
+            'referralCode': code,
+            'totalReferred': 0,
+            'registeredUsers': 0,
+            'consultationsCompleted': 0,
+          };
+        }
+        referrersMap[id]!['totalReferred'] = (referrersMap[id]!['totalReferred'] as int) + 1;
+        referrersMap[id]!['registeredUsers'] = (referrersMap[id]!['registeredUsers'] as int) + 1;
+        if (r['status'] == 'CONSULTATION_COMPLETED') {
+          referrersMap[id]!['consultationsCompleted'] = (referrersMap[id]!['consultationsCompleted'] as int) + 1;
+        }
+      }
+
+      final topReferrers = referrersMap.values.toList();
+      topReferrers.sort((a, b) => (b['totalReferred'] as int).compareTo(a['totalReferred'] as int));
+
+      return {
+        'success': true,
+        'analytics': {
+          'totalReferrals': total,
+          'registeredUsers': registered,
+          'consultationsBooked': booked,
+          'consultationsCompleted': completed,
+          'referralToRegistrationRate': total > 0 ? '100.0%' : '0.0%',
+          'registrationToConsultationRate': registered > 0 ? '${((completed / registered) * 100).toStringAsFixed(1)}%' : '0.0%',
+          'topReferrers': topReferrers.take(10).toList(),
+        }
+      };
+    } catch (e) {
+      return {'success': false, 'message': e.toString()};
     }
   }
 }

@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { User, Dentist, Clinic, comparePassword } = require('../models/Schemas');
+const { User, Dentist, Clinic, Referral, comparePassword } = require('../models/Schemas');
 const admin = require('firebase-admin');
 const { sendOtpEmail } = require('../services/emailService');
 const { sendRealSmsOtp } = require('../services/smsService');
@@ -24,7 +24,7 @@ const generateTokens = (user) => {
 
 // 1. REGISTER
 exports.register = async (req, res) => {
-    const { name, email, password, phone, role, fcmToken, specialty, licenseNumber, clinicName, clinicAddress, location, state, city, pincode, latitude, longitude, qualification, experienceYears, profilePhoto, age, gender, bloodGroup, emergencyContact, languages, languagesKnown } = req.body;
+    const { name, email, password, phone, role, fcmToken, specialty, licenseNumber, clinicName, clinicAddress, location, state, city, pincode, latitude, longitude, qualification, experienceYears, profilePhoto, age, gender, bloodGroup, emergencyContact, languages, languagesKnown, referralCode, ref } = req.body;
     try {
         const normalizedRole = (role || 'Patient').toString().trim();
         const normalizedPhone = (phone || '').toString().trim();
@@ -67,10 +67,15 @@ exports.register = async (req, res) => {
             }
         }
 
-        // Email uniqueness check only if provided
-        if (normalizedEmail.length > 0) {
+        const cleanPhoneDigits = normalizedPhone.replace(/[^0-9]/g, '') || Math.floor(100000 + Math.random() * 900000).toString();
+        const effectiveEmail = (normalizedEmail && normalizedEmail.includes('@') && !normalizedEmail.endsWith('@dentaguru.internal'))
+            ? normalizedEmail
+            : `user_${cleanPhoneDigits}@dentaguru.internal`;
+
+        // Email uniqueness check only if real user-provided email
+        if (normalizedEmail.length > 0 && !normalizedEmail.endsWith('@dentaguru.internal')) {
             const existingEmail = await User.findOne({ email: normalizedEmail });
-            if (existingEmail) {
+            if (existingEmail && existingEmail.phone !== normalizedPhone) {
                 return res.status(400).json({ success: false, message: 'Email already registered.' });
             }
         }
@@ -106,6 +111,10 @@ exports.register = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Language selection is mandatory for registration.' });
         }
 
+        // Generate unique referral code for this user
+        const cleanNamePrefix = (name || 'PAT').replace(/[^a-zA-Z]/g, '').substring(0, 3).toUpperCase() || 'DEN';
+        const userReferralCode = `DG-${cleanNamePrefix}${normalizedPhone ? normalizedPhone.slice(-4) : Math.floor(1000 + Math.random() * 9000)}`;
+
         // Passwordless support: if password omitted, generate secure internal hash
         const effectivePassword = (password && password.trim().length >= 4)
             ? password.trim()
@@ -123,14 +132,15 @@ exports.register = async (req, res) => {
             pincode: normalizedPincode,
             location: normalizedLocation,
             address: normalizedLocation,
-            languages: finalLanguages
+            languages: finalLanguages,
+            referral_code: userReferralCode
         };
         const metaDeviceToken = fcmToken || JSON.stringify(profileMetaObj);
 
         try {
             user = await User.create({
                 name: name || (normalizedRole === 'Dentist' ? 'Dr. Specialist' : 'Patient'),
-                email: normalizedEmail,
+                email: effectiveEmail,
                 password: effectivePassword,
                 phone: normalizedPhone,
                 role: normalizedRole,
@@ -142,6 +152,7 @@ exports.register = async (req, res) => {
                 blood_group: bloodGroup || '',
                 emergency_contact: emergencyContact || '',
                 languages: finalLanguages,
+                referral_code: userReferralCode,
                 latitude: latitude || null,
                 longitude: longitude || null,
                 device_token: metaDeviceToken,
@@ -151,7 +162,7 @@ exports.register = async (req, res) => {
             // Schema fallback: if DB table lacks age/gender/blood_group/languages columns
             user = await User.create({
                 name: name || (normalizedRole === 'Dentist' ? 'Dr. Specialist' : 'Patient'),
-                email: normalizedEmail,
+                email: effectiveEmail,
                 password: effectivePassword,
                 phone: normalizedPhone,
                 role: normalizedRole,
@@ -163,6 +174,38 @@ exports.register = async (req, res) => {
                 device_token: metaDeviceToken,
                 biometric_token: profilePhoto || null
             });
+        }
+
+        // 3. Referral Tracking & Attribution
+        const incomingReferralCode = (referralCode || ref || req.body.referral_code || '').toString().trim().toUpperCase();
+        if (incomingReferralCode) {
+            try {
+                const allUsers = await User.find();
+                const referrer = allUsers.find(u => {
+                    const uRef = (u.referral_code || (u.device_token && u.device_token.startsWith('{') ? JSON.parse(u.device_token).referral_code : '')) || `DG-${(u.name || 'USER').substring(0, 3).toUpperCase()}${u.phone ? u.phone.slice(-4) : ''}`;
+                    return (uRef && uRef.toUpperCase() === incomingReferralCode) || (u.phone && u.phone.trim() === incomingReferralCode) || u.id === incomingReferralCode;
+                });
+
+                if (referrer) {
+                    const isSelfReferral = referrer.id === user.id ||
+                        (referrer.phone && user.phone && referrer.phone.trim() === user.phone.trim()) ||
+                        (referrer.email && user.email && referrer.email.trim().toLowerCase() === user.email.trim().toLowerCase());
+
+                    if (!isSelfReferral) {
+                        await Referral.create({
+                            referrer_id: referrer.id,
+                            referred_user_id: user.id,
+                            referral_code: incomingReferralCode,
+                            status: 'REGISTERED'
+                        });
+                        console.log(`🎉 Referral attributed: User ${user.name} referred by ${referrer.name} (Code: ${incomingReferralCode})`);
+                    } else {
+                        console.warn('⚠️ Self-referral prevented during registration.');
+                    }
+                }
+            } catch (refErr) {
+                console.warn('⚠️ Referral attribution warning:', refErr.message);
+            }
         }
 
         // If registering as a Dentist, automatically insert row into 'dentists' and 'clinics' tables
@@ -259,7 +302,8 @@ exports.register = async (req, res) => {
                     city: city || '',
                     pincode: pincode || '',
                     state: state || '',
-                    languages: finalLanguages
+                    languages: finalLanguages,
+                    referral_code: userReferralCode
                 }
             });
         } catch (_) {}
@@ -280,6 +324,7 @@ exports.register = async (req, res) => {
                 city: user.city || '',
                 pincode: user.pincode || '',
                 languages: finalLanguages,
+                referralCode: userReferralCode,
                 profilePhoto: user.biometric_token
             },
             accessToken,
