@@ -790,7 +790,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                           width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 32) / 5 : 85,
                           child: _AnimatedPatientActionTile(
                             icon: Icons.recommend_rounded,
-                            title: 'Referred Doctor',
+                            title: 'Referred a Patient',
                             color: const Color(0xFF0D9488),
                             onTap: () => _showReferredPatientFlow(context),
                           ),
