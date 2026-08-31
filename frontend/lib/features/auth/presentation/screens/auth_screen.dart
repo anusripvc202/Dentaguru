@@ -991,11 +991,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     setState(() {
       _selectedRole = role;
       if (role == UserRole.admin) {
-        _loginEmailController.text = '8977906566';
+        _loginEmailController.text = '9063663180';
       } else if (role == UserRole.dentist) {
-        _loginEmailController.text = '8977906566';
+        _loginEmailController.text = '9063663177';
       } else {
-        _loginEmailController.text = '7799332395';
+        _loginEmailController.text = '8985732915';
       }
     });
   }
