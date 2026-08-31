@@ -10,7 +10,6 @@ import '../../../../core/services/session_service.dart';
 import '../../../../core/widgets/dental_ads_banner.dart';
 import '../../../../core/widgets/whatsapp_chat_modal.dart';
 import '../../../../core/models/referral_model.dart';
-import '../widgets/refer_friend_dialog.dart';
 import '../widgets/refer_patient_flow_dialog.dart';
 
 class PatientDashboardScreen extends StatefulWidget {
