@@ -5585,9 +5585,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   }
 
   // ==========================================
-  // PANEL: REFERRAL MANAGEMENT & GROWTH ANALYTICS
+  // PANEL: REFERRAL MANAGEMENT & GROWTH ANALYTICS (BY WHOM & TO WHOM)
   // ==========================================
   String _referralSearchQuery = '';
+  String _adminReferralStatusFilter = 'All';
   bool _isRefreshingReferrals = false;
 
   Future<void> _refreshAdminReferrals() async {
@@ -5600,25 +5601,41 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
   Widget _buildReferralManagementPanel() {
     final analytics = _problemService.adminReferralAnalytics;
-    final allReferrals = _problemService.adminReferrals;
+    final allPatientRefs = _problemService.adminPatientReferrals;
 
-    if (allReferrals.isEmpty && !_isRefreshingReferrals) {
+    if (allPatientRefs.isEmpty && !_isRefreshingReferrals) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _problemService.syncAdminReferralsFromApi();
       });
     }
 
-    final filtered = allReferrals.where((r) {
+    final filtered = allPatientRefs.where((r) {
+      // 1. Status Filter
+      if (_adminReferralStatusFilter != 'All' && r.status.toLowerCase() != _adminReferralStatusFilter.toLowerCase()) {
+        return false;
+      }
+      // 2. Search Query
       if (_referralSearchQuery.isEmpty) return true;
       final q = _referralSearchQuery.toLowerCase();
-      return r.referrerName.toLowerCase().contains(q) ||
-          r.referredUserName.toLowerCase().contains(q) ||
-          r.referralCode.toLowerCase().contains(q) ||
-          r.status.toLowerCase().contains(q) ||
-          (r.assignedDoctorName != null && r.assignedDoctorName!.toLowerCase().contains(q)) ||
-          r.referrerPhone.contains(q) ||
-          r.referredUserPhone.contains(q);
+      return r.referrerPatientName.toLowerCase().contains(q) ||
+          r.referrerPatientPhone.contains(q) ||
+          r.referrerPatientEmail.toLowerCase().contains(q) ||
+          r.referredPatientName.toLowerCase().contains(q) ||
+          r.referredPatientMobile.contains(q) ||
+          r.referredPatientCity.toLowerCase().contains(q) ||
+          r.referredPatientPincode.contains(q) ||
+          r.referredPatientLocation.toLowerCase().contains(q) ||
+          r.doctorName.toLowerCase().contains(q) ||
+          r.doctorSpecialty.toLowerCase().contains(q) ||
+          r.doctorClinicName.toLowerCase().contains(q) ||
+          r.requiredSpecialist.toLowerCase().contains(q) ||
+          r.clinicalComplaint.toLowerCase().contains(q) ||
+          r.status.toLowerCase().contains(q);
     }).toList();
+
+    final pendingCount = allPatientRefs.where((r) => r.status == 'Pending').length;
+    final acceptedCount = allPatientRefs.where((r) => r.status == 'Accepted').length;
+    final rejectedCount = allPatientRefs.where((r) => r.status == 'Rejected').length;
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -5654,13 +5671,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Referral Management & Growth',
+                      'Referral Management & Attribution',
                       style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: AppTheme.textDark),
                       overflow: TextOverflow.ellipsis,
                     ),
                     SizedBox(height: 2),
                     Text(
-                      'Track organic user acquisition, peer referrals & conversions',
+                      'Track By Whom (Referrer) and To Whom (Patient & Doctor) across the platform',
                       style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -5682,16 +5699,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               ),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 18),
 
-          // 2. Growth KPI Metrics Grid
+          // 2. Growth & Referral KPI Metrics Grid
           LayoutBuilder(
             builder: (context, constraints) {
               final w = constraints.maxWidth;
-              final crossCount = w > 850 ? 5 : (w > 500 ? 3 : 2);
-              final childRatio = w > 850 ? 1.5 : (w > 500 ? 1.4 : 1.32);
-
-              final totalReg = analytics.totalRegistered > 0 ? analytics.totalRegistered : allReferrals.length;
+              final crossCount = w > 900 ? 5 : (w > 560 ? 3 : 2);
+              final childRatio = w > 900 ? 1.5 : (w > 560 ? 1.4 : 1.32);
 
               return GridView.count(
                 crossAxisCount: crossCount,
@@ -5703,159 +5718,71 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 children: [
                   _KpiCard(
                     title: 'Total Referrals',
-                    value: '${allReferrals.length}',
-                    growth: 'Organic Invites',
+                    value: '${allPatientRefs.length}',
+                    growth: 'All Platform Referrals',
                     accentColor: const Color(0xFF8B5CF6),
                     icon: Icons.share_rounded,
                   ),
                   _KpiCard(
-                    title: 'New Registered',
-                    value: '$totalReg',
-                    growth: 'Verified Accounts',
-                    accentColor: const Color(0xFF0284C7),
-                    icon: Icons.how_to_reg_rounded,
-                  ),
-                  _KpiCard(
-                    title: 'Consultations',
-                    value: '${analytics.totalConsultations}',
-                    growth: 'Active Patients',
-                    accentColor: const Color(0xFF10B981),
-                    icon: Icons.event_available_rounded,
-                  ),
-                  _KpiCard(
-                    title: 'Registration Rate',
-                    value: analytics.conversionRateRegistration,
-                    growth: 'Referral-to-Reg',
+                    title: 'Pending Review',
+                    value: '$pendingCount',
+                    growth: 'Awaiting Doctor Review',
                     accentColor: const Color(0xFFF59E0B),
-                    icon: Icons.trending_up_rounded,
+                    icon: Icons.hourglass_top_rounded,
                   ),
                   _KpiCard(
-                    title: 'Consultation Rate',
-                    value: analytics.conversionRateConsultation,
-                    growth: 'Reg-to-Booking',
-                    accentColor: const Color(0xFFEC4899),
-                    icon: Icons.insights_rounded,
+                    title: 'Accepted by Doctor',
+                    value: '$acceptedCount',
+                    growth: 'Doctor Confirmed',
+                    accentColor: const Color(0xFF10B981),
+                    icon: Icons.check_circle_rounded,
+                  ),
+                  _KpiCard(
+                    title: 'Referrals Declined',
+                    value: '$rejectedCount',
+                    growth: 'Doctor Unavailable',
+                    accentColor: const Color(0xFFEF4444),
+                    icon: Icons.cancel_outlined,
+                  ),
+                  _KpiCard(
+                    title: 'WhatsApp Delivered',
+                    value: '${allPatientRefs.where((r) => r.whatsappStatus == 'Sent').length}',
+                    growth: 'Instant Mobile Alerts',
+                    accentColor: const Color(0xFF25D366),
+                    icon: Icons.chat_bubble_rounded,
                   ),
                 ],
               );
             },
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
 
-          // 3. Top Referring Patients Leaderboard
-          if (analytics.topReferringPatients.isNotEmpty) ...[
-            Row(
-              children: [
-                const Icon(Icons.emoji_events_rounded, size: 18, color: Color(0xFFF59E0B)),
-                const SizedBox(width: 8),
-                const Text(
-                  'Top Referring Patients Leaderboard',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+          // 3. Status Filters & Search Bar
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isNarrow = constraints.maxWidth < 650;
+              final filterRow = SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _buildReferralFilterChip('All', allPatientRefs.length),
+                    const SizedBox(width: 8),
+                    _buildReferralFilterChip('Pending', pendingCount),
+                    const SizedBox(width: 8),
+                    _buildReferralFilterChip('Accepted', acceptedCount),
+                    const SizedBox(width: 8),
+                    _buildReferralFilterChip('Rejected', rejectedCount),
+                  ],
                 ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.02),
-                    blurRadius: 10,
-                    offset: const Offset(0, 3),
-                  ),
-                ],
-              ),
-              child: ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: analytics.topReferringPatients.length,
-                separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFFF1F5F9)),
-                itemBuilder: (ctx, index) {
-                  final top = analytics.topReferringPatients[index];
-                  final medals = ['🥇', '🥈', '🥉'];
-                  final medal = index < 3 ? medals[index] : '#${index + 1}';
+              );
 
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    child: Row(
-                      children: [
-                        Text(medal, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                        const SizedBox(width: 12),
-                        CircleAvatar(
-                          radius: 18,
-                          backgroundColor: const Color(0xFF8B5CF6).withValues(alpha: 0.12),
-                          child: Text(
-                            top.name.isNotEmpty ? top.name[0].toUpperCase() : 'P',
-                            style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF8B5CF6)),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(top.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark), overflow: TextOverflow.ellipsis),
-                              Text('Code: ${top.referralCode} • ${top.phone}', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted), overflow: TextOverflow.ellipsis),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF5F3FF),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: const Color(0xFFDDD6FE)),
-                          ),
-                          child: Text(
-                            '${top.totalReferrals} Invited',
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF7C3AED)),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF0FDF4),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: const Color(0xFFBBF7D0)),
-                          ),
-                          child: Text(
-                            '${top.completedConsultations} Completed',
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 24),
-          ],
-
-          // 4. Detailed Referrals Table & Search
-          Row(
-            children: [
-              const Icon(Icons.table_chart_rounded, size: 18, color: AppTheme.primaryBlue),
-              const SizedBox(width: 8),
-              const Expanded(
-                child: Text(
-                  'Referral Records & Attribution',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(width: 10),
-              SizedBox(
-                width: 220,
+              final searchField = SizedBox(
+                width: isNarrow ? double.infinity : 280,
                 child: TextField(
                   onChanged: (val) => setState(() => _referralSearchQuery = val.trim()),
                   style: const TextStyle(fontSize: 12),
                   decoration: InputDecoration(
-                    hintText: 'Search referrals...',
+                    hintText: 'Search referrer, patient, doctor, location...',
                     prefixIcon: const Icon(Icons.search_rounded, size: 16, color: AppTheme.textMuted),
                     filled: true,
                     fillColor: Colors.white,
@@ -5866,15 +5793,36 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     ),
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
+              );
 
+              if (isNarrow) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    filterRow,
+                    const SizedBox(height: 10),
+                    searchField,
+                  ],
+                );
+              }
+
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(child: filterRow),
+                  const SizedBox(width: 12),
+                  searchField,
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 14),
+
+          // 4. Comprehensive Referrals Table (By Whom & To Whom)
           if (filtered.isEmpty)
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(32),
+              padding: const EdgeInsets.all(36),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
@@ -5882,15 +5830,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               ),
               child: const Column(
                 children: [
-                  Icon(Icons.diversity_1_rounded, color: AppTheme.textMuted, size: 42),
+                  Icon(Icons.person_add_disabled_rounded, color: AppTheme.textMuted, size: 42),
                   SizedBox(height: 10),
                   Text(
-                    'No Referral Records Found',
+                    'No Matching Referral Records Found',
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
                   ),
                   SizedBox(height: 4),
                   Text(
-                    'When patients share their referral links and friends register, their attribution records will appear here.',
+                    'When patients refer other patients to doctors, full attribution (By Whom, To Whom, Doctor) will appear here in real-time.',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
                   ),
@@ -5899,6 +5847,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
             )
           else
             Container(
+              width: double.infinity,
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
@@ -5916,92 +5865,205 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 child: DataTable(
                   headingRowColor: WidgetStateProperty.all(const Color(0xFFF8FAFC)),
                   columns: const [
-                    DataColumn(label: Text('Referring Patient', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                    DataColumn(label: Text('Referred Friend', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                    DataColumn(label: Text('Referral Code', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    DataColumn(label: Text('By Whom (Referrer)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    DataColumn(label: Text('To Whom (Referred Patient)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    DataColumn(label: Text('Patient Location & Pincode', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    DataColumn(label: Text('To Whom (Doctor & Clinic)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    DataColumn(label: Text('Specialty & Complaint', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    DataColumn(label: Text('WhatsApp', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
                     DataColumn(label: Text('Date', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                    DataColumn(label: Text('Registration', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                    DataColumn(label: Text('Consultation Status', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                    DataColumn(label: Text('Assigned Doctor', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    DataColumn(label: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
                   ],
                   rows: filtered.map((ref) {
-                    final isCompleted = ref.status == 'CONSULTATION_COMPLETED';
-                    final isBooked = ref.status == 'CONSULTATION_BOOKED';
-                    final statusColor = isCompleted
-                        ? const Color(0xFF10B981)
-                        : (isBooked ? const Color(0xFF0284C7) : const Color(0xFF6B7280));
-                    final statusText = isCompleted
-                        ? 'Completed'
-                        : (isBooked ? 'Booked' : 'Pending Booking');
+                    final isPending = ref.status == 'Pending';
+                    final isAccepted = ref.status == 'Accepted';
+                    final isRejected = ref.status == 'Rejected';
 
-                    final dateStr = '${ref.createdAt.day}/${ref.createdAt.month}/${ref.createdAt.year}';
+                    final statusColor = isAccepted
+                        ? const Color(0xFF10B981)
+                        : (isRejected ? const Color(0xFFEF4444) : const Color(0xFFF59E0B));
+                    final statusBg = isAccepted
+                        ? const Color(0xFFDCFCE7)
+                        : (isRejected ? const Color(0xFFFEE2E2) : const Color(0xFFFEF3C7));
+                    final statusText = isAccepted
+                        ? '🟢 Accepted'
+                        : (isRejected ? '🔴 Declined' : '🟡 Pending');
+
+                    final dateStr = '${ref.referralDate.day}/${ref.referralDate.month}/${ref.referralDate.year}';
+
+                    final patientLoc = [
+                      if (ref.referredPatientLocation.isNotEmpty) ref.referredPatientLocation,
+                      if (ref.referredPatientCity.isNotEmpty) ref.referredPatientCity,
+                      if (ref.referredPatientPincode.isNotEmpty) '(${ref.referredPatientPincode})',
+                    ].join(', ');
 
                     return DataRow(
                       cells: [
+                        // 1. By Whom (Referrer)
                         DataCell(
                           Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(ref.referrerName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                              Text(ref.referrerPhone, style: const TextStyle(fontSize: 10.5, color: AppTheme.textMuted)),
+                              Row(
+                                children: [
+                                  const Icon(Icons.person_pin_rounded, size: 14, color: Color(0xFF6366F1)),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    ref.referrerPatientName.isNotEmpty ? ref.referrerPatientName : 'Patient Referrer',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF4338CA)),
+                                  ),
+                                ],
+                              ),
+                              if (ref.referrerPatientPhone.isNotEmpty)
+                                Text(
+                                  '+91 ${ref.referrerPatientPhone}',
+                                  style: const TextStyle(fontSize: 10.5, color: AppTheme.textMuted),
+                                ),
                             ],
                           ),
                         ),
+
+                        // 2. To Whom (Referred Patient)
                         DataCell(
                           Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(ref.referredUserName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                              Text(ref.referredUserPhone, style: const TextStyle(fontSize: 10.5, color: AppTheme.textMuted)),
+                              Text(
+                                ref.referredPatientName.isNotEmpty ? ref.referredPatientName : 'Referred Patient',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textDark),
+                              ),
+                              Text(
+                                [
+                                  '+91 ${ref.referredPatientMobile}',
+                                  if (ref.referredPatientAge.isNotEmpty) '${ref.referredPatientAge} Yrs',
+                                  if (ref.referredPatientGender.isNotEmpty) ref.referredPatientGender,
+                                ].join(' • '),
+                                style: const TextStyle(fontSize: 10.5, color: AppTheme.textMuted),
+                              ),
                             ],
                           ),
                         ),
+
+                        // 3. Patient Location & Pincode
                         DataCell(
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF5F3FF),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: const Color(0xFFDDD6FE)),
-                            ),
-                            child: Text(ref.referralCode, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFF6D28D9))),
+                          patientLoc.isNotEmpty
+                              ? Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFEFF6FF),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(color: const Color(0xFFBFDBFE)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.location_on_outlined, size: 12, color: Color(0xFF0284C7)),
+                                      const SizedBox(width: 3),
+                                      Text(
+                                        patientLoc,
+                                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF0369A1)),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              : const Text('—', style: TextStyle(color: AppTheme.textMuted)),
+                        ),
+
+                        // 4. To Whom (Doctor & Clinic)
+                        DataCell(
+                          Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.medical_services_outlined, size: 13, color: Color(0xFF0D9488)),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    ref.doctorName.isNotEmpty ? ref.doctorName : 'Dr. Specialist',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF0F172A)),
+                                  ),
+                                ],
+                              ),
+                              Text(
+                                ref.doctorClinicName.isNotEmpty ? ref.doctorClinicName : 'DentaGuru Partner Clinic',
+                                style: const TextStyle(fontSize: 10.5, color: AppTheme.textMedium),
+                              ),
+                            ],
                           ),
                         ),
-                        DataCell(Text(dateStr, style: const TextStyle(fontSize: 11.5))),
+
+                        // 5. Specialty & Complaint
                         DataCell(
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFEFF6FF),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: const Color(0xFFBFDBFE)),
-                            ),
-                            child: const Text('Verified', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10.5, color: Color(0xFF1D4ED8))),
+                          Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF3E8FF),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  ref.requiredSpecialist,
+                                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF7E22CE)),
+                                ),
+                              ),
+                              if (ref.clinicalComplaint.isNotEmpty)
+                                SizedBox(
+                                  width: 140,
+                                  child: Text(
+                                    ref.clinicalComplaint,
+                                    style: const TextStyle(fontSize: 10, color: AppTheme.textMuted, fontStyle: FontStyle.italic),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
+
+                        // 6. Status
                         DataCell(
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                             decoration: BoxDecoration(
-                              color: statusColor.withValues(alpha: 0.1),
+                              color: statusBg,
                               borderRadius: BorderRadius.circular(6),
                               border: Border.all(color: statusColor.withValues(alpha: 0.3)),
                             ),
                             child: Text(statusText, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10.5, color: statusColor)),
                           ),
                         ),
+
+                        // 7. WhatsApp Status
                         DataCell(
-                          Text(
-                            ref.assignedDoctorName != null && ref.assignedDoctorName!.isNotEmpty
-                                ? '${ref.assignedDoctorName}${ref.assignedClinicName != null ? " (${ref.assignedClinicName})" : ""}'
-                                : '—',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: ref.assignedDoctorName != null ? FontWeight.w600 : FontWeight.normal,
-                              color: ref.assignedDoctorName != null ? const Color(0xFF0D9488) : AppTheme.textMuted,
-                            ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.chat_bubble_outline_rounded, size: 12, color: Color(0xFF25D366)),
+                              const SizedBox(width: 4),
+                              Text(
+                                ref.whatsappStatus == 'Sent' ? 'Delivered' : 'Queued',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF16A34A)),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // 8. Date
+                        DataCell(Text(dateStr, style: const TextStyle(fontSize: 11.5))),
+
+                        // 9. Actions (View Full Attribution Modal)
+                        DataCell(
+                          IconButton(
+                            icon: const Icon(Icons.visibility_outlined, size: 18, color: AppTheme.primaryBlue),
+                            tooltip: 'View Full Referral Attribution',
+                            onPressed: () => _showAdminReferralDetailsModal(context, ref),
                           ),
                         ),
                       ],
@@ -6010,6 +6072,236 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 ),
               ),
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReferralFilterChip(String label, int count) {
+    final isSelected = _adminReferralStatusFilter == label;
+    return FilterChip(
+      label: Text(
+        '$label ($count)',
+        style: TextStyle(
+          fontSize: 11.5,
+          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          color: isSelected ? Colors.white : AppTheme.textDark,
+        ),
+      ),
+      selected: isSelected,
+      selectedColor: const Color(0xFF8B5CF6),
+      backgroundColor: Colors.white,
+      checkmarkColor: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(
+          color: isSelected ? const Color(0xFF8B5CF6) : const Color(0xFFE2E8F0),
+        ),
+      ),
+      onSelected: (selected) {
+        if (selected) {
+          setState(() => _adminReferralStatusFilter = label);
+        }
+      },
+    );
+  }
+
+  void _showAdminReferralDetailsModal(BuildContext context, PatientReferral ref) {
+    final isAccepted = ref.status == 'Accepted';
+    final isRejected = ref.status == 'Rejected';
+    final statusColor = isAccepted
+        ? const Color(0xFF10B981)
+        : (isRejected ? const Color(0xFFEF4444) : const Color(0xFFF59E0B));
+    final statusBg = isAccepted
+        ? const Color(0xFFDCFCE7)
+        : (isRejected ? const Color(0xFFFEE2E2) : const Color(0xFFFEF3C7));
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.88,
+          ),
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Top Grab Bar
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Header
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Referral Attribution Details',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: statusBg,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        ref.status,
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: statusColor),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                // Section 1: Referrer Information (By Whom)
+                _buildDetailCard(
+                  title: '1. BY WHOM (REFERRING PATIENT)',
+                  icon: Icons.person_pin_rounded,
+                  color: const Color(0xFF6366F1),
+                  items: [
+                    {'label': 'Referrer Name', 'value': ref.referrerPatientName},
+                    {'label': 'Referrer Mobile', 'value': '+91 ${ref.referrerPatientPhone}'},
+                    if (ref.referrerPatientEmail.isNotEmpty)
+                      {'label': 'Referrer Email', 'value': ref.referrerPatientEmail},
+                  ],
+                ),
+                const SizedBox(height: 12),
+
+                // Section 2: Referred Patient Details (To Whom)
+                _buildDetailCard(
+                  title: '2. TO WHOM (REFERRED PATIENT)',
+                  icon: Icons.person_rounded,
+                  color: const Color(0xFF0284C7),
+                  items: [
+                    {'label': 'Patient Name', 'value': ref.referredPatientName},
+                    {'label': 'Mobile Number', 'value': '+91 ${ref.referredPatientMobile}'},
+                    {'label': 'Age & Gender', 'value': '${ref.referredPatientAge} Years • ${ref.referredPatientGender}'},
+                    {'label': 'Location', 'value': '${ref.referredPatientLocation}, ${ref.referredPatientCity} (${ref.referredPatientPincode})'},
+                  ],
+                ),
+                const SizedBox(height: 12),
+
+                // Section 3: Receiving Doctor & Clinic Details
+                _buildDetailCard(
+                  title: '3. TO WHOM (RECEIVING DOCTOR & CLINIC)',
+                  icon: Icons.medical_services_rounded,
+                  color: const Color(0xFF0D9488),
+                  items: [
+                    {'label': 'Doctor Name', 'value': ref.doctorName},
+                    {'label': 'Specialty', 'value': ref.doctorSpecialty.isNotEmpty ? ref.doctorSpecialty : ref.requiredSpecialist},
+                    {'label': 'Clinic Name', 'value': ref.doctorClinicName.isNotEmpty ? ref.doctorClinicName : 'DentaGuru Partner Clinic'},
+                    if (ref.doctorLocation.isNotEmpty)
+                      {'label': 'Clinic Address', 'value': ref.doctorLocation},
+                  ],
+                ),
+                const SizedBox(height: 12),
+
+                // Section 4: Clinical Complaint & WhatsApp Status
+                _buildDetailCard(
+                  title: '4. CLINICAL COMPLAINT & NOTIFICATION AUDIT',
+                  icon: Icons.notes_rounded,
+                  color: const Color(0xFF8B5CF6),
+                  items: [
+                    {'label': 'Specialist Category', 'value': ref.requiredSpecialist},
+                    {'label': 'Clinical Complaint', 'value': ref.clinicalComplaint.isNotEmpty ? ref.clinicalComplaint : 'General specialized evaluation'},
+                    {'label': 'Referral Date', 'value': '${ref.referralDate.day}/${ref.referralDate.month}/${ref.referralDate.year}'},
+                    {'label': 'WhatsApp Status', 'value': ref.whatsappStatus == 'Sent' ? 'Delivered (+91 ${ref.referredPatientMobile})' : 'Queued'},
+                    if (isRejected && ref.rejectionReason != null)
+                      {'label': 'Rejection Reason', 'value': ref.rejectionReason!},
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                SizedBox(
+                  width: double.infinity,
+                  height: 44,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primaryBlue,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('Close Details', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDetailCard({
+    required String title,
+    required IconData icon,
+    required Color color,
+    required List<Map<String, String>> items,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 16, color: color),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: color),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ...items.map((it) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 130,
+                    child: Text(
+                      it['label'] ?? '',
+                      style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      it['value'] ?? '—',
+                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: AppTheme.textDark),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
         ],
       ),
     );

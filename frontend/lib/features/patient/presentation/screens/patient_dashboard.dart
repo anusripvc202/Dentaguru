@@ -8,7 +8,6 @@ import '../../../../core/services/api_service.dart';
 import '../../../../core/services/session_service.dart';
 import '../../../../core/widgets/dental_ads_banner.dart';
 import '../../../../core/widgets/whatsapp_chat_modal.dart';
-import '../../../../core/models/referral_model.dart';
 import '../widgets/refer_friend_dialog.dart';
 import '../widgets/refer_patient_flow_dialog.dart';
 
@@ -2035,7 +2034,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               ),
             ),
             TextButton.icon(
-              onPressed: () => ReferPatientFlowDialog.show(context),
+              onPressed: () => _showReferredPatientFlow(context),
               icon: const Icon(Icons.add_rounded, size: 16, color: Color(0xFF0D9488)),
               label: const Text(
                 'Refer Patient',

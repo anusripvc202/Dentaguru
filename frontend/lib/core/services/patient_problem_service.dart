@@ -2796,6 +2796,7 @@ class PatientProblemService extends ChangeNotifier {
   List<PatientReferral> _myCreatedPatientReferrals = [];
   List<PatientReferral> _doctorReceivedPatientReferrals = [];
   List<PatientReferral> _receivedForMePatientReferrals = [];
+  List<PatientReferral> _adminPatientReferrals = [];
 
   List<ReferralItem> get myReferrals => _myReferrals;
   ReferralStats get myReferralStats => _myReferralStats;
@@ -2803,6 +2804,7 @@ class PatientProblemService extends ChangeNotifier {
       ? _myReferralCode
       : 'DG-${(currentPatient.name.isNotEmpty ? currentPatient.name.substring(0, currentPatient.name.length >= 3 ? 3 : currentPatient.name.length).toUpperCase() : "PAT")}${currentPatient.phone.isNotEmpty && currentPatient.phone.length >= 4 ? currentPatient.phone.substring(currentPatient.phone.length - 4) : "2026"}';
   List<ReferralItem> get adminReferrals => _adminReferrals;
+  List<PatientReferral> get adminPatientReferrals => List.unmodifiable(_adminPatientReferrals);
   AdminReferralAnalytics get adminReferralAnalytics => _adminReferralAnalytics;
 
   List<PatientReferral> get myCreatedPatientReferrals => List.unmodifiable(_myCreatedPatientReferrals);
@@ -3023,7 +3025,11 @@ class PatientProblemService extends ChangeNotifier {
     try {
       final res = await ApiService().fetchAllReferralsAdmin();
       if (res['success'] == true && res['referrals'] is List) {
-        _adminReferrals = (res['referrals'] as List)
+        final list = res['referrals'] as List;
+        _adminPatientReferrals = list
+            .map((r) => PatientReferral.fromJson(Map<String, dynamic>.from(r)))
+            .toList();
+        _adminReferrals = list
             .map((r) => ReferralItem.fromJson(Map<String, dynamic>.from(r)))
             .toList();
       }

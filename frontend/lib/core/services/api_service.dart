@@ -1935,8 +1935,9 @@ class ApiService {
     }
   }
 
-  /// Admin: Fetch All Platform Referrals
+  /// Admin: Fetch All Platform Referrals (Comprehensive: Dedicated Referrals + Fallback Payloads + Growth Invites)
   Future<Map<String, dynamic>> fetchAllReferralsAdmin() async {
+    // 1. Primary Express Backend Call
     try {
       final url = Uri.parse(ApiConstants.allReferralsAdmin);
       final response = await http.get(url, headers: _headers).timeout(const Duration(seconds: 15));
@@ -1950,72 +1951,217 @@ class ApiService {
       debugPrint('⚠️ Express admin referrals notice: $e');
     }
 
-    // Direct Supabase Fallback for Admin
+    // 2. Direct Supabase Cloud Dual-Mode Fallback
     try {
       final client = Supabase.instance.client;
-      final allUsersRes = await client.from('users').select('*');
-      final allUsers = List<Map<String, dynamic>>.from(allUsersRes);
-      final allAppts = await client.from('appointments').select('*').catchError((_) => []);
-      final allProblems = await client.from('patient_problem_requests').select('*').catchError((_) => []);
-
       final referralsList = <Map<String, dynamic>>[];
-      for (final u in allUsers) {
-        String refBy = (u['referral_code'] ?? '').toString().toUpperCase().trim();
-        String refId = '';
-        if (u['device_token'] != null && u['device_token'].toString().startsWith('{')) {
-          try {
-            final meta = jsonDecode(u['device_token'].toString());
-            if (meta['referred_by_code'] != null) refBy = meta['referred_by_code'].toString().toUpperCase().trim();
-            if (meta['referrer_id'] != null) refId = meta['referrer_id'].toString();
-          } catch (_) {}
-        }
+      final seenIds = <String>{};
 
-        if (refBy.isNotEmpty || refId.isNotEmpty) {
-          // Find referrer user
-          Map<String, dynamic>? referrer = allUsers.firstWhere(
-            (r) => r['id']?.toString() == refId ||
-                   (r['name'] != null && refBy.contains(r['name'].toString().substring(0, 1).toUpperCase())) ||
-                   (r['phone'] != null && refBy.endsWith(r['phone'].toString().substring(r['phone'].toString().length >= 4 ? r['phone'].toString().length - 4 : 0))),
-            orElse: () => <String, dynamic>{'name': 'Referring Patient', 'phone': ''},
-          );
+      // Tier A: Query dedicated 'referrals' table in Supabase
+      try {
+        final res = await client
+            .from('referrals')
+            .select('*, doctor:dentists!doctor_id(id, speciality, qualification, users(name, email, phone), clinics(clinic_name, location)), referrer:users!referrer_patient_id(id, name, phone, email)')
+            .order('created_at', ascending: false);
 
-          final rId = u['id']?.toString() ?? '';
-          final rName = u['name']?.toString() ?? 'Friend';
-          final rPhone = u['phone']?.toString() ?? '';
+        if (res.isNotEmpty) {
+          for (final row in res) {
+            final id = row['id']?.toString() ?? '';
+            if (id.isNotEmpty) seenIds.add(id);
 
-          bool hasBooked = false;
-          bool hasCompleted = false;
-          if (allAppts is List) {
-            for (final a in allAppts) {
-              if (a['patient_id']?.toString() == rId || a['patient_phone']?.toString() == rPhone) {
-                final st = (a['status'] ?? '').toString().toUpperCase();
-                if (st == 'COMPLETED') hasCompleted = true;
-                else hasBooked = true;
+            String docName = 'Specialist';
+            String docSpecialty = row['required_specialist']?.toString() ?? 'General Dentistry';
+            String clinicName = 'DentaGuru Clinic';
+            String clinicLoc = '';
+            if (row['doctor'] is Map) {
+              final dMap = row['doctor'] as Map;
+              if (dMap['users'] is Map && dMap['users']['name'] != null) {
+                docName = dMap['users']['name'].toString();
+              }
+              if (dMap['speciality'] != null) docSpecialty = dMap['speciality'].toString();
+              if (dMap['clinics'] is Map) {
+                if (dMap['clinics']['clinic_name'] != null) clinicName = dMap['clinics']['clinic_name'].toString();
+                if (dMap['clinics']['location'] != null) clinicLoc = dMap['clinics']['location'].toString();
               }
             }
-          }
-          if (!hasBooked && !hasCompleted && allProblems is List) {
-            for (final p in allProblems) {
-              if (p['patient_id']?.toString() == rId || p['patient_phone']?.toString() == rPhone) hasBooked = true;
+            if (!docName.startsWith('Dr.') && !docName.startsWith('Dr ')) {
+              docName = 'Dr. $docName';
             }
+
+            String refName = 'Patient Referrer';
+            String refPhone = '';
+            String refEmail = '';
+            if (row['referrer'] is Map) {
+              final rMap = row['referrer'] as Map;
+              if (rMap['name'] != null) refName = rMap['name'].toString();
+              if (rMap['phone'] != null) refPhone = rMap['phone'].toString();
+              if (rMap['email'] != null) refEmail = rMap['email'].toString();
+            }
+
+            referralsList.add({
+              'id': id,
+              'referralId': id,
+              'referrerPatientId': row['referrer_patient_id'] ?? row['referrer_id'] ?? '',
+              'referrerPatientName': refName,
+              'referrerPatientPhone': refPhone,
+              'referrerPatientEmail': refEmail,
+              'referrerName': refName,
+              'referrerPhone': refPhone,
+
+              'referredPatientId': row['referred_patient_id'] ?? row['referred_user_id'],
+              'referredPatientName': row['referred_patient_name'] ?? 'Referred Patient',
+              'referredPatientMobile': row['referred_patient_mobile'] ?? '',
+              'referredUserName': row['referred_patient_name'] ?? 'Referred Patient',
+              'referredUserPhone': row['referred_patient_mobile'] ?? '',
+              'referredPatientAge': row['referred_patient_age'] ?? '',
+              'referredPatientGender': row['referred_patient_gender'] ?? '',
+              'referredPatientCity': row['referred_patient_city'] ?? '',
+              'referredPatientPincode': row['referred_patient_pincode'] ?? '',
+              'referredPatientLocation': row['referred_patient_location'] ?? '',
+
+              'requiredSpecialist': row['required_specialist'] ?? docSpecialty,
+              'clinicalComplaint': row['clinical_complaint'] ?? '',
+
+              'doctorId': row['doctor_id'] ?? row['assigned_doctor_id'] ?? '',
+              'doctorName': docName,
+              'doctorSpecialty': docSpecialty,
+              'doctorClinicName': clinicName,
+              'doctorLocation': clinicLoc,
+              'assignedDoctorName': docName,
+              'assignedClinicName': clinicName,
+
+              'status': row['status'] ?? 'Pending',
+              'rejectionReason': row['rejection_reason'],
+              'whatsappStatus': row['whatsapp_status'] ?? 'Sent',
+              'referralDate': row['referral_date'] ?? row['created_at'] ?? DateTime.now().toIso8601String(),
+              'createdAt': row['created_at'] ?? DateTime.now().toIso8601String(),
+              'referralCode': row['referral_code'] ?? 'PATIENT-DIRECT',
+            });
+          }
+        }
+      } catch (_) {}
+
+      // Tier B: Query fallback 'patient_problem_requests' where admin_notes contains REFERRAL_PAYLOAD:
+      try {
+        final probRes = await client
+            .from('patient_problem_requests')
+            .select('*')
+            .ilike('admin_notes', 'REFERRAL_PAYLOAD:%')
+            .order('created_at', ascending: false);
+
+        if (probRes.isNotEmpty) {
+          for (final row in probRes) {
+            final id = row['id']?.toString() ?? '';
+            if (seenIds.contains(id)) continue;
+            seenIds.add(id);
+
+            Map<String, dynamic> payload = {};
+            try {
+              final raw = (row['admin_notes'] ?? '').toString().replaceFirst('REFERRAL_PAYLOAD:', '').trim();
+              payload = jsonDecode(raw);
+            } catch (_) {}
+
+            final isAccepted = (row['status'] ?? '').toString().toUpperCase() == 'CONFIRMED';
+            final isRejected = (row['status'] ?? '').toString().toUpperCase() == 'REJECTED';
+            final status = isAccepted ? 'Accepted' : (isRejected ? 'Rejected' : 'Pending');
+
+            referralsList.add({
+              'id': id,
+              'referralId': id,
+              'referrerPatientId': payload['referrerPatientId'] ?? row['patient_id'] ?? '',
+              'referrerPatientName': payload['referrerPatientName'] ?? 'Patient Referrer',
+              'referrerPatientPhone': payload['referrerPatientPhone'] ?? '',
+              'referrerPatientEmail': payload['referrerPatientEmail'] ?? '',
+              'referrerName': payload['referrerPatientName'] ?? 'Patient Referrer',
+              'referrerPhone': payload['referrerPatientPhone'] ?? '',
+
+              'referredPatientId': row['patient_id'],
+              'referredPatientName': payload['referredPatientName'] ?? row['patient_name'] ?? 'Referred Patient',
+              'referredPatientMobile': payload['referredPatientMobile'] ?? row['patient_phone'] ?? '',
+              'referredUserName': payload['referredPatientName'] ?? row['patient_name'] ?? 'Referred Patient',
+              'referredUserPhone': payload['referredPatientMobile'] ?? row['patient_phone'] ?? '',
+              'referredPatientAge': payload['referredPatientAge'] ?? '',
+              'referredPatientGender': payload['referredPatientGender'] ?? '',
+              'referredPatientCity': payload['referredPatientCity'] ?? row['city'] ?? '',
+              'referredPatientPincode': payload['referredPatientPincode'] ?? row['pincode'] ?? '',
+              'referredPatientLocation': payload['referredPatientLocation'] ?? row['city'] ?? '',
+
+              'requiredSpecialist': payload['requiredSpecialist'] ?? row['problem_category'] ?? 'Specialist Consultation',
+              'clinicalComplaint': payload['clinicalComplaint'] ?? row['description'] ?? '',
+
+              'doctorId': payload['doctorId'] ?? '',
+              'doctorName': payload['doctorName'] ?? 'Dr. Specialist',
+              'doctorSpecialty': payload['requiredSpecialist'] ?? 'Specialist Consultation',
+              'doctorClinicName': payload['doctorClinicName'] ?? 'DentaGuru Partner Clinic',
+              'doctorLocation': payload['doctorLocation'] ?? '',
+              'assignedDoctorName': payload['doctorName'] ?? 'Dr. Specialist',
+
+              'status': status,
+              'rejectionReason': payload['rejectionReason'],
+              'whatsappStatus': 'Sent',
+              'referralDate': row['created_at'] ?? DateTime.now().toIso8601String(),
+              'createdAt': row['created_at'] ?? DateTime.now().toIso8601String(),
+              'referralCode': 'DIRECT-CARE',
+            });
+          }
+        }
+      } catch (_) {}
+
+      // Tier C: Also include peer referral attribution users (if any)
+      try {
+        final allUsersRes = await client.from('users').select('*');
+        final allUsers = List<Map<String, dynamic>>.from(allUsersRes);
+
+        for (final u in allUsers) {
+          String refBy = (u['referral_code'] ?? '').toString().toUpperCase().trim();
+          String refId = '';
+          if (u['device_token'] != null && u['device_token'].toString().startsWith('{')) {
+            try {
+              final meta = jsonDecode(u['device_token'].toString());
+              if (meta['referred_by_code'] != null) refBy = meta['referred_by_code'].toString().toUpperCase().trim();
+              if (meta['referrer_id'] != null) refId = meta['referrer_id'].toString();
+            } catch (_) {}
           }
 
-          String status = hasCompleted ? 'CONSULTATION_COMPLETED' : (hasBooked ? 'CONSULTATION_BOOKED' : 'REGISTERED');
+          final uId = u['id']?.toString() ?? '';
+          if ((refBy.isNotEmpty || refId.isNotEmpty) && !seenIds.contains(uId)) {
+            seenIds.add(uId);
 
-          referralsList.add({
-            'id': rId,
-            'referrerId': referrer['id'] ?? refId,
-            'referrerName': referrer['name'] ?? 'Referring Patient',
-            'referrerPhone': referrer['phone'] ?? '',
-            'referredUserId': rId,
-            'referredUserName': rName,
-            'referredUserPhone': rPhone,
-            'referralCode': refBy,
-            'status': status,
-            'createdAt': u['created_at'] ?? DateTime.now().toIso8601String(),
-          });
+            Map<String, dynamic>? referrer = allUsers.firstWhere(
+              (r) => r['id']?.toString() == refId ||
+                     (r['name'] != null && refBy.contains(r['name'].toString().substring(0, 1).toUpperCase())) ||
+                     (r['phone'] != null && refBy.endsWith(r['phone'].toString().substring(r['phone'].toString().length >= 4 ? r['phone'].toString().length - 4 : 0))),
+              orElse: () => <String, dynamic>{'name': 'Referring Patient', 'phone': ''},
+            );
+
+            referralsList.add({
+              'id': uId,
+              'referrerId': referrer['id'] ?? refId,
+              'referrerPatientId': referrer['id'] ?? refId,
+              'referrerPatientName': referrer['name'] ?? 'Referring Patient',
+              'referrerPatientPhone': referrer['phone'] ?? '',
+              'referrerName': referrer['name'] ?? 'Referring Patient',
+              'referrerPhone': referrer['phone'] ?? '',
+              'referredUserId': uId,
+              'referredPatientId': uId,
+              'referredUserName': u['name'] ?? 'Registered Patient',
+              'referredPatientName': u['name'] ?? 'Registered Patient',
+              'referredUserPhone': u['phone'] ?? '',
+              'referredPatientMobile': u['phone'] ?? '',
+              'referredPatientCity': u['city'] ?? '',
+              'referredPatientPincode': u['pincode'] ?? '',
+              'referredPatientLocation': u['city'] ?? '',
+              'requiredSpecialist': 'General Consultation',
+              'clinicalComplaint': 'Platform Referral Registration',
+              'referralCode': refBy,
+              'status': 'REGISTERED',
+              'whatsappStatus': 'Sent',
+              'createdAt': u['created_at'] ?? DateTime.now().toIso8601String(),
+              'referralDate': u['created_at'] ?? DateTime.now().toIso8601String(),
+            });
+          }
         }
-      }
+      } catch (_) {}
 
       return {'success': true, 'referrals': referralsList};
     } catch (e) {
