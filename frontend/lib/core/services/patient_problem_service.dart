@@ -321,6 +321,8 @@ class PatientConsultationRequest {
   String? assignedDoctorName;
   String? assignedDoctorSpecialty;
   String? assignedDoctorClinic;
+  String? assignedDoctorPhone;
+  String? assignedDoctorFee;
   String? preferredDoctorId;
   String? preferredDoctorName;
   String? preferredDoctorClinic;
@@ -356,6 +358,8 @@ class PatientConsultationRequest {
     this.assignedDoctorName,
     this.assignedDoctorSpecialty,
     this.assignedDoctorClinic,
+    this.assignedDoctorPhone,
+    this.assignedDoctorFee,
     this.preferredDoctorId,
     this.preferredDoctorName,
     this.preferredDoctorClinic,
@@ -473,6 +477,8 @@ class PatientConsultationRequest {
         'assignedDoctorName': assignedDoctorName,
         'assignedDoctorSpecialty': assignedDoctorSpecialty,
         'assignedDoctorClinic': assignedDoctorClinic,
+        'assignedDoctorPhone': assignedDoctorPhone,
+        'assignedDoctorFee': assignedDoctorFee,
         'preferredDoctorId': preferredDoctorId,
         'preferredDoctorName': preferredDoctorName,
         'preferredDoctorClinic': preferredDoctorClinic,
@@ -534,6 +540,8 @@ class PatientConsultationRequest {
       assignedDoctorName: assignedNameClean,
       assignedDoctorSpecialty: json['assignedDoctorSpecialty'] ?? json['suggested_dentist']?['speciality'],
       assignedDoctorClinic: json['assignedDoctorClinic'] ?? json['suggested_dentist']?['clinics']?['clinic_name'],
+      assignedDoctorPhone: json['assignedDoctorPhone'] ?? json['suggested_dentist']?['users']?['phone'],
+      assignedDoctorFee: json['assignedDoctorFee'],
       preferredDoctorId: (json['preferredDoctorId'] ?? json['preferred_doctor_id'])?.toString(),
       preferredDoctorName: prefDocName,
       preferredDoctorClinic: prefDocClinic,
@@ -2130,6 +2138,11 @@ class PatientProblemService extends ChangeNotifier {
     String symptoms = '',
     String preferredLocation = '',
     List<String> attachments = const [],
+    String? preferredDoctorId,
+    String? preferredDoctorName,
+    String? preferredDoctorClinic,
+    String? referringDentistId,
+    String? referringDentistName,
   }) async {
     String pName = currentPatient.name.trim();
     if (pName.isEmpty || pName.toLowerCase() == 'patient') {
@@ -2152,6 +2165,19 @@ class PatientProblemService extends ChangeNotifier {
       }
     }
 
+    final bool isDirectReferral = preferredDoctorId != null && preferredDoctorId.isNotEmpty;
+
+    // Resolve doctor details if this is a referral
+    DoctorModel? doc;
+    if (isDirectReferral) {
+      final matchIdx = _allDoctors.indexWhere(
+        (d) => d.id == preferredDoctorId || d.userId == preferredDoctorId || (preferredDoctorName != null && d.name.toLowerCase().contains(preferredDoctorName.toLowerCase())),
+      );
+      if (matchIdx != -1) {
+        doc = _allDoctors[matchIdx];
+      }
+    }
+
     // Insert a temp record immediately for optimistic UI feedback
     final tempId = 'PR-${DateTime.now().millisecondsSinceEpoch}';
     final pId = currentPatient.id.isNotEmpty ? currentPatient.id : Supabase.instance.client.auth.currentUser?.id;
@@ -2167,10 +2193,20 @@ class PatientProblemService extends ChangeNotifier {
       attachments: attachments,
       severity: severity,
       submittedAt: DateTime.now(),
-      status: 'SUBMITTED',
+      status: isDirectReferral ? 'DENTIST_ASSIGNED' : 'PENDING_ADMIN_REVIEW',
       city: pCity,
       pincode: pPincode,
       state: pState,
+      preferredDoctorId: preferredDoctorId,
+      preferredDoctorName: preferredDoctorName ?? doc?.name,
+      preferredDoctorClinic: preferredDoctorClinic ?? doc?.clinicName,
+      assignedDoctorId: isDirectReferral ? (doc?.id ?? preferredDoctorId) : null,
+      assignedDoctorName: isDirectReferral ? (doc?.name ?? preferredDoctorName) : null,
+      assignedDoctorSpecialty: isDirectReferral ? (doc?.specialty.isNotEmpty == true ? doc!.specialty : problemCategory) : null,
+      assignedDoctorClinic: isDirectReferral ? (doc?.clinicName ?? preferredDoctorClinic) : null,
+      assignedDoctorPhone: isDirectReferral ? (doc?.phone ?? '') : null,
+      assignedDoctorFee: isDirectReferral ? (doc?.consultationFee.isNotEmpty == true ? doc!.consultationFee : '₹500') : null,
+      adminNotes: isDirectReferral ? 'Referral directly assigned to ${doc?.name ?? preferredDoctorName}' : null,
     );
     _requests.insert(0, newReq);
     _saveToStorage();
@@ -2190,6 +2226,11 @@ class PatientProblemService extends ChangeNotifier {
         city: pCity,
         pincode: pPincode,
         state: pState,
+        preferredDoctorId: preferredDoctorId,
+        preferredDoctorName: preferredDoctorName,
+        preferredDoctorClinic: preferredDoctorClinic,
+        referringDentistId: referringDentistId,
+        referringDentistName: referringDentistName,
       );
       // Replace temp record with the server-assigned UUID record
       await syncProblemRequestsFromApi();
@@ -2751,6 +2792,11 @@ class PatientProblemService extends ChangeNotifier {
   List<ReferralItem> _adminReferrals = [];
   AdminReferralAnalytics _adminReferralAnalytics = AdminReferralAnalytics();
 
+  // Complete Patient -> Patient -> Doctor Referrals
+  List<PatientReferral> _myCreatedPatientReferrals = [];
+  List<PatientReferral> _doctorReceivedPatientReferrals = [];
+  List<PatientReferral> _receivedForMePatientReferrals = [];
+
   List<ReferralItem> get myReferrals => _myReferrals;
   ReferralStats get myReferralStats => _myReferralStats;
   String get myReferralCode => _myReferralCode.isNotEmpty
@@ -2759,6 +2805,11 @@ class PatientProblemService extends ChangeNotifier {
   List<ReferralItem> get adminReferrals => _adminReferrals;
   AdminReferralAnalytics get adminReferralAnalytics => _adminReferralAnalytics;
 
+  List<PatientReferral> get myCreatedPatientReferrals => List.unmodifiable(_myCreatedPatientReferrals);
+  List<PatientReferral> get doctorReceivedPatientReferrals => List.unmodifiable(_doctorReceivedPatientReferrals);
+  List<PatientReferral> get receivedForMePatientReferrals => List.unmodifiable(_receivedForMePatientReferrals);
+
+  /// Sync Patient Referrals created by the logged-in patient
   Future<void> syncReferralsFromApi() async {
     try {
       final authUser = Supabase.instance.client.auth.currentUser;
@@ -2766,6 +2817,7 @@ class PatientProblemService extends ChangeNotifier {
       final phone = currentPatient.phone.isNotEmpty ? currentPatient.phone : '';
       final code = myReferralCode;
 
+      // 1. Fetch organic invites
       final res = await ApiService().fetchMyReferrals(userId: userId, userPhone: phone, referralCode: code);
       if (res['success'] == true) {
         if (res['referralCode'] != null && res['referralCode'].toString().isNotEmpty) {
@@ -2779,11 +2831,192 @@ class PatientProblemService extends ChangeNotifier {
               .map((r) => ReferralItem.fromJson(Map<String, dynamic>.from(r)))
               .toList();
         }
-        notifyListeners();
       }
+
+      // 2. Fetch Patient Referrals (Patient A -> Patient B -> Doctor C)
+      final rawPatientRefs = await ApiService().fetchMyPatientReferrals(userId: userId);
+      _myCreatedPatientReferrals.clear();
+      for (final r in rawPatientRefs) {
+        try {
+          _myCreatedPatientReferrals.add(PatientReferral.fromJson(Map<String, dynamic>.from(r)));
+        } catch (_) {}
+      }
+
+      // 3. Fetch referrals where this user is the referred patient
+      final rawReceived = await ApiService().fetchReceivedPatientReferrals(patientId: userId, patientPhone: phone);
+      _receivedForMePatientReferrals.clear();
+      for (final r in rawReceived) {
+        try {
+          _receivedForMePatientReferrals.add(PatientReferral.fromJson(Map<String, dynamic>.from(r)));
+        } catch (_) {}
+      }
+
+      notifyListeners();
     } catch (e) {
       debugPrint('Error in syncReferralsFromApi: $e');
     }
+  }
+
+  /// Sync Referrals received by Doctor (Doctor isolation)
+  Future<void> syncDoctorReferralsFromApi({String? doctorId}) async {
+    try {
+      final authUser = Supabase.instance.client.auth.currentUser;
+      final effectiveDocId = doctorId ?? currentDoctor?.id ?? authUser?.id;
+      if (effectiveDocId != null && effectiveDocId.isNotEmpty) {
+        final raw = await ApiService().fetchDoctorPatientReferrals(doctorId: effectiveDocId);
+        _doctorReceivedPatientReferrals.clear();
+        for (final r in raw) {
+          try {
+            _doctorReceivedPatientReferrals.add(PatientReferral.fromJson(Map<String, dynamic>.from(r)));
+          } catch (_) {}
+        }
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Error in syncDoctorReferralsFromApi: $e');
+    }
+  }
+
+  /// Submit a new Patient Referral
+  Future<Map<String, dynamic>> submitPatientReferral({
+    required String referredPatientName,
+    required String referredPatientMobile,
+    required String referredPatientAge,
+    required String referredPatientGender,
+    required String referredPatientCity,
+    required String referredPatientPincode,
+    required String referredPatientLocation,
+    required String requiredSpecialist,
+    required String clinicalComplaint,
+    required String doctorId,
+  }) async {
+    try {
+      final authUser = Supabase.instance.client.auth.currentUser;
+      final referrerId = currentPatient.id.isNotEmpty ? currentPatient.id : authUser?.id;
+
+      final res = await ApiService().createPatientReferral(
+        referredPatientName: referredPatientName,
+        referredPatientMobile: referredPatientMobile,
+        referredPatientAge: referredPatientAge,
+        referredPatientGender: referredPatientGender,
+        referredPatientCity: referredPatientCity,
+        referredPatientPincode: referredPatientPincode,
+        referredPatientLocation: referredPatientLocation,
+        requiredSpecialist: requiredSpecialist,
+        clinicalComplaint: clinicalComplaint,
+        doctorId: doctorId,
+        referrerPatientId: referrerId,
+      );
+
+      if (res['success'] == true && res['referral'] != null) {
+        try {
+          final newRef = PatientReferral.fromJson(Map<String, dynamic>.from(res['referral']));
+          _myCreatedPatientReferrals.insert(0, newRef);
+          notifyListeners();
+        } catch (_) {}
+      }
+
+      return res;
+    } catch (e) {
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  /// Doctor Accepts Referral
+  Future<bool> acceptPatientReferralByDoctor(String referralId, {String? confirmedTimeSlot}) async {
+    try {
+      final res = await ApiService().acceptPatientReferral(referralId, confirmedTimeSlot: confirmedTimeSlot);
+      if (res['success'] == true) {
+        final idx = _doctorReceivedPatientReferrals.indexWhere((r) => r.id == referralId);
+        if (idx != -1) {
+          final old = _doctorReceivedPatientReferrals[idx];
+          _doctorReceivedPatientReferrals[idx] = PatientReferral(
+            id: old.id,
+            referrerPatientId: old.referrerPatientId,
+            referrerPatientName: old.referrerPatientName,
+            referrerPatientPhone: old.referrerPatientPhone,
+            referrerPatientEmail: old.referrerPatientEmail,
+            referredPatientId: old.referredPatientId,
+            referredPatientName: old.referredPatientName,
+            referredPatientMobile: old.referredPatientMobile,
+            referredPatientAge: old.referredPatientAge,
+            referredPatientGender: old.referredPatientGender,
+            referredPatientCity: old.referredPatientCity,
+            referredPatientPincode: old.referredPatientPincode,
+            referredPatientLocation: old.referredPatientLocation,
+            requiredSpecialist: old.requiredSpecialist,
+            clinicalComplaint: old.clinicalComplaint,
+            doctorId: old.doctorId,
+            doctorName: old.doctorName,
+            doctorSpecialty: old.doctorSpecialty,
+            doctorClinicName: old.doctorClinicName,
+            doctorCity: old.doctorCity,
+            doctorPincode: old.doctorPincode,
+            doctorLocation: old.doctorLocation,
+            doctorLanguages: old.doctorLanguages,
+            status: 'Accepted',
+            whatsappStatus: 'Sent',
+            referralDate: old.referralDate,
+            createdAt: old.createdAt,
+            updatedAt: DateTime.now(),
+          );
+          notifyListeners();
+        }
+        return true;
+      }
+    } catch (e) {
+      debugPrint('Error accepting referral: $e');
+    }
+    return false;
+  }
+
+  /// Doctor Rejects Referral
+  Future<bool> rejectPatientReferralByDoctor(String referralId, {String? rejectionReason}) async {
+    try {
+      final res = await ApiService().rejectPatientReferral(referralId, rejectionReason: rejectionReason);
+      if (res['success'] == true) {
+        final idx = _doctorReceivedPatientReferrals.indexWhere((r) => r.id == referralId);
+        if (idx != -1) {
+          final old = _doctorReceivedPatientReferrals[idx];
+          _doctorReceivedPatientReferrals[idx] = PatientReferral(
+            id: old.id,
+            referrerPatientId: old.referrerPatientId,
+            referrerPatientName: old.referrerPatientName,
+            referrerPatientPhone: old.referrerPatientPhone,
+            referrerPatientEmail: old.referrerPatientEmail,
+            referredPatientId: old.referredPatientId,
+            referredPatientName: old.referredPatientName,
+            referredPatientMobile: old.referredPatientMobile,
+            referredPatientAge: old.referredPatientAge,
+            referredPatientGender: old.referredPatientGender,
+            referredPatientCity: old.referredPatientCity,
+            referredPatientPincode: old.referredPatientPincode,
+            referredPatientLocation: old.referredPatientLocation,
+            requiredSpecialist: old.requiredSpecialist,
+            clinicalComplaint: old.clinicalComplaint,
+            doctorId: old.doctorId,
+            doctorName: old.doctorName,
+            doctorSpecialty: old.doctorSpecialty,
+            doctorClinicName: old.doctorClinicName,
+            doctorCity: old.doctorCity,
+            doctorPincode: old.doctorPincode,
+            doctorLocation: old.doctorLocation,
+            doctorLanguages: old.doctorLanguages,
+            status: 'Rejected',
+            rejectionReason: rejectionReason,
+            whatsappStatus: 'Sent',
+            referralDate: old.referralDate,
+            createdAt: old.createdAt,
+            updatedAt: DateTime.now(),
+          );
+          notifyListeners();
+        }
+        return true;
+      }
+    } catch (e) {
+      debugPrint('Error rejecting referral: $e');
+    }
+    return false;
   }
 
   Future<void> syncAdminReferralsFromApi() async {

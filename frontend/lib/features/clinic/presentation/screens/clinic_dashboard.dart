@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
+import '../../../../core/services/session_service.dart';
 import 'package:go_router/go_router.dart';
 
 class ClinicDashboardScreen extends StatefulWidget {
@@ -46,11 +47,16 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
           IconButton(
             icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
             tooltip: 'Log Out',
-            onPressed: () {
+            onPressed: () async {
+              await SessionService().clearSession();
+              if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Logged out successfully.')),
+                const SnackBar(
+                  content: Text('Logged out of Clinic workspace.'),
+                  duration: Duration(seconds: 2),
+                ),
               );
-              context.go('/');
+              context.go('/login');
             },
           ),
         ],

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../widgets/session_gate_screen.dart';
 import '../../features/home/presentation/screens/home_screen.dart';
 import '../../features/patient/presentation/screens/patient_dashboard.dart';
 import '../../features/dentist/presentation/screens/dentist_timeline.dart';
@@ -17,13 +18,13 @@ class LoginScreen extends StatelessWidget {
   }
 }
 
-// Router Configurations
+// Router Configurations with Persistent Session Resolution Gate
 final GoRouter appRouter = GoRouter(
   initialLocation: '/',
   routes: [
     GoRoute(
       path: '/',
-      builder: (context, state) => const AuthScreen(),
+      builder: (context, state) => const SessionGateScreen(),
     ),
     GoRoute(
       path: '/login',

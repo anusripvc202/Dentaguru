@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import '../../../../core/constants/api_constants.dart';
+import '../../../../core/services/session_service.dart';
 
 class AuthState {
   final bool isLoading;
@@ -29,9 +29,19 @@ class AuthState {
 }
 
 class AuthNotifier extends StateNotifier<AuthState> {
-  AuthNotifier() : super(AuthState());
+  AuthNotifier() : super(AuthState()) {
+    _loadInitialSession();
+  }
 
-  static const _secureStorage = FlutterSecureStorage();
+  Future<void> _loadInitialSession() async {
+    final session = await SessionService().getSession();
+    if (session != null && !session.isExpired) {
+      state = state.copyWith(
+        token: session.token,
+        role: session.role,
+      );
+    }
+  }
 
   /// Login directly against Vercel live backend
   Future<bool> login(String email, String password) async {
@@ -47,12 +57,19 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200 && data['success'] == true) {
-        final token = data['accessToken'] as String?;
+        final token = (data['accessToken'] ?? 'sb_token_${data['user']?['id']}').toString();
         final role = data['user']?['role'] as String? ?? 'Patient';
+        final userId = (data['user']?['id'] ?? 'user_${DateTime.now().millisecondsSinceEpoch}').toString();
+        final name = data['user']?['name'] as String?;
 
-        if (token != null) {
-          await _secureStorage.write(key: 'auth_token', value: token);
-        }
+        await SessionService().saveSession(
+          token: token,
+          role: role,
+          userId: userId,
+          email: email,
+          name: name,
+          metadata: data['user'] is Map<String, dynamic> ? data['user'] : {},
+        );
 
         state = state.copyWith(isLoading: false, token: token, role: role);
         return true;
@@ -99,10 +116,18 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 201 && data['success'] == true) {
-        final token = data['accessToken'] as String?;
-        if (token != null) {
-          await _secureStorage.write(key: 'auth_token', value: token);
-        }
+        final token = (data['accessToken'] ?? 'sb_token_${data['user']?['id']}').toString();
+        final userId = (data['user']?['id'] ?? 'user_${DateTime.now().millisecondsSinceEpoch}').toString();
+
+        await SessionService().saveSession(
+          token: token,
+          role: role,
+          userId: userId,
+          email: email,
+          phone: phone,
+          name: name,
+          metadata: data['user'] is Map<String, dynamic> ? data['user'] : {},
+        );
 
         state = state.copyWith(isLoading: false, token: token, role: role);
         return true;
@@ -136,15 +161,26 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200 && data['success'] == true) {
-        final token = data['accessToken'] as String?;
-        if (token != null) {
-          await _secureStorage.write(key: 'auth_token', value: token);
-        }
+        final token = (data['accessToken'] ?? 'sb_token_${data['user']?['id']}').toString();
+        final role = data['user']?['role'] as String? ?? 'Patient';
+        final userId = (data['user']?['id'] ?? 'user_${DateTime.now().millisecondsSinceEpoch}').toString();
+        final name = data['user']?['name'] as String?;
+        final email = data['user']?['email'] as String?;
+
+        await SessionService().saveSession(
+          token: token,
+          role: role,
+          userId: userId,
+          email: email,
+          phone: phone,
+          name: name,
+          metadata: data['user'] is Map<String, dynamic> ? data['user'] : {},
+        );
 
         state = state.copyWith(
           isLoading: false,
           token: token,
-          role: data['user']?['role'] ?? 'Patient',
+          role: role,
         );
         return true;
       } else {
@@ -163,8 +199,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
-  void logout() async {
-    await _secureStorage.delete(key: 'auth_token');
+  Future<void> logout() async {
+    await SessionService().clearSession();
     state = AuthState();
   }
 }

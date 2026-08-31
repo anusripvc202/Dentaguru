@@ -9,6 +9,7 @@ import '../../../../core/services/api_service.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/supabase_service.dart';
 import '../../../../core/services/analytics_service.dart';
+import '../../../../core/services/session_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -266,6 +267,13 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 ? _phoneController.text.trim()
                 : (!identifier.contains('@') && identifier.isNotEmpty ? identifier : ''));
 
+        final String effectiveToken = (responseData['accessToken'] ?? res['accessToken'] ?? res['token'] ?? 'sb_session_${userData['id'] ?? DateTime.now().millisecondsSinceEpoch}').toString();
+        final String effectiveUserId = (userData['id'] ?? Supabase.instance.client.auth.currentUser?.id ?? 'user_${DateTime.now().millisecondsSinceEpoch}').toString();
+        final String effectiveEmail = userData['email'] ?? (identifier.contains('@') ? identifier : '');
+        final String effectiveName = (userData['name'] != null && userData['name'].toString().trim().isNotEmpty)
+            ? userData['name'].toString().trim()
+            : (effectiveEmail.contains('@') ? effectiveEmail.split('@').first : identifier);
+
         AnalyticsService.logLogin(method: 'Direct_Contact_Login', role: _roleName);
 
         if (registeredRole.contains('dentist') || registeredRole.contains('doctor')) {
@@ -284,6 +292,19 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             clinicName: userData['clinicName'] ?? '',
             experienceYears: 5,
             photoBytes: photoBytes,
+          );
+          await SessionService().saveSession(
+            token: effectiveToken,
+            role: 'Dentist',
+            userId: docId,
+            email: effectiveEmail,
+            phone: userPhone,
+            name: docName,
+            metadata: {
+              ...userData,
+              'clinicName': userData['clinicName'] ?? '',
+              'specialty': 'General Dentistry',
+            },
           );
           await PatientProblemService().syncAllDataFromApi();
           if (!mounted) return;
@@ -313,6 +334,18 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           } else {
             PatientProblemService().clearSubAdminSession();
           }
+          await SessionService().saveSession(
+            token: effectiveToken,
+            role: isSubAdmin ? 'Sub-Admin' : 'Admin',
+            userId: effectiveUserId,
+            email: effectiveEmail,
+            phone: userPhone,
+            name: effectiveName,
+            metadata: {
+              ...userData,
+              'isSubAdmin': isSubAdmin,
+            },
+          );
           await PatientProblemService().syncAllDataFromApi();
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
@@ -361,6 +394,23 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             city: (userData['city'] ?? dbProfileMeta['city'] ?? cachedMap['city'] ?? '').toString(),
             pincode: (userData['pincode'] ?? dbProfileMeta['pincode'] ?? cachedMap['pincode'] ?? '').toString(),
             photoBytes: photoBytes,
+          );
+          await SessionService().saveSession(
+            token: effectiveToken,
+            role: 'Patient',
+            userId: effectiveUserId,
+            email: effectiveEmail,
+            phone: userPhone,
+            name: effectiveName,
+            metadata: {
+              ...userData,
+              'age': loginAge,
+              'gender': loginGender,
+              'bloodGroup': loginBloodGroup,
+              'emergencyContact': loginEmergency,
+              'city': (userData['city'] ?? dbProfileMeta['city'] ?? cachedMap['city'] ?? '').toString(),
+              'pincode': (userData['pincode'] ?? dbProfileMeta['pincode'] ?? cachedMap['pincode'] ?? '').toString(),
+            },
           );
           await PatientProblemService().syncAllDataFromApi();
           if (!mounted) return;
@@ -491,8 +541,17 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       setState(() => _isRegistering = false);
 
       if (res['success'] == true) {
+        final Map<String, dynamic> regData = res['data'] is Map<String, dynamic> ? res['data'] : {};
+        final Map<String, dynamic> regUser = (regData['user'] is Map<String, dynamic>)
+            ? regData['user']
+            : (res['user'] is Map<String, dynamic> ? res['user'] : {});
+
+        final String regToken = (regData['accessToken'] ?? res['accessToken'] ?? res['token'] ?? 'sb_session_${regUser['id'] ?? DateTime.now().millisecondsSinceEpoch}').toString();
+        final String regUserId = (regUser['id'] ?? Supabase.instance.client.auth.currentUser?.id ?? 'user_${DateTime.now().millisecondsSinceEpoch}').toString();
+
         if (_selectedRole == UserRole.patient) {
           PatientProblemService().updatePatientProfile(
+            id: regUserId,
             name: name,
             email: email,
             phone: phone,
@@ -504,6 +563,23 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             city: city,
             pincode: pincode,
             photoBytes: _pickedImageBytes,
+          );
+          await SessionService().saveSession(
+            token: regToken,
+            role: 'Patient',
+            userId: regUserId,
+            email: email,
+            phone: phone,
+            name: name,
+            metadata: {
+              'age': registeredAge,
+              'gender': _selectedGender ?? 'Female',
+              'bloodGroup': _selectedBloodGroup ?? 'O Positive (O+)',
+              'emergencyContact': _emergencyContactController.text.trim().isEmpty ? phone : _emergencyContactController.text.trim(),
+              'city': city,
+              'pincode': pincode,
+              'address': location,
+            },
           );
         } else if (_selectedRole == UserRole.dentist) {
           final exp = int.tryParse(_experienceController.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 5;
@@ -523,6 +599,37 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             experienceYears: exp,
             photoBytes: _pickedImageBytes,
             languages: selectedLangs,
+          );
+          await SessionService().saveSession(
+            token: regToken,
+            role: 'Dentist',
+            userId: docId,
+            email: email,
+            phone: phone,
+            name: name,
+            metadata: {
+              'licenseNumber': _licenseNoController.text.trim(),
+              'specialty': _selectedSpecialty ?? 'General Dentistry',
+              'clinicName': _clinicNameController.text.trim(),
+              'clinicAddress': clinicAddress.isNotEmpty ? clinicAddress : location,
+              'city': city,
+              'pincode': pincode,
+              'experienceYears': exp,
+              'languages': selectedLangs,
+            },
+          );
+        } else {
+          await SessionService().saveSession(
+            token: regToken,
+            role: 'Admin',
+            userId: regUserId,
+            email: email,
+            phone: phone,
+            name: name,
+            metadata: {
+              'city': city,
+              'pincode': pincode,
+            },
           );
         }
 

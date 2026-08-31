@@ -17,6 +17,10 @@ exports.createProblemRequest = async (req, res) => {
         let realPincode = req.body.pincode || (patientUser ? patientUser.pincode : '') || '';
         let realState = req.body.state || (patientUser ? patientUser.state : '') || '';
 
+        const preferredDoctorId = req.body.preferredDoctorId || req.body.suggested_dentist_id;
+        const isDirectReferral = !!preferredDoctorId;
+        const initialStatus = isDirectReferral ? 'DENTIST_ASSIGNED' : 'PENDING_ADMIN_REVIEW';
+
         const request = await PatientProblemRequest.create({
             patient_id: patientId,
             patient_name: realName,
@@ -29,21 +33,35 @@ exports.createProblemRequest = async (req, res) => {
             symptoms: symptoms || '',
             preferred_location: preferredLocation || null,
             attachments: attachments || [],
-            status: 'PENDING_ADMIN_REVIEW'
+            status: initialStatus,
+            suggested_dentist_id: preferredDoctorId || null,
+            admin_notes: isDirectReferral ? `Direct patient referral to ${req.body.preferredDoctorName || 'Dentist'}` : null
         });
 
-        // 🔔 Dispatch Notification to Admin
+        if (isDirectReferral) {
+            try {
+                await DentistSuggestion.create({
+                    request_id: request.id || request._id,
+                    patient_id: patientId,
+                    dentist_id: preferredDoctorId,
+                    status: 'SUGGESTED',
+                    notes: `Direct referral consultation with ${req.body.preferredDoctorName || 'Dentist'}`
+                });
+            } catch (_) {}
+        }
+
+        // 🔔 Dispatch Notification to Admin or Doctor
         await Notification.create({
-            recipient_role: 'Admin',
-            recipient_id: 'ALL',
-            title: '🚨 New Dental Problem Request',
-            message: `Patient (${realName}) submitted a new problem: ${problemCategory}`,
+            recipient_role: isDirectReferral ? 'Dentist' : 'Admin',
+            recipient_id: isDirectReferral ? preferredDoctorId : 'ALL',
+            title: isDirectReferral ? '🩺 Direct Referral Consultation' : '🚨 New Dental Problem Request',
+            message: `Patient (${realName}) consultation request for ${problemCategory}`,
             type: 'problem_request'
         });
 
         res.status(201).json({
             success: true,
-            message: 'Dental problem request submitted successfully. Awaiting admin review.',
+            message: isDirectReferral ? 'Referral submitted directly to doctor.' : 'Dental problem request submitted successfully. Awaiting admin review.',
             request
         });
     } catch (err) {

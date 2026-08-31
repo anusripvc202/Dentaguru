@@ -55,3 +55,27 @@ class DentaGuruLogo extends StatelessWidget {
     );
   }
 }
+
+/// Standalone tooth emblem icon for animated splash, gates and headers
+class DentaGuruToothIcon extends StatelessWidget {
+  final double size;
+
+  const DentaGuruToothIcon({super.key, this.size = 48.0});
+
+  @override
+  Widget build(BuildContext context) {
+    return Image.asset(
+      'assets/dentaguru_tooth_icon_transparent.png',
+      width: size,
+      height: size,
+      fit: BoxFit.contain,
+      errorBuilder: (context, error, stackTrace) {
+        return Icon(
+          Icons.medical_services_rounded,
+          size: size,
+          color: const Color(0xFF0052CC),
+        );
+      },
+    );
+  }
+}

@@ -8,6 +8,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
+import '../../../../core/services/session_service.dart';
 import '../../../../core/constants/permissions.dart';
 import '../../../../core/models/referral_model.dart';
 import 'patient_details_screen.dart';
@@ -1293,11 +1294,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     IconButton(
                       icon: const Icon(Icons.logout_rounded, color: AppTheme.statusCancelText, size: 20),
                       tooltip: 'Log Out',
-                      onPressed: () {
+                      onPressed: () async {
+                        await SessionService().clearSession();
+                        if (!mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Logged out successfully.')),
+                          const SnackBar(
+                            content: Text('Logged out of Admin Dashboard.'),
+                            duration: Duration(seconds: 2),
+                          ),
                         );
-                        context.go('/');
+                        context.go('/login');
                       },
                     ),
                   ],
@@ -1398,7 +1404,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 IconButton(
                                   icon: const Icon(Icons.logout_rounded, color: AppTheme.statusCancelText, size: 20),
                                   tooltip: 'Log Out',
-                                  onPressed: () => context.go('/'),
+                                  onPressed: () async {
+                                    await SessionService().clearSession();
+                                    if (!mounted) return;
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Logged out of Admin Dashboard.'),
+                                        duration: Duration(seconds: 2),
+                                      ),
+                                    );
+                                    context.go('/login');
+                                  },
                                 ),
                               ],
                             ),

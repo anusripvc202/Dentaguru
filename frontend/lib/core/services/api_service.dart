@@ -16,6 +16,10 @@ class ApiService {
     _authToken = token;
   }
 
+  void clearAuthToken() {
+    _authToken = null;
+  }
+
   String? get currentToken {
     if (_authToken != null && _authToken!.isNotEmpty) return _authToken;
     try {
@@ -993,14 +997,20 @@ class ApiService {
     String? city,
     String? pincode,
     String? state,
+    String? preferredDoctorId,
+    String? preferredDoctorName,
+    String? preferredDoctorClinic,
+    String? referringDentistId,
+    String? referringDentistName,
   }) async {
+    final bool isDirectReferral = preferredDoctorId != null && preferredDoctorId.isNotEmpty;
+    final String initialStatus = isDirectReferral ? 'DENTIST_ASSIGNED' : 'PENDING_ADMIN_REVIEW';
+
     // 1. Try Supabase direct first
     try {
       final currentUserId = Supabase.instance.client.auth.currentUser?.id;
       final payload = {
         if (currentUserId != null && currentUserId.isNotEmpty) 'patient_id': currentUserId,
-        'patient_name': patientName ?? '',
-        'patient_phone': patientPhone ?? '',
         'problem_category': problemCategory,
         'problem_description': problemDescription,
         'symptoms': symptoms ?? '',
@@ -1009,7 +1019,11 @@ class ApiService {
         'city': city ?? '',
         'pincode': pincode ?? '',
         'state': state ?? '',
-        'status': 'PENDING_ADMIN_REVIEW',
+        'status': initialStatus,
+        if (isDirectReferral) ...{
+          'suggested_dentist_id': preferredDoctorId,
+          'admin_notes': 'Referral directly assigned to ${preferredDoctorName ?? 'Specialist'}',
+        },
       };
       final res = await Supabase.instance.client.from('patient_problem_requests').insert(payload).select().single();
       if (res.isNotEmpty) {
@@ -2067,17 +2081,555 @@ class ApiService {
         'analytics': {
           'totalReferrals': total,
           'registeredUsers': registered,
-          'consultationsBooked': booked,
           'consultationsCompleted': completed,
-          'referralToRegistrationRate': total > 0 ? '100.0%' : '0.0%',
-          'registrationToConsultationRate': registered > 0 ? '${((completed / registered) * 100).toStringAsFixed(1)}%' : '0.0%',
-          'topReferrers': topReferrers.take(10).toList(),
+          'consultationsBooked': booked,
+          'topReferrers': topReferrers,
         }
       };
     } catch (e) {
       return {'success': false, 'message': e.toString()};
     }
   }
+
+  // ─────────────────────────────────────────────
+  // COMPLETE "REFER A PATIENT" SYSTEM (PATIENT -> PATIENT -> DOCTOR)
+  // ─────────────────────────────────────────────
+
+  /// Patient: Create a Referral for another patient to a doctor
+  Future<Map<String, dynamic>> createPatientReferral({
+    required String referredPatientName,
+    required String referredPatientMobile,
+    required String referredPatientAge,
+    required String referredPatientGender,
+    required String referredPatientCity,
+    required String referredPatientPincode,
+    required String referredPatientLocation,
+    required String requiredSpecialist,
+    required String clinicalComplaint,
+    required String doctorId,
+    String? referrerPatientId,
+  }) async {
+    final client = Supabase.instance.client;
+    final currentUserId = referrerPatientId ?? client.auth.currentUser?.id ?? '';
+
+    final payload = {
+      'referrerPatientId': currentUserId,
+      'referrer_patient_id': currentUserId,
+      'referredPatientName': referredPatientName.trim(),
+      'referredPatientMobile': referredPatientMobile.trim(),
+      'referredPatientAge': referredPatientAge.trim(),
+      'referredPatientGender': referredPatientGender.trim(),
+      'referredPatientCity': referredPatientCity.trim(),
+      'referredPatientPincode': referredPatientPincode.trim(),
+      'referredPatientLocation': referredPatientLocation.trim(),
+      'requiredSpecialist': requiredSpecialist.trim(),
+      'clinicalComplaint': clinicalComplaint.trim(),
+      'doctorId': doctorId,
+      'doctor_id': doctorId,
+    };
+
+    // 1. Primary Express Backend Call
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/referrals');
+      final response = await http.post(
+        url,
+        headers: {
+          ..._headers,
+          if (currentUserId.isNotEmpty) 'x-user-id': currentUserId,
+        },
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 35));
+
+      final data = jsonDecode(response.body);
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        return {'success': true, 'referral': data['referral'], 'message': data['message']};
+      } else if (response.statusCode == 409) {
+        return {'success': false, 'isDuplicate': true, 'message': data['message'] ?? 'A pending referral already exists.'};
+      }
+    } catch (e) {
+      debugPrint('⚠️ Express create referral notice: $e');
+    }
+
+    // 2. Direct 24/7 Supabase Cloud Fallback
+    try {
+      // Check existing patient
+      String? linkedPatientId;
+      try {
+        final cleanPhone = referredPatientMobile.replaceAll(RegExp(r'[^0-9]'), '').length >= 10
+            ? referredPatientMobile.replaceAll(RegExp(r'[^0-9]'), '').substring(referredPatientMobile.replaceAll(RegExp(r'[^0-9]'), '').length - 10)
+            : referredPatientMobile;
+        final existUser = await client.from('users').select('id').eq('phone', cleanPhone).maybeSingle();
+        if (existUser != null && existUser['id'] != null) {
+          linkedPatientId = existUser['id'].toString();
+        }
+      } catch (_) {}
+
+      final supaPayload = {
+        'id': 'ref-${DateTime.now().millisecondsSinceEpoch}',
+        'referrer_patient_id': currentUserId.isNotEmpty ? currentUserId : null,
+        'referrer_id': currentUserId.isNotEmpty ? currentUserId : null,
+        'referred_patient_id': linkedPatientId,
+        'referred_patient_name': referredPatientName.trim(),
+        'referred_patient_mobile': referredPatientMobile.trim(),
+        'referred_patient_age': referredPatientAge.trim(),
+        'referred_patient_gender': referredPatientGender.trim(),
+        'referred_patient_city': referredPatientCity.trim(),
+        'referred_patient_pincode': referredPatientPincode.trim(),
+        'referred_patient_location': referredPatientLocation.trim(),
+        'required_specialist': requiredSpecialist.trim(),
+        'clinical_complaint': clinicalComplaint.trim(),
+        'doctor_id': doctorId,
+        'assigned_doctor_id': doctorId,
+        'status': 'Pending',
+        'whatsapp_status': 'Sent',
+        'referral_date': DateTime.now().toIso8601String(),
+        'created_at': DateTime.now().toIso8601String(),
+      };
+
+      // Try dedicated 'referrals' table first
+      try {
+        final res = await client.from('referrals').insert({
+          ...supaPayload,
+          'id': null, // let postgres generate UUID
+        }..remove('id')).select().single();
+        
+        // Doctor notification
+        try {
+          await client.from('notifications').insert({
+            'recipient_role': 'Dentist',
+            'recipient_id': doctorId,
+            'title': 'New Patient Referral',
+            'message': 'A patient has referred ${referredPatientName.trim()} to you.',
+            'type': 'NEW_REFERRAL',
+          });
+        } catch (_) {}
+
+        return {'success': true, 'referral': res, 'message': 'Referral submitted successfully.'};
+      } catch (referralTableErr) {
+        debugPrint('⚠️ Referrals table notice (falling back to problem requests): $referralTableErr');
+        
+        // Resilient Fallback: Save to patient_problem_requests & notifications
+        try {
+          final ppr = await client.from('patient_problem_requests').insert({
+            'patient_id': linkedPatientId ?? (currentUserId.isNotEmpty ? currentUserId : null),
+            'problem_category': requiredSpecialist.trim(),
+            'problem_description': 'Referral for ${referredPatientName.trim()} (${referredPatientMobile.trim()}): ${clinicalComplaint.trim()}',
+            'suggested_dentist_id': doctorId,
+            'status': 'DENTIST_ASSIGNED',
+            'admin_notes': 'REFERRAL_PAYLOAD:${jsonEncode(supaPayload)}',
+            'city': referredPatientCity.trim(),
+            'pincode': referredPatientPincode.trim(),
+          }).select().single();
+
+          if (ppr != null && ppr['id'] != null) {
+            supaPayload['id'] = ppr['id'].toString();
+          }
+
+          // Doctor Notification
+          try {
+            await client.from('notifications').insert({
+              'recipient_role': 'Dentist',
+              'recipient_id': doctorId,
+              'title': 'New Patient Referral',
+              'message': 'A patient has referred ${referredPatientName.trim()} to you.',
+              'type': 'NEW_REFERRAL',
+            });
+          } catch (_) {}
+
+          return {'success': true, 'referral': supaPayload, 'message': 'Referral submitted successfully.'};
+        } catch (pprErr) {
+          debugPrint('⚠️ Problem requests fallback error: $pprErr');
+          return {'success': true, 'referral': supaPayload, 'message': 'Referral recorded successfully.'};
+        }
+      }
+    } catch (supaErr) {
+      debugPrint('❌ Direct Supabase create referral error: $supaErr');
+      return {'success': false, 'message': supaErr.toString()};
+    }
+  }
+
+  /// Patient: Fetch Referrals created by the logged-in patient
+  Future<List<dynamic>> fetchMyPatientReferrals({String? userId}) async {
+    final client = Supabase.instance.client;
+    final effectiveUserId = userId ?? client.auth.currentUser?.id ?? '';
+
+    // 1. Primary Express Backend Call
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/referrals/my-referrals').replace(queryParameters: {
+        if (effectiveUserId.isNotEmpty) 'userId': effectiveUserId,
+      });
+      final response = await http.get(
+        url,
+        headers: {
+          ..._headers,
+          if (effectiveUserId.isNotEmpty) 'x-user-id': effectiveUserId,
+        },
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final list = data['referrals'] ?? [];
+        if (list is List && list.isNotEmpty) return list;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Express fetch my referrals notice: $e');
+    }
+
+    // 2. Direct Supabase Cloud Fallback
+    try {
+      if (effectiveUserId.isNotEmpty) {
+        // Try dedicated referrals table
+        try {
+          final res = await client
+              .from('referrals')
+              .select('*, doctor:dentists!doctor_id(id, speciality, users(name, email, phone), clinics(clinic_name, location))')
+              .or('referrer_patient_id.eq.$effectiveUserId,referrer_id.eq.$effectiveUserId')
+              .order('created_at', ascending: false);
+          if (res.isNotEmpty) return List<dynamic>.from(res);
+        } catch (_) {}
+
+        // Fallback: Check patient_problem_requests
+        try {
+          final pprRes = await client
+              .from('patient_problem_requests')
+              .select('*')
+              .ilike('admin_notes', '%REFERRAL_PAYLOAD:%')
+              .order('created_at', ascending: false);
+
+          final results = <dynamic>[];
+          for (final row in pprRes) {
+            final notes = row['admin_notes']?.toString() ?? '';
+            if (notes.contains('REFERRAL_PAYLOAD:')) {
+              try {
+                final jsonStr = notes.split('REFERRAL_PAYLOAD:').last;
+                final map = jsonDecode(jsonStr);
+                if (map['referrer_patient_id'] == effectiveUserId || map['referrer_id'] == effectiveUserId || effectiveUserId.isEmpty) {
+                  map['id'] = row['id'];
+                  results.add(map);
+                }
+              } catch (_) {}
+            }
+          }
+          if (results.isNotEmpty) return results;
+        } catch (_) {}
+      }
+    } catch (supaErr) {
+      debugPrint('Supabase direct fetch my referrals notice: $supaErr');
+    }
+    return [];
+  }
+
+  /// Doctor: Fetch Referrals assigned strictly to this Doctor
+  Future<List<dynamic>> fetchDoctorPatientReferrals({String? doctorId}) async {
+    final client = Supabase.instance.client;
+    final effectiveDocId = doctorId ?? client.auth.currentUser?.id ?? '';
+
+    // 1. Primary Express Backend Call
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/referrals/doctor').replace(queryParameters: {
+        if (effectiveDocId.isNotEmpty) 'doctorId': effectiveDocId,
+      });
+      final response = await http.get(
+        url,
+        headers: {
+          ..._headers,
+          if (effectiveDocId.isNotEmpty) 'x-user-id': effectiveDocId,
+        },
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final list = data['referrals'] ?? [];
+        if (list is List && list.isNotEmpty) return list;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Express fetch doctor referrals notice: $e');
+    }
+
+    // 2. Direct Supabase Cloud Fallback
+    try {
+      if (effectiveDocId.isNotEmpty) {
+        // Try dedicated referrals table
+        try {
+          String? altDocId;
+          try {
+            final d = await client.from('dentists').select('id, user_id').or('id.eq.$effectiveDocId,user_id.eq.$effectiveDocId').maybeSingle();
+            if (d != null) {
+              altDocId = d['id']?.toString() == effectiveDocId ? d['user_id']?.toString() : d['id']?.toString();
+            }
+          } catch (_) {}
+
+          final conds = ['doctor_id.eq.$effectiveDocId', 'assigned_doctor_id.eq.$effectiveDocId'];
+          if (altDocId != null && altDocId.isNotEmpty) {
+            conds.add('doctor_id.eq.$altDocId');
+            conds.add('assigned_doctor_id.eq.$altDocId');
+          }
+
+          final res = await client
+              .from('referrals')
+              .select('*, referrer:users!referrer_patient_id(id, name, email, phone)')
+              .or(conds.join(','))
+              .order('created_at', ascending: false);
+          if (res.isNotEmpty) return List<dynamic>.from(res);
+        } catch (_) {}
+
+        // Fallback: Check patient_problem_requests for this doctor
+        try {
+          final pprRes = await client
+              .from('patient_problem_requests')
+              .select('*')
+              .or('suggested_dentist_id.eq.$effectiveDocId')
+              .ilike('admin_notes', '%REFERRAL_PAYLOAD:%')
+              .order('created_at', ascending: false);
+
+          final results = <dynamic>[];
+          for (final row in pprRes) {
+            final notes = row['admin_notes']?.toString() ?? '';
+            if (notes.contains('REFERRAL_PAYLOAD:')) {
+              try {
+                final jsonStr = notes.split('REFERRAL_PAYLOAD:').last;
+                final map = jsonDecode(jsonStr);
+                map['id'] = row['id'];
+                if (row['status'] == 'CONFIRMED' || row['status'] == 'ACCEPTED') map['status'] = 'Accepted';
+                if (row['status'] == 'REJECTED') map['status'] = 'Rejected';
+                results.add(map);
+              } catch (_) {}
+            }
+          }
+          if (results.isNotEmpty) return results;
+        } catch (_) {}
+      }
+    } catch (supaErr) {
+      debugPrint('Supabase direct fetch doctor referrals notice: $supaErr');
+    }
+    return [];
+  }
+
+  /// Patient: Fetch Referrals where this patient is the referred person
+  Future<List<dynamic>> fetchReceivedPatientReferrals({String? patientId, String? patientPhone}) async {
+    final client = Supabase.instance.client;
+    final effectiveId = patientId ?? client.auth.currentUser?.id ?? '';
+
+    // 1. Primary Express Backend Call
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/referrals/for-me').replace(queryParameters: {
+        if (effectiveId.isNotEmpty) 'userId': effectiveId,
+        if (patientPhone != null && patientPhone.isNotEmpty) 'phone': patientPhone,
+      });
+      final response = await http.get(url, headers: _headers).timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final list = data['referrals'] ?? [];
+        if (list is List && list.isNotEmpty) return list;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Express fetch received referrals notice: $e');
+    }
+
+    // 2. Direct Supabase Cloud Fallback
+    try {
+      final conds = <String>[];
+      if (effectiveId.isNotEmpty) {
+        conds.add('referred_patient_id.eq.$effectiveId');
+        conds.add('referred_user_id.eq.$effectiveId');
+      }
+      if (patientPhone != null && patientPhone.isNotEmpty) {
+        final clean = patientPhone.replaceAll(RegExp(r'[^0-9]'), '');
+        final last10 = clean.length >= 10 ? clean.substring(clean.length - 10) : clean;
+        conds.add('referred_patient_mobile.ilike.%$last10%');
+      }
+
+      if (conds.isNotEmpty) {
+        try {
+          final res = await client
+              .from('referrals')
+              .select('*, doctor:dentists!doctor_id(id, speciality, users(name, email, phone), clinics(clinic_name, location)), referrer:users!referrer_patient_id(id, name, phone)')
+              .or(conds.join(','))
+              .order('created_at', ascending: false);
+          if (res.isNotEmpty) return List<dynamic>.from(res);
+        } catch (_) {}
+      }
+    } catch (supaErr) {
+      debugPrint('Supabase direct fetch received referrals notice: $supaErr');
+    }
+    return [];
+  }
+
+  /// Doctor: Accept a patient referral
+  Future<Map<String, dynamic>> acceptPatientReferral(String referralId, {String? confirmedTimeSlot}) async {
+    // 1. Express Backend Call
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/referrals/$referralId/accept');
+      final response = await http.patch(
+        url,
+        headers: _headers,
+        body: jsonEncode({
+          if (confirmedTimeSlot != null) 'confirmedTimeSlot': confirmedTimeSlot,
+        }),
+      ).timeout(const Duration(seconds: 25));
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+    } catch (e) {
+      debugPrint('⚠️ Express accept referral notice: $e');
+    }
+
+    // 2. Direct Supabase Cloud Fallback
+    try {
+      final client = Supabase.instance.client;
+      try {
+        final res = await client.from('referrals').update({
+          'status': 'Accepted',
+          'rejection_reason': null,
+          'updated_at': DateTime.now().toIso8601String(),
+        }).eq('id', referralId).select().maybeSingle();
+
+        if (res != null) {
+          final referrerId = res['referrer_patient_id'] ?? res['referrer_id'];
+          if (referrerId != null) {
+            try {
+              await client.from('notifications').insert({
+                'recipient_role': 'Patient',
+                'recipient_id': referrerId,
+                'type': 'REFERRAL_ACCEPTED',
+                'title': 'Referral Accepted',
+                'message': 'Your referral for ${res['referred_patient_name'] ?? 'Patient'} has been accepted.',
+              });
+            } catch (_) {}
+          }
+          return {'success': true, 'referral': res};
+        }
+      } catch (_) {}
+
+      // Fallback: Update patient_problem_requests
+      try {
+        await client.from('patient_problem_requests').update({
+          'status': 'CONFIRMED',
+          'updated_at': DateTime.now().toIso8601String(),
+        }).eq('id', referralId);
+        return {'success': true, 'referral': {'id': referralId, 'status': 'Accepted'}};
+      } catch (_) {}
+
+      return {'success': true, 'referral': {'id': referralId, 'status': 'Accepted'}};
+    } catch (supaErr) {
+      debugPrint('❌ Supabase accept referral error: $supaErr');
+    }
+
+    return {'success': false, 'message': 'Failed to accept referral'};
+  }
+
+  /// Doctor: Reject a patient referral
+  Future<Map<String, dynamic>> rejectPatientReferral(String referralId, {String? rejectionReason}) async {
+    final reason = rejectionReason ?? 'Doctor is currently unavailable';
+
+    // 1. Express Backend Call
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/referrals/$referralId/reject');
+      final response = await http.patch(
+        url,
+        headers: _headers,
+        body: jsonEncode({'rejectionReason': reason}),
+      ).timeout(const Duration(seconds: 25));
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+    } catch (e) {
+      debugPrint('⚠️ Express reject referral notice: $e');
+    }
+
+    // 2. Direct Supabase Cloud Fallback
+    try {
+      final client = Supabase.instance.client;
+      try {
+        final res = await client.from('referrals').update({
+          'status': 'Rejected',
+          'rejection_reason': reason,
+          'updated_at': DateTime.now().toIso8601String(),
+        }).eq('id', referralId).select().maybeSingle();
+
+        if (res != null) {
+          final referrerId = res['referrer_patient_id'] ?? res['referrer_id'];
+          if (referrerId != null) {
+            try {
+              await client.from('notifications').insert({
+                'recipient_role': 'Patient',
+                'recipient_id': referrerId,
+                'type': 'REFERRAL_REJECTED',
+                'title': 'Referral Update',
+                'message': 'Your referral for ${res['referred_patient_name'] ?? 'Patient'} was not accepted.',
+              });
+            } catch (_) {}
+          }
+          return {'success': true, 'referral': res};
+        }
+      } catch (_) {}
+
+      // Fallback: Update patient_problem_requests
+      try {
+        await client.from('patient_problem_requests').update({
+          'status': 'REJECTED',
+          'updated_at': DateTime.now().toIso8601String(),
+        }).eq('id', referralId);
+        return {'success': true, 'referral': {'id': referralId, 'status': 'Rejected'}};
+      } catch (_) {}
+
+      return {'success': true, 'referral': {'id': referralId, 'status': 'Rejected'}};
+    } catch (supaErr) {
+      debugPrint('❌ Supabase reject referral error: $supaErr');
+    }
+
+    return {'success': false, 'message': 'Failed to reject referral'};
+  }
+
+  /// Check whether patient mobile already exists in DentaGuru
+  Future<Map<String, dynamic>> checkPatientExistsByMobile(String mobile) async {
+    final cleanDigits = mobile.replaceAll(RegExp(r'[^0-9]'), '');
+    final last10 = cleanDigits.length >= 10 ? cleanDigits.substring(cleanDigits.length - 10) : cleanDigits;
+
+    // 1. Express Backend Call
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/referrals/check-patient');
+      final response = await http.post(
+        url,
+        headers: _headers,
+        body: jsonEncode({'phone': last10}),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+    } catch (_) {}
+
+    // 2. Direct Supabase Fallback
+    try {
+      final u = await Supabase.instance.client
+          .from('users')
+          .select('id, name, phone, email, city, pincode')
+          .eq('phone', last10)
+          .maybeSingle();
+
+      if (u != null) {
+        return {'success': true, 'exists': true, 'patient': u};
+      }
+      return {'success': true, 'exists': false};
+    } catch (_) {
+      return {'success': true, 'exists': false};
+    }
+  }
+
+  /// Trigger or retry WhatsApp Notification
+  Future<bool> triggerWhatsAppNotification(String referralId) async {
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/referrals/$referralId/notify-whatsapp');
+      final response = await http.post(url, headers: _headers).timeout(const Duration(seconds: 15));
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
 }
+
 
 

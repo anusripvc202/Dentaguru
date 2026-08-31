@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/constants/permissions.dart';
 import '../../../../core/services/patient_problem_service.dart';
+import '../../../../core/services/session_service.dart';
 import '../../../../core/theme/app_theme.dart';
 
 class SubAdminDashboardScreen extends StatefulWidget {
@@ -1305,9 +1306,17 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
     );
   }
 
-  void _handleLogout(BuildContext context) {
+  void _handleLogout(BuildContext context) async {
+    await SessionService().clearSession();
     _service.clearSubAdminSession();
-    context.go('/auth');
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Logged out of Sub-Admin workspace.'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+    context.go('/login');
   }
 }
 

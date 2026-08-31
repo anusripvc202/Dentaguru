@@ -228,21 +228,63 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 11. REFERRALS TABLE (Refer a Friend Organic Growth System)
+-- 11. REFERRALS TABLE (Patient Referrals & Organic Referral System)
 CREATE TABLE IF NOT EXISTS public.referrals (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    referrer_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-    referred_user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-    referral_code VARCHAR(100) NOT NULL,
-    status VARCHAR(50) DEFAULT 'REGISTERED',
+    referrer_patient_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+    referred_patient_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+    referred_patient_name VARCHAR(255),
+    referred_patient_mobile VARCHAR(50),
+    referred_patient_age VARCHAR(20),
+    referred_patient_gender VARCHAR(50),
+    referred_patient_city VARCHAR(100),
+    referred_patient_pincode VARCHAR(20),
+    referred_patient_location VARCHAR(255),
+    required_specialist VARCHAR(255),
+    clinical_complaint TEXT,
+    doctor_id UUID REFERENCES public.dentists(id) ON DELETE SET NULL,
+    status VARCHAR(50) DEFAULT 'Pending',
+    rejection_reason TEXT,
+    whatsapp_status VARCHAR(50) DEFAULT 'Pending',
+    referral_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    -- Backward-compatibility fields
+    referrer_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+    referred_user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+    referral_code VARCHAR(100),
     appointment_id UUID REFERENCES public.appointments(id) ON DELETE SET NULL,
     assigned_doctor_id UUID REFERENCES public.dentists(id) ON DELETE SET NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Ensure all columns exist if table was previously created
+ALTER TABLE public.referrals ADD COLUMN IF NOT EXISTS referrer_patient_id UUID REFERENCES public.users(id) ON DELETE CASCADE;
+ALTER TABLE public.referrals ADD COLUMN IF NOT EXISTS referred_patient_id UUID REFERENCES public.users(id) ON DELETE SET NULL;
+ALTER TABLE public.referrals ADD COLUMN IF NOT EXISTS referred_patient_name VARCHAR(255);
+ALTER TABLE public.referrals ADD COLUMN IF NOT EXISTS referred_patient_mobile VARCHAR(50);
+ALTER TABLE public.referrals ADD COLUMN IF NOT EXISTS referred_patient_age VARCHAR(20);
+ALTER TABLE public.referrals ADD COLUMN IF NOT EXISTS referred_patient_gender VARCHAR(50);
+ALTER TABLE public.referrals ADD COLUMN IF NOT EXISTS referred_patient_city VARCHAR(100);
+ALTER TABLE public.referrals ADD COLUMN IF NOT EXISTS referred_patient_pincode VARCHAR(20);
+ALTER TABLE public.referrals ADD COLUMN IF NOT EXISTS referred_patient_location VARCHAR(255);
+ALTER TABLE public.referrals ADD COLUMN IF NOT EXISTS required_specialist VARCHAR(255);
+ALTER TABLE public.referrals ADD COLUMN IF NOT EXISTS clinical_complaint TEXT;
+ALTER TABLE public.referrals ADD COLUMN IF NOT EXISTS doctor_id UUID REFERENCES public.dentists(id) ON DELETE SET NULL;
+ALTER TABLE public.referrals ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+ALTER TABLE public.referrals ADD COLUMN IF NOT EXISTS whatsapp_status VARCHAR(50) DEFAULT 'Pending';
+ALTER TABLE public.referrals ADD COLUMN IF NOT EXISTS referral_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+
+CREATE INDEX IF NOT EXISTS idx_referrals_referrer_patient_id ON public.referrals(referrer_patient_id);
+CREATE INDEX IF NOT EXISTS idx_referrals_referred_patient_id ON public.referrals(referred_patient_id);
+CREATE INDEX IF NOT EXISTS idx_referrals_referred_patient_mobile ON public.referrals(referred_patient_mobile);
+CREATE INDEX IF NOT EXISTS idx_referrals_doctor_id ON public.referrals(doctor_id);
+CREATE INDEX IF NOT EXISTS idx_referrals_status ON public.referrals(status);
 CREATE INDEX IF NOT EXISTS idx_referrals_referrer_id ON public.referrals(referrer_id);
 CREATE INDEX IF NOT EXISTS idx_referrals_referred_user_id ON public.referrals(referred_user_id);
 CREATE INDEX IF NOT EXISTS idx_referrals_code ON public.referrals(referral_code);
+
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS referral_id UUID REFERENCES public.referrals(id) ON DELETE SET NULL;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS notification_type VARCHAR(50);
 
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS referral_code VARCHAR(50);
 

@@ -5,8 +5,10 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
+import '../../../../core/services/session_service.dart';
 import '../../../../core/widgets/dental_ads_banner.dart';
 import '../../../../core/widgets/whatsapp_chat_modal.dart';
+import '../../../../core/models/referral_model.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class DentistTimelineScreen extends StatefulWidget {
@@ -29,18 +31,22 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   late Animation<Offset> _slideAnimation;
   late Animation<double> _pulseScaleAnimation;
 
+  String _doctorReferralFilter = 'All';
+
   @override
   void initState() {
     super.initState();
     _patientService.addListener(_onServiceUpdate);
     _patientService.setDentistMode(true);
     _patientService.syncAllDataFromApi();
+    _patientService.syncDoctorReferralsFromApi();
 
-    // ⏱️ Auto-sync polling timer (every 4s) to catch assigned patients immediately
+    // ⏱️ Auto-sync polling timer (every 4s) to catch assigned patients & direct referrals immediately
     _autoSyncTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       if (mounted) {
         _patientService.syncProblemRequestsFromApi();
         _patientService.syncDentistAssignedRequestsFromApi();
+        _patientService.syncDoctorReferralsFromApi();
       }
     });
 
@@ -642,16 +648,16 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                   icon: const Icon(Icons.logout_rounded, color: Color(0xFFEF4444), size: 22),
                   tooltip: 'Log Out',
                   onPressed: () async {
+                    await SessionService().clearSession();
                     await _patientService.clearAllDataAndStorage();
-                    try {
-                      await Supabase.instance.client.auth.signOut();
-                    } catch (_) {}
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Logged out of Dentist workspace.')),
-                      );
-                      context.go('/');
-                    }
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Logged out of Dentist workspace.'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                    context.go('/login');
                   },
                 ),
               ],
@@ -1317,6 +1323,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               ),
               const SizedBox(height: 20),
 
+              // 4b. Direct Patient Referrals Section
+              _buildDoctorPatientReferralsSection(),
+              const SizedBox(height: 24),
+
               // ── BOTTOM ADS SECTION (Single-card auto-transition under Admin Assigned Patients) ──
               const DentalAdsBanner(isDentist: true, remainingSlidesOnly: true),
               const SizedBox(height: 24),
@@ -1948,6 +1958,594 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  // ==========================================
+  // DIRECT PATIENT REFERRALS SECTION & MODALS
+  // ==========================================
+  Widget _buildDoctorPatientReferralsSection() {
+    final allDoctorRefs = _patientService.doctorReceivedPatientReferrals;
+
+    final filteredRefs = allDoctorRefs.where((r) {
+      if (_doctorReferralFilter == 'Pending') return r.status == 'Pending';
+      if (_doctorReferralFilter == 'Accepted') return r.status == 'Accepted';
+      if (_doctorReferralFilter == 'Rejected') return r.status == 'Rejected';
+      return true;
+    }).toList();
+
+    final pendingCount = allDoctorRefs.where((r) => r.status == 'Pending').length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Row(
+                children: [
+                  const Text(
+                    'Direct Patient Referrals',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                  ),
+                  if (pendingCount > 0) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF59E0B),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '$pendingCount New',
+                        style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.refresh_rounded, size: 18, color: AppTheme.primaryBlue),
+              onPressed: () => _patientService.syncDoctorReferralsFromApi(),
+              tooltip: 'Refresh Referrals',
+            ),
+          ],
+        ),
+        const SizedBox(height: 2),
+        const Text(
+          'Patients referred directly to you by other patients',
+          style: TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
+        ),
+        const SizedBox(height: 10),
+
+        // Filter Chips
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: ['All', 'Pending', 'Accepted', 'Rejected'].map((filter) {
+              final isSelected = _doctorReferralFilter == filter;
+              int count = allDoctorRefs.length;
+              if (filter == 'Pending') count = allDoctorRefs.where((r) => r.status == 'Pending').length;
+              if (filter == 'Accepted') count = allDoctorRefs.where((r) => r.status == 'Accepted').length;
+              if (filter == 'Rejected') count = allDoctorRefs.where((r) => r.status == 'Rejected').length;
+
+              return Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: FilterChip(
+                  label: Text(
+                    '$filter ($count)',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      color: isSelected ? Colors.white : AppTheme.textDark,
+                    ),
+                  ),
+                  selected: isSelected,
+                  selectedColor: AppTheme.primaryBlue,
+                  backgroundColor: Colors.white,
+                  checkmarkColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                    side: BorderSide(
+                      color: isSelected ? AppTheme.primaryBlue : const Color(0xFFE2E8F0),
+                    ),
+                  ),
+                  onSelected: (selected) {
+                    if (selected) {
+                      setState(() => _doctorReferralFilter = filter);
+                    }
+                  },
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        if (filteredRefs.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: const Color(0xFFEEF2F6)),
+            ),
+            child: Column(
+              children: [
+                Icon(Icons.person_add_disabled_rounded, size: 36, color: Colors.grey.withOpacity(0.4)),
+                const SizedBox(height: 8),
+                Text(
+                  _doctorReferralFilter == 'All'
+                      ? 'No direct patient referrals received yet.'
+                      : 'No $_doctorReferralFilter patient referrals.',
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                  'When patients refer friends or family to your clinic, they will appear here.',
+                  style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          )
+        else
+          ...filteredRefs.map((ref) {
+            final isPending = ref.status == 'Pending';
+            final isAccepted = ref.status == 'Accepted';
+            final isRejected = ref.status == 'Rejected';
+
+            final statusColor = isAccepted
+                ? const Color(0xFF10B981)
+                : (isRejected ? const Color(0xFFEF4444) : const Color(0xFFF59E0B));
+            final statusBg = isAccepted
+                ? const Color(0xFFDCFCE7)
+                : (isRejected ? const Color(0xFFFEE2E2) : const Color(0xFFFEF3C7));
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: isPending
+                      ? const Color(0xFFF59E0B).withOpacity(0.5)
+                      : (isAccepted ? const Color(0xFF86EFAC) : const Color(0xFFE2E8F0)),
+                  width: isPending ? 1.5 : 1,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: (isPending ? const Color(0xFFF59E0B) : Colors.black).withOpacity(0.04),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Top Row: Patient Name & Status
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 18,
+                              backgroundColor: AppTheme.primaryBlue.withOpacity(0.12),
+                              child: Text(
+                                ref.referredPatientName.isNotEmpty ? ref.referredPatientName[0].toUpperCase() : 'P',
+                                style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryBlue, fontSize: 14),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    ref.referredPatientName,
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  Text(
+                                    '+91 ${ref.referredPatientMobile} • ${ref.referredPatientAge} Yrs • ${ref.referredPatientGender}',
+                                    style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: statusBg,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          ref.status,
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: statusColor),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  const Divider(height: 1, thickness: 1, color: Color(0xFFF1F5F9)),
+                  const SizedBox(height: 8),
+
+                  // Referrer & Specialty Info
+                  Row(
+                    children: [
+                      const Icon(Icons.person_pin_circle_outlined, size: 14, color: Color(0xFF6366F1)),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: RichText(
+                          text: TextSpan(
+                            style: const TextStyle(fontSize: 11.5, color: AppTheme.textDark),
+                            children: [
+                              const TextSpan(text: 'Referred by: ', style: TextStyle(color: AppTheme.textMuted)),
+                              TextSpan(text: ref.referrerPatientName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                              if (ref.referrerPatientPhone.isNotEmpty)
+                                TextSpan(text: ' (+91 ${ref.referrerPatientPhone})', style: const TextStyle(color: AppTheme.textMuted)),
+                            ],
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+
+                  Row(
+                    children: [
+                      const Icon(Icons.medical_services_outlined, size: 14, color: Color(0xFF0D9488)),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Category: ${ref.requiredSpecialist}',
+                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF0D9488)),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  if (ref.clinicalComplaint.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Problem / Clinical Complaint:', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: AppTheme.textMuted)),
+                          const SizedBox(height: 2),
+                          Text(
+                            ref.clinicalComplaint,
+                            style: const TextStyle(fontSize: 11.5, color: AppTheme.textDark, height: 1.3),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+
+                  if (isRejected && ref.rejectionReason != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'Rejection Reason: ${ref.rejectionReason}',
+                      style: const TextStyle(fontSize: 11, color: Color(0xFFDC2626), fontWeight: FontWeight.w600),
+                    ),
+                  ],
+
+                  const SizedBox(height: 12),
+
+                  // Actions: View Details, Accept, Reject
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => _showDoctorReferralDetailModal(context, ref),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          child: const Text('View Details', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                      if (isPending) ...[
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => _showRejectReferralDialog(context, ref),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFFEF4444),
+                              side: const BorderSide(color: Color(0xFFFCA5A5)),
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            child: const Text('Reject', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () => _acceptReferralDirectly(context, ref),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF10B981),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            child: const Text('Accept', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            );
+          }),
+      ],
+    );
+  }
+
+  Future<void> _acceptReferralDirectly(BuildContext context, PatientReferral ref) async {
+    final success = await _patientService.acceptPatientReferralByDoctor(ref.id);
+    if (!mounted) return;
+    if (success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ Accepted referral for ${ref.referredPatientName}. WhatsApp notification dispatched.'),
+          backgroundColor: const Color(0xFF10B981),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to accept referral. Please try again.')),
+      );
+    }
+  }
+
+  void _showRejectReferralDialog(BuildContext context, PatientReferral ref) {
+    final reasonCtrl = TextEditingController(text: 'Doctor is currently unavailable for new referrals');
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: Text('Reject Referral for ${ref.referredPatientName}?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Please provide a brief reason for declining this patient referral:'),
+              const SizedBox(height: 10),
+              TextField(
+                controller: reasonCtrl,
+                maxLines: 2,
+                decoration: InputDecoration(
+                  hintText: 'e.g. Doctor schedule full, specialized surgery required elsewhere...',
+                  filled: true,
+                  fillColor: const Color(0xFFF8FAFC),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(dialogCtx);
+                final reason = reasonCtrl.text.trim();
+                final ok = await _patientService.rejectPatientReferralByDoctor(ref.id, rejectionReason: reason);
+                if (!mounted) return;
+                if (ok) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Referral for ${ref.referredPatientName} declined. Referrer notified.'),
+                      backgroundColor: Colors.grey[800],
+                    ),
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
+              child: const Text('Confirm Reject', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showDoctorReferralDetailModal(BuildContext context, PatientReferral ref) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final isPending = ref.status == 'Pending';
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.85,
+          padding: const EdgeInsets.all(20),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Referral Details', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
+                  IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
+                ],
+              ),
+              const Divider(),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      // Section 1: Referrer
+                      _buildDetailCard(
+                        title: '1. REFERRER INFO',
+                        icon: Icons.person_pin_rounded,
+                        color: const Color(0xFF6366F1),
+                        items: [
+                          {'label': 'Referrer Name', 'value': ref.referrerPatientName},
+                          {'label': 'Referrer Mobile', 'value': '+91 ${ref.referrerPatientPhone}'},
+                          if (ref.referrerPatientEmail.isNotEmpty)
+                            {'label': 'Referrer Email', 'value': ref.referrerPatientEmail},
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Section 2: Referred Patient
+                      _buildDetailCard(
+                        title: '2. REFERRED PATIENT INFO',
+                        icon: Icons.person_rounded,
+                        color: const Color(0xFF0284C7),
+                        items: [
+                          {'label': 'Patient Name', 'value': ref.referredPatientName},
+                          {'label': 'Mobile Number', 'value': '+91 ${ref.referredPatientMobile}'},
+                          {'label': 'Age & Gender', 'value': '${ref.referredPatientAge} Years • ${ref.referredPatientGender}'},
+                          {'label': 'Location', 'value': '${ref.referredPatientLocation}, ${ref.referredPatientCity} (${ref.referredPatientPincode})'},
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Section 3: Referral Details
+                      _buildDetailCard(
+                        title: '3. REFERRAL & CLINICAL COMPLAINT',
+                        icon: Icons.medical_information_rounded,
+                        color: const Color(0xFF0D9488),
+                        items: [
+                          {'label': 'Specialist Category', 'value': ref.requiredSpecialist},
+                          {'label': 'Complaint / Notes', 'value': ref.clinicalComplaint},
+                          {'label': 'Referral Date', 'value': '${ref.referralDate.day}/${ref.referralDate.month}/${ref.referralDate.year}'},
+                          {'label': 'Current Status', 'value': ref.status},
+                          {'label': 'WhatsApp Status', 'value': ref.whatsappStatus},
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (isPending) ...[
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _showRejectReferralDialog(context, ref);
+                        },
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFFEF4444),
+                          side: const BorderSide(color: Color(0xFFEF4444)),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        child: const Text('Reject Referral', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _acceptReferralDirectly(context, ref);
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF10B981),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        child: const Text('Accept Referral', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDetailCard({
+    required String title,
+    required IconData icon,
+    required Color color,
+    required List<Map<String, String>> items,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: color),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: color),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...items.map((it) => Padding(
+                padding: const EdgeInsets.only(bottom: 5),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 120,
+                      child: Text(it['label'] ?? '', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                    ),
+                    Expanded(
+                      child: Text(it['value'] ?? '', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
+                    ),
+                  ],
+                ),
+              )),
         ],
       ),
     );

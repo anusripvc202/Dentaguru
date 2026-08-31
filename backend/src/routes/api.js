@@ -113,9 +113,19 @@ router.post('/records', optionalAuth, records.createRecord);
 // ─────────────────────────────────────────────
 // 9. REFERRAL MANAGEMENT & GROWTH ENDPOINTS
 // ─────────────────────────────────────────────
+router.post('/referrals', optionalAuth, referrals.createReferral);
 router.get('/referrals/my-referrals', optionalAuth, referrals.getMyReferrals);
+router.get('/referrals/doctor', optionalAuth, referrals.getDoctorReferrals);
+router.get('/referrals/received', optionalAuth, referrals.getDoctorReferrals);
+router.get('/referrals/for-me', optionalAuth, referrals.getReferralsForReferredPatient);
+router.post('/referrals/check-patient', optionalAuth, referrals.checkPatientExists);
 router.get('/referrals/all', optionalAuth, referrals.getAllReferralsAdmin);
 router.get('/referrals/analytics', optionalAuth, referrals.getAdminReferralAnalytics);
+router.get('/referrals/:referralId', optionalAuth, referrals.getReferralById);
+router.patch('/referrals/:referralId/accept', optionalAuth, referrals.acceptReferral);
+router.patch('/referrals/:referralId/reject', optionalAuth, referrals.rejectReferral);
+router.post('/referrals/:referralId/notify-whatsapp', optionalAuth, referrals.notifyWhatsApp);
 
 module.exports = router;
+
 
