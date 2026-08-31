@@ -2498,8 +2498,12 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     final doc = _patientService.currentDoctor;
     final docName = (doc != null && doc.name.isNotEmpty)
         ? (doc.name.startsWith('Dr.') ? doc.name : 'Dr. ${doc.name}')
-        : 'Dr. Practitioner';
-    final clinicName = (doc != null && doc.clinicName.isNotEmpty) ? doc.clinicName : 'DentaGuru Partner Dental Clinic';
+        : (ref.doctorName.isNotEmpty ? ref.doctorName : 'Dr. Practitioner');
+    final clinicName = (doc != null && doc.clinicName.isNotEmpty)
+        ? doc.clinicName
+        : (ref.doctorClinicName.isNotEmpty ? ref.doctorClinicName : 'DentaGuru Partner Dental Clinic');
+    final specialty = ref.requiredSpecialist.isNotEmpty ? ref.requiredSpecialist : (doc?.specialty ?? 'Dental Care');
+    final qual = (doc?.qualification.isNotEmpty == true && doc!.qualification != 'BDS, MDS') ? ' (${doc.qualification})' : '';
 
     String rawPhone = ref.referredPatientMobile.replaceAll(RegExp(r'[^0-9]'), '');
     if (rawPhone.startsWith('0') && rawPhone.length == 11) {
@@ -2509,23 +2513,38 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     }
 
     final complaintText = ref.clinicalComplaint.isNotEmpty ? ref.clinicalComplaint : 'Dental Care';
-    final locationText = [
-      if (ref.referredPatientLocation.isNotEmpty) ref.referredPatientLocation,
-      if (ref.referredPatientCity.isNotEmpty) ref.referredPatientCity,
-      if (ref.referredPatientPincode.isNotEmpty) 'PIN: ${ref.referredPatientPincode}',
-    ].join(', ');
+    final docLocationParts = [
+      if (ref.doctorLocation.isNotEmpty) ref.doctorLocation else if (doc?.clinicAddress.isNotEmpty == true) doc!.clinicAddress,
+      if (ref.doctorCity.isNotEmpty) ref.doctorCity else if (doc?.city.isNotEmpty == true) doc!.city,
+      if (ref.doctorPincode.isNotEmpty) 'PIN: ${ref.doctorPincode}' else if (doc?.pincode.isNotEmpty == true) 'PIN: ${doc!.pincode}',
+    ].where((s) => s.trim().isNotEmpty).toList();
 
-    final message = 'Hello ${ref.referredPatientName},\n\n'
-        'This is $docName from $clinicName regarding your dental consultation referral on DentaGuru.\n\n'
-        '📋 Referral Details:\n'
-        '• Category: ${ref.requiredSpecialist}\n'
-        '• Referred by: ${ref.referrerPatientName}\n'
-        '• Complaint: $complaintText\n'
-        '${locationText.isNotEmpty ? "• Location: $locationText\n" : ""}\n'
-        'We have received your referral details and would like to help schedule your consultation appointment. Please reply to this message or let us know when you would like to visit!\n\n'
-        'Best regards,\n'
-        '$docName\n'
-        '$clinicName';
+    final docPhone = (doc?.phone.isNotEmpty == true) ? doc!.phone : '';
+
+    final buffer = StringBuffer();
+    buffer.writeln('Hello ${ref.referredPatientName},');
+    buffer.writeln();
+    buffer.writeln('This is *$docName*$qual from *$clinicName* regarding your dental consultation referral on DentaGuru.');
+    buffer.writeln();
+    buffer.writeln('👨‍⚕️ *Consulting Doctor & Clinic Details:*');
+    buffer.writeln('• *Doctor:* $docName');
+    buffer.writeln('• *Specialty:* $specialty');
+    if (clinicName.isNotEmpty) buffer.writeln('• *Clinic:* $clinicName');
+    if (docPhone.isNotEmpty) buffer.writeln('• *Doctor Contact:* +91 $docPhone');
+    if (docLocationParts.isNotEmpty) buffer.writeln('• *Location:* ${docLocationParts.join(", ")}');
+    if (doc != null && doc.experienceYears > 0) buffer.writeln('• *Experience:* ${doc.experienceYears}+ Years (${doc.rating} ⭐)');
+    buffer.writeln();
+    buffer.writeln('📋 *Referral Summary:*');
+    buffer.writeln('• *Referred by:* ${ref.referrerPatientName}');
+    buffer.writeln('• *Clinical Issue:* $complaintText');
+    buffer.writeln();
+    buffer.writeln('We have accepted your referral and would like to confirm your consultation appointment. Please reply to this message or call us back to confirm your preferred slot!');
+    buffer.writeln();
+    buffer.writeln('Best regards,');
+    buffer.writeln('$docName');
+    buffer.writeln('$clinicName');
+
+    final message = buffer.toString();
 
     final waUrl = Uri.parse(rawPhone.isNotEmpty
         ? 'https://wa.me/$rawPhone?text=${Uri.encodeComponent(message)}'

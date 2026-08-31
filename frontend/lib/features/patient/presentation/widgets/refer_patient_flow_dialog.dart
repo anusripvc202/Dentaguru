@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/models/referral_model.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
@@ -1472,6 +1473,74 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
           ),
 
           const SizedBox(height: 20),
+
+          // Open WhatsApp Button with Detailed Doctor Information
+          SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.chat_rounded, size: 18, color: Colors.white),
+              label: Text(
+                'Open WhatsApp with $patientName',
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF25D366),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: () async {
+                final ref = _createdReferral;
+                final doc = _selectedDoctor;
+                final docName = ref?.doctorName.isNotEmpty == true
+                    ? ref!.doctorName
+                    : (doc != null ? (doc.name.startsWith('Dr.') ? doc.name : 'Dr. ${doc.name}') : 'Doctor');
+                final specialty = ref?.requiredSpecialist.isNotEmpty == true ? ref!.requiredSpecialist : (doc?.specialty ?? _requiredSpecialist);
+                final qual = (doc?.qualification.isNotEmpty == true && doc!.qualification != 'BDS, MDS') ? ' (${doc.qualification})' : '';
+                final clinic = ref?.doctorClinicName.isNotEmpty == true ? ref!.doctorClinicName : (doc?.clinicName ?? '');
+                final locationParts = [
+                  if (ref?.doctorLocation.isNotEmpty == true) ref!.doctorLocation else if (doc?.clinicAddress.isNotEmpty == true) doc!.clinicAddress,
+                  if (ref?.doctorCity.isNotEmpty == true) ref!.doctorCity else if (doc?.city.isNotEmpty == true) doc!.city,
+                  if (ref?.doctorPincode.isNotEmpty == true) 'PIN: ${ref!.doctorPincode}' else if (doc?.pincode.isNotEmpty == true) 'PIN: ${doc!.pincode}',
+                ].where((s) => s.trim().isNotEmpty).toList();
+
+                final docPhone = (doc?.phone.isNotEmpty == true) ? doc!.phone : '';
+
+                final buffer = StringBuffer();
+                buffer.writeln('Hi $patientName,');
+                buffer.writeln();
+                buffer.writeln('I have referred you to *$docName*$qual on DentaGuru for your dental care.');
+                buffer.writeln();
+                buffer.writeln('👨‍⚕️ *Doctor & Clinic Details:*');
+                buffer.writeln('• *Doctor:* $docName');
+                buffer.writeln('• *Specialty:* $specialty');
+                if (clinic.isNotEmpty) buffer.writeln('• *Clinic:* $clinic');
+                if (docPhone.isNotEmpty) buffer.writeln('• *Doctor Mobile:* +91 $docPhone');
+                if (locationParts.isNotEmpty) buffer.writeln('• *Address:* ${locationParts.join(", ")}');
+                if (doc != null && doc.experienceYears > 0) buffer.writeln('• *Experience:* ${doc.experienceYears}+ Years (${doc.rating} ⭐)');
+                if (_complaintController.text.trim().isNotEmpty) {
+                  buffer.writeln();
+                  buffer.writeln('📋 *Clinical Reason:* ${_complaintController.text.trim()}');
+                }
+                buffer.writeln();
+                buffer.writeln('You can reach out directly to the clinic or doctor to schedule your appointment. Wishing you the best dental care!');
+
+                String rawPhone = patientMobile.replaceAll(RegExp(r'[^0-9]'), '');
+                if (rawPhone.startsWith('0') && rawPhone.length == 11) {
+                  rawPhone = '91${rawPhone.substring(1)}';
+                } else if (rawPhone.length == 10) {
+                  rawPhone = '91$rawPhone';
+                }
+
+                final waUrl = Uri.parse(rawPhone.isNotEmpty
+                    ? 'https://wa.me/$rawPhone?text=${Uri.encodeComponent(buffer.toString())}'
+                    : 'https://wa.me/?text=${Uri.encodeComponent(buffer.toString())}');
+                try {
+                  await launchUrl(waUrl, mode: LaunchMode.externalApplication);
+                } catch (_) {}
+              },
+            ),
+          ),
+          const SizedBox(height: 10),
 
           // Buttons
           SizedBox(

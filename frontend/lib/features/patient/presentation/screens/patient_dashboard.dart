@@ -9,6 +9,7 @@ import '../../../../core/services/api_service.dart';
 import '../../../../core/services/session_service.dart';
 import '../../../../core/widgets/dental_ads_banner.dart';
 import '../../../../core/widgets/whatsapp_chat_modal.dart';
+import '../../../../core/models/referral_model.dart';
 import '../widgets/refer_friend_dialog.dart';
 import '../widgets/refer_patient_flow_dialog.dart';
 
@@ -2290,7 +2291,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                           } else if (rawPhone.length == 10) {
                             rawPhone = '91$rawPhone';
                           }
-                          final msg = 'Hi ${ref.referredPatientName}, I referred you to ${ref.doctorName} (${ref.doctorClinicName}) on DentaGuru for ${ref.requiredSpecialist}. You can consult with the doctor for your dental care!';
+                          final msg = _buildReferralWhatsAppMessage(ref);
                           final waUrl = Uri.parse(rawPhone.isNotEmpty
                               ? 'https://wa.me/$rawPhone?text=${Uri.encodeComponent(msg)}'
                               : 'https://wa.me/?text=${Uri.encodeComponent(msg)}');
@@ -2394,6 +2395,59 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
         ],
       ],
     );
+  }
+
+  String _buildReferralWhatsAppMessage(PatientReferral ref) {
+    // Find doctor in platform directory if available
+    DoctorModel? doc;
+    for (final d in _patientService.allDoctors) {
+      if (ref.doctorId.isNotEmpty && (d.id == ref.doctorId || d.userId == ref.doctorId)) {
+        doc = d;
+        break;
+      }
+      final cleanRefDoc = ref.doctorName.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
+      final cleanD = d.name.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
+      if (cleanRefDoc.isNotEmpty && (cleanD.contains(cleanRefDoc) || cleanRefDoc.contains(cleanD))) {
+        doc = d;
+        break;
+      }
+    }
+
+    final docName = ref.doctorName.isNotEmpty
+        ? (ref.doctorName.startsWith('Dr.') ? ref.doctorName : 'Dr. ${ref.doctorName}')
+        : (doc != null ? (doc.name.startsWith('Dr.') ? doc.name : 'Dr. ${doc.name}') : 'Doctor');
+    final specialty = ref.requiredSpecialist.isNotEmpty ? ref.requiredSpecialist : (doc?.specialty ?? 'Dental Specialist');
+    final qual = (doc?.qualification.isNotEmpty == true && doc!.qualification != 'BDS, MDS') ? ' (${doc.qualification})' : '';
+    final clinic = ref.doctorClinicName.isNotEmpty ? ref.doctorClinicName : (doc?.clinicName.isNotEmpty == true ? doc!.clinicName : '');
+
+    final locationParts = [
+      if (ref.doctorLocation.isNotEmpty) ref.doctorLocation else if (doc?.clinicAddress.isNotEmpty == true) doc!.clinicAddress,
+      if (ref.doctorCity.isNotEmpty) ref.doctorCity else if (doc?.city.isNotEmpty == true) doc!.city,
+      if (ref.doctorPincode.isNotEmpty) 'PIN: ${ref.doctorPincode}' else if (doc?.pincode.isNotEmpty == true) 'PIN: ${doc!.pincode}',
+    ].where((s) => s.trim().isNotEmpty).toList();
+
+    final docPhone = (doc?.phone.isNotEmpty == true) ? doc!.phone : '';
+
+    final buffer = StringBuffer();
+    buffer.writeln('Hi ${ref.referredPatientName},');
+    buffer.writeln();
+    buffer.writeln('I have referred you to *$docName*$qual on DentaGuru for your dental care.');
+    buffer.writeln();
+    buffer.writeln('👨‍⚕️ *Doctor & Clinic Details:*');
+    buffer.writeln('• *Doctor:* $docName');
+    buffer.writeln('• *Specialty:* $specialty');
+    if (clinic.isNotEmpty) buffer.writeln('• *Clinic:* $clinic');
+    if (docPhone.isNotEmpty) buffer.writeln('• *Doctor Mobile:* +91 $docPhone');
+    if (locationParts.isNotEmpty) buffer.writeln('• *Address:* ${locationParts.join(", ")}');
+    if (doc != null && doc.experienceYears > 0) buffer.writeln('• *Experience:* ${doc.experienceYears}+ Years (${doc.rating} ⭐)');
+    if (ref.clinicalComplaint.isNotEmpty) {
+      buffer.writeln();
+      buffer.writeln('📋 *Clinical Reason:* ${ref.clinicalComplaint}');
+    }
+    buffer.writeln();
+    buffer.writeln('You can reach out directly to the clinic or doctor to schedule your appointment. Wishing you the best dental care!');
+
+    return buffer.toString();
   }
 
   Widget _buildProfileDetailRow(String label, String value, IconData icon) {
