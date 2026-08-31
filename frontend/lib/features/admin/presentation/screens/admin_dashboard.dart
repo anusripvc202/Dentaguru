@@ -5400,7 +5400,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                       children: [
                         const Flexible(
                           child: Text(
-                            '🔄 Patient-to-Doctor Referrals',
+                            '🔄 Patient Referrals',
                             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -5424,7 +5424,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     ),
                     const SizedBox(height: 2),
                     const Text(
-                      'Live attribution: By Whom (Referrer) • To Whom (Patient & Doctor)',
+                      'Patient referrals & specialist consultation tracking',
                       style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -5454,7 +5454,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               ),
               child: const Column(
                 children: [
-                  Icon(Icons.diversity_1_rounded, size: 36, color: AppTheme.textMuted),
+                  Icon(Icons.group_add_outlined, size: 36, color: AppTheme.textMuted),
                   SizedBox(height: 8),
                   Text(
                     'No patient referrals recorded yet.',
@@ -5462,7 +5462,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   ),
                   SizedBox(height: 4),
                   Text(
-                    'When patients refer other patients to specialists, real-time attribution will appear here.',
+                    'When patients refer other patients to specialists, real-time records will appear here.',
                     style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
                     textAlign: TextAlign.center,
                   ),
@@ -5505,12 +5505,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Header Row: Status Badge, WhatsApp Pill, Date
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      // Header: Wrap prevents any pixel overflow on small screens
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
                             decoration: BoxDecoration(
                               color: statusBg,
                               borderRadius: BorderRadius.circular(8),
@@ -5521,38 +5523,34 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: statusColor),
                             ),
                           ),
-                          Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFDCFCE7),
-                                  borderRadius: BorderRadius.circular(6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFDCFCE7),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.chat_bubble_rounded, size: 10, color: Color(0xFF16A34A)),
+                                const SizedBox(width: 3),
+                                Text(
+                                  ref.whatsappStatus == 'Sent' ? 'WhatsApp Sent' : 'Queued',
+                                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF16A34A)),
                                 ),
-                                child: Row(
-                                  children: [
-                                    const Icon(Icons.chat_bubble_rounded, size: 10, color: Color(0xFF16A34A)),
-                                    const SizedBox(width: 3),
-                                    Text(
-                                      ref.whatsappStatus == 'Sent' ? 'WhatsApp Sent' : 'WhatsApp Queued',
-                                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF16A34A)),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(dateStr, style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
-                            ],
+                              ],
+                            ),
                           ),
+                          Text(dateStr, style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
                         ],
                       ),
                       const SizedBox(height: 12),
 
-                      // By Whom & To Whom Grid / Rows
+                      // Referring Patient & Referred Patient Cards (RenderFlex Safe with Expanded)
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Left side: By Whom
+                          // Left: Referring Patient
                           Expanded(
                             child: Container(
                               padding: const EdgeInsets.all(10),
@@ -5568,9 +5566,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     children: [
                                       Icon(Icons.person_pin_rounded, size: 13, color: Color(0xFF4338CA)),
                                       SizedBox(width: 4),
-                                      Text(
-                                        'BY WHOM (REFERRER)',
-                                        style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFF4338CA)),
+                                      Expanded(
+                                        child: Text(
+                                          'Referring Patient',
+                                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF4338CA)),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -5584,6 +5585,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     Text(
                                       '+91 ${ref.referrerPatientPhone}',
                                       style: const TextStyle(fontSize: 10.5, color: AppTheme.textMuted),
+                                      overflow: TextOverflow.ellipsis,
                                     ),
                                 ],
                               ),
@@ -5591,7 +5593,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           ),
                           const SizedBox(width: 10),
 
-                          // Right side: To Whom (Patient)
+                          // Right: Referred Patient
                           Expanded(
                             child: Container(
                               padding: const EdgeInsets.all(10),
@@ -5607,9 +5609,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     children: [
                                       Icon(Icons.person_rounded, size: 13, color: Color(0xFF15803D)),
                                       SizedBox(width: 4),
-                                      Text(
-                                        'TO WHOM (PATIENT)',
-                                        style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                                      Expanded(
+                                        child: Text(
+                                          'Referred Patient',
+                                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -5632,7 +5637,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                       ),
                       const SizedBox(height: 10),
 
-                      // Location & Receiving Doctor Strip
+                      // Location & Consulting Doctor Strip
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -5676,16 +5681,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           ],
                         ),
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 8),
 
-                      // Action row: View details modal
+                      // Action button
                       Align(
                         alignment: Alignment.centerRight,
                         child: TextButton.icon(
                           onPressed: () => _showAdminReferralDetailsModal(context, ref),
                           icon: const Icon(Icons.visibility_rounded, size: 14, color: AppTheme.primaryBlue),
                           label: const Text(
-                            'View Full Referral Attribution',
+                            'View Referral Details',
                             style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
                           ),
                         ),
@@ -5955,7 +5960,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   }
 
   // ==========================================
-  // PANEL: REFERRAL MANAGEMENT & GROWTH ANALYTICS (BY WHOM & TO WHOM)
+  // PANEL: REFERRAL MANAGEMENT & TRACKING
   // ==========================================
   String _referralSearchQuery = '';
   String _adminReferralStatusFilter = 'All';
@@ -6041,13 +6046,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Referral Management & Attribution',
+                      'Referral Management & Tracking',
                       style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: AppTheme.textDark),
                       overflow: TextOverflow.ellipsis,
                     ),
                     SizedBox(height: 2),
                     Text(
-                      'Track By Whom (Referrer) and To Whom (Patient & Doctor) across the platform',
+                      'Track patient referrals, specialist consultations & doctor assignments',
                       style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -6089,35 +6094,35 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   _KpiCard(
                     title: 'Total Referrals',
                     value: '${allPatientRefs.length}',
-                    growth: 'All Platform Referrals',
+                    growth: 'All Referrals',
                     accentColor: const Color(0xFF8B5CF6),
                     icon: Icons.share_rounded,
                   ),
                   _KpiCard(
                     title: 'Pending Review',
                     value: '$pendingCount',
-                    growth: 'Awaiting Doctor Review',
+                    growth: 'Awaiting Doctor',
                     accentColor: const Color(0xFFF59E0B),
                     icon: Icons.hourglass_top_rounded,
                   ),
                   _KpiCard(
                     title: 'Accepted by Doctor',
                     value: '$acceptedCount',
-                    growth: 'Doctor Confirmed',
+                    growth: 'Confirmed Care',
                     accentColor: const Color(0xFF10B981),
                     icon: Icons.check_circle_rounded,
                   ),
                   _KpiCard(
                     title: 'Referrals Declined',
                     value: '$rejectedCount',
-                    growth: 'Doctor Unavailable',
+                    growth: 'Unavailable',
                     accentColor: const Color(0xFFEF4444),
                     icon: Icons.cancel_outlined,
                   ),
                   _KpiCard(
                     title: 'WhatsApp Delivered',
                     value: '${allPatientRefs.where((r) => r.whatsappStatus == 'Sent').length}',
-                    growth: 'Instant Mobile Alerts',
+                    growth: 'Mobile Alerts',
                     accentColor: const Color(0xFF25D366),
                     icon: Icons.chat_bubble_rounded,
                   ),
@@ -6152,7 +6157,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   onChanged: (val) => setState(() => _referralSearchQuery = val.trim()),
                   style: const TextStyle(fontSize: 12),
                   decoration: InputDecoration(
-                    hintText: 'Search referrer, patient, doctor, location...',
+                    hintText: 'Search patient, doctor, location...',
                     prefixIcon: const Icon(Icons.search_rounded, size: 16, color: AppTheme.textMuted),
                     filled: true,
                     fillColor: Colors.white,
@@ -6188,7 +6193,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
           ),
           const SizedBox(height: 14),
 
-          // 4. Comprehensive Referrals Table (By Whom & To Whom)
+          // 4. Comprehensive Referrals Table
           if (filtered.isEmpty)
             Container(
               width: double.infinity,
@@ -6200,7 +6205,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               ),
               child: const Column(
                 children: [
-                  Icon(Icons.person_add_disabled_rounded, color: AppTheme.textMuted, size: 42),
+                  Icon(Icons.group_add_outlined, color: AppTheme.textMuted, size: 42),
                   SizedBox(height: 10),
                   Text(
                     'No Matching Referral Records Found',
@@ -6208,7 +6213,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   ),
                   SizedBox(height: 4),
                   Text(
-                    'When patients refer other patients to doctors, full attribution (By Whom, To Whom, Doctor) will appear here in real-time.',
+                    'When patients refer other patients to doctors, full referral details and status will appear here.',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
                   ),
@@ -6235,11 +6240,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 child: DataTable(
                   headingRowColor: WidgetStateProperty.all(const Color(0xFFF8FAFC)),
                   columns: const [
-                    DataColumn(label: Text('By Whom (Referrer)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                    DataColumn(label: Text('To Whom (Referred Patient)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                    DataColumn(label: Text('Patient Location & Pincode', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                    DataColumn(label: Text('To Whom (Doctor & Clinic)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                    DataColumn(label: Text('Specialty & Complaint', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    DataColumn(label: Text('Referring Patient', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    DataColumn(label: Text('Referred Patient', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    DataColumn(label: Text('Location & PIN', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    DataColumn(label: Text('Consulting Doctor & Clinic', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    DataColumn(label: Text('Specialty & Notes', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
                     DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
                     DataColumn(label: Text('WhatsApp', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
                     DataColumn(label: Text('Date', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
@@ -6270,7 +6275,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
                     return DataRow(
                       cells: [
-                        // 1. By Whom (Referrer)
+                        // 1. Referring Patient
                         DataCell(
                           Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -6295,7 +6300,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           ),
                         ),
 
-                        // 2. To Whom (Referred Patient)
+                        // 2. Referred Patient
                         DataCell(
                           Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -6342,7 +6347,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               : const Text('—', style: TextStyle(color: AppTheme.textMuted)),
                         ),
 
-                        // 4. To Whom (Doctor & Clinic)
+                        // 4. Consulting Doctor & Clinic
                         DataCell(
                           Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -6366,7 +6371,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           ),
                         ),
 
-                        // 5. Specialty & Complaint
+                        // 5. Specialty & Notes
                         DataCell(
                           Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -6428,11 +6433,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         // 8. Date
                         DataCell(Text(dateStr, style: const TextStyle(fontSize: 11.5))),
 
-                        // 9. Actions (View Full Attribution Modal)
+                        // 9. Actions
                         DataCell(
                           IconButton(
                             icon: const Icon(Icons.visibility_outlined, size: 18, color: AppTheme.primaryBlue),
-                            tooltip: 'View Full Referral Attribution',
+                            tooltip: 'View Referral Details',
                             onPressed: () => _showAdminReferralDetailsModal(context, ref),
                           ),
                         ),
@@ -6521,7 +6526,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     const Text(
-                      'Referral Attribution Details',
+                      'Referral Details',
                       style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
                     ),
                     Container(
@@ -6539,9 +6544,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 ),
                 const SizedBox(height: 16),
 
-                // Section 1: Referrer Information (By Whom)
+                // Section 1: Referring Patient
                 _buildDetailCard(
-                  title: '1. BY WHOM (REFERRING PATIENT)',
+                  title: '1. REFERRING PATIENT',
                   icon: Icons.person_pin_rounded,
                   color: const Color(0xFF6366F1),
                   items: [
@@ -6553,9 +6558,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 ),
                 const SizedBox(height: 12),
 
-                // Section 2: Referred Patient Details (To Whom)
+                // Section 2: Referred Patient
                 _buildDetailCard(
-                  title: '2. TO WHOM (REFERRED PATIENT)',
+                  title: '2. REFERRED PATIENT',
                   icon: Icons.person_rounded,
                   color: const Color(0xFF0284C7),
                   items: [
@@ -6567,9 +6572,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 ),
                 const SizedBox(height: 12),
 
-                // Section 3: Receiving Doctor & Clinic Details
+                // Section 3: Consulting Doctor & Clinic
                 _buildDetailCard(
-                  title: '3. TO WHOM (RECEIVING DOCTOR & CLINIC)',
+                  title: '3. CONSULTING DOCTOR & CLINIC',
                   icon: Icons.medical_services_rounded,
                   color: const Color(0xFF0D9488),
                   items: [
@@ -6582,9 +6587,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 ),
                 const SizedBox(height: 12),
 
-                // Section 4: Clinical Complaint & WhatsApp Status
+                // Section 4: Clinical Complaint & Notifications
                 _buildDetailCard(
-                  title: '4. CLINICAL COMPLAINT & NOTIFICATION AUDIT',
+                  title: '4. CLINICAL COMPLAINT & NOTIFICATIONS',
                   icon: Icons.notes_rounded,
                   color: const Color(0xFF8B5CF6),
                   items: [
