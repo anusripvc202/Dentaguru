@@ -19,11 +19,13 @@ enum UserRole { patient, dentist, admin }
 class AuthScreen extends StatefulWidget {
   final String? initialRole; // 'Patient', 'Dentist', 'Admin'
   final int initialTab; // 0 for Sign In, 1 for Register
+  final bool? allowAdminRole;
 
   const AuthScreen({
     super.key,
     this.initialRole,
     this.initialTab = 0,
+    this.allowAdminRole,
   });
 
   @override
@@ -33,6 +35,7 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   late UserRole _selectedRole;
+  late bool _isAdminMode;
 
   // Controllers for Sign In
   final _loginFormKey = GlobalKey<FormState>();
@@ -106,11 +109,13 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     } catch (_) {}
 
     // Initialize selected role from widget param or default to Patient
-    final roleStr = (widget.initialRole ?? 'Patient').toLowerCase();
-    if (roleStr == 'dentist') {
-      _selectedRole = UserRole.dentist;
-    } else if (roleStr == 'admin' || roleStr == 'sub-admin' || roleStr == 'subadmin') {
+    final roleStr = (widget.initialRole ?? '').toLowerCase();
+    _isAdminMode = widget.allowAdminRole == true || roleStr == 'admin' || roleStr == 'sub-admin' || roleStr == 'subadmin';
+
+    if (_isAdminMode) {
       _selectedRole = UserRole.admin;
+    } else if (roleStr == 'dentist') {
+      _selectedRole = UserRole.dentist;
     } else {
       _selectedRole = UserRole.patient;
     }
@@ -1151,26 +1156,63 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     const SizedBox(height: 18),
 
                     // Material 3 Dynamic Role Selector Segmented Bar
-                    Text(
-                      _tabController.index == 1 ? 'Registering as:' : 'Select User Role:',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textDark),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      height: 44,
-                      padding: const EdgeInsets.all(3),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF1F5F9),
-                        borderRadius: BorderRadius.circular(14),
+                    if (!_isAdminMode) ...[
+                      Text(
+                        _tabController.index == 1 ? 'Registering as:' : 'Select User Role:',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textDark),
                       ),
-                      child: Row(
+                      const SizedBox(height: 8),
+                      Container(
+                        height: 44,
+                        padding: const EdgeInsets.all(3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Row(
+                          children: [
+                            _buildRoleTile(UserRole.patient, 'Patient', Icons.person_outline_rounded),
+                            _buildRoleTile(UserRole.dentist, 'Dentist', Icons.medical_services_outlined),
+                          ],
+                        ),
+                      ),
+                    ] else ...[
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          _buildRoleTile(UserRole.patient, 'Patient', Icons.person_outline_rounded),
-                          _buildRoleTile(UserRole.dentist, 'Dentist', Icons.medical_services_outlined),
-                          _buildRoleTile(UserRole.admin, _tabController.index == 1 ? 'Sub-Admin' : 'Admin', Icons.admin_panel_settings_outlined),
+                          Text(
+                            _tabController.index == 1 ? 'Registering Administrative Account:' : 'Administrative Workspace:',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textDark),
+                          ),
+                          InkWell(
+                            onTap: () {
+                              setState(() {
+                                _isAdminMode = false;
+                                _selectedRole = UserRole.patient;
+                              });
+                            },
+                            child: const Text(
+                              '← Patient/Dentist',
+                              style: TextStyle(fontSize: 11, color: AppTheme.primaryBlue, fontWeight: FontWeight.bold),
+                            ),
+                          ),
                         ],
                       ),
-                    ),
+                      const SizedBox(height: 8),
+                      Container(
+                        height: 44,
+                        padding: const EdgeInsets.all(3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Row(
+                          children: [
+                            _buildRoleTile(UserRole.admin, _tabController.index == 1 ? 'Sub-Admin / Admin' : 'Admin & Sub-Admin Portal', Icons.admin_panel_settings_outlined),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 20),
 
                     // Tab Bar (Sign In & Register)
@@ -1215,6 +1257,25 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                           ? KeyedSubtree(key: const ValueKey('signin_tab'), child: _buildSignInForm())
                           : KeyedSubtree(key: const ValueKey('register_tab'), child: _buildRegisterForm()),
                     ),
+
+                    if (!_isAdminMode) ...[
+                      const SizedBox(height: 8),
+                      Center(
+                        child: TextButton.icon(
+                          icon: const Icon(Icons.admin_panel_settings_outlined, size: 14, color: AppTheme.textMuted),
+                          label: const Text(
+                            'Admin / Sub-Admin Portal',
+                            style: TextStyle(fontSize: 11, color: AppTheme.textMuted, fontWeight: FontWeight.w500),
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              _isAdminMode = true;
+                              _selectedRole = UserRole.admin;
+                            });
+                          },
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

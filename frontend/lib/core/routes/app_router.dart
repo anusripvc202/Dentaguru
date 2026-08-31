@@ -35,6 +35,20 @@ final GoRouter appRouter = GoRouter(
       },
     ),
     GoRoute(
+      path: '/admin-login',
+      builder: (context, state) {
+        final tab = int.tryParse(state.uri.queryParameters['tab'] ?? '0') ?? 0;
+        return AuthScreen(initialRole: 'admin', initialTab: tab, allowAdminRole: true);
+      },
+    ),
+    GoRoute(
+      path: '/admin/auth',
+      builder: (context, state) {
+        final tab = int.tryParse(state.uri.queryParameters['tab'] ?? '0') ?? 0;
+        return AuthScreen(initialRole: 'admin', initialTab: tab, allowAdminRole: true);
+      },
+    ),
+    GoRoute(
       path: '/auth',
       builder: (context, state) {
         final role = state.uri.queryParameters['role'];
