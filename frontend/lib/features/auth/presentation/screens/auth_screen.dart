@@ -1061,15 +1061,51 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                _tabController.index == 1
-                    ? '$_roleName Registration'
-                    : '$_roleName Portal Authentication',
+                _isAdminMode
+                    ? (_tabController.index == 1 ? 'Admin / Sub-Admin Registration' : 'Admin Portal Authentication')
+                    : (_tabController.index == 1 ? '$_roleName Registration' : '$_roleName Portal Authentication'),
                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
         ),
+        actions: [
+          if (!_isAdminMode)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: TextButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _isAdminMode = true;
+                    _selectedRole = UserRole.admin;
+                  });
+                },
+                icon: const Icon(Icons.shield_outlined, size: 16, color: Color(0xFF6366F1)),
+                label: const Text(
+                  'Admin Portal',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF6366F1)),
+                ),
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: TextButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _isAdminMode = false;
+                    _selectedRole = UserRole.patient;
+                  });
+                },
+                icon: const Icon(Icons.people_outline_rounded, size: 16, color: AppTheme.primaryBlue),
+                label: const Text(
+                  'Patient / Dentist',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
+                ),
+              ),
+            ),
+        ],
       ),
       body: Center(
         child: SingleChildScrollView(
@@ -1259,20 +1295,37 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     ),
 
                     if (!_isAdminMode) ...[
-                      const SizedBox(height: 8),
-                      Center(
-                        child: TextButton.icon(
-                          icon: const Icon(Icons.admin_panel_settings_outlined, size: 14, color: AppTheme.textMuted),
-                          label: const Text(
-                            'Admin / Sub-Admin Portal',
-                            style: TextStyle(fontSize: 11, color: AppTheme.textMuted, fontWeight: FontWeight.w500),
+                      const SizedBox(height: 14),
+                      InkWell(
+                        onTap: () {
+                          setState(() {
+                            _isAdminMode = true;
+                            _selectedRole = UserRole.admin;
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF6366F1).withValues(alpha: 0.07),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFF6366F1).withValues(alpha: 0.2)),
                           ),
-                          onPressed: () {
-                            setState(() {
-                              _isAdminMode = true;
-                              _selectedRole = UserRole.admin;
-                            });
-                          },
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.shield_outlined, size: 15, color: Color(0xFF6366F1)),
+                              SizedBox(width: 6),
+                              Text(
+                                'Administrator or Staff? Access Admin Portal →',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: Color(0xFF4F46E5),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ],
