@@ -848,7 +848,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                     child: Row(
                       children: [
                         SizedBox(
-                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 32) / 5 : 85,
+                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 24) / 4 : 85,
                           child: _AnimatedPatientActionTile(
                             icon: Icons.calendar_month_rounded,
                             title: 'Appointments',
@@ -858,17 +858,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                         ),
                         const SizedBox(width: 8),
                         SizedBox(
-                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 32) / 5 : 85,
-                          child: _AnimatedPatientActionTile(
-                            icon: Icons.star_rounded,
-                            title: 'My Doctors',
-                            color: const Color(0xFFD97706),
-                            onTap: () => setState(() => _doctorTabFilter = 0),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        SizedBox(
-                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 32) / 5 : 85,
+                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 24) / 4 : 85,
                           child: _AnimatedPatientActionTile(
                             icon: Icons.person_search_rounded,
                             title: 'Find Doctors',
@@ -878,7 +868,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                         ),
                         const SizedBox(width: 8),
                         SizedBox(
-                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 32) / 5 : 85,
+                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 24) / 4 : 85,
                           child: _AnimatedPatientActionTile(
                             icon: Icons.person_add_alt_1_rounded,
                             title: 'Refer a Patient',
@@ -888,7 +878,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                         ),
                         const SizedBox(width: 8),
                         SizedBox(
-                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 32) / 5 : 85,
+                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 24) / 4 : 85,
                           child: _AnimatedPatientActionTile(
                             icon: Icons.receipt_long_rounded,
                             title: 'Prescriptions',
