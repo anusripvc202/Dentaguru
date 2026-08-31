@@ -65,6 +65,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   final _clinicAddressController = TextEditingController();
   String? _selectedSpecialty;
 
+  // Role-Specific Fields - Sub-Admin / Admin
+  final _adminEmployeeIdController = TextEditingController();
+  final _adminDeptController = TextEditingController();
+  String _selectedAdminRoleType = 'Sub-Admin';
+
   // Languages Selection
   static const List<String> _availableLanguages = [
     'English', 'Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam', 'Marathi', 'Bengali', 'Gujarati', 'Punjabi', 'Spanish'
@@ -89,10 +94,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     super.initState();
     _tabController = TabController(length: 2, vsync: this, initialIndex: widget.initialTab);
     _tabController.addListener(() {
-      // In registration tab, Admin / Sub-Admin are not allowed; automatically switch to Patient
-      if (_tabController.index == 1 && _selectedRole == UserRole.admin) {
-        _selectedRole = UserRole.patient;
-      }
       setState(() {});
     });
 
@@ -109,12 +110,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     if (roleStr == 'dentist') {
       _selectedRole = UserRole.dentist;
     } else if (roleStr == 'admin' || roleStr == 'sub-admin' || roleStr == 'subadmin') {
-      // Admin/Sub-Admin are only accessible through sign-in portal, not registration
-      if (widget.initialTab == 1) {
-        _selectedRole = UserRole.patient;
-      } else {
-        _selectedRole = UserRole.admin;
-      }
+      _selectedRole = UserRole.admin;
     } else {
       _selectedRole = UserRole.patient;
     }
@@ -134,6 +130,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     _clinicNameController.dispose();
     _experienceController.dispose();
     _clinicAddressController.dispose();
+    _adminEmployeeIdController.dispose();
+    _adminDeptController.dispose();
     _pincodeController.dispose();
     _locationController.dispose();
     _otpController.dispose();
@@ -147,7 +145,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       case UserRole.dentist:
         return 'Dentist';
       case UserRole.admin:
-        return 'Admin';
+        return _tabController.index == 1 ? 'Sub-Admin' : 'Admin';
     }
   }
 
@@ -479,7 +477,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     final city = _cityController.text.trim();
     final pincode = _pincodeController.text.trim();
     final clinicAddress = _clinicAddressController.text.trim();
-    final String chosenRole = _selectedRole == UserRole.dentist ? 'Dentist' : 'Patient';
+    final String chosenRole = _selectedRole == UserRole.dentist
+        ? 'Dentist'
+        : (_selectedRole == UserRole.admin ? _selectedAdminRoleType : 'Patient');
 
     // Mandatory Field Validations
     if (city.isEmpty) {
@@ -585,7 +585,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               'address': location,
             },
           );
-        } else {
+        } else if (_selectedRole == UserRole.dentist) {
           final exp = int.tryParse(_experienceController.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 5;
           final docId = (res['user']?['id'] ?? Supabase.instance.client.auth.currentUser?.id ?? '').toString();
           PatientProblemService().registerDoctor(
@@ -620,6 +620,47 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               'pincode': pincode,
               'experienceYears': exp,
               'languages': selectedLangs,
+            },
+          );
+        } else {
+          final isSubAdmin = _selectedAdminRoleType == 'Sub-Admin' ||
+              regUser['role']?.toString().toLowerCase().contains('sub') == true;
+
+          if (isSubAdmin) {
+            PatientProblemService().setSubAdminSession(
+              id: regUserId,
+              name: name,
+              email: email,
+              phone: phone,
+              permissions: const [
+                'ALL',
+                'MANAGE_PATIENTS',
+                'MANAGE_REQUESTS',
+                'VIEW_DENTISTS',
+                'MANAGE_CLINICS',
+                'MANAGE_REFERRALS',
+                'VIEW_RECORDS',
+                'APPOINTMENTS'
+              ],
+              status: 'ACTIVE',
+            );
+          } else {
+            PatientProblemService().clearSubAdminSession();
+          }
+
+          await SessionService().saveSession(
+            token: regToken,
+            role: isSubAdmin ? 'Sub-Admin' : 'Admin',
+            userId: regUserId,
+            email: email,
+            phone: phone,
+            name: name,
+            metadata: {
+              'city': city,
+              'pincode': pincode,
+              'isSubAdmin': isSubAdmin,
+              'department': _adminDeptController.text.trim(),
+              'employeeId': _adminEmployeeIdController.text.trim(),
             },
           );
         }
@@ -1126,8 +1167,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                         children: [
                           _buildRoleTile(UserRole.patient, 'Patient', Icons.person_outline_rounded),
                           _buildRoleTile(UserRole.dentist, 'Dentist', Icons.medical_services_outlined),
-                          if (_tabController.index == 0)
-                            _buildRoleTile(UserRole.admin, 'Admin', Icons.admin_panel_settings_outlined),
+                          _buildRoleTile(UserRole.admin, _tabController.index == 1 ? 'Sub-Admin' : 'Admin', Icons.admin_panel_settings_outlined),
                         ],
                       ),
                     ),
@@ -1394,7 +1434,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 label: _selectedRole == UserRole.dentist
                     ? 'Practitioner Full Name & Title'
                     : _selectedRole == UserRole.admin
-                        ? 'Administrator Full Name'
+                        ? 'Administrator / Sub-Admin Full Name'
                         : 'Patient Full Name',
                 hint: _selectedRole == UserRole.dentist ? 'e.g. Dr. Nikhil' : 'e.g. Jane Smith',
                 isRequired: true,
@@ -1807,7 +1847,200 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         );
 
       case UserRole.admin:
-        return const SizedBox.shrink();
+        return Column(
+          key: const ValueKey('admin_fields'),
+          children: [
+            // Administrative Role Level Selector: Sub-Admin vs Admin
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF6366F1).withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFF6366F1).withValues(alpha: 0.25)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Administrative Role Type *',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF4338CA)),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => setState(() => _selectedAdminRoleType = 'Sub-Admin'),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                            decoration: BoxDecoration(
+                              color: _selectedAdminRoleType == 'Sub-Admin' ? const Color(0xFF6366F1) : Colors.white,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: _selectedAdminRoleType == 'Sub-Admin' ? const Color(0xFF6366F1) : const Color(0xFFCBD5E1),
+                              ),
+                              boxShadow: _selectedAdminRoleType == 'Sub-Admin'
+                                  ? [
+                                      BoxShadow(
+                                        color: const Color(0xFF6366F1).withValues(alpha: 0.3),
+                                        blurRadius: 6,
+                                        offset: const Offset(0, 2),
+                                      )
+                                    ]
+                                  : [],
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.badge_outlined,
+                                  size: 16,
+                                  color: _selectedAdminRoleType == 'Sub-Admin' ? Colors.white : const Color(0xFF475569),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Sub-Admin',
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: _selectedAdminRoleType == 'Sub-Admin' ? Colors.white : const Color(0xFF334155),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => setState(() => _selectedAdminRoleType = 'Admin'),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                            decoration: BoxDecoration(
+                              color: _selectedAdminRoleType == 'Admin' ? const Color(0xFF6366F1) : Colors.white,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: _selectedAdminRoleType == 'Admin' ? const Color(0xFF6366F1) : const Color(0xFFCBD5E1),
+                              ),
+                              boxShadow: _selectedAdminRoleType == 'Admin'
+                                  ? [
+                                      BoxShadow(
+                                        color: const Color(0xFF6366F1).withValues(alpha: 0.3),
+                                        blurRadius: 6,
+                                        offset: const Offset(0, 2),
+                                      )
+                                    ]
+                                  : [],
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.shield_outlined,
+                                  size: 16,
+                                  color: _selectedAdminRoleType == 'Admin' ? Colors.white : const Color(0xFF475569),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Primary Admin',
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: _selectedAdminRoleType == 'Admin' ? Colors.white : const Color(0xFF334155),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _selectedAdminRoleType == 'Sub-Admin'
+                        ? 'ℹ️ Sub-Admins manage patients, appointments, consultation cases, referrals, and dentists.'
+                        : 'ℹ️ Primary Admin has full administrative governance over the entire platform.',
+                    style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            // MANDATORY FIELD 1: Location *
+            TextFormField(
+              controller: _locationController,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter Location / Office Address' : null,
+              decoration: _buildInputDecoration(
+                label: 'Location / Office Address',
+                hint: 'e.g. Headquarters / Branch Area',
+                isRequired: true,
+                icon: Icons.location_on_outlined,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                // MANDATORY FIELD 2: City *
+                Expanded(
+                  child: TextFormField(
+                    controller: _cityController,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter City' : null,
+                    decoration: _buildInputDecoration(
+                      label: 'City',
+                      hint: 'e.g. City Name',
+                      isRequired: true,
+                      icon: Icons.location_city_rounded,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // MANDATORY FIELD 3: Pincode *
+                Expanded(
+                  child: TextFormField(
+                    controller: _pincodeController,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                    validator: (val) {
+                      if (val == null || val.trim().isEmpty) return 'Enter Pincode';
+                      if (val.trim().length != 6) return '6-digit PIN';
+                      return null;
+                    },
+                    decoration: _buildInputDecoration(
+                      label: 'Pincode',
+                      hint: '6-Digit PIN',
+                      isRequired: true,
+                      icon: Icons.pin_drop_outlined,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _adminEmployeeIdController,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              decoration: _buildInputDecoration(
+                label: 'Admin ID / Employee ID (Optional)',
+                hint: 'ADM-901',
+                icon: Icons.badge_outlined,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _adminDeptController,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              decoration: _buildInputDecoration(
+                label: 'Department / Key Code (Optional)',
+                hint: 'Clinical Operations',
+                icon: Icons.admin_panel_settings_outlined,
+              ),
+            ),
+          ],
+        );
     }
   }
 
