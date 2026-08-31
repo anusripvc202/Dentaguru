@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
@@ -2265,19 +2266,38 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                     ),
                   ],
 
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.chat_bubble_outline_rounded, size: 12, color: Color(0xFF25D366)),
-                          const SizedBox(width: 4),
-                          Text(
-                            ref.whatsappStatus == 'Sent' ? 'WhatsApp Sent' : 'WhatsApp Queued',
-                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Color(0xFF25D366)),
-                          ),
-                        ],
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.chat_rounded, size: 13, color: Colors.white),
+                        label: Text(
+                          'WhatsApp ${ref.referredPatientName}',
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF25D366),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          elevation: 0,
+                        ),
+                        onPressed: () async {
+                          String rawPhone = ref.referredPatientMobile.replaceAll(RegExp(r'[^0-9]'), '');
+                          if (rawPhone.startsWith('0') && rawPhone.length == 11) {
+                            rawPhone = '91${rawPhone.substring(1)}';
+                          } else if (rawPhone.length == 10) {
+                            rawPhone = '91$rawPhone';
+                          }
+                          final msg = 'Hi ${ref.referredPatientName}, I referred you to ${ref.doctorName} (${ref.doctorClinicName}) on DentaGuru for ${ref.requiredSpecialist}. You can consult with the doctor for your dental care!';
+                          final waUrl = Uri.parse(rawPhone.isNotEmpty
+                              ? 'https://wa.me/$rawPhone?text=${Uri.encodeComponent(msg)}'
+                              : 'https://wa.me/?text=${Uri.encodeComponent(msg)}');
+                          try {
+                            await launchUrl(waUrl, mode: LaunchMode.externalApplication);
+                          } catch (_) {}
+                        },
                       ),
                       Text(
                         '${ref.referralDate.day}/${ref.referralDate.month}/${ref.referralDate.year}',

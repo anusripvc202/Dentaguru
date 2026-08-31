@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
@@ -2428,7 +2429,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
 
                   const SizedBox(height: 12),
 
-                  // Actions: View Details, Accept, Reject
+                  // Actions: View Details, WhatsApp, Accept, Reject
                   Row(
                     children: [
                       Expanded(
@@ -2439,6 +2440,20 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           ),
                           child: const Text('View Details', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.chat_rounded, size: 14, color: Colors.white),
+                          label: const Text('WhatsApp', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF25D366),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          onPressed: () => _sendWhatsAppToReferredPatient(ref),
                         ),
                       ),
                       if (isPending) ...[
@@ -2479,15 +2494,111 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     );
   }
 
+  Future<void> _sendWhatsAppToReferredPatient(PatientReferral ref) async {
+    final doc = _patientService.currentDoctor;
+    final docName = (doc != null && doc.name.isNotEmpty)
+        ? (doc.name.startsWith('Dr.') ? doc.name : 'Dr. ${doc.name}')
+        : 'Dr. Practitioner';
+    final clinicName = (doc != null && doc.clinicName.isNotEmpty) ? doc.clinicName : 'DentaGuru Partner Dental Clinic';
+
+    String rawPhone = ref.referredPatientMobile.replaceAll(RegExp(r'[^0-9]'), '');
+    if (rawPhone.startsWith('0') && rawPhone.length == 11) {
+      rawPhone = '91${rawPhone.substring(1)}';
+    } else if (rawPhone.length == 10) {
+      rawPhone = '91$rawPhone';
+    }
+
+    final complaintText = ref.clinicalComplaint.isNotEmpty ? ref.clinicalComplaint : 'Dental Care';
+    final locationText = [
+      if (ref.referredPatientLocation.isNotEmpty) ref.referredPatientLocation,
+      if (ref.referredPatientCity.isNotEmpty) ref.referredPatientCity,
+      if (ref.referredPatientPincode.isNotEmpty) 'PIN: ${ref.referredPatientPincode}',
+    ].join(', ');
+
+    final message = 'Hello ${ref.referredPatientName},\n\n'
+        'This is $docName from $clinicName regarding your dental consultation referral on DentaGuru.\n\n'
+        '📋 Referral Details:\n'
+        '• Category: ${ref.requiredSpecialist}\n'
+        '• Referred by: ${ref.referrerPatientName}\n'
+        '• Complaint: $complaintText\n'
+        '${locationText.isNotEmpty ? "• Location: $locationText\n" : ""}\n'
+        'We have received your referral details and would like to help schedule your consultation appointment. Please reply to this message or let us know when you would like to visit!\n\n'
+        'Best regards,\n'
+        '$docName\n'
+        '$clinicName';
+
+    final waUrl = Uri.parse(rawPhone.isNotEmpty
+        ? 'https://wa.me/$rawPhone?text=${Uri.encodeComponent(message)}'
+        : 'https://wa.me/?text=${Uri.encodeComponent(message)}');
+
+    try {
+      await launchUrl(waUrl, mode: LaunchMode.externalApplication);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('📱 WhatsApp opened for ${ref.referredPatientName}!'),
+            backgroundColor: const Color(0xFF25D366),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error launching WhatsApp: $e');
+    }
+  }
+
+  Future<void> _sendWhatsAppToReferrer(PatientReferral ref) async {
+    final doc = _patientService.currentDoctor;
+    final docName = (doc != null && doc.name.isNotEmpty)
+        ? (doc.name.startsWith('Dr.') ? doc.name : 'Dr. ${doc.name}')
+        : 'the consulting dentist';
+    final clinicName = (doc != null && doc.clinicName.isNotEmpty) ? doc.clinicName : 'DentaGuru Partner Dental Clinic';
+
+    String rawPhone = ref.referrerPatientPhone.replaceAll(RegExp(r'[^0-9]'), '');
+    if (rawPhone.startsWith('0') && rawPhone.length == 11) {
+      rawPhone = '91${rawPhone.substring(1)}';
+    } else if (rawPhone.length == 10) {
+      rawPhone = '91$rawPhone';
+    }
+
+    final message = 'Hello ${ref.referrerPatientName},\n\n'
+        'Thank you for referring ${ref.referredPatientName} to $docName at $clinicName for *${ref.requiredSpecialist}* on DentaGuru.\n\n'
+        'We have received their details and are reaching out to provide them with excellent dental care. Thank you for your recommendation!';
+
+    final waUrl = Uri.parse(rawPhone.isNotEmpty
+        ? 'https://wa.me/$rawPhone?text=${Uri.encodeComponent(message)}'
+        : 'https://wa.me/?text=${Uri.encodeComponent(message)}');
+
+    try {
+      await launchUrl(waUrl, mode: LaunchMode.externalApplication);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('📱 WhatsApp opened for referrer ${ref.referrerPatientName}!'),
+            backgroundColor: const Color(0xFF25D366),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error launching WhatsApp to referrer: $e');
+    }
+  }
+
   Future<void> _acceptReferralDirectly(BuildContext context, PatientReferral ref) async {
     final success = await _patientService.acceptPatientReferralByDoctor(ref.id);
     if (!mounted) return;
     if (success) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('✅ Accepted referral for ${ref.referredPatientName}. WhatsApp notification dispatched.'),
+          content: Text('✅ Accepted referral for ${ref.referredPatientName}!'),
           backgroundColor: const Color(0xFF10B981),
           behavior: SnackBarBehavior.floating,
+          action: SnackBarAction(
+            label: '💬 WhatsApp',
+            textColor: Colors.white,
+            onPressed: () => _sendWhatsAppToReferredPatient(ref),
+          ),
         ),
       );
     } else {
@@ -2626,44 +2737,87 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                   ),
                 ),
               ),
-              if (isPending) ...[
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          _showRejectReferralDialog(context, ref);
-                        },
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFFEF4444),
-                          side: const BorderSide(color: Color(0xFFEF4444)),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              const SizedBox(height: 12),
+              Column(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.chat_rounded, size: 16, color: Colors.white),
+                          label: Text(
+                            '💬 WhatsApp Patient (${ref.referredPatientName})',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: Colors.white),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF25D366),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          onPressed: () => _sendWhatsAppToReferredPatient(ref),
                         ),
-                        child: const Text('Reject Referral', style: TextStyle(fontWeight: FontWeight.bold)),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          _acceptReferralDirectly(context, ref);
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF10B981),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      if (ref.referrerPatientPhone.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          icon: const Icon(Icons.person_pin_rounded, size: 15, color: Color(0xFF6366F1)),
+                          label: const Text(
+                            'Referrer',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5, color: Color(0xFF6366F1)),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Color(0xFF6366F1)),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          onPressed: () => _sendWhatsAppToReferrer(ref),
                         ),
-                        child: const Text('Accept Referral', style: TextStyle(fontWeight: FontWeight.bold)),
-                      ),
+                      ],
+                    ],
+                  ),
+                  if (isPending) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              _showRejectReferralDialog(context, ref);
+                            },
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFFEF4444),
+                              side: const BorderSide(color: Color(0xFFEF4444)),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: const Text('Reject Referral', style: TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              _acceptReferralDirectly(context, ref);
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF10B981),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: const Text('Accept Referral', style: TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
-                ),
-              ],
+                ],
+              ),
             ],
           ),
         );
