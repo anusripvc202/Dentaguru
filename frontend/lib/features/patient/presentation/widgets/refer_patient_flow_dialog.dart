@@ -376,13 +376,16 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
             return false;
           }
           if (_doctorSearchQuery.isNotEmpty) {
-            final q = _doctorSearchQuery.toLowerCase();
+            final q = _doctorSearchQuery.toLowerCase().trim();
+            final cleanDigitsQ = q.replaceAll(RegExp(r'\D'), '');
+            final cleanDocPhone = doc.phone.replaceAll(RegExp(r'\D'), '');
             final matchName = doc.name.toLowerCase().contains(q);
             final matchSpec = doc.specialty.toLowerCase().contains(q);
-            final matchClinic = doc.clinicName.toLowerCase().contains(q);
+            final matchClinic = doc.clinicName.toLowerCase().contains(q) || doc.clinicAddress.toLowerCase().contains(q);
             final matchCity = doc.city.toLowerCase().contains(q);
             final matchPincode = doc.pincode.contains(q);
-            if (!matchName && !matchSpec && !matchClinic && !matchCity && !matchPincode) return false;
+            final matchPhone = (cleanDigitsQ.isNotEmpty && cleanDocPhone.contains(cleanDigitsQ)) || doc.phone.toLowerCase().contains(q);
+            if (!matchName && !matchSpec && !matchClinic && !matchCity && !matchPincode && !matchPhone) return false;
           }
           return true;
         }).toList();
@@ -426,9 +429,15 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
               child: TextField(
                 onChanged: (val) => setState(() => _doctorSearchQuery = val),
                 decoration: InputDecoration(
-                  hintText: 'Search doctor, specialty, clinic, city or pincode...',
+                  hintText: 'Search doctor, contact number, specialty, clinic, city or pincode...',
                   hintStyle: TextStyle(fontSize: 13, color: isDark ? Colors.white38 : Colors.black38),
                   prefixIcon: Icon(Icons.search_rounded, size: 20, color: primaryColor),
+                  suffixIcon: _doctorSearchQuery.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear_rounded, size: 18),
+                          onPressed: () => setState(() => _doctorSearchQuery = ''),
+                        )
+                      : null,
                   filled: true,
                   fillColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -632,6 +641,24 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                                           ],
                                         ),
                                         const SizedBox(height: 2),
+
+                                        if (doc.phone.isNotEmpty) ...[
+                                          Row(
+                                            children: [
+                                              Icon(Icons.phone_outlined, size: 13, color: isDark ? Colors.white54 : Colors.black45),
+                                              const SizedBox(width: 4),
+                                              Expanded(
+                                                child: Text(
+                                                  doc.phone.startsWith('+91') ? doc.phone : '+91 ${doc.phone}',
+                                                  style: TextStyle(fontSize: 12, color: isDark ? Colors.white60 : Colors.black54),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 2),
+                                        ],
 
                                         Row(
                                           children: [
@@ -1199,6 +1226,8 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                     items: [
                       {'label': 'Doctor Name', 'value': _selectedDoctor!.name.startsWith('Dr.') ? _selectedDoctor!.name : 'Dr. ${_selectedDoctor!.name}'},
                       {'label': 'Specialty', 'value': _selectedDoctor!.specialty},
+                      if (_selectedDoctor!.phone.isNotEmpty)
+                        {'label': 'Contact Number', 'value': _selectedDoctor!.phone.startsWith('+91') ? _selectedDoctor!.phone : '+91 ${_selectedDoctor!.phone}'},
                       {'label': 'Clinic', 'value': _selectedDoctor!.clinicName.isNotEmpty ? _selectedDoctor!.clinicName : 'DentaGuru Partner Clinic'},
                       {'label': 'City & Pincode', 'value': '${_selectedDoctor!.city.isNotEmpty ? _selectedDoctor!.city : "City"} • ${_selectedDoctor!.pincode}'},
                     ],
