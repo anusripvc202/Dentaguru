@@ -561,6 +561,103 @@ class ApiService {
     return [];
   }
 
+  /// 4b. Fetch patient's saved "My Doctors" list
+  Future<List<String>> fetchMyDoctors({required String patientId}) async {
+    if (patientId.trim().isEmpty) return [];
+    final cleanPId = patientId.trim();
+
+    // 1. Direct Supabase Query (24/7 Resilience)
+    try {
+      final res = await Supabase.instance.client
+          .from('patient_doctors')
+          .select('doctor_id')
+          .eq('patient_id', cleanPId);
+      if (res.isNotEmpty) {
+        return res.map((r) => r['doctor_id']?.toString() ?? '').where((id) => id.isNotEmpty).toList();
+      }
+    } catch (e) {
+      debugPrint('Supabase direct fetchMyDoctors notice: $e');
+    }
+
+    // 2. Express Backend API
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/patient/my-doctors').replace(queryParameters: {'patientId': cleanPId});
+      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final list = data['doctorIds'] ?? [];
+        if (list is List) {
+          return list.map((id) => id.toString()).toList();
+        }
+      }
+    } catch (e) {
+      debugPrint('Fetch My Doctors API error: $e');
+    }
+    return [];
+  }
+
+  /// 4c. Add a doctor to patient's "My Doctors" list
+  Future<bool> addDoctorToMyDoctors({required String patientId, required String doctorId}) async {
+    if (patientId.trim().isEmpty || doctorId.trim().isEmpty) return false;
+    final cleanPId = patientId.trim();
+    final cleanDId = doctorId.trim();
+
+    // 1. Direct Supabase Query
+    try {
+      await Supabase.instance.client
+          .from('patient_doctors')
+          .upsert({'patient_id': cleanPId, 'doctor_id': cleanDId});
+    } catch (e) {
+      debugPrint('Supabase direct addDoctorToMyDoctors notice: $e');
+    }
+
+    // 2. Express Backend API
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/patient/my-doctors');
+      final response = await http.post(
+        uri,
+        headers: _headers,
+        body: jsonEncode({'patientId': cleanPId, 'doctorId': cleanDId}),
+      ).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return true;
+      }
+    } catch (e) {
+      debugPrint('Add My Doctors API error: $e');
+    }
+    return true;
+  }
+
+  /// 4d. Remove a doctor from patient's "My Doctors" list
+  Future<bool> removeDoctorFromMyDoctors({required String patientId, required String doctorId}) async {
+    if (patientId.trim().isEmpty || doctorId.trim().isEmpty) return false;
+    final cleanPId = patientId.trim();
+    final cleanDId = doctorId.trim();
+
+    // 1. Direct Supabase Query
+    try {
+      await Supabase.instance.client
+          .from('patient_doctors')
+          .delete()
+          .eq('patient_id', cleanPId)
+          .eq('doctor_id', cleanDId);
+    } catch (e) {
+      debugPrint('Supabase direct removeDoctorFromMyDoctors notice: $e');
+    }
+
+    // 2. Express Backend API
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/patient/my-doctors/$cleanDId?patientId=$cleanPId');
+      final response = await http.delete(uri, headers: _headers).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) {
+        return true;
+      }
+    } catch (e) {
+      debugPrint('Remove My Doctors API error: $e');
+    }
+    return true;
+  }
+
   /// Delete a problem request from Supabase via backend API
   Future<bool> deleteProblemRequest(String id) async {
     try {

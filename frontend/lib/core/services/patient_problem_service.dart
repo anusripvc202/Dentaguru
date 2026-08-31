@@ -686,6 +686,110 @@ class PatientProblemService extends ChangeNotifier {
 
   List<DoctorModel> get allDoctors => List.unmodifiable(_allDoctors);
 
+  // Helper to safely access auth user ID without throwing when uninitialized
+  String? get _safeAuthUserId {
+    try {
+      return Supabase.instance.client.auth.currentUser?.id;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Scoped "My Doctors" saved by the currently logged-in patient
+  final Set<String> _myDoctorIds = {};
+
+  Set<String> get myDoctorIds => Set.unmodifiable(_myDoctorIds);
+
+  List<DoctorModel> get myDoctors {
+    if (_myDoctorIds.isEmpty) return [];
+    return _allDoctors.where((d) {
+      return _myDoctorIds.contains(d.id) ||
+             (d.userId.isNotEmpty && _myDoctorIds.contains(d.userId)) ||
+             (d.email.isNotEmpty && _myDoctorIds.contains(d.email.toLowerCase())) ||
+             (d.name.isNotEmpty && _myDoctorIds.contains(d.name.toLowerCase()));
+    }).toList();
+  }
+
+  bool isDoctorAdded(String doctorId) {
+    if (doctorId.trim().isEmpty) return false;
+    final cleanId = doctorId.trim();
+    if (_myDoctorIds.contains(cleanId)) return true;
+
+    final doc = _allDoctors.firstWhere(
+      (d) => d.id == cleanId || d.userId == cleanId || (d.email.isNotEmpty && d.email.toLowerCase() == cleanId.toLowerCase()),
+      orElse: () => DoctorModel(
+        id: '',
+        name: '',
+        specialty: '',
+        qualification: '',
+        experienceYears: 0,
+        rating: 0,
+        reviewCount: 0,
+        clinicName: '',
+        phone: '',
+        email: '',
+        status: '',
+        nextAvailableSlots: [],
+        consultationFee: '',
+      ),
+    );
+
+    if (doc.id.isNotEmpty && _myDoctorIds.contains(doc.id)) return true;
+    if (doc.userId.isNotEmpty && _myDoctorIds.contains(doc.userId)) return true;
+    if (doc.email.isNotEmpty && _myDoctorIds.contains(doc.email.toLowerCase())) return true;
+    return false;
+  }
+
+  Future<void> addDoctorToMyDoctors(DoctorModel doctor) async {
+    final pId = currentPatient.id.isNotEmpty ? currentPatient.id : (_safeAuthUserId ?? '');
+    final targetDocId = doctor.id.isNotEmpty ? doctor.id : (doctor.userId.isNotEmpty ? doctor.userId : doctor.email);
+    if (targetDocId.isEmpty) return;
+
+    _myDoctorIds.add(targetDocId);
+    if (doctor.id.isNotEmpty) _myDoctorIds.add(doctor.id);
+    if (doctor.userId.isNotEmpty) _myDoctorIds.add(doctor.userId);
+    if (doctor.email.isNotEmpty) _myDoctorIds.add(doctor.email.toLowerCase());
+
+    _saveToStorage();
+    notifyListeners();
+
+    if (pId.isNotEmpty) {
+      await ApiService().addDoctorToMyDoctors(patientId: pId, doctorId: targetDocId);
+    }
+  }
+
+  Future<void> removeDoctorFromMyDoctors(DoctorModel doctor) async {
+    final pId = currentPatient.id.isNotEmpty ? currentPatient.id : (_safeAuthUserId ?? '');
+    final targetDocId = doctor.id.isNotEmpty ? doctor.id : (doctor.userId.isNotEmpty ? doctor.userId : doctor.email);
+
+    _myDoctorIds.remove(targetDocId);
+    if (doctor.id.isNotEmpty) _myDoctorIds.remove(doctor.id);
+    if (doctor.userId.isNotEmpty) _myDoctorIds.remove(doctor.userId);
+    if (doctor.email.isNotEmpty) _myDoctorIds.remove(doctor.email.toLowerCase());
+
+    _saveToStorage();
+    notifyListeners();
+
+    if (pId.isNotEmpty) {
+      await ApiService().removeDoctorFromMyDoctors(patientId: pId, doctorId: targetDocId);
+    }
+  }
+
+  Future<void> syncMyDoctorsFromApi() async {
+    final pId = currentPatient.id.isNotEmpty ? currentPatient.id : (_safeAuthUserId ?? '');
+    if (pId.isEmpty) return;
+    try {
+      final docIds = await ApiService().fetchMyDoctors(patientId: pId);
+      if (docIds.isNotEmpty) {
+        _myDoctorIds.addAll(docIds);
+        _saveToStorage();
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Sync my doctors error: $e');
+    }
+  }
+
   // Directory of All Clinics in the Platform
   final List<ClinicModel> _allClinics = [];
 
@@ -843,6 +947,21 @@ class PatientProblemService extends ChangeNotifier {
         } catch (_) {}
       }
 
+      // 5c. Load My Doctors for Current Patient
+      final pId = currentPatient.id.isNotEmpty ? currentPatient.id : (_safeAuthUserId ?? '');
+      String? myDocStr;
+      if (pId.isNotEmpty) {
+        myDocStr = prefs.getString('dentaguru_my_doctor_ids_$pId');
+      }
+      myDocStr ??= prefs.getString('dentaguru_my_doctor_ids');
+      if (myDocStr != null && myDocStr.isNotEmpty) {
+        try {
+          final List list = jsonDecode(myDocStr);
+          _myDoctorIds.clear();
+          _myDoctorIds.addAll(list.map((e) => e.toString()));
+        } catch (_) {}
+      }
+
       // 6. Sync live patients, appointments, clinics, doctors, records, and requests directly from Supabase DB API
       syncAllDataFromApi();
 
@@ -925,6 +1044,7 @@ class PatientProblemService extends ChangeNotifier {
         syncDoctorsFromApi(),
         syncMedicalRecordsFromApi(),
         syncSubAdminsFromApi(),
+        syncMyDoctorsFromApi(),
       ]);
       await Future.wait([
         syncAppointmentsFromApi(),
@@ -1704,6 +1824,15 @@ class PatientProblemService extends ChangeNotifier {
 
           final doctorUserId = (dMap['user_id'] ?? userObj['id'] ?? '').toString();
 
+          Uint8List? docPhotoBytes;
+          final rawPhoto = (userObj['biometric_token'] ?? dMap['profile_photo'] ?? dMap['photo'] ?? dMap['avatar'] ?? userObj['avatar'] ?? '').toString();
+          if (rawPhoto.isNotEmpty && rawPhoto.length > 20) {
+            try {
+              final cleanBase64 = rawPhoto.contains(',') ? rawPhoto.split(',').last : rawPhoto;
+              docPhotoBytes = base64Decode(cleanBase64);
+            } catch (_) {}
+          }
+
           _allDoctors.add(DoctorModel(
             id: id.isNotEmpty ? id : 'DOC-${100 + _allDoctors.length + 1}',
             userId: doctorUserId,
@@ -1721,6 +1850,7 @@ class PatientProblemService extends ChangeNotifier {
             nextAvailableSlots: ['Today, 2:00 PM', 'Tomorrow, 10:00 AM'],
             consultationFee: '\$75',
             licenseNumber: licNum,
+            photoBytes: docPhotoBytes,
             state: doctorState,
             city: doctorCity,
             pincode: doctorPincode,
@@ -2024,6 +2154,14 @@ class PatientProblemService extends ChangeNotifier {
       await prefs.setString('dentaguru_all_doctors', jsonEncode(_allDoctors.map((d) => d.toJson()).toList()));
       await prefs.setString('dentaguru_all_patients', jsonEncode(_allPatients.map((p) => p.toJson()).toList()));
       await prefs.setString('dentaguru_medical_records', jsonEncode(_medicalRecords));
+
+      // Persist My Doctors isolated per Patient
+      final pId = currentPatient.id.isNotEmpty ? currentPatient.id : (_safeAuthUserId ?? '');
+      if (pId.isNotEmpty) {
+        await prefs.setString('dentaguru_my_doctor_ids_$pId', jsonEncode(_myDoctorIds.toList()));
+      }
+      await prefs.setString('dentaguru_my_doctor_ids', jsonEncode(_myDoctorIds.toList()));
+
       if (_isSubAdminMode) {
         await prefs.setString('dentaguru_sub_admin_session', jsonEncode({
           'isSubAdminMode': _isSubAdminMode,

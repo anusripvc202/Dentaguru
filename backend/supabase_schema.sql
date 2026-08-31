@@ -301,6 +301,17 @@ ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.referrals ENABLE ROW LEVEL SECURITY;
 
+-- 11. PATIENT SAVED DOCTORS TABLE (My Doctors)
+CREATE TABLE IF NOT EXISTS public.patient_doctors (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    patient_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+    doctor_id UUID REFERENCES public.dentists(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT unique_patient_doctor UNIQUE (patient_id, doctor_id)
+);
+CREATE INDEX IF NOT EXISTS idx_patient_doctors_patient_id ON public.patient_doctors(patient_id);
+ALTER TABLE public.patient_doctors ENABLE ROW LEVEL SECURITY;
+
 -- Allow Service Role Access
 DO $$ 
 BEGIN
@@ -336,6 +347,9 @@ BEGIN
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow All Referrals') THEN
         CREATE POLICY "Allow All Referrals" ON public.referrals FOR ALL USING (true);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow All Patient Doctors') THEN
+        CREATE POLICY "Allow All Patient Doctors" ON public.patient_doctors FOR ALL USING (true);
     END IF;
 END $$;
 

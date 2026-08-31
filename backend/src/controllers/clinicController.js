@@ -212,3 +212,58 @@ exports.getAllDentists = async (req, res) => {
         res.status(500).json({ success: false, message: 'Failed to fetch all dentists.' });
     }
 };
+
+// 5. GET PATIENT SAVED DOCTORS (My Doctors)
+exports.getPatientDoctors = async (req, res) => {
+    try {
+        const { PatientDoctor } = require('../models/Schemas');
+        const patientId = req.query.patientId || req.user?.id;
+        if (!patientId) {
+            return res.status(400).json({ success: false, message: 'patientId is required' });
+        }
+        const doctorIds = await PatientDoctor.getDoctorsForPatient(patientId);
+        res.json({ success: true, count: doctorIds.length, doctorIds });
+    } catch (err) {
+        console.error('Get Patient Doctors Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to fetch patient doctors.' });
+    }
+};
+
+// 6. ADD DOCTOR TO PATIENT'S "MY DOCTORS"
+exports.addPatientDoctor = async (req, res) => {
+    try {
+        const { PatientDoctor } = require('../models/Schemas');
+        const patientId = req.body.patientId || req.user?.id;
+        const doctorId = req.body.doctorId;
+
+        if (!patientId || !doctorId) {
+            return res.status(400).json({ success: false, message: 'Both patientId and doctorId are required' });
+        }
+
+        const result = await PatientDoctor.addDoctorForPatient(patientId, doctorId);
+        res.json({ success: true, message: 'Doctor added to My Doctors successfully.', data: result.data });
+    } catch (err) {
+        console.error('Add Patient Doctor Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to add doctor to patient list.' });
+    }
+};
+
+// 7. REMOVE DOCTOR FROM PATIENT'S "MY DOCTORS"
+exports.removePatientDoctor = async (req, res) => {
+    try {
+        const { PatientDoctor } = require('../models/Schemas');
+        const patientId = req.query.patientId || req.body.patientId || req.user?.id;
+        const doctorId = req.params.doctorId || req.body.doctorId;
+
+        if (!patientId || !doctorId) {
+            return res.status(400).json({ success: false, message: 'Both patientId and doctorId are required' });
+        }
+
+        await PatientDoctor.removeDoctorForPatient(patientId, doctorId);
+        res.json({ success: true, message: 'Doctor removed from My Doctors successfully.' });
+    } catch (err) {
+        console.error('Remove Patient Doctor Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to remove doctor from patient list.' });
+    }
+};
+

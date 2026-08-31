@@ -1582,6 +1582,83 @@ const Referral = {
     }
 };
 
+// 12. PATIENT SAVED DOCTORS MODEL (Supabase PostgreSQL + In-Memory Fallback)
+const _inMemoryPatientDoctors = [];
+
+const PatientDoctor = {
+    async getDoctorsForPatient(patientId) {
+        if (!patientId) return [];
+        const cleanPId = patientId.toString().trim();
+        try {
+            const { data, error } = await supabaseAdmin
+                .from('patient_doctors')
+                .select('doctor_id, created_at')
+                .eq('patient_id', cleanPId);
+            if (!error && data) {
+                return data.map(d => d.doctor_id);
+            }
+        } catch (_) {}
+
+        return _inMemoryPatientDoctors
+            .filter(r => r.patient_id === cleanPId)
+            .map(r => r.doctor_id);
+    },
+
+    async addDoctorForPatient(patientId, doctorId) {
+        if (!patientId || !doctorId) return { success: false, message: 'Missing patientId or doctorId' };
+        const cleanPId = patientId.toString().trim();
+        const cleanDId = doctorId.toString().trim();
+
+        try {
+            const { data, error } = await supabaseAdmin
+                .from('patient_doctors')
+                .upsert({ patient_id: cleanPId, doctor_id: cleanDId }, { onConflict: 'patient_id,doctor_id' })
+                .select();
+            if (!error) {
+                return { success: true, data: data?.[0] };
+            }
+        } catch (e) {
+            console.warn('⚠️ Supabase patient_doctors insert warning:', e.message);
+        }
+
+        const existing = _inMemoryPatientDoctors.find(r => r.patient_id === cleanPId && r.doctor_id === cleanDId);
+        if (!existing) {
+            _inMemoryPatientDoctors.push({
+                id: `pd_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+                patient_id: cleanPId,
+                doctor_id: cleanDId,
+                created_at: new Date().toISOString()
+            });
+        }
+        return { success: true };
+    },
+
+    async removeDoctorForPatient(patientId, doctorId) {
+        if (!patientId || !doctorId) return { success: false, message: 'Missing patientId or doctorId' };
+        const cleanPId = patientId.toString().trim();
+        const cleanDId = doctorId.toString().trim();
+
+        try {
+            const { error } = await supabaseAdmin
+                .from('patient_doctors')
+                .delete()
+                .eq('patient_id', cleanPId)
+                .eq('doctor_id', cleanDId);
+            if (!error) {
+                return { success: true };
+            }
+        } catch (e) {
+            console.warn('⚠️ Supabase patient_doctors delete warning:', e.message);
+        }
+
+        const idx = _inMemoryPatientDoctors.findIndex(r => r.patient_id === cleanPId && r.doctor_id === cleanDId);
+        if (idx !== -1) {
+            _inMemoryPatientDoctors.splice(idx, 1);
+        }
+        return { success: true };
+    }
+};
+
 module.exports = {
     User,
     SubAdminPermission,
@@ -1596,6 +1673,7 @@ module.exports = {
     Notification,
     AuditLog,
     Referral,
+    PatientDoctor,
     comparePassword
 };
 

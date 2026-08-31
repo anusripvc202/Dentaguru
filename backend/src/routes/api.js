@@ -88,6 +88,12 @@ router.get('/clinics', optionalAuth, clinics.getClinics);
 router.get('/clinics/:clinicId/dentists', optionalAuth, clinics.getClinicDentists);
 router.get('/dentists', optionalAuth, clinics.getAllDentists);
 
+// Patient Saved Doctors (My Doctors) Endpoints
+router.get('/patient/my-doctors', optionalAuth, clinics.getPatientDoctors);
+router.post('/patient/my-doctors', optionalAuth, clinics.addPatientDoctor);
+router.delete('/patient/my-doctors/:doctorId', optionalAuth, clinics.removePatientDoctor);
+router.delete('/patient/my-doctors', optionalAuth, clinics.removePatientDoctor);
+
 // ─────────────────────────────────────────────
 // 6. SECURE CLOUD STORAGE ENDPOINTS (AWS S3)
 // ─────────────────────────────────────────────
