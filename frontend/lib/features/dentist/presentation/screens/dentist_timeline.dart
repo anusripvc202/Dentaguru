@@ -2162,6 +2162,27 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
+                                  if (ref.referredPatientLocation.isNotEmpty || ref.referredPatientCity.isNotEmpty || ref.referredPatientPincode.isNotEmpty) ...[
+                                    const SizedBox(height: 2),
+                                    Row(
+                                      children: [
+                                        const Icon(Icons.location_on_outlined, size: 12, color: Color(0xFF0284C7)),
+                                        const SizedBox(width: 3),
+                                        Expanded(
+                                          child: Text(
+                                            [
+                                              if (ref.referredPatientLocation.isNotEmpty) ref.referredPatientLocation,
+                                              if (ref.referredPatientCity.isNotEmpty) ref.referredPatientCity,
+                                              if (ref.referredPatientPincode.isNotEmpty) '(${ref.referredPatientPincode})',
+                                            ].join(', '),
+                                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w500, color: Color(0xFF0369A1)),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),

@@ -2150,11 +2150,36 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                   Text(
-                                    '+91 ${ref.referredPatientMobile}',
+                                    [
+                                      '+91 ${ref.referredPatientMobile}',
+                                      if (ref.referredPatientAge.isNotEmpty) '${ref.referredPatientAge} Yrs',
+                                      if (ref.referredPatientGender.isNotEmpty) ref.referredPatientGender,
+                                    ].join(' • '),
                                     style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
+                                  if (ref.referredPatientLocation.isNotEmpty || ref.referredPatientCity.isNotEmpty || ref.referredPatientPincode.isNotEmpty) ...[
+                                    const SizedBox(height: 2),
+                                    Row(
+                                      children: [
+                                        const Icon(Icons.location_on_outlined, size: 12, color: Color(0xFF0284C7)),
+                                        const SizedBox(width: 3),
+                                        Expanded(
+                                          child: Text(
+                                            [
+                                              if (ref.referredPatientLocation.isNotEmpty) ref.referredPatientLocation,
+                                              if (ref.referredPatientCity.isNotEmpty) ref.referredPatientCity,
+                                              if (ref.referredPatientPincode.isNotEmpty) '(${ref.referredPatientPincode})',
+                                            ].join(', '),
+                                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w500, color: Color(0xFF0369A1)),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),
@@ -2199,7 +2224,15 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
-                          ref.doctorClinicName.isNotEmpty ? ref.doctorClinicName : 'DentaGuru Partner Clinic',
+                          [
+                            ref.doctorClinicName.isNotEmpty ? ref.doctorClinicName : 'DentaGuru Partner Clinic',
+                            if (ref.doctorLocation.isNotEmpty || ref.doctorCity.isNotEmpty || ref.doctorPincode.isNotEmpty)
+                              [
+                                if (ref.doctorLocation.isNotEmpty) ref.doctorLocation,
+                                if (ref.doctorCity.isNotEmpty) ref.doctorCity,
+                                if (ref.doctorPincode.isNotEmpty) ref.doctorPincode,
+                              ].join(', ')
+                          ].join(' • '),
                           style: const TextStyle(fontSize: 11, color: AppTheme.textMedium),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -2306,6 +2339,28 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                         'Doctor: ${ref.doctorName} (${ref.requiredSpecialist})',
                         style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF166534)),
                       ),
+                      if (ref.doctorClinicName.isNotEmpty || ref.doctorCity.isNotEmpty || ref.doctorPincode.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Row(
+                          children: [
+                            const Icon(Icons.location_on_outlined, size: 12, color: Color(0xFF15803D)),
+                            const SizedBox(width: 3),
+                            Expanded(
+                              child: Text(
+                                [
+                                  if (ref.doctorClinicName.isNotEmpty) ref.doctorClinicName,
+                                  if (ref.doctorLocation.isNotEmpty) ref.doctorLocation,
+                                  if (ref.doctorCity.isNotEmpty) ref.doctorCity,
+                                  if (ref.doctorPincode.isNotEmpty) '(${ref.doctorPincode})',
+                                ].join(', '),
+                                style: const TextStyle(fontSize: 10.5, color: Color(0xFF15803D)),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                       if (ref.clinicalComplaint.isNotEmpty) ...[
                         const SizedBox(height: 4),
                         Text(

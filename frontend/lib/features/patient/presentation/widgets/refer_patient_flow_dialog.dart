@@ -1393,6 +1393,18 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
             child: Column(
               children: [
                 _buildSuccessRow('Referred Patient', patientName, isDark),
+                if (_locationController.text.trim().isNotEmpty || _cityController.text.trim().isNotEmpty || _pincodeController.text.trim().isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  _buildSuccessRow(
+                    'Location & Pincode',
+                    [
+                      if (_locationController.text.trim().isNotEmpty) _locationController.text.trim(),
+                      if (_cityController.text.trim().isNotEmpty) _cityController.text.trim(),
+                      if (_pincodeController.text.trim().isNotEmpty) '(${_pincodeController.text.trim()})',
+                    ].join(', '),
+                    isDark,
+                  ),
+                ],
                 const SizedBox(height: 8),
                 _buildSuccessRow('Receiving Doctor', doctorName, isDark),
                 const SizedBox(height: 8),
