@@ -40,6 +40,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     _patientService.setDentistMode(true);
     _patientService.syncAllDataFromApi();
     _patientService.syncDoctorReferralsFromApi();
+    _patientService.syncNotificationsFromApi(role: 'Dentist');
 
     // ⏱️ Auto-sync polling timer (every 4s) to catch assigned patients & direct referrals immediately
     _autoSyncTimer = Timer.periodic(const Duration(seconds: 4), (_) {
@@ -47,13 +48,14 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         _patientService.syncProblemRequestsFromApi();
         _patientService.syncDentistAssignedRequestsFromApi();
         _patientService.syncDoctorReferralsFromApi();
+        _patientService.syncNotificationsFromApi(role: 'Dentist');
       }
     });
 
     // ⚡ Supabase Realtime Postgres Changes listener for instant dentist dashboard updates
     try {
       _realtimeChannel = Supabase.instance.client
-          .channel('dentist_problem_requests_realtime')
+          .channel('dentist_dashboard_realtime')
           .onPostgresChanges(
             event: PostgresChangeEvent.all,
             schema: 'public',
@@ -63,6 +65,30 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               if (mounted) {
                 _patientService.syncProblemRequestsFromApi();
                 _patientService.syncDentistAssignedRequestsFromApi();
+                _patientService.syncNotificationsFromApi(role: 'Dentist');
+              }
+            },
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'referrals',
+            callback: (payload) {
+              debugPrint('⚡ Realtime update on referrals for Dentist: ${payload.eventType}');
+              if (mounted) {
+                _patientService.syncDoctorReferralsFromApi();
+                _patientService.syncNotificationsFromApi(role: 'Dentist');
+              }
+            },
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'notifications',
+            callback: (payload) {
+              debugPrint('⚡ Realtime update on notifications for Dentist: ${payload.eventType}');
+              if (mounted) {
+                _patientService.syncNotificationsFromApi(role: 'Dentist');
               }
             },
           )
@@ -510,81 +536,185 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   }
 
   void _showNotificationsModal(BuildContext context, String role) {
+    _patientService.syncNotificationsFromApi(role: role);
+
     showDialog(
       context: context,
       builder: (dialogCtx) {
-        final notifs = _patientService.appNotifications.where((n) => n.recipientRole == role || n.recipientRole == 'ALL').toList();
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final notifs = _patientService.appNotifications.where((n) => n.recipientRole == role || n.recipientRole == 'ALL').toList();
+            final unreadCount = notifs.where((n) => !n.isRead).length;
 
-        return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 440, maxHeight: 520),
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            return Dialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 460, maxHeight: 540),
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Expanded(
-                      child: Row(
-                        children: [
-                          Icon(Icons.notifications_active_rounded, color: AppTheme.primaryBlue, size: 22),
-                          SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'In-App Notifications',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(dialogCtx).pop()),
-                  ],
-                ),
-                const Divider(height: 20),
-                if (notifs.isEmpty)
-                  const Expanded(
-                    child: Center(
-                      child: Text('No new notifications.', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                    ),
-                  )
-                else
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: notifs.length,
-                      itemBuilder: (ctx, idx) {
-                        final n = notifs[idx];
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 10),
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF8FAFC),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFFE2E8F0)),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Row(
                             children: [
-                              Text(n.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.primaryBlue)),
-                              const SizedBox(height: 2),
-                              Text(n.message, style: const TextStyle(fontSize: 11, color: AppTheme.textDark)),
-                              const SizedBox(height: 4),
-                              Text(
-                                '${n.timestamp.hour}:${n.timestamp.minute.toString().padLeft(2, '0')}',
-                                style: const TextStyle(fontSize: 9, color: Colors.grey),
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primaryBlue.withValues(alpha: 0.1),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.notifications_active_rounded, color: AppTheme.primaryBlue, size: 20),
+                              ),
+                              const SizedBox(width: 10),
+                              const Expanded(
+                                child: Text(
+                                  'In-App Notifications',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textDark),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                             ],
                           ),
-                        );
-                      },
+                        ),
+                        if (unreadCount > 0)
+                          TextButton(
+                            onPressed: () async {
+                              await _patientService.markAllNotificationsRead(role);
+                              setModalState(() {});
+                            },
+                            child: const Text('Mark all read', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue)),
+                          ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 20),
+                          onPressed: () => Navigator.of(dialogCtx).pop(),
+                        ),
+                      ],
                     ),
-                  ),
-              ],
-            ),
-          ),
+                    const Divider(height: 20),
+                    if (notifs.isEmpty)
+                      Expanded(
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.notifications_none_rounded, size: 48, color: Colors.grey.withValues(alpha: 0.4)),
+                              const SizedBox(height: 10),
+                              const Text('No new notifications.', style: TextStyle(color: Colors.grey, fontSize: 13, fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 4),
+                              const Text('New patient referrals and consultations will alert you here.', style: TextStyle(color: Colors.grey, fontSize: 11), textAlign: TextAlign.center),
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: notifs.length,
+                          itemBuilder: (ctx, idx) {
+                            final n = notifs[idx];
+                            final isUnread = !n.isRead;
+
+                            IconData itemIcon = Icons.notifications_rounded;
+                            Color iconColor = AppTheme.primaryBlue;
+                            if (n.title.toLowerCase().contains('referral')) {
+                              itemIcon = Icons.group_add_rounded;
+                              iconColor = const Color(0xFF6366F1);
+                            } else if (n.title.toLowerCase().contains('consultation') || n.title.toLowerCase().contains('assigned')) {
+                              itemIcon = Icons.medical_services_rounded;
+                              iconColor = const Color(0xFF0284C7);
+                            } else if (n.title.toLowerCase().contains('prescription')) {
+                              itemIcon = Icons.receipt_long_rounded;
+                              iconColor = const Color(0xFF10B981);
+                            }
+
+                            return InkWell(
+                              onTap: () async {
+                                if (isUnread) {
+                                  await _patientService.markNotificationRead(n.id);
+                                  setModalState(() {});
+                                }
+                              },
+                              borderRadius: BorderRadius.circular(12),
+                              child: Container(
+                                margin: const EdgeInsets.only(bottom: 10),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: isUnread ? const Color(0xFFF0F9FF) : const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: isUnread ? const Color(0xFFBAE6FD) : const Color(0xFFE2E8F0),
+                                    width: isUnread ? 1.5 : 1.0,
+                                  ),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(7),
+                                      decoration: BoxDecoration(
+                                        color: iconColor.withValues(alpha: 0.12),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Icon(itemIcon, size: 16, color: iconColor),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                            children: [
+                                              Expanded(
+                                                child: Text(
+                                                  n.title,
+                                                  style: TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 13,
+                                                    color: isUnread ? const Color(0xFF0369A1) : AppTheme.textDark,
+                                                  ),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                              if (isUnread) ...[
+                                                const SizedBox(width: 6),
+                                                Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                  decoration: BoxDecoration(
+                                                    color: const Color(0xFF0284C7),
+                                                    borderRadius: BorderRadius.circular(8),
+                                                  ),
+                                                  child: const Text('NEW', style: TextStyle(fontSize: 8.5, color: Colors.white, fontWeight: FontWeight.bold)),
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                          const SizedBox(height: 3),
+                                          Text(n.message, style: const TextStyle(fontSize: 11.5, color: AppTheme.textDark, height: 1.3)),
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            '${n.timestamp.day}/${n.timestamp.month} • ${n.timestamp.hour.toString().padLeft(2, '0')}:${n.timestamp.minute.toString().padLeft(2, '0')}',
+                                            style: const TextStyle(fontSize: 9.5, color: Colors.grey),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
         );
       },
     );
@@ -618,7 +748,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               children: [
                 Builder(
                   builder: (context) {
-                    final notifs = _patientService.appNotifications.where((n) => n.recipientRole == 'Dentist').toList();
+                    final notifs = _patientService.appNotifications.where((n) => n.recipientRole == 'Dentist' || n.recipientRole == 'ALL').toList();
                     final unreadCount = notifs.where((n) => !n.isRead).length;
 
                     return Stack(
@@ -951,8 +1081,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               // 2. Animated Practice Stat Boxes Row
               Builder(
                 builder: (context) {
-                  final displayCount = requests.length;
-                  final pendingCount = requests.where((r) => r.status == 'Doctor Suggested' || r.status == 'Pending' || r.status == 'Doctor Assigned').length;
+                  final doctorRefs = _patientService.doctorReceivedPatientReferrals;
+                  final displayCount = requests.length + doctorRefs.length;
+                  final pendingCount = requests.where((r) => r.status == 'Doctor Suggested' || r.status == 'Pending' || r.status == 'Doctor Assigned').length +
+                      doctorRefs.where((r) => r.status == 'Pending').length;
 
                   return Row(
                     children: [
@@ -1757,13 +1889,28 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
       ..._patientService.dentistAssignedRequests,
       ..._patientService.requests.where((r) => isAssignedToMe(r)),
     ];
-    final Map<String, PatientConsultationRequest> uniquePatientMap = {};
+    final patient = _patientService.currentPatient;
+    final Map<String, Map<String, String>> uniquePatientMap = {};
     for (final req in allPool) {
-      uniquePatientMap[req.patientName.trim().toLowerCase()] = req;
+      uniquePatientMap[req.patientName.trim().toLowerCase()] = {
+        'name': req.patientName,
+        'age': '${patient.age.isNotEmpty ? patient.age : "28"} Yrs',
+        'blood': patient.bloodGroup.isNotEmpty ? patient.bloodGroup : 'O+',
+        'issue': req.problemCategory,
+      };
+    }
+    for (final ref in _patientService.doctorReceivedPatientReferrals) {
+      final key = ref.referredPatientName.trim().toLowerCase();
+      if (!uniquePatientMap.containsKey(key)) {
+        uniquePatientMap[key] = {
+          'name': ref.referredPatientName,
+          'age': '${ref.referredPatientAge.isNotEmpty ? ref.referredPatientAge : "28"} Yrs (${ref.referredPatientGender})',
+          'blood': 'O+',
+          'issue': ref.requiredSpecialist.isNotEmpty ? ref.requiredSpecialist : 'Referral Consultation',
+        };
+      }
     }
     final myPatients = uniquePatientMap.values.toList();
-
-    final patient = _patientService.currentPatient;
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -1788,14 +1935,14 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               ),
             )
           else
-            ...myPatients.map((req) {
+            ...myPatients.map((p) {
               return Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: _buildPatientListTile(
-                  name: req.patientName,
-                  age: '${patient.age.isNotEmpty ? patient.age : '28'} Yrs',
-                  blood: patient.bloodGroup.isNotEmpty ? patient.bloodGroup : 'O+',
-                  issue: req.problemCategory,
+                  name: p['name'] ?? 'Patient',
+                  age: p['age'] ?? '28 Yrs',
+                  blood: p['blood'] ?? 'O+',
+                  issue: p['issue'] ?? 'Dental Care',
                 ),
               );
             }),

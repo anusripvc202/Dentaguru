@@ -931,7 +931,9 @@ class PatientProblemService extends ChangeNotifier {
         syncProblemRequestsFromApi(),
         syncDentistAssignedRequestsFromApi(),
         syncReferralsFromApi(),
+        syncDoctorReferralsFromApi(),
         syncAdminReferralsFromApi(),
+        syncNotificationsFromApi(),
       ]);
     } catch (e) {
       debugPrint('Error in syncAllDataFromApi: $e');
@@ -2863,17 +2865,76 @@ class PatientProblemService extends ChangeNotifier {
   Future<void> syncDoctorReferralsFromApi({String? doctorId}) async {
     try {
       final authUser = Supabase.instance.client.auth.currentUser;
-      final effectiveDocId = doctorId ?? currentDoctor?.id ?? authUser?.id;
-      if (effectiveDocId != null && effectiveDocId.isNotEmpty) {
-        final raw = await ApiService().fetchDoctorPatientReferrals(doctorId: effectiveDocId);
-        _doctorReceivedPatientReferrals.clear();
+      final authEmail = authUser?.email?.trim().toLowerCase();
+      final authName = (authUser?.userMetadata?['name'] ?? '').toString().toLowerCase();
+
+      // Auto-resolve currentDoctor if needed
+      if (currentDoctor == null && authEmail != null && authEmail.isNotEmpty) {
+        final match = allDoctors.where((d) =>
+          d.email.toLowerCase() == authEmail ||
+          (d.id.isNotEmpty && d.id == authUser?.id) ||
+          (d.userId.isNotEmpty && d.userId == authUser?.id) ||
+          (authName.isNotEmpty && d.name.toLowerCase().contains(authName))
+        ).firstOrNull;
+        if (match != null) {
+          currentDoctor = match;
+        }
+      }
+
+      final doc = currentDoctor;
+      final docNameClean = (doc?.name ?? '').replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
+      final docClinicClean = (doc?.clinicName ?? '').trim().toLowerCase();
+
+      final doctorIds = <String>{
+        if (doctorId != null && doctorId.isNotEmpty) doctorId,
+        if (doc?.id != null && doc!.id.isNotEmpty) doc.id,
+        if (doc?.userId != null && doc!.userId.isNotEmpty) doc.userId,
+        if (authUser?.id != null && authUser!.id.isNotEmpty) authUser.id,
+        if (doc?.email != null && doc!.email.isNotEmpty) doc.email.toLowerCase(),
+        if (authEmail != null && authEmail.isNotEmpty) authEmail,
+      };
+
+      for (final d in allDoctors) {
+        if (doctorIds.contains(d.id) || (d.userId.isNotEmpty && doctorIds.contains(d.userId)) || (d.email.isNotEmpty && doctorIds.contains(d.email.toLowerCase()))) {
+          if (d.id.isNotEmpty) doctorIds.add(d.id);
+          if (d.userId.isNotEmpty) doctorIds.add(d.userId);
+          if (d.email.isNotEmpty) doctorIds.add(d.email.toLowerCase());
+        }
+      }
+
+      final Map<String, PatientReferral> resultMap = {};
+
+      // 1. Primary doctor referrals fetch from ApiService
+      try {
+        final raw = await ApiService().fetchDoctorPatientReferrals(doctorId: doctorIds.firstOrNull);
         for (final r in raw) {
           try {
-            _doctorReceivedPatientReferrals.add(PatientReferral.fromJson(Map<String, dynamic>.from(r)));
+            final pref = PatientReferral.fromJson(Map<String, dynamic>.from(r));
+            if (pref.id.isNotEmpty) resultMap[pref.id] = pref;
           } catch (_) {}
         }
-        notifyListeners();
+      } catch (_) {}
+
+      // 2. Cross-reference adminPatientReferrals pool
+      for (final ref in _adminPatientReferrals) {
+        final rDocId = ref.doctorId.trim();
+        final rDocName = ref.doctorName.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
+        final rClinic = ref.doctorClinicName.trim().toLowerCase();
+
+        final matchId = rDocId.isNotEmpty && doctorIds.contains(rDocId);
+        final matchName = docNameClean.isNotEmpty && rDocName.isNotEmpty && (docNameClean == rDocName || docNameClean.contains(rDocName) || rDocName.contains(docNameClean));
+        final matchClinic = docClinicClean.isNotEmpty && rClinic.isNotEmpty && (docClinicClean == rClinic || docClinicClean.contains(rClinic));
+
+        if (matchId || matchName || matchClinic) {
+          if (ref.id.isNotEmpty && !resultMap.containsKey(ref.id)) {
+            resultMap[ref.id] = ref;
+          }
+        }
       }
+
+      _doctorReceivedPatientReferrals.clear();
+      _doctorReceivedPatientReferrals.addAll(resultMap.values);
+      notifyListeners();
     } catch (e) {
       debugPrint('Error in syncDoctorReferralsFromApi: $e');
     }
@@ -3042,5 +3103,114 @@ class PatientProblemService extends ChangeNotifier {
       debugPrint('Error in syncAdminReferralsFromApi: $e');
     }
   }
+
+  /// Sync In-App Notifications from DB & synthesize dynamic consultation/referral alerts
+  Future<void> syncNotificationsFromApi({String? role, String? userId}) async {
+    try {
+      final authUser = Supabase.instance.client.auth.currentUser;
+      final effectiveRole = role ?? (currentDoctor != null ? 'Dentist' : 'Patient');
+      final effectiveUserId = userId ?? (effectiveRole == 'Dentist' ? (currentDoctor?.id ?? authUser?.id) : (currentPatient.id.isNotEmpty ? currentPatient.id : authUser?.id));
+
+      final rawList = await ApiService().fetchNotifications(
+        role: effectiveRole,
+        userId: effectiveUserId,
+      );
+
+      final Map<String, AppNotificationModel> notifMap = {};
+
+      // 1. Add existing local in-app notifications
+      for (final n in _appNotifications) {
+        if (n.id.isNotEmpty) notifMap[n.id] = n;
+      }
+
+      // 2. Add API notifications from DB
+      for (final item in rawList) {
+        try {
+          final id = item['id']?.toString() ?? 'NOTIF-${DateTime.now().millisecondsSinceEpoch}';
+          final rRole = item['recipient_role']?.toString() ?? effectiveRole;
+          final rId = item['recipient_id']?.toString() ?? item['user_id']?.toString() ?? '';
+          final title = item['title']?.toString() ?? 'DentaGuru Notification';
+          final message = item['message']?.toString() ?? '';
+          final isRead = item['read'] == true || item['is_read'] == true;
+          final ts = item['created_at'] != null ? (DateTime.tryParse(item['created_at'].toString()) ?? DateTime.now()) : DateTime.now();
+
+          notifMap[id] = AppNotificationModel(
+            id: id,
+            recipientRole: rRole,
+            recipientId: rId,
+            title: title,
+            message: message,
+            timestamp: ts,
+            isRead: isRead,
+          );
+        } catch (_) {}
+      }
+
+      // 3. Automatically synthesize in-app notifications for direct referrals & assigned consultations
+      if (effectiveRole == 'Dentist') {
+        for (final ref in _doctorReceivedPatientReferrals) {
+          final notifKey = 'REF-NOTIF-${ref.id}';
+          if (!notifMap.containsKey(notifKey)) {
+            notifMap[notifKey] = AppNotificationModel(
+              id: notifKey,
+              recipientRole: 'Dentist',
+              recipientId: effectiveUserId ?? '',
+              title: ref.status == 'Accepted' ? '✅ Consultation Confirmed' : '👥 New Patient Referral',
+              message: 'Patient ${ref.referredPatientName} (${ref.referredPatientMobile}) referred for ${ref.requiredSpecialist}.',
+              timestamp: ref.createdAt,
+              isRead: ref.status == 'Accepted',
+            );
+          }
+        }
+
+        for (final req in _dentistAssignedRequests) {
+          final notifKey = 'REQ-NOTIF-${req.id}';
+          if (!notifMap.containsKey(notifKey)) {
+            notifMap[notifKey] = AppNotificationModel(
+              id: notifKey,
+              recipientRole: 'Dentist',
+              recipientId: effectiveUserId ?? '',
+              title: (req.status == 'Accepted' || req.status == 'Confirmed') ? '✅ Active Consultation' : '🩺 New Patient Assigned',
+              message: '${req.patientName} assigned for ${req.problemCategory}. Severity: ${req.severity}.',
+              timestamp: req.submittedAt,
+              isRead: req.status == 'Accepted' || req.status == 'Confirmed',
+            );
+          }
+        }
+      }
+
+      _appNotifications.clear();
+      final sortedList = notifMap.values.toList()
+        ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      _appNotifications.addAll(sortedList);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error in syncNotificationsFromApi: $e');
+    }
+  }
+
+  /// Mark single notification as read
+  Future<void> markNotificationRead(String notifId) async {
+    final idx = _appNotifications.indexWhere((n) => n.id == notifId);
+    if (idx != -1) {
+      _appNotifications[idx].isRead = true;
+      notifyListeners();
+      _saveToStorage();
+      await ApiService().markNotificationAsRead(notifId);
+    }
+  }
+
+  /// Mark all notifications as read
+  Future<void> markAllNotificationsRead(String role) async {
+    for (final n in _appNotifications) {
+      if (n.recipientRole == role || n.recipientRole == 'ALL') {
+        n.isRead = true;
+        ApiService().markNotificationAsRead(n.id);
+      }
+    }
+    notifyListeners();
+    _saveToStorage();
+  }
 }
+
 

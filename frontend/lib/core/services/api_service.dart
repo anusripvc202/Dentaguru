@@ -2775,7 +2775,110 @@ class ApiService {
       return false;
     }
   }
+
+  /// Fetch in-app notifications
+  Future<List<Map<String, dynamic>>> fetchNotifications({String? role, String? userId}) async {
+    final client = Supabase.instance.client;
+    final effectiveUserId = userId ?? client.auth.currentUser?.id ?? '';
+
+    // 1. Primary Express Backend Call
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/notifications').replace(queryParameters: {
+        if (role != null && role.isNotEmpty) 'role': role,
+        if (effectiveUserId.isNotEmpty) 'userId': effectiveUserId,
+      });
+      final response = await http.get(
+        url,
+        headers: {
+          ..._headers,
+          if (effectiveUserId.isNotEmpty) 'x-user-id': effectiveUserId,
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final list = data['notifications'] ?? data['data'] ?? [];
+        if (list is List && list.isNotEmpty) {
+          return list.map((e) => Map<String, dynamic>.from(e)).toList();
+        }
+      }
+    } catch (_) {}
+
+    // 2. Direct Supabase Cloud Fallback
+    try {
+      final conds = <String>[];
+      if (role != null && role.isNotEmpty) {
+        conds.add('recipient_role.eq.$role');
+        conds.add('recipient_role.eq.ALL');
+      }
+      if (effectiveUserId.isNotEmpty) {
+        conds.add('recipient_id.eq.$effectiveUserId');
+        conds.add('user_id.eq.$effectiveUserId');
+      }
+
+      var query = client.from('notifications').select('*');
+      if (conds.isNotEmpty) {
+        query = query.or(conds.join(','));
+      }
+      final res = await query.order('created_at', ascending: false).limit(50);
+      if (res.isNotEmpty) {
+        return List<Map<String, dynamic>>.from(res);
+      }
+    } catch (e) {
+      debugPrint('⚠️ Supabase fetch notifications notice: $e');
+    }
+    return [];
+  }
+
+  /// Mark notification as read
+  Future<bool> markNotificationAsRead(String notifId) async {
+    try {
+      // 1. Express call
+      try {
+        final url = Uri.parse('${ApiConstants.baseUrl}/notifications/$notifId/read');
+        await http.put(url, headers: _headers).timeout(const Duration(seconds: 5));
+      } catch (_) {}
+
+      // 2. Supabase fallback
+      await Supabase.instance.client
+          .from('notifications')
+          .update({'read': true, 'is_read': true})
+          .eq('id', notifId);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Create In-App Notification
+  Future<bool> createInAppNotification({
+    required String recipientRole,
+    required String recipientId,
+    required String title,
+    required String message,
+    String type = 'GENERAL',
+  }) async {
+    try {
+      final client = Supabase.instance.client;
+      await client.from('notifications').insert({
+        'recipient_role': recipientRole,
+        'recipient_id': recipientId,
+        'user_id': recipientId,
+        'title': title,
+        'message': message,
+        'type': type,
+        'read': false,
+        'is_read': false,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      return true;
+    } catch (e) {
+      debugPrint('⚠️ Create in-app notification error: $e');
+      return false;
+    }
+  }
 }
+
 
 
 
