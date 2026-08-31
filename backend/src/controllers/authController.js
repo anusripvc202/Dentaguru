@@ -41,15 +41,12 @@ exports.register = async (req, res) => {
         const isSubAdmin = normalizedRole.toLowerCase() === 'sub-admin' || normalizedRole.toLowerCase() === 'subadmin' || normalizedRole.toLowerCase() === 'sub_admin';
         const isAdminReg = normalizedRole.toLowerCase() === 'admin' || normalizedRole.toLowerCase() === 'primaryadmin' || normalizedRole.toLowerCase() === 'primary_admin';
 
-        if (isSubAdmin) {
-            return res.status(403).json({
-                success: false,
-                message: 'Access Denied: Sub-Admins cannot register publicly. They must be created by the Primary Admin from the Admin Dashboard.'
-            });
-        }
+        let effectiveAssignedRole = normalizedRole;
 
-        // Database-level Single Primary Admin Enforcement
-        if (isAdminReg) {
+        if (isSubAdmin) {
+            effectiveAssignedRole = 'Sub-Admin';
+        } else if (isAdminReg) {
+            // Database-level Single Primary Admin Enforcement
             const existingAdmins = await User.find({ role: 'Admin' });
             if (existingAdmins && existingAdmins.length > 0) {
                 const matchAdmin = existingAdmins.find(a => (normalizedEmail && (a.email || '').trim().toLowerCase() === normalizedEmail) || (a.phone && a.phone.trim() === normalizedPhone));
@@ -60,10 +57,10 @@ exports.register = async (req, res) => {
                         user: matchAdmin,
                     });
                 }
-                return res.status(403).json({
-                    success: false,
-                    message: 'Primary Admin is already registered in the system. Only one Primary Admin is allowed. Please log in using your Admin credentials.'
-                });
+                // When a Primary Admin is already registered, seamlessly register this new admin as Sub-Admin
+                effectiveAssignedRole = 'Sub-Admin';
+            } else {
+                effectiveAssignedRole = 'Admin';
             }
         }
 
@@ -139,11 +136,11 @@ exports.register = async (req, res) => {
 
         try {
             user = await User.create({
-                name: name || (normalizedRole === 'Dentist' ? 'Dr. Specialist' : 'Patient'),
+                name: name || (normalizedRole === 'Dentist' ? 'Dr. Specialist' : (effectiveAssignedRole === 'Sub-Admin' ? 'Sub-Admin' : 'Patient')),
                 email: effectiveEmail,
                 password: effectivePassword,
                 phone: normalizedPhone,
-                role: normalizedRole,
+                role: effectiveAssignedRole,
                 state: normalizedLocation,
                 city: normalizedCity,
                 pincode: normalizedPincode,
@@ -161,11 +158,11 @@ exports.register = async (req, res) => {
         } catch (createErr) {
             // Schema fallback: if DB table lacks age/gender/blood_group/languages columns
             user = await User.create({
-                name: name || (normalizedRole === 'Dentist' ? 'Dr. Specialist' : 'Patient'),
+                name: name || (normalizedRole === 'Dentist' ? 'Dr. Specialist' : (effectiveAssignedRole === 'Sub-Admin' ? 'Sub-Admin' : 'Patient')),
                 email: effectiveEmail,
                 password: effectivePassword,
                 phone: normalizedPhone,
-                role: normalizedRole,
+                role: effectiveAssignedRole,
                 state: state || '',
                 city: city || '',
                 pincode: pincode || '',
@@ -174,6 +171,25 @@ exports.register = async (req, res) => {
                 device_token: metaDeviceToken,
                 biometric_token: profilePhoto || null
             });
+        }
+
+        // Assign default RBAC permissions for Sub-Admin
+        if (effectiveAssignedRole === 'Sub-Admin' || isSubAdmin) {
+            try {
+                const { SubAdminPermission } = require('../models/Schemas');
+                await SubAdminPermission.setPermissionsForUser(user.id, [
+                    'ALL',
+                    'MANAGE_PATIENTS',
+                    'MANAGE_REQUESTS',
+                    'VIEW_DENTISTS',
+                    'MANAGE_CLINICS',
+                    'MANAGE_REFERRALS',
+                    'VIEW_RECORDS',
+                    'APPOINTMENTS'
+                ]);
+            } catch (subErr) {
+                console.warn('⚠️ Sub-Admin permission assignment warning:', subErr.message);
+            }
         }
 
         // 3. Referral Tracking & Attribution

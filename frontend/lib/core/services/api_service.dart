@@ -226,6 +226,21 @@ class ApiService {
                 'rating': 5.0,
                 'consultation_fee': '\$75',
               });
+            } else if (role == 'Sub-Admin' || role.toLowerCase().contains('sub')) {
+              try {
+                final perms = [
+                  'ALL',
+                  'MANAGE_PATIENTS',
+                  'MANAGE_REQUESTS',
+                  'VIEW_DENTISTS',
+                  'MANAGE_CLINICS',
+                  'MANAGE_REFERRALS',
+                  'VIEW_RECORDS',
+                  'APPOINTMENTS'
+                ];
+                final rows = perms.map((p) => {'user_id': res.user!.id, 'permission': p}).toList();
+                await client.from('sub_admin_permissions').upsert(rows);
+              } catch (_) {}
             }
           } catch (dbErr) {
             debugPrint('Direct Supabase DB insert error: $dbErr');

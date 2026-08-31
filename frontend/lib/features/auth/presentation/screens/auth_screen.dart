@@ -68,6 +68,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   // Role-Specific Fields - Admin
   final _adminEmployeeIdController = TextEditingController();
   final _adminDeptController = TextEditingController();
+  String _selectedAdminRoleType = 'Sub-Admin'; // 'Sub-Admin' or 'Admin'
 
   // Languages Selection
   static const List<String> _availableLanguages = [
@@ -108,8 +109,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     final roleStr = (widget.initialRole ?? 'Patient').toLowerCase();
     if (roleStr == 'dentist') {
       _selectedRole = UserRole.dentist;
-    } else if (roleStr == 'admin') {
+    } else if (roleStr == 'admin' || roleStr == 'sub-admin' || roleStr == 'subadmin') {
       _selectedRole = UserRole.admin;
+      if (roleStr.contains('sub')) {
+        _selectedAdminRoleType = 'Sub-Admin';
+      }
     } else {
       _selectedRole = UserRole.patient;
     }
@@ -144,7 +148,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       case UserRole.dentist:
         return 'Dentist';
       case UserRole.admin:
-        return 'Admin / Sub-Admin';
+        return _selectedAdminRoleType == 'Sub-Admin' ? 'Sub-Admin' : 'Admin';
     }
   }
 
@@ -619,9 +623,34 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             },
           );
         } else {
+          final isSubAdmin = regUser['role']?.toString().toLowerCase().contains('sub') == true ||
+              _selectedAdminRoleType == 'Sub-Admin';
+
+          if (isSubAdmin) {
+            PatientProblemService().setSubAdminSession(
+              id: regUserId,
+              name: name,
+              email: email,
+              phone: phone,
+              permissions: const [
+                'ALL',
+                'MANAGE_PATIENTS',
+                'MANAGE_REQUESTS',
+                'VIEW_DENTISTS',
+                'MANAGE_CLINICS',
+                'MANAGE_REFERRALS',
+                'VIEW_RECORDS',
+                'APPOINTMENTS'
+              ],
+              status: 'ACTIVE',
+            );
+          } else {
+            PatientProblemService().clearSubAdminSession();
+          }
+
           await SessionService().saveSession(
             token: regToken,
-            role: 'Admin',
+            role: isSubAdmin ? 'Sub-Admin' : 'Admin',
             userId: regUserId,
             email: email,
             phone: phone,
@@ -629,6 +658,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             metadata: {
               'city': city,
               'pincode': pincode,
+              'isSubAdmin': isSubAdmin,
             },
           );
         }
@@ -1839,6 +1869,124 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         return Column(
           key: const ValueKey('admin_fields'),
           children: [
+            // Administrative Role Level Selector: Sub-Admin vs Primary Admin
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF6366F1).withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFF6366F1).withValues(alpha: 0.25)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Administrative Role Type *',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF4338CA)),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => setState(() => _selectedAdminRoleType = 'Sub-Admin'),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                            decoration: BoxDecoration(
+                              color: _selectedAdminRoleType == 'Sub-Admin' ? const Color(0xFF6366F1) : Colors.white,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: _selectedAdminRoleType == 'Sub-Admin' ? const Color(0xFF6366F1) : const Color(0xFFCBD5E1),
+                              ),
+                              boxShadow: _selectedAdminRoleType == 'Sub-Admin'
+                                  ? [
+                                      BoxShadow(
+                                        color: const Color(0xFF6366F1).withValues(alpha: 0.3),
+                                        blurRadius: 6,
+                                        offset: const Offset(0, 2),
+                                      )
+                                    ]
+                                  : [],
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.badge_outlined,
+                                  size: 16,
+                                  color: _selectedAdminRoleType == 'Sub-Admin' ? Colors.white : const Color(0xFF475569),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Sub-Admin',
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: _selectedAdminRoleType == 'Sub-Admin' ? Colors.white : const Color(0xFF334155),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => setState(() => _selectedAdminRoleType = 'Admin'),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                            decoration: BoxDecoration(
+                              color: _selectedAdminRoleType == 'Admin' ? const Color(0xFF6366F1) : Colors.white,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: _selectedAdminRoleType == 'Admin' ? const Color(0xFF6366F1) : const Color(0xFFCBD5E1),
+                              ),
+                              boxShadow: _selectedAdminRoleType == 'Admin'
+                                  ? [
+                                      BoxShadow(
+                                        color: const Color(0xFF6366F1).withValues(alpha: 0.3),
+                                        blurRadius: 6,
+                                        offset: const Offset(0, 2),
+                                      )
+                                    ]
+                                  : [],
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.shield_outlined,
+                                  size: 16,
+                                  color: _selectedAdminRoleType == 'Admin' ? Colors.white : const Color(0xFF475569),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Primary Admin',
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: _selectedAdminRoleType == 'Admin' ? Colors.white : const Color(0xFF334155),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _selectedAdminRoleType == 'Sub-Admin'
+                        ? 'ℹ️ Sub-Admins manage patients, appointments, consultation cases, referrals, and dentists.'
+                        : 'ℹ️ Primary Admin has full administrative governance over the entire platform.',
+                    style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
             // MANDATORY FIELD 1: Location *
             TextFormField(
               controller: _locationController,
