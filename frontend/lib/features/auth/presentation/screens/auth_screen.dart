@@ -70,7 +70,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     'English', 'Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam', 'Marathi', 'Bengali', 'Gujarati', 'Punjabi', 'Spanish'
   ];
   String? _selectedPatientLanguage;
-  String? _selectedDentistLanguage;
 
   // Profile Image Picker Bytes
   Uint8List? _pickedImageBytes;
@@ -481,7 +480,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     final pincode = _pincodeController.text.trim();
     final clinicAddress = _clinicAddressController.text.trim();
     final String chosenRole = _selectedRole == UserRole.dentist ? 'Dentist' : 'Patient';
-    final String? chosenLang = _selectedRole == UserRole.dentist ? _selectedDentistLanguage : _selectedPatientLanguage;
 
     // Mandatory Field Validations
     if (city.isEmpty) {
@@ -508,15 +506,18 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       return;
     }
 
-    if (chosenLang == null || chosenLang.trim().isEmpty) {
+    // Language selection is only mandatory for Patient registration
+    if (_selectedRole == UserRole.patient && (_selectedPatientLanguage == null || _selectedPatientLanguage!.trim().isEmpty)) {
       setState(() => _isRegistering = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('⚠️ Language selection is mandatory.'), backgroundColor: Color(0xFFEF4444)),
+        const SnackBar(content: Text('⚠️ Preferred Language selection is mandatory for Patient registration.'), backgroundColor: Color(0xFFEF4444)),
       );
       return;
     }
 
-    final selectedLangs = [chosenLang];
+    final selectedLangs = _selectedRole == UserRole.patient && _selectedPatientLanguage != null
+        ? [_selectedPatientLanguage!]
+        : const ['English'];
 
     try {
       final res = await ApiService().registerUser(
@@ -1802,32 +1803,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   ),
                 ),
               ],
-            ),
-            const SizedBox(height: 12),
-            // MANDATORY FIELD 4: Language *
-            DropdownButtonFormField<String>(
-              value: _selectedDentistLanguage,
-              dropdownColor: Colors.white,
-              isExpanded: true,
-              validator: (val) => (val == null || val.isEmpty) ? 'Please select Languages Known' : null,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
-              decoration: _buildInputDecoration(
-                label: 'Languages Known / Spoken',
-                hint: 'Select Language',
-                isRequired: true,
-                icon: Icons.translate_rounded,
-              ),
-              items: _availableLanguages.map((lang) {
-                return DropdownMenuItem(
-                  value: lang,
-                  child: Text(lang, style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600)),
-                );
-              }).toList(),
-              onChanged: (val) {
-                if (val != null) {
-                  setState(() => _selectedDentistLanguage = val);
-                }
-              },
             ),
           ],
         );
