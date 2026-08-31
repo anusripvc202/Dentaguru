@@ -69,7 +69,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   static const List<String> _availableLanguages = [
     'English', 'Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam', 'Marathi', 'Bengali', 'Gujarati', 'Punjabi', 'Spanish'
   ];
-  String? _selectedPatientLanguage;
+  String? _selectedLanguage;
 
   // Profile Image Picker Bytes
   Uint8List? _pickedImageBytes;
@@ -506,18 +506,16 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       return;
     }
 
-    // Language selection is only mandatory for Patient registration
-    if (_selectedRole == UserRole.patient && (_selectedPatientLanguage == null || _selectedPatientLanguage!.trim().isEmpty)) {
+    // Language selection is mandatory for registration
+    if (_selectedLanguage == null || _selectedLanguage!.trim().isEmpty) {
       setState(() => _isRegistering = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('⚠️ Preferred Language selection is mandatory for Patient registration.'), backgroundColor: Color(0xFFEF4444)),
+        const SnackBar(content: Text('⚠️ Preferred Language selection is mandatory.'), backgroundColor: Color(0xFFEF4444)),
       );
       return;
     }
 
-    final selectedLangs = _selectedRole == UserRole.patient && _selectedPatientLanguage != null
-        ? [_selectedPatientLanguage!]
-        : const ['English'];
+    final selectedLangs = [_selectedLanguage!];
 
     try {
       final res = await ApiService().registerUser(
@@ -1425,6 +1423,33 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ),
             const SizedBox(height: 12),
 
+            // Mandatory Primary Identifier: Preferred Language
+            DropdownButtonFormField<String>(
+              initialValue: _selectedLanguage,
+              dropdownColor: Colors.white,
+              isExpanded: true,
+              validator: (val) => (val == null || val.isEmpty) ? 'Please select a preferred Language' : null,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
+              decoration: _buildInputDecoration(
+                label: 'Select Language',
+                hint: 'Select Language',
+                isRequired: true,
+                icon: Icons.translate_rounded,
+              ),
+              items: _availableLanguages.map((lang) {
+                return DropdownMenuItem(
+                  value: lang,
+                  child: Text(lang, style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600)),
+                );
+              }).toList(),
+              onChanged: (val) {
+                if (val != null) {
+                  setState(() => _selectedLanguage = val);
+                }
+              },
+            ),
+            const SizedBox(height: 12),
+
             // Optional Field: Email Address
             TextFormField(
               controller: _emailController,
@@ -1649,32 +1674,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   ),
                 ),
               ],
-            ),
-            const SizedBox(height: 12),
-            // MANDATORY FIELD 4: Language *
-            DropdownButtonFormField<String>(
-              value: _selectedPatientLanguage,
-              dropdownColor: Colors.white,
-              isExpanded: true,
-              validator: (val) => (val == null || val.isEmpty) ? 'Please select a preferred Language' : null,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
-              decoration: _buildInputDecoration(
-                label: 'Preferred Language',
-                hint: 'Select Language',
-                isRequired: true,
-                icon: Icons.translate_rounded,
-              ),
-              items: _availableLanguages.map((lang) {
-                return DropdownMenuItem(
-                  value: lang,
-                  child: Text(lang, style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600)),
-                );
-              }).toList(),
-              onChanged: (val) {
-                if (val != null) {
-                  setState(() => _selectedPatientLanguage = val);
-                }
-              },
             ),
           ],
         );
