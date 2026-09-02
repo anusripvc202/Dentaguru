@@ -408,17 +408,14 @@ class PatientConsultationRequest {
       final doc = PatientProblemService().allDoctors.firstWhere(
         (d) =>
             d.id == assignedDoctorId ||
+            d.userId == assignedDoctorId ||
             d.email.toLowerCase() == assignedDoctorId!.toLowerCase() ||
             (d.name.isNotEmpty && assignedDoctorId!.toLowerCase().contains(d.name.replaceAll('Dr. ', '').trim().toLowerCase())),
         orElse: () => DoctorModel(id: '', name: '', specialty: '', qualification: '', experienceYears: 0, rating: 0, reviewCount: 0, clinicName: '', phone: '', email: '', status: '', nextAvailableSlots: [], consultationFee: ''),
       );
       if (doc.name.isNotEmpty) return doc.name;
     }
-    final docs = PatientProblemService().allDoctors;
-    if (docs.isNotEmpty) {
-      return docs.first.name;
-    }
-    return 'Dr. Rahul Sharma';
+    return '';
   }
 
   String get displayDoctorSpecialty {
@@ -432,17 +429,14 @@ class PatientConsultationRequest {
       final doc = PatientProblemService().allDoctors.firstWhere(
         (d) =>
             d.id == assignedDoctorId ||
+            d.userId == assignedDoctorId ||
             d.email.toLowerCase() == assignedDoctorId!.toLowerCase() ||
             (d.name.isNotEmpty && assignedDoctorId!.toLowerCase().contains(d.name.replaceAll('Dr. ', '').trim().toLowerCase())),
         orElse: () => DoctorModel(id: '', name: '', specialty: '', qualification: '', experienceYears: 0, rating: 0, reviewCount: 0, clinicName: '', phone: '', email: '', status: '', nextAvailableSlots: [], consultationFee: ''),
       );
       if (doc.specialty.isNotEmpty) return doc.specialty;
     }
-    final docs = PatientProblemService().allDoctors;
-    if (docs.isNotEmpty) {
-      return docs.first.specialty;
-    }
-    return 'Orthodontics & Dental Surgery';
+    return '';
   }
 
   String get displayDoctorClinic {
@@ -451,7 +445,18 @@ class PatientConsultationRequest {
         assignedDoctorClinic != 'null') {
       return assignedDoctorClinic!;
     }
-    return 'DentaGuru Care Center';
+    if (assignedDoctorId != null && assignedDoctorId!.isNotEmpty) {
+      final doc = PatientProblemService().allDoctors.firstWhere(
+        (d) =>
+            d.id == assignedDoctorId ||
+            d.userId == assignedDoctorId ||
+            d.email.toLowerCase() == assignedDoctorId!.toLowerCase() ||
+            (d.name.isNotEmpty && assignedDoctorId!.toLowerCase().contains(d.name.replaceAll('Dr. ', '').trim().toLowerCase())),
+        orElse: () => DoctorModel(id: '', name: '', specialty: '', qualification: '', experienceYears: 0, rating: 0, reviewCount: 0, clinicName: '', phone: '', email: '', status: '', nextAvailableSlots: [], consultationFee: ''),
+      );
+      if (doc.clinicName.isNotEmpty) return doc.clinicName;
+    }
+    return '';
   }
 
   Map<String, dynamic> toJson() => {
@@ -3113,6 +3118,27 @@ class PatientProblemService extends ChangeNotifier {
         try {
           final newRef = PatientReferral.fromJson(Map<String, dynamic>.from(res['referral']));
           _myCreatedPatientReferrals.insert(0, newRef);
+
+          // Add referred patient to _allPatients if not present
+          final cleanPhone = referredPatientMobile.replaceAll(RegExp(r'[^0-9]'), '');
+          final raw10 = cleanPhone.length >= 10 ? cleanPhone.substring(cleanPhone.length - 10) : cleanPhone;
+          final alreadyInList = _allPatients.any((p) => (p.phone.isNotEmpty && p.phone.contains(raw10)) || (p.name.toLowerCase() == referredPatientName.trim().toLowerCase()));
+          if (!alreadyInList) {
+            _allPatients.insert(
+              0,
+              PatientProfile(
+                id: newRef.referredPatientId ?? 'pat_${DateTime.now().millisecondsSinceEpoch}',
+                name: referredPatientName.trim(),
+                phone: raw10,
+                email: 'user_$raw10@dentaguru.internal',
+                age: referredPatientAge.trim(),
+                gender: referredPatientGender.trim(),
+                city: referredPatientCity.trim(),
+                pincode: referredPatientPincode.trim(),
+                address: referredPatientLocation.trim(),
+              ),
+            );
+          }
           notifyListeners();
         } catch (_) {}
       }

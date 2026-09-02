@@ -2410,23 +2410,48 @@ class ApiService {
 
     // 2. Direct 24/7 Supabase Cloud Fallback
     try {
-      // Check existing patient
+      // Check existing patient or create patient in users table
       String? linkedPatientId;
       try {
         final cleanPhone = referredPatientMobile.replaceAll(RegExp(r'[^0-9]'), '').length >= 10
             ? referredPatientMobile.replaceAll(RegExp(r'[^0-9]'), '').substring(referredPatientMobile.replaceAll(RegExp(r'[^0-9]'), '').length - 10)
-            : referredPatientMobile;
-        final existUser = await client.from('users').select('id').eq('phone', cleanPhone).maybeSingle();
+            : referredPatientMobile.replaceAll(RegExp(r'[^0-9]'), '');
+        final existUser = await client.from('users').select('id').or('phone.eq.$cleanPhone,phone.eq.${referredPatientMobile.trim()}').maybeSingle();
         if (existUser != null && existUser['id'] != null) {
           linkedPatientId = existUser['id'].toString();
+        } else {
+          // Auto-insert referred patient into Supabase DB 'users' table
+          final userMeta = {
+            'age': referredPatientAge.trim(),
+            'gender': referredPatientGender.trim(),
+            'emergencyContact': referredPatientMobile.trim(),
+            'address': referredPatientLocation.trim(),
+          };
+          final insertedUser = await client.from('users').insert({
+            'name': referredPatientName.trim(),
+            'phone': cleanPhone.isNotEmpty ? cleanPhone : referredPatientMobile.trim(),
+            'email': 'user_${cleanPhone.isNotEmpty ? cleanPhone : DateTime.now().millisecondsSinceEpoch}@dentaguru.internal',
+            'password': 'Password_${cleanPhone}_Secure!',
+            'role': 'Patient',
+            'city': referredPatientCity.trim(),
+            'pincode': referredPatientPincode.trim(),
+            'state': referredPatientLocation.trim(),
+            'device_token': jsonEncode(userMeta),
+          }).select('id').maybeSingle();
+          if (insertedUser != null && insertedUser['id'] != null) {
+            linkedPatientId = insertedUser['id'].toString();
+          }
         }
-      } catch (_) {}
+      } catch (err) {
+        debugPrint('⚠️ Error auto-creating referred patient in users table: $err');
+      }
 
       final supaPayload = {
         'id': 'ref-${DateTime.now().millisecondsSinceEpoch}',
         'referrer_patient_id': currentUserId.isNotEmpty ? currentUserId : null,
         'referrer_id': currentUserId.isNotEmpty ? currentUserId : null,
         'referred_patient_id': linkedPatientId,
+        'referred_user_id': linkedPatientId,
         'referred_patient_name': referredPatientName.trim(),
         'referred_patient_mobile': referredPatientMobile.trim(),
         'referred_patient_age': referredPatientAge.trim(),
@@ -2756,6 +2781,27 @@ class ApiService {
               });
             } catch (_) {}
           }
+
+          // Create confirmed appointment in appointments table
+          final pId = res['referred_patient_id'] ?? res['referred_user_id'];
+          final dId = res['doctor_id'] ?? res['assigned_doctor_id'];
+          if (pId != null && dId != null) {
+            try {
+              final apptRes = await client.from('appointments').insert({
+                'patient_id': pId,
+                'dentist_id': dId,
+                'appointment_date': DateTime.now().toIso8601String().split('T').first,
+                'time_slot': confirmedTimeSlot ?? '10:00 AM',
+                'treatment': res['required_specialist'] ?? 'Specialist Consultation',
+                'status': 'CONFIRMED',
+                'notes': 'Referred Patient: ${res['referred_patient_name'] ?? ''} (${res['referred_patient_mobile'] ?? ''}). Complaint: ${res['clinical_complaint'] ?? ''}',
+              }).select('id').maybeSingle();
+              if (apptRes != null && apptRes['id'] != null) {
+                await client.from('referrals').update({'appointment_id': apptRes['id']}).eq('id', referralId);
+              }
+            } catch (_) {}
+          }
+
           return {'success': true, 'referral': res};
         }
       } catch (_) {}

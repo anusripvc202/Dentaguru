@@ -1,4 +1,4 @@
-const { Referral, User, Appointment, Dentist, Clinic, Notification } = require('../models/Schemas');
+const { Referral, User, Appointment, Dentist, Clinic, Notification, PatientProblemRequest } = require('../models/Schemas');
 const { sendPushNotification } = require('../services/notificationService');
 const {
     sendNewReferralWhatsApp,
@@ -174,11 +174,44 @@ exports.createReferral = async (req, res) => {
             });
         }
 
-        // 2. Existing Patient Check (Section 5)
+        // 2. Existing Patient Check / Auto-Create Referred Patient in Database (Section 5)
         let linkedPatientId = null;
-        const existingPatientUser = await User.findOne({ phone: cleanMobile });
+        const digitsOnly = cleanMobile.replace(/[^0-9]/g, '');
+        const raw10 = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : digitsOnly;
+        const patientEmail = `user_${raw10}@dentaguru.internal`;
+
+        let existingPatientUser = await User.findOne({ phone: cleanMobile });
+        if (!existingPatientUser && raw10 !== cleanMobile) {
+            existingPatientUser = await User.findOne({ phone: raw10 });
+        }
+        if (!existingPatientUser) {
+            existingPatientUser = await User.findOne({ email: patientEmail });
+        }
+
         if (existingPatientUser && existingPatientUser.id) {
             linkedPatientId = existingPatientUser.id;
+        } else {
+            // Automatically register and persist the referred patient into DB 'users' table!
+            try {
+                const newPatientUser = await User.create({
+                    name: referredPatientName.trim(),
+                    email: patientEmail,
+                    password: `Referred_${raw10}_Secure!`,
+                    phone: raw10,
+                    role: 'Patient',
+                    city: referredPatientCity.trim(),
+                    pincode: referredPatientPincode.trim(),
+                    state: referredPatientLocation.trim(),
+                    age: String(referredPatientAge).trim(),
+                    gender: referredPatientGender.trim(),
+                    emergency_contact: cleanMobile,
+                });
+                if (newPatientUser && newPatientUser.id) {
+                    linkedPatientId = newPatientUser.id;
+                }
+            } catch (err) {
+                console.error('⚠️ Could not auto-create referred patient user in DB:', err.message);
+            }
         }
 
         // 3. Fetch Referrer & Doctor Details
@@ -201,6 +234,8 @@ exports.createReferral = async (req, res) => {
         const newReferralRecord = await Referral.create({
             referrer_patient_id: loggedInUserId,
             referred_patient_id: linkedPatientId,
+            referred_user_id: linkedPatientId,
+            referrer_id: loggedInUserId,
             referred_patient_name: referredPatientName.trim(),
             referred_patient_mobile: cleanMobile,
             referred_patient_age: String(referredPatientAge).trim(),
@@ -211,10 +246,29 @@ exports.createReferral = async (req, res) => {
             required_specialist: requiredSpecialist.trim(),
             clinical_complaint: clinicalComplaint.trim(),
             doctor_id: doctorId,
+            assigned_doctor_id: doctorId,
             status: 'Pending',
             whatsapp_status: 'Pending',
             referral_date: new Date().toISOString()
         });
+
+        // Create Problem Request for the referred patient assigned to this Doctor
+        if (linkedPatientId) {
+            try {
+                await PatientProblemRequest.create({
+                    patient_id: linkedPatientId,
+                    problem_category: requiredSpecialist.trim(),
+                    problem_description: `Patient Referral (${clinicalComplaint.trim()})`,
+                    suggested_dentist_id: doctorId,
+                    status: 'DENTIST_ASSIGNED',
+                    city: referredPatientCity.trim(),
+                    pincode: referredPatientPincode.trim(),
+                    state: referredPatientLocation.trim()
+                });
+            } catch (e) {
+                console.warn('⚠️ Problem request creation for referral notice:', e.message);
+            }
+        }
 
         // 5. Create In-App Notification for Doctor (Section 9)
         const doctorRecipientId = doctor?.user_id || doctor?.id || doctorId;
@@ -465,6 +519,28 @@ exports.acceptReferral = async (req, res) => {
             status: 'Accepted',
             rejection_reason: null
         });
+
+        // 1b. Ensure consultation appointment exists for this accepted referral
+        const patientId = ref.referred_patient_id || ref.referred_user_id;
+        const doctorId = ref.doctor_id || ref.assigned_doctor_id;
+        if (patientId && doctorId) {
+            try {
+                const appt = await Appointment.create({
+                    patient_id: patientId,
+                    dentist_id: doctorId,
+                    appointment_date: new Date().toISOString().split('T')[0],
+                    time_slot: confirmedTimeSlot || '10:00 AM',
+                    treatment: ref.required_specialist || 'Specialist Consultation',
+                    status: 'CONFIRMED',
+                    notes: `Referred Patient: ${ref.referred_patient_name} (${ref.referred_patient_mobile}). Clinical complaint: ${ref.clinical_complaint || ''}`
+                });
+                if (appt && appt.id) {
+                    await Referral.findByIdAndUpdate(referralId, { appointment_id: appt.id });
+                }
+            } catch (apptErr) {
+                console.warn('⚠️ Appointment auto-creation on referral accept notice:', apptErr.message);
+            }
+        }
 
         const populated = await populateReferralData(updated);
 

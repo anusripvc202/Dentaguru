@@ -152,15 +152,20 @@ async function runTest() {
         console.error('❌ Accept referral failed:', acceptRes.data);
     }
 
-    // 7. Verify Referrer Notification
-    console.log('\n--- 5. Checking Referrer Notification ---');
-    const notifs = await Notification.find({ recipient_id: referrer.id });
-    const acceptNotif = notifs.find(n => n.type === 'REFERRAL_ACCEPTED' || (n.message && n.message.includes('accepted')));
-    if (acceptNotif) {
-        console.log('✅ Referrer received acceptance notification:', acceptNotif.title, '-', acceptNotif.message);
-    } else {
-        console.log('ℹ️ Notification created in notifications list (count:', notifs.length, ')');
-    }
+    console.log('\n--- 6. Cleaning Up Test Artifacts ---');
+    try {
+        if (createdReferralId) await Referral.findByIdAndDelete(createdReferralId);
+        if (referrer?.id) await User.findByIdAndDelete(referrer.id);
+        if (doctorUser?.id) await User.findByIdAndDelete(doctorUser.id);
+        if (doctor?.id) await Dentist.findByIdAndDelete(doctor.id);
+        if (clinic?.id) await Clinic.findByIdAndDelete(clinic.id);
+        await Notification.deleteMany({ recipient_id: referrer?.id });
+        await Notification.deleteMany({ recipient_id: doctorUser?.id });
+        const { supabaseAdmin } = require('../config/supabase');
+        await supabaseAdmin.from('users').delete().eq('phone', '9988776655');
+        await supabaseAdmin.from('patient_problem_requests').delete().ilike('problem_description', '%Severe crowding%');
+        console.log('✅ Cleaned up all test entities.');
+    } catch (_) {}
 
     console.log('\n🎉 ALL BACKEND REFERRAL TESTS PASSED!\n');
     process.exit(0);

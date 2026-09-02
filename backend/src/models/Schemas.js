@@ -152,6 +152,22 @@ const User = {
             const cleanDigits = (userData.phone || '').replace(/[^0-9]/g, '') || Date.now().toString();
             userData.email = `user_${cleanDigits}@dentaguru.internal`;
         }
+
+        // Pack extra profile metadata into device_token if not already a real push token
+        if (!userData.device_token || userData.device_token.startsWith('{')) {
+            const meta = {};
+            if (userData.age) meta.age = userData.age;
+            if (userData.gender) meta.gender = userData.gender;
+            if (userData.blood_group) meta.bloodGroup = userData.blood_group;
+            if (userData.emergency_contact) meta.emergencyContact = userData.emergency_contact;
+            if (userData.languages) meta.languages = userData.languages;
+            if (userData.permissions) meta.permissions = userData.permissions;
+            if (userData.status) meta.status = userData.status;
+            if (Object.keys(meta).length > 0) {
+                userData.device_token = JSON.stringify(meta);
+            }
+        }
+
         const payload = {};
         for (const [key, val] of Object.entries(userData)) {
             if (val !== undefined && val !== null) {
@@ -165,11 +181,20 @@ const User = {
             if (error) throw error;
             insertedData = data;
         } catch (err) {
-            // Fallback if schema doesn't have permissions, status, or languages column yet
-            const safePayload = { ...payload };
-            delete safePayload.permissions;
-            delete safePayload.status;
-            delete safePayload.languages;
+            // Fallback: Strip unmapped columns and use standard core columns
+            const safePayload = {
+                name: payload.name || 'User',
+                email: payload.email,
+                password: payload.password,
+                phone: payload.phone,
+                role: payload.role || 'Patient',
+            };
+            if (payload.city) safePayload.city = payload.city;
+            if (payload.pincode) safePayload.pincode = payload.pincode;
+            if (payload.state) safePayload.state = payload.state;
+            if (payload.device_token) safePayload.device_token = payload.device_token;
+            if (payload.biometric_token) safePayload.biometric_token = payload.biometric_token;
+
             const { data, error } = await supabaseAdmin.from('users').insert(safePayload).select().single();
             if (error) {
                 console.error('❌ Supabase User Insert Error:', error.message);

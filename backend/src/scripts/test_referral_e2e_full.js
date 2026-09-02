@@ -289,6 +289,27 @@ async function runE2ETest() {
         console.error('❌ Rejection failed:', rejRes.data);
     }
 
+    console.log('\n--- 10. Cleaning Up Test Data ---');
+    try {
+        const { supabaseAdmin } = require('../config/supabase');
+        if (ref1Id) await Referral.findByIdAndDelete(ref1Id);
+        if (ref2Id) await Referral.findByIdAndDelete(ref2Id);
+        if (patientA?.id) await User.findByIdAndDelete(patientA.id);
+        if (doctorCUser?.id) await User.findByIdAndDelete(doctorCUser.id);
+        if (doctorDUser?.id) await User.findByIdAndDelete(doctorDUser.id);
+        if (doctorC?.id) await Dentist.findByIdAndDelete(doctorC.id);
+        if (doctorD?.id) await Dentist.findByIdAndDelete(doctorD.id);
+        if (clinicC?.id) await Clinic.findByIdAndDelete(clinicC.id);
+        await supabaseAdmin.from('users').delete().eq('phone', '9900112233');
+        await supabaseAdmin.from('users').delete().eq('phone', '9900998877');
+        await supabaseAdmin.from('users').delete().eq('phone', '9848012345');
+        await supabaseAdmin.from('patient_problem_requests').delete().ilike('problem_description', '%Patient Referral%');
+        await Notification.deleteMany({ recipient_id: patientA?.id });
+        await Notification.deleteMany({ recipient_id: doctorCUser?.id });
+        await Notification.deleteMany({ recipient_id: doctorDUser?.id });
+        console.log('✅ Cleaned up all test users and referrals.');
+    } catch (_) {}
+
     console.log('\n=========================================================');
     console.log('🎉 ALL 9 END-TO-END REFERRAL VERIFICATION CHECKS PASSED!');
     console.log('=========================================================\n');

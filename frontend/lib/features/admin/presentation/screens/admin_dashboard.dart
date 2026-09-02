@@ -5155,175 +5155,704 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         builder: (context, cardConstraints) {
                           final isNarrow = cardConstraints.maxWidth < 520;
 
+                          final displayPatientName = req.patientName.trim().isNotEmpty && req.patientName.trim().toLowerCase() != 'patient'
+                              ? req.patientName.trim()
+                              : (_problemService.allPatients.any((p) => (req.patientId != null && p.id == req.patientId) || (p.name.isNotEmpty && p.name.toLowerCase() != 'patient'))
+                                  ? _problemService.allPatients.firstWhere((p) => (req.patientId != null && p.id == req.patientId) || (p.name.isNotEmpty && p.name.toLowerCase() != 'patient')).name
+                                  : 'Patient');
+                          final displayPhone = req.patientPhone.isNotEmpty
+                              ? req.patientPhone
+                              : (_problemService.allPatients.firstWhere((p) => p.id == req.patientId || p.name == req.patientName, orElse: () => PatientProfile()).phone.isNotEmpty
+                                  ? _problemService.allPatients.firstWhere((p) => p.id == req.patientId || p.name == req.patientName, orElse: () => PatientProfile()).phone
+                                  : '');
+                          final displayCity = req.getDisplayCity(_problemService.allPatients);
+                          final displayPin = req.getDisplayPincode(_problemService.allPatients);
+                          final initialLetter = displayPatientName.isNotEmpty ? displayPatientName[0].toUpperCase() : 'P';
+                          final isSevere = req.severity.toLowerCase() == 'severe';
+                          final isModerate = req.severity.toLowerCase() == 'moderate';
+
                           return Container(
-                            margin: const EdgeInsets.only(bottom: 12),
-                            padding: const EdgeInsets.all(14),
+                            margin: const EdgeInsets.only(bottom: 16),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF8FAFC),
-                              borderRadius: BorderRadius.circular(16),
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(20),
                               border: Border.all(
-                                color: isPending ? const Color(0xFFF59E0B) : const Color(0xFFCBD5E1),
-                                width: isPending ? 1.5 : 1,
+                                color: isPending ? const Color(0xFFFDE68A) : const Color(0xFFE2E8F0),
+                                width: isPending ? 1.4 : 1.0,
                               ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFF0F172A).withValues(alpha: 0.04),
+                                  blurRadius: 18,
+                                  offset: const Offset(0, 6),
+                                ),
+                                BoxShadow(
+                                  color: isPending
+                                      ? const Color(0xFFF59E0B).withValues(alpha: 0.06)
+                                      : const Color(0xFF10B981).withValues(alpha: 0.05),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Container(
-                                      padding: const EdgeInsets.all(8),
-                                      decoration: BoxDecoration(
-                                        color: isPending ? const Color(0xFFFEF3C7) : const Color(0xFFDCFCE7),
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: Icon(
-                                        isPending ? Icons.pending_actions_rounded : Icons.check_circle_rounded,
-                                        color: isPending ? const Color(0xFFD97706) : const Color(0xFF16A34A),
-                                        size: 18,
+                            clipBehavior: Clip.antiAlias,
+                            child: IntrinsicHeight(
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  // Left Status Accent Bar
+                                  Container(
+                                    width: 5,
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        begin: Alignment.topCenter,
+                                        end: Alignment.bottomCenter,
+                                        colors: isPending
+                                            ? const [Color(0xFFF59E0B), Color(0xFFD97706)]
+                                            : const [Color(0xFF10B981), Color(0xFF059669)],
                                       ),
                                     ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
+                                  ),
+
+                                  // Main Card Content
+                                  Expanded(
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(16),
                                       child: Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          Text(
-                                            req.patientName.trim().isNotEmpty && req.patientName.trim().toLowerCase() != 'patient'
-                                                ? req.patientName
-                                                : (_problemService.allPatients.any((p) => (req.patientId != null && p.id == req.patientId) || (p.name.isNotEmpty && p.name.toLowerCase() != 'patient'))
-                                                    ? _problemService.allPatients.firstWhere((p) => (req.patientId != null && p.id == req.patientId) || (p.name.isNotEmpty && p.name.toLowerCase() != 'patient')).name
-                                                    : 'Patient'),
-                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
-                                            overflow: TextOverflow.ellipsis,
+                                          // 1. Top Header: Avatar + Patient Name + Badges
+                                          Row(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              // Avatar with Status Dot
+                                              Stack(
+                                                clipBehavior: Clip.none,
+                                                children: [
+                                                  Container(
+                                                    width: 44,
+                                                    height: 44,
+                                                    decoration: BoxDecoration(
+                                                      gradient: LinearGradient(
+                                                        begin: Alignment.topLeft,
+                                                        end: Alignment.bottomRight,
+                                                        colors: isPending
+                                                            ? const [Color(0xFFF59E0B), Color(0xFFD97706)]
+                                                            : const [Color(0xFF0284C7), Color(0xFF0369A1)],
+                                                      ),
+                                                      borderRadius: BorderRadius.circular(14),
+                                                      boxShadow: [
+                                                        BoxShadow(
+                                                          color: (isPending ? const Color(0xFFF59E0B) : const Color(0xFF0284C7)).withValues(alpha: 0.25),
+                                                          blurRadius: 8,
+                                                          offset: const Offset(0, 3),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    child: Center(
+                                                      child: Text(
+                                                        initialLetter,
+                                                        style: const TextStyle(
+                                                          color: Colors.white,
+                                                          fontSize: 18,
+                                                          fontWeight: FontWeight.w900,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  Positioned(
+                                                    right: -2,
+                                                    bottom: -2,
+                                                    child: Container(
+                                                      padding: const EdgeInsets.all(2),
+                                                      decoration: const BoxDecoration(
+                                                        color: Colors.white,
+                                                        shape: BoxShape.circle,
+                                                      ),
+                                                      child: Icon(
+                                                        isPending ? Icons.hourglass_top_rounded : Icons.check_circle_rounded,
+                                                        color: isPending ? const Color(0xFFD97706) : const Color(0xFF10B981),
+                                                        size: 13,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              const SizedBox(width: 12),
+
+                                              // Name & Contact Column
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      displayPatientName,
+                                                      style: const TextStyle(
+                                                        fontSize: 15.5,
+                                                        fontWeight: FontWeight.w800,
+                                                        color: Color(0xFF0F172A),
+                                                        letterSpacing: 0.2,
+                                                      ),
+                                                      overflow: TextOverflow.ellipsis,
+                                                      maxLines: 1,
+                                                    ),
+                                                    const SizedBox(height: 3),
+                                                    Row(
+                                                      children: [
+                                                        const Icon(Icons.phone_rounded, size: 11, color: Color(0xFF64748B)),
+                                                        const SizedBox(width: 4),
+                                                        Flexible(
+                                                          child: Text(
+                                                            displayPhone.isNotEmpty ? displayPhone : 'Phone not provided',
+                                                            style: const TextStyle(
+                                                              fontSize: 11.5,
+                                                              fontWeight: FontWeight.w600,
+                                                              color: Color(0xFF64748B),
+                                                            ),
+                                                            overflow: TextOverflow.ellipsis,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+
+                                              // Severity Badge
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
+                                                decoration: BoxDecoration(
+                                                  color: isSevere
+                                                      ? const Color(0xFFFEF2F2)
+                                                      : (isModerate ? const Color(0xFFFFFBEB) : const Color(0xFFF0F9FF)),
+                                                  borderRadius: BorderRadius.circular(10),
+                                                  border: Border.all(
+                                                    color: isSevere
+                                                        ? const Color(0xFFFECACA)
+                                                        : (isModerate ? const Color(0xFFFDE68A) : const Color(0xFFBAE6FD)),
+                                                    width: 1,
+                                                  ),
+                                                ),
+                                                child: Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    Container(
+                                                      width: 6,
+                                                      height: 6,
+                                                      decoration: BoxDecoration(
+                                                        shape: BoxShape.circle,
+                                                        color: isSevere
+                                                            ? const Color(0xFFDC2626)
+                                                            : (isModerate ? const Color(0xFFD97706) : const Color(0xFF0284C7)),
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 5),
+                                                    Text(
+                                                      req.severity,
+                                                      style: TextStyle(
+                                                        fontSize: 10.5,
+                                                        fontWeight: FontWeight.w800,
+                                                        color: isSevere
+                                                            ? const Color(0xFFDC2626)
+                                                            : (isModerate ? const Color(0xFFB45309) : const Color(0xFF0369A1)),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
                                           ),
-                                          Text(
-                                            '📞 Phone: ${req.patientPhone.isNotEmpty ? req.patientPhone : (_problemService.allPatients.firstWhere((p) => p.id == req.patientId || p.name == req.patientName, orElse: () => PatientProfile()).phone.isNotEmpty ? _problemService.allPatients.firstWhere((p) => p.id == req.patientId || p.name == req.patientName, orElse: () => PatientProfile()).phone : 'Not Provided')}',
-                                            style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
-                                            overflow: TextOverflow.ellipsis,
+
+                                          const SizedBox(height: 12),
+
+                                          // 2. City & Location Tag Bar
+                                          if (displayCity.isNotEmpty || displayPin.isNotEmpty) ...[
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFFF1F5F9),
+                                                borderRadius: BorderRadius.circular(8),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const Icon(Icons.location_on_rounded, size: 12, color: Color(0xFF0284C7)),
+                                                  const SizedBox(width: 4),
+                                                  Flexible(
+                                                    child: Text(
+                                                      '${displayCity.isNotEmpty ? displayCity : "Location"}${displayPin.isNotEmpty ? " • PIN: $displayPin" : ""}',
+                                                      style: const TextStyle(
+                                                        fontSize: 11,
+                                                        fontWeight: FontWeight.w700,
+                                                        color: Color(0xFF334155),
+                                                      ),
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            const SizedBox(height: 10),
+                                          ],
+
+                                          // 3. Problem Category & Complaint Container
+                                          Container(
+                                            width: double.infinity,
+                                            padding: const EdgeInsets.all(12),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFFF8FAFC),
+                                              borderRadius: BorderRadius.circular(14),
+                                              border: Border.all(color: const Color(0xFFE2E8F0)),
+                                            ),
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                // Category Tag
+                                                Row(
+                                                  children: [
+                                                    Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                                                      decoration: BoxDecoration(
+                                                        color: const Color(0xFFEFF6FF),
+                                                        borderRadius: BorderRadius.circular(6),
+                                                        border: Border.all(color: const Color(0xFFBFDBFE)),
+                                                      ),
+                                                      child: Row(
+                                                        mainAxisSize: MainAxisSize.min,
+                                                        children: [
+                                                          const Text('🦷', style: TextStyle(fontSize: 11)),
+                                                          const SizedBox(width: 4),
+                                                          Flexible(
+                                                            child: Text(
+                                                              req.problemCategory,
+                                                              style: const TextStyle(
+                                                                fontSize: 11,
+                                                                fontWeight: FontWeight.w800,
+                                                                color: Color(0xFF1D4ED8),
+                                                              ),
+                                                              overflow: TextOverflow.ellipsis,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                if (req.problemDescription.trim().isNotEmpty) ...[
+                                                  const SizedBox(height: 8),
+                                                  Text(
+                                                    req.problemDescription.trim(),
+                                                    style: const TextStyle(
+                                                      fontSize: 12.5,
+                                                      color: Color(0xFF334155),
+                                                      height: 1.4,
+                                                      fontWeight: FontWeight.w500,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ],
+                                            ),
                                           ),
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            '📍 City: ${req.getDisplayCity(_problemService.allPatients)}${req.getDisplayPincode(_problemService.allPatients).isNotEmpty ? " • PIN: ${req.getDisplayPincode(_problemService.allPatients)}" : ""}',
-                                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
-                                            overflow: TextOverflow.ellipsis,
+
+                                          // 4. Assigned Specialist Section (Strictly Real Database Data)
+                                          if ((req.assignedDoctorName != null && req.assignedDoctorName!.isNotEmpty) ||
+                                              (req.assignedDoctorId != null && req.assignedDoctorId!.isNotEmpty) ||
+                                              req.status.toUpperCase().contains('ASSIGNED') ||
+                                              req.status == 'Doctor Assigned' ||
+                                              req.status == 'Confirmed') ...[
+                                            Builder(
+                                              builder: (context) {
+                                                DoctorModel? assignedDoc;
+                                                final docId = req.assignedDoctorId ?? req.preferredDoctorId;
+                                                if (docId != null && docId.isNotEmpty) {
+                                                  try {
+                                                    assignedDoc = _problemService.allDoctors.firstWhere((d) => d.id == docId || d.userId == docId);
+                                                  } catch (_) {}
+                                                }
+                                                if (assignedDoc == null && req.displayDoctorName.isNotEmpty) {
+                                                  final dName = req.displayDoctorName.toLowerCase().replaceAll('dr.', '').trim();
+                                                  try {
+                                                    assignedDoc = _problemService.allDoctors.firstWhere((d) => d.name.toLowerCase().replaceAll('dr.', '').trim().contains(dName) || dName.contains(d.name.toLowerCase().replaceAll('dr.', '').trim()));
+                                                  } catch (_) {}
+                                                }
+
+                                                final rawDocName = assignedDoc?.name.trim().isNotEmpty == true
+                                                    ? assignedDoc!.name.trim()
+                                                    : req.displayDoctorName.trim();
+                                                final docName = rawDocName.isNotEmpty
+                                                    ? (rawDocName.toLowerCase().startsWith('dr.') ? rawDocName : 'Dr. $rawDocName')
+                                                    : '';
+                                                final docSpecialty = assignedDoc?.specialty.trim().isNotEmpty == true
+                                                    ? assignedDoc!.specialty.trim()
+                                                    : req.displayDoctorSpecialty.trim();
+                                                final docClinic = assignedDoc?.clinicName.trim().isNotEmpty == true
+                                                    ? assignedDoc!.clinicName.trim()
+                                                    : (req.assignedDoctorClinic?.trim() ?? (req.preferredDoctorClinic?.trim() ?? ''));
+                                                final docPhone = assignedDoc?.phone.trim().isNotEmpty == true
+                                                    ? assignedDoc!.phone.trim()
+                                                    : (req.assignedDoctorPhone?.trim() ?? '');
+                                                final docEmail = assignedDoc?.email.trim().isNotEmpty == true
+                                                    ? assignedDoc!.email.trim()
+                                                    : '';
+                                                final docQualification = assignedDoc?.qualification.trim().isNotEmpty == true
+                                                    ? assignedDoc!.qualification.trim()
+                                                    : '';
+                                                final docExperience = (assignedDoc != null && assignedDoc.experienceYears > 0)
+                                                    ? '${assignedDoc.experienceYears} Yrs Experience'
+                                                    : '';
+                                                final docRating = (assignedDoc != null && assignedDoc.rating > 0 && assignedDoc.reviewCount > 0)
+                                                    ? '${assignedDoc.rating.toStringAsFixed(1)} ★'
+                                                    : '';
+                                                final docCity = assignedDoc?.city.trim().isNotEmpty == true ? assignedDoc!.city.trim() : '';
+                                                final docPin = assignedDoc?.pincode.trim().isNotEmpty == true ? assignedDoc!.pincode.trim() : '';
+                                                final docAddress = assignedDoc?.clinicAddress.trim().isNotEmpty == true
+                                                    ? assignedDoc!.clinicAddress.trim()
+                                                    : (assignedDoc?.state.trim().isNotEmpty == true ? assignedDoc!.state.trim() : '');
+                                                
+                                                String docLocation = '';
+                                                if (docAddress.isNotEmpty && docCity.isNotEmpty) {
+                                                  docLocation = '$docAddress, $docCity${docPin.isNotEmpty ? " • PIN: $docPin" : ""}';
+                                                } else if (docCity.isNotEmpty) {
+                                                  docLocation = '$docCity${docPin.isNotEmpty ? " • PIN: $docPin" : ""}';
+                                                } else if (docAddress.isNotEmpty) {
+                                                  docLocation = docAddress;
+                                                }
+
+                                                final docFee = (assignedDoc?.consultationFee.trim().isNotEmpty == true &&
+                                                        assignedDoc!.consultationFee.trim() != '\$75' &&
+                                                        assignedDoc.consultationFee.trim() != '75')
+                                                    ? assignedDoc.consultationFee.trim()
+                                                    : '';
+                                                final docLanguages = (assignedDoc?.languages != null && assignedDoc!.languages.isNotEmpty)
+                                                    ? assignedDoc.languages.join(', ')
+                                                    : '';
+                                                final timeSlot = (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.trim().isNotEmpty)
+                                                    ? req.confirmedTimeSlot!.trim()
+                                                    : '';
+
+                                                if (docName.isEmpty && docSpecialty.isEmpty) {
+                                                  return const SizedBox.shrink();
+                                                }
+
+                                                return Container(
+                                                  margin: const EdgeInsets.only(top: 10),
+                                                  padding: const EdgeInsets.all(14),
+                                                  decoration: BoxDecoration(
+                                                    gradient: const LinearGradient(
+                                                      colors: [Color(0xFFF0FDF4), Color(0xFFECFDF5)],
+                                                      begin: Alignment.topLeft,
+                                                      end: Alignment.bottomRight,
+                                                    ),
+                                                    borderRadius: BorderRadius.circular(16),
+                                                    border: Border.all(color: const Color(0xFFA7F3D0), width: 1.2),
+                                                    boxShadow: [
+                                                      BoxShadow(
+                                                        color: const Color(0xFF10B981).withValues(alpha: 0.08),
+                                                        blurRadius: 10,
+                                                        offset: const Offset(0, 3),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    children: [
+                                                      // Top Doctor Identity Row
+                                                      Row(
+                                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                                        children: [
+                                                          Container(
+                                                            padding: const EdgeInsets.all(8),
+                                                            decoration: BoxDecoration(
+                                                              color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                                                              shape: BoxShape.circle,
+                                                            ),
+                                                            child: const Icon(Icons.verified_user_rounded, color: Color(0xFF059669), size: 20),
+                                                          ),
+                                                          const SizedBox(width: 10),
+                                                          Expanded(
+                                                            child: Column(
+                                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                                              children: [
+                                                                Row(
+                                                                  children: [
+                                                                    Flexible(
+                                                                      child: Text(
+                                                                        docName,
+                                                                        style: const TextStyle(
+                                                                          fontWeight: FontWeight.w900,
+                                                                          fontSize: 14,
+                                                                          color: Color(0xFF065F46),
+                                                                          letterSpacing: 0.1,
+                                                                        ),
+                                                                        overflow: TextOverflow.ellipsis,
+                                                                      ),
+                                                                    ),
+                                                                    const SizedBox(width: 6),
+                                                                    Container(
+                                                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                                      decoration: BoxDecoration(
+                                                                        color: const Color(0xFFDCFCE7),
+                                                                        borderRadius: BorderRadius.circular(6),
+                                                                        border: Border.all(color: const Color(0xFF86EFAC)),
+                                                                      ),
+                                                                      child: const Row(
+                                                                        mainAxisSize: MainAxisSize.min,
+                                                                        children: [
+                                                                          Icon(Icons.check_circle, size: 10, color: Color(0xFF16A34A)),
+                                                                          SizedBox(width: 3),
+                                                                          Text(
+                                                                            'Assigned Doctor',
+                                                                            style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                                                                          ),
+                                                                        ],
+                                                                      ),
+                                                                    ),
+                                                                  ],
+                                                                ),
+                                                                if (docSpecialty.isNotEmpty || docQualification.isNotEmpty || docExperience.isNotEmpty) ...[
+                                                                  const SizedBox(height: 3),
+                                                                  Text(
+                                                                    [
+                                                                      if (docSpecialty.isNotEmpty) docSpecialty,
+                                                                      if (docQualification.isNotEmpty) docQualification,
+                                                                      if (docExperience.isNotEmpty) '($docExperience)',
+                                                                    ].join(' • '),
+                                                                    style: const TextStyle(
+                                                                      fontSize: 11.5,
+                                                                      fontWeight: FontWeight.w600,
+                                                                      color: Color(0xFF047857),
+                                                                    ),
+                                                                    overflow: TextOverflow.ellipsis,
+                                                                  ),
+                                                                ],
+                                                              ],
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+
+                                                      if (docClinic.isNotEmpty || docLocation.isNotEmpty || docPhone.isNotEmpty || docEmail.isNotEmpty) ...[
+                                                        const Padding(
+                                                          padding: EdgeInsets.symmetric(vertical: 8),
+                                                          child: Divider(color: Color(0xFFA7F3D0), height: 1, thickness: 0.8),
+                                                        ),
+                                                      ],
+
+                                                      // Real Doctor Details Rows (Render ONLY if provided in DB)
+                                                      if (docClinic.isNotEmpty) ...[
+                                                        Row(
+                                                          children: [
+                                                            const Icon(Icons.local_hospital_rounded, size: 12, color: Color(0xFF059669)),
+                                                            const SizedBox(width: 5),
+                                                            const Text('Clinic: ', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF065F46))),
+                                                            Expanded(
+                                                              child: Text(
+                                                                docClinic,
+                                                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
+                                                                overflow: TextOverflow.ellipsis,
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                        const SizedBox(height: 4),
+                                                      ],
+
+                                                      if (docLocation.isNotEmpty) ...[
+                                                        Row(
+                                                          children: [
+                                                            const Icon(Icons.location_on_rounded, size: 12, color: Color(0xFF059669)),
+                                                            const SizedBox(width: 5),
+                                                            const Text('Location: ', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF065F46))),
+                                                            Expanded(
+                                                              child: Text(
+                                                                docLocation,
+                                                                style: const TextStyle(fontSize: 11, color: Color(0xFF334155)),
+                                                                overflow: TextOverflow.ellipsis,
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                        const SizedBox(height: 4),
+                                                      ],
+
+                                                      if (docPhone.isNotEmpty) ...[
+                                                        Row(
+                                                          children: [
+                                                            const Icon(Icons.phone_in_talk_rounded, size: 12, color: Color(0xFF059669)),
+                                                            const SizedBox(width: 5),
+                                                            const Text('Contact: ', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF065F46))),
+                                                            Expanded(
+                                                              child: Text(
+                                                                docPhone,
+                                                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0284C7)),
+                                                                overflow: TextOverflow.ellipsis,
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                        const SizedBox(height: 4),
+                                                      ],
+
+                                                      if (docEmail.isNotEmpty) ...[
+                                                        Row(
+                                                          children: [
+                                                            const Icon(Icons.email_outlined, size: 12, color: Color(0xFF059669)),
+                                                            const SizedBox(width: 5),
+                                                            const Text('Email: ', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF065F46))),
+                                                            Expanded(
+                                                              child: Text(
+                                                                docEmail,
+                                                                style: const TextStyle(fontSize: 11, color: Color(0xFF475569)),
+                                                                overflow: TextOverflow.ellipsis,
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ],
+
+                                                      // Real Metadata Chips (Only if present in DB)
+                                                      if (docFee.isNotEmpty || docLanguages.isNotEmpty || docRating.isNotEmpty || timeSlot.isNotEmpty) ...[
+                                                        const SizedBox(height: 6),
+                                                        Wrap(
+                                                          spacing: 6,
+                                                          runSpacing: 5,
+                                                          children: [
+                                                            if (docFee.isNotEmpty)
+                                                              Container(
+                                                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                                                decoration: BoxDecoration(
+                                                                  color: Colors.white,
+                                                                  borderRadius: BorderRadius.circular(6),
+                                                                  border: Border.all(color: const Color(0xFFA7F3D0)),
+                                                                ),
+                                                                child: Row(
+                                                                  mainAxisSize: MainAxisSize.min,
+                                                                  children: [
+                                                                    const Icon(Icons.payments_outlined, size: 11, color: Color(0xFF059669)),
+                                                                    const SizedBox(width: 4),
+                                                                    Text('Fee: $docFee', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Color(0xFF065F46))),
+                                                                  ],
+                                                                ),
+                                                              ),
+                                                            if (docLanguages.isNotEmpty)
+                                                              Container(
+                                                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                                                decoration: BoxDecoration(
+                                                                  color: Colors.white,
+                                                                  borderRadius: BorderRadius.circular(6),
+                                                                  border: Border.all(color: const Color(0xFFA7F3D0)),
+                                                                ),
+                                                                child: Row(
+                                                                  mainAxisSize: MainAxisSize.min,
+                                                                  children: [
+                                                                    const Icon(Icons.translate_rounded, size: 11, color: Color(0xFF059669)),
+                                                                    const SizedBox(width: 4),
+                                                                    Text(docLanguages, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Color(0xFF065F46))),
+                                                                  ],
+                                                                ),
+                                                              ),
+                                                            if (docRating.isNotEmpty)
+                                                              Container(
+                                                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                                                decoration: BoxDecoration(
+                                                                  color: Colors.white,
+                                                                  borderRadius: BorderRadius.circular(6),
+                                                                  border: Border.all(color: const Color(0xFFA7F3D0)),
+                                                                ),
+                                                                child: Row(
+                                                                  mainAxisSize: MainAxisSize.min,
+                                                                  children: [
+                                                                    const Icon(Icons.star_rounded, size: 12, color: Color(0xFFF59E0B)),
+                                                                    const SizedBox(width: 3),
+                                                                    Text(docRating, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF92400E))),
+                                                                  ],
+                                                                ),
+                                                              ),
+                                                            if (timeSlot.isNotEmpty)
+                                                              Container(
+                                                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                                                decoration: BoxDecoration(
+                                                                  color: const Color(0xFFEFF6FF),
+                                                                  borderRadius: BorderRadius.circular(6),
+                                                                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                                                                ),
+                                                                child: Row(
+                                                                  mainAxisSize: MainAxisSize.min,
+                                                                  children: [
+                                                                    const Icon(Icons.schedule_rounded, size: 11, color: Color(0xFF1D4ED8)),
+                                                                    const SizedBox(width: 4),
+                                                                    Text('Slot: $timeSlot', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8))),
+                                                                  ],
+                                                                ),
+                                                              ),
+                                                          ],
+                                                        ),
+                                                      ],
+                                                    ],
+                                                  ),
+                                                );
+                                              },
+                                            ),
+                                          ],
+
+                                          const SizedBox(height: 14),
+
+                                          // 5. Action Toolbar Row
+                                          Row(
+                                            children: [
+                                              Expanded(
+                                                child: ElevatedButton(
+                                                  onPressed: () => _showAssignDoctorDialog(context, req),
+                                                  style: ElevatedButton.styleFrom(
+                                                    backgroundColor: isPending ? const Color(0xFF10B981) : const Color(0xFF0052CC),
+                                                    foregroundColor: Colors.white,
+                                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                                    elevation: 2,
+                                                    shadowColor: (isPending ? const Color(0xFF10B981) : const Color(0xFF0052CC)).withValues(alpha: 0.35),
+                                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                                  ),
+                                                  child: Row(
+                                                    mainAxisAlignment: MainAxisAlignment.center,
+                                                    children: [
+                                                      Icon(
+                                                        isPending ? Icons.person_search_rounded : Icons.mark_chat_read_rounded,
+                                                        size: 15,
+                                                        color: Colors.white,
+                                                      ),
+                                                      const SizedBox(width: 6),
+                                                      Flexible(
+                                                        child: Text(
+                                                          isPending ? 'Suggest Doctor & Launch WhatsApp' : 'Resend WhatsApp Link',
+                                                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 0.2),
+                                                          overflow: TextOverflow.ellipsis,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Container(
+                                                decoration: BoxDecoration(
+                                                  color: const Color(0xFFFEF2F2),
+                                                  borderRadius: BorderRadius.circular(12),
+                                                  border: Border.all(color: const Color(0xFFFECACA)),
+                                                ),
+                                                child: IconButton(
+                                                  tooltip: 'Remove Request',
+                                                  icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFEF4444), size: 18),
+                                                  onPressed: () => _confirmDeleteRequest(context, req),
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                         ],
                                       ),
                                     ),
-                                    const SizedBox(width: 6),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: req.severity == 'Severe'
-                                            ? const Color(0xFFFEE2E2)
-                                            : req.severity == 'Moderate'
-                                                ? const Color(0xFFFEF3C7)
-                                                : const Color(0xFFDBEAFE),
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Text(
-                                        req.severity,
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
-                                          color: req.severity == 'Severe'
-                                              ? const Color(0xFF991B1B)
-                                              : req.severity == 'Moderate'
-                                                  ? const Color(0xFF92400E)
-                                                  : AppTheme.primaryBlue,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 10),
-
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.primaryBlue.withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text(
-                                    'Issue: ${req.problemCategory}',
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.primaryBlue),
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  req.problemDescription,
-                                  style: const TextStyle(fontSize: 12, color: AppTheme.textDark, height: 1.3),
-                                ),
-
-                                if (req.assignedDoctorName != null || req.assignedDoctorId != null || req.status.toUpperCase().contains('ASSIGNED') || req.status == 'Doctor Assigned' || req.status == 'Confirmed') ...[
-                                  const SizedBox(height: 10),
-                                  Container(
-                                    padding: const EdgeInsets.all(10),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFF0FDF4),
-                                      borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(color: const Color(0xFF86EFAC)),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        const Icon(Icons.verified_user_rounded, color: Color(0xFF16A34A), size: 16),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'Assigned: ${req.displayDoctorName} (${req.displayDoctorSpecialty})',
-                                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFF14532D)),
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                              if (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.isNotEmpty) ...[
-                                                const SizedBox(height: 4),
-                                                Text(
-                                                  '⏰ Time Slot: ${req.confirmedTimeSlot}',
-                                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppTheme.primaryBlue),
-                                                ),
-                                              ],
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
                                   ),
                                 ],
-
-                                const SizedBox(height: 12),
-
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: ElevatedButton.icon(
-                                        icon: const Icon(Icons.mark_chat_read_rounded, size: 16),
-                                        label: Text(
-                                          isPending ? '🟢 Suggest Doctor & Launch WhatsApp' : '💬 Resend WhatsApp Link',
-                                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: isPending ? const Color(0xFF10B981) : AppTheme.primaryBlue,
-                                          foregroundColor: Colors.white,
-                                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                                          elevation: 1,
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                        ),
-                                        onPressed: () => _showAssignDoctorDialog(context, req),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    IconButton(
-                                      tooltip: 'Remove Request',
-                                      icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
-                                      onPressed: () => _confirmDeleteRequest(context, req),
-                                    ),
-                                  ],
-                                ),
-                              ],
+                              ),
                             ),
                           );
                         },
