@@ -576,7 +576,6 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                                     child: Text(
                                       'Assigned Doctor: ${req.assignedDoctorName ?? "Specialist"} (${req.assignedDoctorSpecialty ?? "Dentistry"})',
                                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
-                                      overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
                                 ],

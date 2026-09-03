@@ -1526,15 +1526,13 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                     children: [
                       Text(
                         docName,
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
-                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: AppTheme.textDark),
                       ),
                       if (clinicName.isNotEmpty) ...[
                         const SizedBox(height: 2),
                         Text(
                           clinicName,
-                          style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
-                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
                         ),
                       ],
                     ],

@@ -5574,23 +5574,23 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                             child: Column(
                                                               crossAxisAlignment: CrossAxisAlignment.start,
                                                               children: [
-                                                                Row(
+                                                                Text(
+                                                                  docName,
+                                                                  style: const TextStyle(
+                                                                    fontWeight: FontWeight.w900,
+                                                                    fontSize: 15,
+                                                                    color: Color(0xFF065F46),
+                                                                    letterSpacing: 0.1,
+                                                                  ),
+                                                                ),
+                                                                const SizedBox(height: 4),
+                                                                Wrap(
+                                                                  spacing: 6,
+                                                                  runSpacing: 4,
+                                                                  crossAxisAlignment: WrapCrossAlignment.center,
                                                                   children: [
-                                                                    Flexible(
-                                                                      child: Text(
-                                                                        docName,
-                                                                        style: const TextStyle(
-                                                                          fontWeight: FontWeight.w900,
-                                                                          fontSize: 14,
-                                                                          color: Color(0xFF065F46),
-                                                                          letterSpacing: 0.1,
-                                                                        ),
-                                                                        overflow: TextOverflow.ellipsis,
-                                                                      ),
-                                                                    ),
-                                                                    const SizedBox(width: 6),
                                                                     Container(
-                                                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
                                                                       decoration: BoxDecoration(
                                                                         color: const Color(0xFFDCFCE7),
                                                                         borderRadius: BorderRadius.circular(6),
@@ -5608,24 +5608,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                                         ],
                                                                       ),
                                                                     ),
+                                                                    if (docSpecialty.isNotEmpty || docQualification.isNotEmpty || docExperience.isNotEmpty)
+                                                                      Text(
+                                                                        [
+                                                                          if (docSpecialty.isNotEmpty) docSpecialty,
+                                                                          if (docQualification.isNotEmpty) docQualification,
+                                                                          if (docExperience.isNotEmpty) '($docExperience)',
+                                                                        ].join(' • '),
+                                                                        style: const TextStyle(
+                                                                          fontSize: 11.5,
+                                                                          fontWeight: FontWeight.w600,
+                                                                          color: Color(0xFF047857),
+                                                                        ),
+                                                                      ),
                                                                   ],
                                                                 ),
-                                                                if (docSpecialty.isNotEmpty || docQualification.isNotEmpty || docExperience.isNotEmpty) ...[
-                                                                  const SizedBox(height: 3),
-                                                                  Text(
-                                                                    [
-                                                                      if (docSpecialty.isNotEmpty) docSpecialty,
-                                                                      if (docQualification.isNotEmpty) docQualification,
-                                                                      if (docExperience.isNotEmpty) '($docExperience)',
-                                                                    ].join(' • '),
-                                                                    style: const TextStyle(
-                                                                      fontSize: 11.5,
-                                                                      fontWeight: FontWeight.w600,
-                                                                      color: Color(0xFF047857),
-                                                                    ),
-                                                                    overflow: TextOverflow.ellipsis,
-                                                                  ),
-                                                                ],
                                                               ],
                                                             ),
                                                           ),
@@ -5642,15 +5639,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                       // Real Doctor Details Rows (Render ONLY if provided in DB)
                                                       if (docClinic.isNotEmpty) ...[
                                                         Row(
+                                                          crossAxisAlignment: CrossAxisAlignment.start,
                                                           children: [
-                                                            const Icon(Icons.local_hospital_rounded, size: 12, color: Color(0xFF059669)),
-                                                            const SizedBox(width: 5),
-                                                            const Text('Clinic: ', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF065F46))),
+                                                            const Padding(
+                                                              padding: EdgeInsets.only(top: 2),
+                                                              child: Icon(Icons.local_hospital_rounded, size: 13, color: Color(0xFF059669)),
+                                                            ),
+                                                            const SizedBox(width: 6),
+                                                            const Text('Clinic: ', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF065F46))),
                                                             Expanded(
                                                               child: Text(
                                                                 docClinic,
-                                                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
-                                                                overflow: TextOverflow.ellipsis,
+                                                                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
                                                               ),
                                                             ),
                                                           ],
@@ -5660,15 +5660,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
                                                       if (docLocation.isNotEmpty) ...[
                                                         Row(
+                                                          crossAxisAlignment: CrossAxisAlignment.start,
                                                           children: [
-                                                            const Icon(Icons.location_on_rounded, size: 12, color: Color(0xFF059669)),
-                                                            const SizedBox(width: 5),
-                                                            const Text('Location: ', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF065F46))),
+                                                            const Padding(
+                                                              padding: EdgeInsets.only(top: 2),
+                                                              child: Icon(Icons.location_on_rounded, size: 13, color: Color(0xFF059669)),
+                                                            ),
+                                                            const SizedBox(width: 6),
+                                                            const Text('Location: ', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF065F46))),
                                                             Expanded(
                                                               child: Text(
                                                                 docLocation,
-                                                                style: const TextStyle(fontSize: 11, color: Color(0xFF334155)),
-                                                                overflow: TextOverflow.ellipsis,
+                                                                style: const TextStyle(fontSize: 11.5, color: Color(0xFF334155)),
                                                               ),
                                                             ),
                                                           ],
@@ -5678,15 +5681,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
                                                       if (docPhone.isNotEmpty) ...[
                                                         Row(
+                                                          crossAxisAlignment: CrossAxisAlignment.center,
                                                           children: [
-                                                            const Icon(Icons.phone_in_talk_rounded, size: 12, color: Color(0xFF059669)),
-                                                            const SizedBox(width: 5),
-                                                            const Text('Contact: ', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF065F46))),
+                                                            const Icon(Icons.phone_in_talk_rounded, size: 13, color: Color(0xFF059669)),
+                                                            const SizedBox(width: 6),
+                                                            const Text('Contact: ', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF065F46))),
                                                             Expanded(
                                                               child: Text(
                                                                 docPhone,
-                                                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0284C7)),
-                                                                overflow: TextOverflow.ellipsis,
+                                                                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF0284C7)),
                                                               ),
                                                             ),
                                                           ],
@@ -5696,15 +5699,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
                                                       if (docEmail.isNotEmpty) ...[
                                                         Row(
+                                                          crossAxisAlignment: CrossAxisAlignment.start,
                                                           children: [
-                                                            const Icon(Icons.email_outlined, size: 12, color: Color(0xFF059669)),
-                                                            const SizedBox(width: 5),
-                                                            const Text('Email: ', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF065F46))),
+                                                            const Padding(
+                                                              padding: EdgeInsets.only(top: 2),
+                                                              child: Icon(Icons.email_outlined, size: 13, color: Color(0xFF059669)),
+                                                            ),
+                                                            const SizedBox(width: 6),
+                                                            const Text('Email: ', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF065F46))),
                                                             Expanded(
                                                               child: Text(
                                                                 docEmail,
-                                                                style: const TextStyle(fontSize: 11, color: Color(0xFF475569)),
-                                                                overflow: TextOverflow.ellipsis,
+                                                                style: const TextStyle(fontSize: 11.5, color: Color(0xFF475569)),
                                                               ),
                                                             ),
                                                           ],
@@ -5823,8 +5829,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                       const SizedBox(width: 6),
                                                       Flexible(
                                                         child: Text(
-                                                          isPending ? 'Suggest Doctor & Launch WhatsApp' : 'Resend WhatsApp Link',
-                                                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 0.2),
+                                                          isPending ? 'Suggest Doctor & WhatsApp' : 'Resend WhatsApp Link',
+                                                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, letterSpacing: 0.1),
                                                           overflow: TextOverflow.ellipsis,
                                                         ),
                                                       ),
