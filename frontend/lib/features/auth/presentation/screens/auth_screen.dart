@@ -1110,16 +1110,16 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       body: Center(
         child: SingleChildScrollView(
           physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 16),
           child: Container(
             constraints: const BoxConstraints(maxWidth: 520),
             child: Card(
               elevation: 8,
               shadowColor: Colors.black.withValues(alpha: 0.08),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               color: Colors.white,
               child: Padding(
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 20),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1542,15 +1542,15 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             // Mandatory Primary Identifier: Full Name
             TextFormField(
               controller: _nameController,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
               validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter full name' : null,
               decoration: _buildInputDecoration(
                 label: _selectedRole == UserRole.dentist
-                    ? 'Practitioner Full Name & Title'
+                    ? 'Practice Full Name & Title'
                     : _selectedRole == UserRole.admin
                         ? 'Administrator / Sub-Admin Full Name'
                         : 'Patient Full Name',
-                hint: _selectedRole == UserRole.dentist ? 'e.g. Dr. Nikhil' : 'e.g. Jane Smith',
+                hint: _selectedRole == UserRole.dentist ? 'e.g. Dr. Jane Smith' : 'e.g. Jane Smith',
                 isRequired: true,
                 icon: Icons.person_outline_rounded,
               ),
@@ -1561,7 +1561,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             TextFormField(
               controller: _phoneController,
               keyboardType: TextInputType.phone,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
               validator: (val) {
                 if (val == null || val.trim().isEmpty) return 'Mobile phone number is mandatory';
                 final clean = val.replaceAll(RegExp(r'[^0-9]'), '');
@@ -1586,14 +1586,19 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
               decoration: _buildInputDecoration(
                 label: 'Select Language',
-                hint: 'Select Language',
+                hint: '',
                 isRequired: true,
                 icon: Icons.translate_rounded,
               ),
               items: _availableLanguages.map((lang) {
                 return DropdownMenuItem(
                   value: lang,
-                  child: Text(lang, style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600)),
+                  child: Text(
+                    lang,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 12.5, fontWeight: FontWeight.w600),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 );
               }).toList(),
               onChanged: (val) {
@@ -1608,7 +1613,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             TextFormField(
               controller: _emailController,
               keyboardType: TextInputType.emailAddress,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
               validator: (val) {
                 if (val != null && val.trim().isNotEmpty && !val.contains('@')) {
                   return 'Enter a valid email address';
@@ -1685,7 +1690,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   child: TextFormField(
                     controller: _ageController,
                     keyboardType: TextInputType.number,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                     decoration: _buildInputDecoration(
                       label: 'Age',
                       hint: '28',
@@ -1703,7 +1708,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
                     decoration: _buildInputDecoration(
                       label: 'Gender',
-                      hint: 'Select Gender',
+                      hint: '',
                       icon: Icons.people_outline_rounded,
                     ),
                     items: ['Female', 'Male', 'Other', 'Prefer not to say'].map((g) {
@@ -1713,6 +1718,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                           g,
                           style: const TextStyle(color: Color(0xFF0F172A), fontSize: 12.5, fontWeight: FontWeight.w600),
                           overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                         ),
                       );
                     }).toList(),
@@ -1729,7 +1735,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
               decoration: _buildInputDecoration(
                 label: 'Blood Group',
-                hint: 'Select Blood Group',
+                hint: '',
                 icon: Icons.bloodtype_outlined,
               ),
               items: [
@@ -1746,8 +1752,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   value: bg,
                   child: Text(
                     bg,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 12.5, fontWeight: FontWeight.w600),
                     overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
                   ),
                 );
               }).toList(),
@@ -1757,7 +1764,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             TextFormField(
               controller: _emergencyContactController,
               keyboardType: TextInputType.phone,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
               decoration: _buildInputDecoration(
                 label: 'Emergency Contact (Optional)',
                 hint: '+91 98765 99880',
@@ -1768,7 +1775,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             TextFormField(
               controller: _referralCodeController,
               textCapitalization: TextCapitalization.characters,
-              style: const TextStyle(color: Color(0xFF5B21B6), fontSize: 13.5, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+              style: const TextStyle(color: Color(0xFF5B21B6), fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 1.2),
               decoration: _buildInputDecoration(
                 label: 'Referral Code (Optional)',
                 hint: 'e.g. DG-RAH7302',
@@ -1779,7 +1786,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             // MANDATORY FIELD 1: Location *
             TextFormField(
               controller: _locationController,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
               validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter Location / Street Address' : null,
               decoration: _buildInputDecoration(
                 label: 'Location / Address',
@@ -1793,10 +1800,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               children: [
                 // MANDATORY FIELD 2: City *
                 Expanded(
-                  flex: 3,
                   child: TextFormField(
                     controller: _cityController,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                     validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter City' : null,
                     decoration: _buildInputDecoration(
                       label: 'City',
@@ -1809,11 +1815,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 const SizedBox(width: 8),
                 // MANDATORY FIELD 3: Pincode *
                 Expanded(
-                  flex: 2,
                   child: TextFormField(
                     controller: _pincodeController,
                     keyboardType: TextInputType.number,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                     validator: (val) {
                       if (val == null || val.trim().isEmpty) return 'Enter Pincode';
                       if (val.trim().length != 6) return '6-digit PIN';
@@ -1838,11 +1843,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           children: [
             TextFormField(
               controller: _licenseNoController,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
               validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter Dental License Number' : null,
               decoration: _buildInputDecoration(
                 label: 'Dental Council License Number',
-                hint: 'DEN-LIC-88490',
+                hint: 'e.g. DEN-LIC-88490',
                 isRequired: true,
                 icon: Icons.badge_outlined,
               ),
@@ -1855,8 +1860,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               dropdownColor: Colors.white,
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
               decoration: _buildInputDecoration(
-                label: 'Dental Specialization',
-                hint: 'Select Specialty',
+                label: 'Select Specialty',
+                hint: '',
+                isRequired: true,
                 icon: Icons.medical_services_outlined,
               ),
               items: [
@@ -1868,48 +1874,49 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 'Oral & Maxillofacial Surgery',
                 'Prosthodontics',
               ].map((sp) {
-                return DropdownMenuItem(value: sp, child: Text(sp, style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis));
+                return DropdownMenuItem(
+                  value: sp,
+                  child: Text(
+                    sp,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 12.5, fontWeight: FontWeight.w600),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                );
               }).toList(),
               onChanged: (val) => setState(() => _selectedSpecialty = val ?? 'General Dentistry'),
             ),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: TextFormField(
-                    controller: _clinicNameController,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter clinic name' : null,
-                    decoration: _buildInputDecoration(
-                      label: 'Primary Clinic Name',
-                      hint: 'Metro Dental Care Practice',
-                      isRequired: true,
-                      icon: Icons.domain_rounded,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 2,
-                  child: TextFormField(
-                    controller: _experienceController,
-                    keyboardType: TextInputType.number,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-                    decoration: _buildInputDecoration(
-                      label: 'Exp. (Years)',
-                      hint: '5',
-                      icon: Icons.work_outline_rounded,
-                    ),
-                  ),
-                ),
-              ],
+
+            TextFormField(
+              controller: _clinicNameController,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+              validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter clinic name' : null,
+              decoration: _buildInputDecoration(
+                label: 'Primary Clinic Name',
+                hint: 'e.g. Metro Dental Care Practice',
+                isRequired: true,
+                icon: Icons.domain_rounded,
+              ),
             ),
             const SizedBox(height: 12),
+
+            TextFormField(
+              controller: _experienceController,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+              decoration: _buildInputDecoration(
+                label: 'Clinical Experience (Years)',
+                hint: '5',
+                icon: Icons.work_outline_rounded,
+              ),
+            ),
+            const SizedBox(height: 12),
+
             // MANDATORY FIELD 1: Location / Clinic Address *
             TextFormField(
               controller: _clinicAddressController,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
               validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter Location / Clinic Address' : null,
               decoration: _buildInputDecoration(
                 label: 'Location / Clinic Address',
@@ -1919,13 +1926,14 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               ),
             ),
             const SizedBox(height: 12),
+
             Row(
               children: [
                 // MANDATORY FIELD 2: City *
                 Expanded(
                   child: TextFormField(
                     controller: _cityController,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                     validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter City' : null,
                     decoration: _buildInputDecoration(
                       label: 'City',
@@ -1941,7 +1949,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   child: TextFormField(
                     controller: _pincodeController,
                     keyboardType: TextInputType.number,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                     validator: (val) {
                       if (val == null || val.trim().isEmpty) return 'Enter Pincode';
                       if (val.trim().length != 6) return '6-digit PIN';
@@ -2085,7 +2093,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             // MANDATORY FIELD 1: Location *
             TextFormField(
               controller: _locationController,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
               validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter Location / Office Address' : null,
               decoration: _buildInputDecoration(
                 label: 'Location / Office Address',
@@ -2101,7 +2109,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 Expanded(
                   child: TextFormField(
                     controller: _cityController,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                     validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter City' : null,
                     decoration: _buildInputDecoration(
                       label: 'City',
@@ -2117,7 +2125,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   child: TextFormField(
                     controller: _pincodeController,
                     keyboardType: TextInputType.number,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                     validator: (val) {
                       if (val == null || val.trim().isEmpty) return 'Enter Pincode';
                       if (val.trim().length != 6) return '6-digit PIN';
@@ -2136,7 +2144,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             const SizedBox(height: 12),
             TextFormField(
               controller: _adminEmployeeIdController,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
               decoration: _buildInputDecoration(
                 label: 'Admin ID / Employee ID (Optional)',
                 hint: 'ADM-901',
@@ -2146,7 +2154,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             const SizedBox(height: 12),
             TextFormField(
               controller: _adminDeptController,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
               decoration: _buildInputDecoration(
                 label: 'Department / Key Code (Optional)',
                 hint: 'Clinical Operations',
@@ -2166,43 +2174,53 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     Widget? suffixIcon,
   }) {
     return InputDecoration(
+      isDense: true,
       label: isRequired
           ? Text.rich(
               TextSpan(
                 text: label,
-                style: const TextStyle(color: Color(0xFF475569), fontSize: 13),
+                style: const TextStyle(color: Color(0xFF475569), fontSize: 12.5, fontWeight: FontWeight.w500),
                 children: const [
                   TextSpan(
                     text: ' *',
-                    style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold, fontSize: 14),
+                    style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold, fontSize: 13),
                   ),
                 ],
               ),
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
             )
-          : Text(label, style: const TextStyle(color: Color(0xFF475569), fontSize: 13)),
-      labelStyle: const TextStyle(color: Color(0xFF475569), fontSize: 13),
-      hintText: hint,
+          : Text(
+              label,
+              style: const TextStyle(color: Color(0xFF475569), fontSize: 12.5, fontWeight: FontWeight.w500),
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+            ),
+      labelStyle: const TextStyle(color: Color(0xFF475569), fontSize: 12.5, fontWeight: FontWeight.w500),
+      hintText: hint.isNotEmpty ? hint : null,
       hintStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
-      prefixIcon: icon != null ? Icon(icon, color: _accentColor, size: 18) : null,
-      prefixIconConstraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+      prefixIcon: icon != null ? Icon(icon, color: _accentColor, size: 17) : null,
+      prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 32),
       suffixIcon: suffixIcon,
       filled: true,
       fillColor: const Color(0xFFF8FAFC),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         borderSide: BorderSide(color: _accentColor, width: 2),
       ),
       errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: Color(0xFFEF4444)),
       ),
     );
