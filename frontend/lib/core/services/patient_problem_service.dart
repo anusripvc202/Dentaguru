@@ -1178,7 +1178,7 @@ class PatientProblemService extends ChangeNotifier {
           final state = (item['state'] ?? tokenMeta['state'] ?? '').toString();
           final address = (item['address'] ?? tokenMeta['address'] ?? item['location'] ?? '').toString();
 
-          final isActualAdmin = (email.toLowerCase() == 'anusripvc202@gmail.com') || (role.contains('admin') && !email.contains('patient'));
+          final isActualAdmin = (role.contains('admin') && !email.contains('patient'));
           if (isActualAdmin) {
             continue; // Skip only actual admin accounts
           }
@@ -1290,7 +1290,7 @@ class PatientProblemService extends ChangeNotifier {
       final currentPName = currentPatient.name;
 
       final isAdmin = _isAdminMode ||
-                      (authUser?.email != null && (authUser!.email!.toLowerCase().contains('admin') || authUser.email!.toLowerCase() == 'anusripvc202@gmail.com')) ||
+                      (authUser?.email != null && authUser!.email!.toLowerCase().contains('admin')) ||
                       currentPatient.email.toLowerCase().contains('admin') ||
                       currentPatient.id.toLowerCase().contains('admin');
 
@@ -1998,7 +1998,7 @@ class PatientProblemService extends ChangeNotifier {
         final itemPatientId = (item['patient_id'] ?? item['patientId'] ?? item['patient']?['id'])?.toString();
         final itemDentistId = (item['dentist_id'] ?? item['dentistId'])?.toString();
         final authUser = Supabase.instance.client.auth.currentUser;
-        final isAdmin = (authUser?.email != null && (authUser!.email!.toLowerCase().contains('admin') || authUser.email!.toLowerCase() == 'anusripvc202@gmail.com')) ||
+        final isAdmin = (authUser?.email != null && authUser!.email!.toLowerCase().contains('admin')) ||
                         currentPatient.email.toLowerCase().contains('admin');
 
         if (_isDentistMode) {

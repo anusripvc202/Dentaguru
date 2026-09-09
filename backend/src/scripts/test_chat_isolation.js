@@ -9,7 +9,7 @@ async function testChatIsolation() {
   const patient = await User.findOne({ email: 'anusripvc203@gmail.com' });
   const doctorSheshu = await User.findOne({ email: 'gouda.sheshukumar@gmail.com' });
   const doctorNikhil = await User.findOne({ email: 'nikhiljai1215@gmail.com' });
-  const admin = await User.findOne({ email: 'anusripvc202@gmail.com' });
+  const admin = await User.findOne({ email: 'admin@dentaguru.com' });
 
   console.log('1. Verified System Users in Supabase:');
   console.log('  - Patient User:', patient.name, '(', patient.id, ')');

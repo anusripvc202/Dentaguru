@@ -39,7 +39,7 @@ async function purgeExceptAdmin() {
             for (const u of allUsers) {
                 const roleLower = (u.role || '').toLowerCase();
                 const emailLower = (u.email || '').toLowerCase();
-                const isAdmin = roleLower.includes('admin') || emailLower.includes('anusripvc202') || emailLower.includes('admin@dentaguru.com');
+                const isAdmin = roleLower.includes('admin') || emailLower.includes('admin@dentaguru.com');
                 
                 if (!isAdmin) {
                     await supabaseAdmin.from('users').delete().eq('id', u.id);
@@ -59,7 +59,7 @@ async function purgeExceptAdmin() {
         if (!authErr && users && users.length > 0) {
             for (const u of users) {
                 const emailLower = (u.email || '').toLowerCase();
-                const isAdmin = emailLower.includes('anusripvc202') || emailLower.includes('admin@dentaguru.com');
+                const isAdmin = emailLower.includes('admin@dentaguru.com');
                 
                 if (!isAdmin) {
                     await supabaseAdmin.auth.admin.deleteUser(u.id);

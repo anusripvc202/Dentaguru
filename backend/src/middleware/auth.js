@@ -171,7 +171,7 @@ const requireMainAdmin = (req, res, next) => {
     }
 
     const role = (req.user.role || '').toString().trim().toLowerCase();
-    const isMainAdmin = role === 'admin' || role === 'primaryadmin' || role === 'primary_admin' || req.user.email === 'anusripvc202@gmail.com';
+    const isMainAdmin = role === 'admin' || role === 'primaryadmin' || role === 'primary_admin' || role === 'superadmin' || role === 'super_admin';
 
     if (!isMainAdmin) {
         return res.status(403).json({
@@ -193,7 +193,7 @@ const requirePermission = (requiredPermission, alternativePermissions = []) => {
         const role = (req.user.role || '').toString().trim().toLowerCase();
 
         // 1. Primary Main Admin always has unrestricted full access
-        if (role === 'admin' || role === 'primaryadmin' || role === 'primary_admin' || req.user.email === 'anusripvc202@gmail.com') {
+        if (role === 'admin' || role === 'primaryadmin' || role === 'primary_admin' || role === 'superadmin' || role === 'super_admin') {
             return next();
         }
 
@@ -257,7 +257,7 @@ const requireChatAccess = async (req, res, next) => {
     }
 
     const role = (req.user.role || '').toString().trim().toLowerCase();
-    const isMainAdmin = role === 'admin' || role === 'primaryadmin' || role === 'primary_admin' || req.user.email === 'anusripvc202@gmail.com' || req.user.email === 'admin@dentaguru.com';
+    const isMainAdmin = role === 'admin' || role === 'primaryadmin' || role === 'primary_admin' || role === 'superadmin' || role === 'super_admin' || req.user.email === 'admin@dentaguru.com';
     const isSubAdmin = role === 'sub-admin' || role === 'subadmin' || role === 'sub_admin';
 
     // 1. Sub-Admins are strictly FORBIDDEN from all chat endpoints

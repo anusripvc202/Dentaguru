@@ -6,7 +6,7 @@ async function testRealChat() {
   // Fetch real users from Supabase
   const patient = await User.findOne({ email: 'anusripvc203@gmail.com' });
   const doctor = await User.findOne({ email: 'gouda.sheshukumar@gmail.com' });
-  const admin = await User.findOne({ email: 'anusripvc202@gmail.com' });
+  const admin = await User.findOne({ email: 'admin@dentaguru.com' });
 
   console.log('Patient User:', patient.name, '(', patient.id, ')');
   console.log('Dentist User:', doctor.name, '(', doctor.id, ')');

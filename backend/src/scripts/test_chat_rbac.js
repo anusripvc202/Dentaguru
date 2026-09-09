@@ -24,11 +24,11 @@ async function runRbacTests() {
     console.log('Setting up test accounts in database...');
 
     // Main Admin
-    let mainAdmin = await User.findOne({ email: 'anusripvc202@gmail.com' });
+    let mainAdmin = await User.findOne({ email: 'admin@dentaguru.com' });
     if (!mainAdmin) {
         mainAdmin = await User.create({
-            name: 'Main Admin Anusri',
-            email: 'anusripvc202@gmail.com',
+            name: 'Main Admin',
+            email: 'admin@dentaguru.com',
             role: 'Admin',
             password: 'AdminPassword123!'
         });

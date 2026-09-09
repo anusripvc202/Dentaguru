@@ -9,7 +9,7 @@ exports.getConversations = async (req, res) => {
     try {
         const user = req.user;
         const role = (user?.role || '').toString().trim().toLowerCase();
-        const isMainAdmin = role === 'admin' || role === 'primaryadmin' || role === 'primary_admin' || user?.email === 'anusripvc202@gmail.com' || user?.email === 'admin@dentaguru.com';
+        const isMainAdmin = role === 'admin' || role === 'primaryadmin' || role === 'primary_admin' || role === 'superadmin' || role === 'super_admin' || user?.email === 'admin@dentaguru.com';
 
         const conversations = await ChatMessage.getConversations(user);
 
@@ -49,7 +49,7 @@ exports.getMessages = async (req, res) => {
     try {
         const user = req.user;
         const role = (user?.role || '').toString().trim().toLowerCase();
-        const isMainAdmin = role === 'admin' || role === 'primaryadmin' || role === 'primary_admin' || user?.email === 'anusripvc202@gmail.com' || user?.email === 'admin@dentaguru.com';
+        const isMainAdmin = role === 'admin' || role === 'primaryadmin' || role === 'primary_admin' || role === 'superadmin' || role === 'super_admin' || user?.email === 'admin@dentaguru.com';
 
         const messages = await ChatMessage.find(roomId ? { room_id: roomId } : {}, { user });
 
@@ -116,7 +116,7 @@ exports.clearMessages = async (req, res) => {
     try {
         const user = req.user;
         const role = (user?.role || '').toString().trim().toLowerCase();
-        const isMainAdmin = role === 'admin' || role === 'primaryadmin' || role === 'primary_admin' || user?.email === 'anusripvc202@gmail.com' || user?.email === 'admin@dentaguru.com';
+        const isMainAdmin = role === 'admin' || role === 'primaryadmin' || role === 'primary_admin' || role === 'superadmin' || role === 'super_admin' || user?.email === 'admin@dentaguru.com';
 
         await ChatMessage.delete({ roomId, messageId });
         console.log(`🗑️ Cleared chat messages for room "${roomId || messageId}"`);

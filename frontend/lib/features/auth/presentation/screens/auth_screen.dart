@@ -322,7 +322,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           );
           context.go('/dentist');
         } else if (registeredRole.contains('admin') || registeredRole.contains('sub-admin') || registeredRole.contains('subadmin') || registeredRole.contains('sub_admin')) {
-          final isSubAdmin = registeredRole.contains('sub-admin') || registeredRole.contains('subadmin') || registeredRole.contains('sub_admin') || (userData['email'] != 'anusripvc202@gmail.com' && (userData['role']?.toString().toLowerCase().contains('sub') ?? false));
+          final isSubAdmin = registeredRole.contains('sub-admin') || registeredRole.contains('subadmin') || registeredRole.contains('sub_admin') || (userData['role']?.toString().toLowerCase().contains('sub') ?? false);
 
           if (isSubAdmin) {
             List<String> perms = [];
@@ -459,17 +459,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     final phone = _phoneController.text.trim();
     final registeredAge = _ageController.text.trim();
 
-    if (_selectedRole == UserRole.admin && email.isNotEmpty && email.toLowerCase() != 'anusripvc202@gmail.com') {
-      setState(() => _isRegistering = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('⛔ Access Denied: Only the primary administrator email (anusripvc202@gmail.com) is authorized to register as Admin.'),
-          backgroundColor: Color(0xFFEF4444),
-          duration: Duration(seconds: 4),
-        ),
-      );
-      return;
-    }
 
     String? photoBase64;
     if (_pickedImageBytes != null) {

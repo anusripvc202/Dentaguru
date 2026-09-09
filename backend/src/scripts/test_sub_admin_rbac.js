@@ -190,7 +190,7 @@ async function runTests() {
         nextCalled = false;
         const { req: reqAdmin, res: resAdmin } = createMockReqRes({
             id: 'primary-admin-id',
-            email: 'anusripvc202@gmail.com',
+            email: 'admin@dentaguru.com',
             role: 'Admin',
             status: 'ACTIVE',
             permissions: []

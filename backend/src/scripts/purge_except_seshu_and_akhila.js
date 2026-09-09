@@ -9,7 +9,6 @@ async function purgeExceptSeshuAndAkhila() {
     const preservedEmails = [
         'gouda.sheshukumar@gmail.com', // Dentist Dr. G.Sheshu Kumar
         'ammuamala895@gmail.com',       // Patient bashipaka akhila
-        'anusripvc202@gmail.com',       // Admin
         'admin@dentaguru.com',          // Admin
         'ssrajuqc@gmail.com',           // Sub-Admin
     ];

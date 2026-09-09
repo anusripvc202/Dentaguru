@@ -845,7 +845,7 @@ const ChatMessage = {
     async getConversations(user) {
         if (!user) return [];
         const role = (user.role || '').toString().trim().toLowerCase();
-        const isMainAdmin = role === 'admin' || role === 'primaryadmin' || role === 'primary_admin' || user.email === 'anusripvc202@gmail.com';
+        const isMainAdmin = role === 'admin' || role === 'primaryadmin' || role === 'primary_admin' || role === 'superadmin' || role === 'super_admin' || user.email === 'admin@dentaguru.com';
         const isSubAdmin = role === 'sub-admin' || role === 'subadmin' || role === 'sub_admin';
 
         // Sub-Admins are strictly forbidden
