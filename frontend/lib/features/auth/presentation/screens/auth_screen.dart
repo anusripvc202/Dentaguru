@@ -71,7 +71,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   // Role-Specific Fields - Sub-Admin / Admin
   final _adminEmployeeIdController = TextEditingController();
   final _adminDeptController = TextEditingController();
-  String _selectedAdminRoleType = 'Sub-Admin';
+  String _selectedAdminRoleType = 'Admin';
 
   // Languages Selection
   static const List<String> _availableLanguages = [
@@ -114,6 +114,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
     if (_isAdminMode) {
       _selectedRole = UserRole.admin;
+      _selectedAdminRoleType = (roleStr == 'sub-admin' || roleStr == 'subadmin') ? 'Sub-Admin' : 'Admin';
     } else if (roleStr == 'dentist') {
       _selectedRole = UserRole.dentist;
     } else {
@@ -150,7 +151,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       case UserRole.dentist:
         return 'Dentist';
       case UserRole.admin:
-        return _tabController.index == 1 ? 'Sub-Admin' : 'Admin';
+        if (_tabController.index == 1) {
+          return _selectedAdminRoleType == 'Admin' ? 'Primary Admin' : 'Sub-Admin';
+        }
+        return 'Admin';
     }
   }
 
