@@ -50,7 +50,7 @@ class AppTheme {
       cardTheme: CardThemeData(
         color: cardBg,
         elevation: 0.5,
-        shadowColor: Colors.black.withOpacity(0.04),
+        shadowColor: Colors.black.withValues(alpha: 0.04),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
           side: const BorderSide(color: Color(0xFFEEF2F6), width: 1),
@@ -62,6 +62,19 @@ class AppTheme {
         centerTitle: false,
         iconTheme: IconThemeData(color: primaryBlue),
         titleTextStyle: TextStyle(color: textDark, fontWeight: FontWeight.bold, fontSize: 20),
+      ),
+      tabBarTheme: const TabBarThemeData(
+        dividerColor: Colors.transparent,
+        indicatorSize: TabBarIndicatorSize.tab,
+        labelColor: Colors.white,
+        unselectedLabelColor: textMedium,
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          elevation: 2,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+        ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         fillColor: const Color(0xFFF8FAFC),
@@ -94,6 +107,19 @@ class AppTheme {
         titleMedium: GoogleFonts.outfit(fontWeight: FontWeight.w600, fontSize: 16, color: Colors.white),
         bodyLarge: GoogleFonts.plusJakartaSans(fontSize: 14, color: textDark),
         bodyMedium: GoogleFonts.plusJakartaSans(fontSize: 13, color: textDark),
+      ),
+      tabBarTheme: const TabBarThemeData(
+        dividerColor: Colors.transparent,
+        indicatorSize: TabBarIndicatorSize.tab,
+        labelColor: Colors.white,
+        unselectedLabelColor: textMuted,
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          elevation: 2,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+        ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         fillColor: const Color(0xFFF8FAFC),

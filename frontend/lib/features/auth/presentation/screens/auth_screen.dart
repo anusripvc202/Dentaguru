@@ -872,18 +872,36 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           const SizedBox(height: 12),
 
           if (!_isOtpSent && !_isOtpVerified) ...[
-            ElevatedButton.icon(
-              icon: _isSendingOtp
-                  ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Icon(Icons.send_to_mobile_rounded, size: 16),
-              label: Text(_isSendingOtp ? 'Sending OTP...' : 'Send OTP to Mobile & Email', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF16A34A),
-                foregroundColor: Colors.white,
-                minimumSize: const Size.fromHeight(40),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF16A34A), Color(0xFF15803D)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF16A34A).withValues(alpha: 0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
               ),
-              onPressed: _isSendingOtp ? null : _handleSendOtp,
+              child: ElevatedButton.icon(
+                icon: _isSendingOtp
+                    ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Icon(Icons.send_to_mobile_rounded, size: 16),
+                label: Text(_isSendingOtp ? 'Sending OTP...' : 'Send OTP to Mobile & Email', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.transparent,
+                  foregroundColor: Colors.white,
+                  shadowColor: Colors.transparent,
+                  minimumSize: const Size.fromHeight(42),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: _isSendingOtp ? null : _handleSendOtp,
+              ),
             ),
           ] else if (!_isOtpVerified && _isOtpSent) ...[
             Container(
@@ -988,20 +1006,38 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     ),
                   ),
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: 8),
                 Expanded(
                   flex: 2,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF10B981),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF10B981), Color(0xFF059669)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF10B981).withValues(alpha: 0.25),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
                     ),
-                    onPressed: _isVerifyingOtp ? null : _handleVerifyOtp,
-                    child: _isVerifyingOtp
-                        ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : const Text('Verify', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.transparent,
+                        shadowColor: Colors.transparent,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: _isVerifyingOtp ? null : _handleVerifyOtp,
+                      child: _isVerifyingOtp
+                          ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                          : const Text('Verify', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
+                    ),
                   ),
                 ),
               ],
@@ -1192,16 +1228,18 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                       ),
                       const SizedBox(height: 8),
                       Container(
-                        height: 44,
-                        padding: const EdgeInsets.all(3),
+                        height: 48,
+                        padding: const EdgeInsets.all(4),
                         decoration: BoxDecoration(
                           color: const Color(0xFFF1F5F9),
                           borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
                         ),
                         child: Row(
                           children: [
-                            _buildRoleTile(UserRole.patient, 'Patient', Icons.person_outline_rounded),
-                            _buildRoleTile(UserRole.dentist, 'Dentist', Icons.medical_services_outlined),
+                            _buildRoleTile(UserRole.patient, 'Patient', Icons.person_rounded),
+                            const SizedBox(width: 4),
+                            _buildRoleTile(UserRole.dentist, 'Dentist', Icons.medical_services_rounded),
                           ],
                         ),
                       ),
@@ -1229,51 +1267,78 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                       ),
                       const SizedBox(height: 8),
                       Container(
-                        height: 44,
-                        padding: const EdgeInsets.all(3),
+                        height: 48,
+                        padding: const EdgeInsets.all(4),
                         decoration: BoxDecoration(
                           color: const Color(0xFFF1F5F9),
                           borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
                         ),
                         child: Row(
                           children: [
-                            _buildRoleTile(UserRole.admin, _tabController.index == 1 ? 'Sub-Admin / Admin' : 'Admin & Sub-Admin Portal', Icons.admin_panel_settings_outlined),
+                            _buildRoleTile(UserRole.admin, _tabController.index == 1 ? 'Sub-Admin / Admin' : 'Admin & Sub-Admin Portal', Icons.admin_panel_settings_rounded),
                           ],
                         ),
                       ),
                     ],
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 18),
 
                     // Tab Bar (Sign In & Register)
                     Container(
-                      height: 46,
-                      padding: const EdgeInsets.all(3),
+                      height: 48,
+                      padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
+                        color: const Color(0xFFF1F5F9),
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(color: const Color(0xFFE2E8F0)),
                       ),
                       child: TabBar(
                         controller: _tabController,
+                        dividerColor: Colors.transparent,
+                        indicatorSize: TabBarIndicatorSize.tab,
                         indicator: BoxDecoration(
-                          color: _accentColor,
-                          borderRadius: BorderRadius.circular(11),
+                          gradient: LinearGradient(
+                            colors: [
+                              _accentColor,
+                              _accentColor.withValues(alpha: 0.9),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(10),
                           boxShadow: [
                             BoxShadow(
-                              color: _accentColor.withValues(alpha: 0.3),
-                              blurRadius: 6,
-                              offset: const Offset(0, 2),
+                              color: _accentColor.withValues(alpha: 0.35),
+                              blurRadius: 8,
+                              offset: const Offset(0, 3),
                             ),
                           ],
                         ),
                         labelColor: Colors.white,
-                        unselectedLabelColor: AppTheme.textMuted,
-                        labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                        unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                        indicatorSize: TabBarIndicatorSize.tab,
+                        unselectedLabelColor: const Color(0xFF64748B),
+                        labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, letterSpacing: 0.2),
+                        unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
                         tabs: const [
-                          Tab(text: 'Sign In'),
-                          Tab(text: 'Register'),
+                          Tab(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.login_rounded, size: 16),
+                                SizedBox(width: 6),
+                                Text('Sign In'),
+                              ],
+                            ),
+                          ),
+                          Tab(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.person_add_alt_1_rounded, size: 16),
+                                SizedBox(width: 6),
+                                Text('Register'),
+                              ],
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -1296,25 +1361,33 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                             _selectedRole = UserRole.admin;
                           });
                         },
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(12),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF6366F1).withValues(alpha: 0.07),
-                            borderRadius: BorderRadius.circular(10),
+                            gradient: LinearGradient(
+                              colors: [
+                                const Color(0xFF6366F1).withValues(alpha: 0.08),
+                                const Color(0xFF4F46E5).withValues(alpha: 0.03),
+                              ],
+                            ),
+                            borderRadius: BorderRadius.circular(12),
                             border: Border.all(color: const Color(0xFF6366F1).withValues(alpha: 0.2)),
                           ),
                           child: const Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.shield_outlined, size: 15, color: Color(0xFF6366F1)),
-                              SizedBox(width: 6),
-                              Text(
-                                'Administrator or Staff? Access Admin Portal →',
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  color: Color(0xFF4F46E5),
-                                  fontWeight: FontWeight.w600,
+                              Icon(Icons.admin_panel_settings_rounded, size: 16, color: Color(0xFF6366F1)),
+                              SizedBox(width: 8),
+                              Flexible(
+                                child: Text(
+                                  'Administrator or Staff? Access Admin Portal →',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Color(0xFF4F46E5),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                             ],
@@ -1344,15 +1417,24 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 250),
           curve: Curves.easeInOut,
+          padding: const EdgeInsets.symmetric(vertical: 6),
           decoration: BoxDecoration(
-            color: isSelected ? _accentColor : Colors.transparent,
-            borderRadius: BorderRadius.circular(11),
+            color: isSelected ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            border: isSelected
+                ? Border.all(color: _accentColor.withValues(alpha: 0.2), width: 1.2)
+                : Border.all(color: Colors.transparent),
             boxShadow: isSelected
                 ? [
                     BoxShadow(
-                      color: _accentColor.withValues(alpha: 0.3),
-                      blurRadius: 6,
+                      color: Colors.black.withValues(alpha: 0.06),
+                      blurRadius: 8,
                       offset: const Offset(0, 2),
+                    ),
+                    BoxShadow(
+                      color: _accentColor.withValues(alpha: 0.1),
+                      blurRadius: 4,
+                      offset: const Offset(0, 1),
                     ),
                   ]
                 : [],
@@ -1360,19 +1442,27 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                icon,
-                size: 15,
-                color: isSelected ? Colors.white : AppTheme.textMuted,
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: isSelected ? _accentColor.withValues(alpha: 0.12) : Colors.transparent,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  icon,
+                  size: 16,
+                  color: isSelected ? _accentColor : const Color(0xFF64748B),
+                ),
               ),
-              const SizedBox(width: 4),
+              const SizedBox(width: 6),
               Flexible(
                 child: Text(
                   label,
                   style: TextStyle(
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                    fontSize: 11.5,
-                    color: isSelected ? Colors.white : AppTheme.textMuted,
+                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                    fontSize: 12.5,
+                    color: isSelected ? _accentColor : const Color(0xFF64748B),
+                    letterSpacing: 0.2,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -1399,24 +1489,32 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             // Demo Auto-fill Banner
             InkWell(
               onTap: () => _autoFillDemo(_selectedRole),
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(12),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
-                  color: _accentColor.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: _accentColor.withValues(alpha: 0.2)),
+                  color: _accentColor.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _accentColor.withValues(alpha: 0.18)),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.touch_app_rounded, color: _accentColor, size: 16),
-                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: _accentColor.withValues(alpha: 0.12),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.touch_app_rounded, color: _accentColor, size: 14),
+                    ),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'Tap to auto-fill $_roleName demo contact',
-                        style: TextStyle(fontSize: 11, color: _accentColor, fontWeight: FontWeight.bold),
+                        'Tap to auto-fill $_roleName demo credentials',
+                        style: TextStyle(fontSize: 12, color: _accentColor, fontWeight: FontWeight.bold),
                       ),
                     ),
+                    Icon(Icons.arrow_forward_ios_rounded, color: _accentColor.withValues(alpha: 0.6), size: 12),
                   ],
                 ),
               ),
@@ -1440,25 +1538,51 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 icon: Icons.phone_android_rounded,
               ),
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 20),
 
             // Direct Sign In Button
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _accentColor,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 15),
-                elevation: 2,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            Container(
+              height: 48,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                gradient: LinearGradient(
+                  colors: [
+                    _accentColor,
+                    _accentColor.withValues(alpha: 0.88),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: _accentColor.withValues(alpha: 0.35),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
-              onPressed: _isLoggingIn ? null : _handleLogin,
-              child: _isLoggingIn
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                    )
-                  : Text('Sign In as $_roleName', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              child: ElevatedButton.icon(
+                icon: _isLoggingIn
+                    ? const SizedBox.shrink()
+                    : const Icon(Icons.arrow_forward_rounded, size: 18),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.transparent,
+                  foregroundColor: Colors.white,
+                  shadowColor: Colors.transparent,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                onPressed: _isLoggingIn ? null : _handleLogin,
+                label: _isLoggingIn
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.2),
+                      )
+                    : Text(
+                        'Sign In as $_roleName',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5, letterSpacing: 0.3),
+                      ),
+              ),
             ),
             const SizedBox(height: 12),
           ],
@@ -1636,18 +1760,43 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             const SizedBox(height: 16),
 
             // Register Submit Button (ACTIVE ONLY AFTER OTP VERIFICATION)
-            Opacity(
-              opacity: _isOtpVerified ? 1.0 : 0.6,
+            Container(
+              height: 48,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                gradient: _isOtpVerified
+                    ? LinearGradient(
+                        colors: [
+                          _accentColor,
+                          _accentColor.withValues(alpha: 0.88),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      )
+                    : null,
+                color: _isOtpVerified ? null : const Color(0xFFE2E8F0),
+                boxShadow: _isOtpVerified
+                    ? [
+                        BoxShadow(
+                          color: _accentColor.withValues(alpha: 0.35),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ]
+                    : [],
+              ),
               child: ElevatedButton.icon(
-                icon: Icon(
-                  _isOtpVerified ? Icons.check_circle_rounded : Icons.lock_rounded,
-                  size: 18,
-                ),
+                icon: _isRegistering
+                    ? const SizedBox.shrink()
+                    : Icon(
+                        _isOtpVerified ? Icons.check_circle_rounded : Icons.lock_rounded,
+                        size: 18,
+                        color: _isOtpVerified ? Colors.white : const Color(0xFF94A3B8),
+                      ),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: _isOtpVerified ? _accentColor : Colors.grey.shade400,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 15),
-                  elevation: _isOtpVerified ? 2 : 0,
+                  backgroundColor: Colors.transparent,
+                  foregroundColor: _isOtpVerified ? Colors.white : const Color(0xFF94A3B8),
+                  shadowColor: Colors.transparent,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 ),
                 onPressed: (_isRegistering || !_isOtpVerified) ? null : _handleRegister,
@@ -1655,11 +1804,16 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     ? const SizedBox(
                         height: 20,
                         width: 20,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.2),
                       )
                     : Text(
                         _isOtpVerified ? 'Create $_roleName Account' : 'Verify Mobile OTP to Complete Registration',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13.5,
+                          letterSpacing: 0.2,
+                          color: _isOtpVerified ? Colors.white : const Color(0xFF64748B),
+                        ),
                       ),
               ),
             ),
@@ -1986,21 +2140,27 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                       Expanded(
                         child: GestureDetector(
                           onTap: () => setState(() => _selectedAdminRoleType = 'Sub-Admin'),
-                          child: Container(
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 250),
                             padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
                             decoration: BoxDecoration(
-                              color: _selectedAdminRoleType == 'Sub-Admin' ? const Color(0xFF6366F1) : Colors.white,
+                              color: _selectedAdminRoleType == 'Sub-Admin' ? Colors.white : Colors.transparent,
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(
-                                color: _selectedAdminRoleType == 'Sub-Admin' ? const Color(0xFF6366F1) : const Color(0xFFCBD5E1),
+                                color: _selectedAdminRoleType == 'Sub-Admin' ? const Color(0xFF6366F1).withValues(alpha: 0.3) : Colors.transparent,
                               ),
                               boxShadow: _selectedAdminRoleType == 'Sub-Admin'
                                   ? [
                                       BoxShadow(
-                                        color: const Color(0xFF6366F1).withValues(alpha: 0.3),
-                                        blurRadius: 6,
+                                        color: Colors.black.withValues(alpha: 0.06),
+                                        blurRadius: 8,
                                         offset: const Offset(0, 2),
-                                      )
+                                      ),
+                                      BoxShadow(
+                                        color: const Color(0xFF6366F1).withValues(alpha: 0.12),
+                                        blurRadius: 4,
+                                        offset: const Offset(0, 1),
+                                      ),
                                     ]
                                   : [],
                             ),
@@ -2008,9 +2168,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Icon(
-                                  Icons.badge_outlined,
+                                  Icons.badge_rounded,
                                   size: 16,
-                                  color: _selectedAdminRoleType == 'Sub-Admin' ? Colors.white : const Color(0xFF475569),
+                                  color: _selectedAdminRoleType == 'Sub-Admin' ? const Color(0xFF6366F1) : const Color(0xFF64748B),
                                 ),
                                 const SizedBox(width: 6),
                                 Text(
@@ -2018,7 +2178,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                                   style: TextStyle(
                                     fontSize: 12.5,
                                     fontWeight: FontWeight.bold,
-                                    color: _selectedAdminRoleType == 'Sub-Admin' ? Colors.white : const Color(0xFF334155),
+                                    color: _selectedAdminRoleType == 'Sub-Admin' ? const Color(0xFF6366F1) : const Color(0xFF64748B),
                                   ),
                                 ),
                               ],
@@ -2030,21 +2190,27 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                       Expanded(
                         child: GestureDetector(
                           onTap: () => setState(() => _selectedAdminRoleType = 'Admin'),
-                          child: Container(
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 250),
                             padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
                             decoration: BoxDecoration(
-                              color: _selectedAdminRoleType == 'Admin' ? const Color(0xFF6366F1) : Colors.white,
+                              color: _selectedAdminRoleType == 'Admin' ? Colors.white : Colors.transparent,
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(
-                                color: _selectedAdminRoleType == 'Admin' ? const Color(0xFF6366F1) : const Color(0xFFCBD5E1),
+                                color: _selectedAdminRoleType == 'Admin' ? const Color(0xFF6366F1).withValues(alpha: 0.3) : Colors.transparent,
                               ),
                               boxShadow: _selectedAdminRoleType == 'Admin'
                                   ? [
                                       BoxShadow(
-                                        color: const Color(0xFF6366F1).withValues(alpha: 0.3),
-                                        blurRadius: 6,
+                                        color: Colors.black.withValues(alpha: 0.06),
+                                        blurRadius: 8,
                                         offset: const Offset(0, 2),
-                                      )
+                                      ),
+                                      BoxShadow(
+                                        color: const Color(0xFF6366F1).withValues(alpha: 0.12),
+                                        blurRadius: 4,
+                                        offset: const Offset(0, 1),
+                                      ),
                                     ]
                                   : [],
                             ),
@@ -2052,9 +2218,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Icon(
-                                  Icons.shield_outlined,
+                                  Icons.shield_rounded,
                                   size: 16,
-                                  color: _selectedAdminRoleType == 'Admin' ? Colors.white : const Color(0xFF475569),
+                                  color: _selectedAdminRoleType == 'Admin' ? const Color(0xFF6366F1) : const Color(0xFF64748B),
                                 ),
                                 const SizedBox(width: 6),
                                 Text(
@@ -2062,7 +2228,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                                   style: TextStyle(
                                     fontSize: 12.5,
                                     fontWeight: FontWeight.bold,
-                                    color: _selectedAdminRoleType == 'Admin' ? Colors.white : const Color(0xFF334155),
+                                    color: _selectedAdminRoleType == 'Admin' ? const Color(0xFF6366F1) : const Color(0xFF64748B),
                                   ),
                                 ),
                               ],
