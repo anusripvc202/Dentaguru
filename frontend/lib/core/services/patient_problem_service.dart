@@ -2956,12 +2956,16 @@ class PatientProblemService extends ChangeNotifier {
   List<PatientReferral> get doctorReceivedPatientReferrals => List.unmodifiable(_doctorReceivedPatientReferrals);
   List<PatientReferral> get receivedForMePatientReferrals => List.unmodifiable(_receivedForMePatientReferrals);
 
-  /// Sync Patient Referrals created by the logged-in patient
-  Future<void> syncReferralsFromApi() async {
+  /// Sync Patient Referrals created by the logged-in patient or dentist
+  Future<void> syncReferralsFromApi({String? overrideUserId}) async {
     try {
       final authUser = Supabase.instance.client.auth.currentUser;
-      final userId = currentPatient.id.isNotEmpty ? currentPatient.id : authUser?.id;
-      final phone = currentPatient.phone.isNotEmpty ? currentPatient.phone : '';
+      final doc = currentDoctor;
+      final userId = overrideUserId ??
+          (doc != null && doc.id.isNotEmpty
+              ? (doc.userId.isNotEmpty ? doc.userId : doc.id)
+              : (currentPatient.id.isNotEmpty ? currentPatient.id : authUser?.id));
+      final phone = (doc != null && doc.phone.isNotEmpty) ? doc.phone : (currentPatient.phone.isNotEmpty ? currentPatient.phone : '');
       final code = myReferralCode;
 
       // 1. Fetch organic invites
@@ -2980,7 +2984,7 @@ class PatientProblemService extends ChangeNotifier {
         }
       }
 
-      // 2. Fetch Patient Referrals (Patient A -> Patient B -> Doctor C)
+      // 2. Fetch Patient Referrals (Patient A -> Patient B -> Doctor C or Doctor A -> Doctor B)
       final rawPatientRefs = await ApiService().fetchMyPatientReferrals(userId: userId);
       _myCreatedPatientReferrals.clear();
       for (final r in rawPatientRefs) {
@@ -3083,7 +3087,121 @@ class PatientProblemService extends ChangeNotifier {
     }
   }
 
-  /// Submit a new Patient Referral
+  /// Get patients associated with the currently logged-in dentist (excluding unrelated patients)
+  List<PatientProfile> getDentistAssociatedPatients() {
+    var doc = currentDoctor;
+    final authUser = Supabase.instance.client.auth.currentUser;
+    final authEmail = authUser?.email?.trim().toLowerCase();
+    final authName = (authUser?.userMetadata?['name'] ?? '').toString().toLowerCase();
+
+    if (doc == null && authEmail != null && authEmail.isNotEmpty) {
+      final match = allDoctors.where((d) =>
+        d.email.toLowerCase() == authEmail ||
+        (d.id.isNotEmpty && d.id == authUser?.id) ||
+        (d.userId.isNotEmpty && d.userId == authUser?.id) ||
+        (authName.isNotEmpty && d.name.toLowerCase().contains(authName))
+      ).firstOrNull;
+      if (match != null) {
+        doc = match;
+      }
+    }
+
+    final docNameClean = (doc?.name ?? '').replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
+    final docId = (doc?.id ?? '').trim();
+    final docUserId = (doc?.userId ?? '').trim();
+    final docEmail = (doc?.email ?? '').trim().toLowerCase();
+    final authUserId = (authUser?.id ?? '').trim();
+
+    final myDoctorIds = <String>{
+      if (docId.isNotEmpty) docId,
+      if (docUserId.isNotEmpty) docUserId,
+      if (authUserId.isNotEmpty) authUserId,
+      if (docEmail.isNotEmpty) docEmail,
+      if (authEmail != null && authEmail.isNotEmpty) authEmail,
+    };
+
+    for (final d in allDoctors) {
+      if (myDoctorIds.contains(d.id) || (d.userId.isNotEmpty && myDoctorIds.contains(d.userId)) || (d.email.isNotEmpty && myDoctorIds.contains(d.email.toLowerCase()))) {
+        if (d.id.isNotEmpty) myDoctorIds.add(d.id);
+        if (d.userId.isNotEmpty) myDoctorIds.add(d.userId);
+        if (d.email.isNotEmpty) myDoctorIds.add(d.email.toLowerCase());
+      }
+    }
+
+    bool isAssignedToMe(PatientConsultationRequest r) {
+      final aId = r.assignedDoctorId?.trim();
+      if (aId != null && aId.isNotEmpty && myDoctorIds.contains(aId)) {
+        return true;
+      }
+      final aName = r.assignedDoctorName?.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
+      if (docNameClean.isNotEmpty &&
+          aName != null && aName.isNotEmpty && (aName == docNameClean || docNameClean.contains(aName) || aName.contains(docNameClean))) {
+        return true;
+      }
+      return false;
+    }
+
+    final Map<String, PatientProfile> associatedMap = {};
+
+    // 1. From dentist assigned requests & timeline requests
+    final allPool = [
+      ..._dentistAssignedRequests,
+      ..._requests.where((r) => isAssignedToMe(r)),
+    ];
+
+    for (final req in allPool) {
+      if (req.patientName.trim().isEmpty) continue;
+      final cleanPhone = req.patientPhone.replaceAll(RegExp(r'[^0-9]'), '');
+      final raw10 = cleanPhone.length >= 10 ? cleanPhone.substring(cleanPhone.length - 10) : cleanPhone;
+      final key = raw10.isNotEmpty ? raw10 : req.patientName.trim().toLowerCase();
+
+      PatientProfile? matchedProfile = _allPatients.where((p) {
+        final pPhone = p.phone.replaceAll(RegExp(r'[^0-9]'), '');
+        return (raw10.isNotEmpty && pPhone.contains(raw10)) ||
+            p.name.trim().toLowerCase() == req.patientName.trim().toLowerCase();
+      }).firstOrNull;
+
+      associatedMap[key] = PatientProfile(
+        id: matchedProfile?.id.isNotEmpty == true ? matchedProfile!.id : (req.id.isNotEmpty ? req.id : 'pat_${req.patientName.hashCode}'),
+        name: req.patientName.trim(),
+        phone: raw10.isNotEmpty ? raw10 : (matchedProfile?.phone.isNotEmpty == true ? matchedProfile!.phone : req.patientPhone),
+        email: matchedProfile?.email.isNotEmpty == true ? matchedProfile!.email : (raw10.isNotEmpty ? 'user_$raw10@dentaguru.internal' : ''),
+        age: (matchedProfile?.age.isNotEmpty == true) ? matchedProfile!.age : '28',
+        gender: (matchedProfile?.gender.isNotEmpty == true) ? matchedProfile!.gender : 'Female',
+        city: req.city.isNotEmpty ? req.city : (matchedProfile?.city.isNotEmpty == true ? matchedProfile!.city : 'Hyderabad'),
+        pincode: req.pincode.isNotEmpty ? req.pincode : (matchedProfile?.pincode.isNotEmpty == true ? matchedProfile!.pincode : ''),
+        address: req.preferredLocation.isNotEmpty ? req.preferredLocation : (matchedProfile?.address.isNotEmpty == true ? matchedProfile!.address : req.state),
+        emergencyContact: req.problemDescription.isNotEmpty ? req.problemDescription : (matchedProfile?.emergencyContact ?? ''),
+      );
+    }
+
+    // 2. From doctor received referrals
+    for (final ref in _doctorReceivedPatientReferrals) {
+      if (ref.referredPatientName.trim().isEmpty) continue;
+      final cleanPhone = ref.referredPatientMobile.replaceAll(RegExp(r'[^0-9]'), '');
+      final raw10 = cleanPhone.length >= 10 ? cleanPhone.substring(cleanPhone.length - 10) : cleanPhone;
+      final key = raw10.isNotEmpty ? raw10 : ref.referredPatientName.trim().toLowerCase();
+
+      if (!associatedMap.containsKey(key)) {
+        associatedMap[key] = PatientProfile(
+          id: ref.referredPatientId ?? 'ref_pat_${ref.id}',
+          name: ref.referredPatientName.trim(),
+          phone: raw10.isNotEmpty ? raw10 : ref.referredPatientMobile,
+          email: raw10.isNotEmpty ? 'user_$raw10@dentaguru.internal' : '',
+          age: ref.referredPatientAge.isNotEmpty ? ref.referredPatientAge : '28',
+          gender: ref.referredPatientGender.isNotEmpty ? ref.referredPatientGender : 'Female',
+          city: ref.referredPatientCity.isNotEmpty ? ref.referredPatientCity : 'Hyderabad',
+          pincode: ref.referredPatientPincode.isNotEmpty ? ref.referredPatientPincode : '',
+          address: ref.referredPatientLocation.isNotEmpty ? ref.referredPatientLocation : '',
+          emergencyContact: ref.clinicalComplaint,
+        );
+      }
+    }
+
+    return associatedMap.values.toList();
+  }
+
+  /// Submit a new Patient Referral (supports Patient Referrer and Dentist Referrer)
   Future<Map<String, dynamic>> submitPatientReferral({
     required String referredPatientName,
     required String referredPatientMobile,
@@ -3095,10 +3213,15 @@ class PatientProblemService extends ChangeNotifier {
     required String requiredSpecialist,
     required String clinicalComplaint,
     required String doctorId,
+    String? referrerPatientId,
   }) async {
     try {
       final authUser = Supabase.instance.client.auth.currentUser;
-      final referrerId = currentPatient.id.isNotEmpty ? currentPatient.id : authUser?.id;
+      final doc = currentDoctor;
+      final referrerId = referrerPatientId ??
+          (doc != null && doc.id.isNotEmpty
+              ? (doc.userId.isNotEmpty ? doc.userId : doc.id)
+              : (currentPatient.id.isNotEmpty ? currentPatient.id : authUser?.id));
 
       final res = await ApiService().createPatientReferral(
         referredPatientName: referredPatientName,

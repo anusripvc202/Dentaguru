@@ -58,11 +58,18 @@ const populateReferralData = async (ref) => {
     const docSpecialty = doctor?.speciality || doctor?.specialty || ref.required_specialist || 'Specialist Consultation';
     const clinicName = clinic?.clinic_name || doctor?.clinics?.clinic_name || doctor?.clinic_name || 'DentaGuru Partner Clinic';
 
+    let referrerName = referrer?.name || 'Patient Referrer';
+    if (referrer && (referrer.role === 'Dentist' || referrer.role === 'dentist')) {
+        if (!referrerName.startsWith('Dr.') && !referrerName.startsWith('Dr ')) {
+            referrerName = `Dr. ${referrerName}`;
+        }
+    }
+
     return {
         id: ref.id,
         referralId: ref.id,
         referrerPatientId: referrerId,
-        referrerPatientName: referrer?.name || 'Patient Referrer',
+        referrerPatientName: referrerName,
         referrerPatientPhone: referrer?.phone || '',
         referrerPatientEmail: referrer?.email || '',
 
@@ -216,7 +223,12 @@ exports.createReferral = async (req, res) => {
 
         // 3. Fetch Referrer & Doctor Details
         const referrerUser = await User.findById(loggedInUserId);
-        const referrerName = referrerUser?.name || 'Patient';
+        let referrerName = referrerUser?.name || 'Patient';
+        if (referrerUser && (referrerUser.role === 'Dentist' || referrerUser.role === 'dentist')) {
+            if (!referrerName.startsWith('Dr.') && !referrerName.startsWith('Dr ')) {
+                referrerName = `Dr. ${referrerName}`;
+            }
+        }
         
         let doctor = await Dentist.findById(doctorId);
         if (!doctor) doctor = await Dentist.findOne({ user_id: doctorId });

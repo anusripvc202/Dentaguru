@@ -10,6 +10,7 @@ import '../../../../core/services/session_service.dart';
 import '../../../../core/widgets/dental_ads_banner.dart';
 import '../../../../core/widgets/whatsapp_chat_modal.dart';
 import '../../../../core/models/referral_model.dart';
+import '../../../patient/presentation/widgets/refer_patient_flow_dialog.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class DentistTimelineScreen extends StatefulWidget {
@@ -33,6 +34,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   late Animation<double> _pulseScaleAnimation;
 
   String _doctorReferralFilter = 'All';
+  int _referralSubTab = 0; // 0: Received (To Me), 1: Created (Referred by Me)
 
   @override
   void initState() {
@@ -41,6 +43,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     _patientService.setDentistMode(true);
     _patientService.syncAllDataFromApi();
     _patientService.syncDoctorReferralsFromApi();
+    _patientService.syncReferralsFromApi();
     _patientService.syncNotificationsFromApi(role: 'Dentist');
 
     // ⏱️ Auto-sync polling timer (every 4s) to catch assigned patients & direct referrals immediately
@@ -49,6 +52,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         _patientService.syncProblemRequestsFromApi();
         _patientService.syncDentistAssignedRequestsFromApi();
         _patientService.syncDoctorReferralsFromApi();
+        _patientService.syncReferralsFromApi();
         _patientService.syncNotificationsFromApi(role: 'Dentist');
       }
     });
@@ -78,6 +82,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               debugPrint('⚡ Realtime update on referrals for Dentist: ${payload.eventType}');
               if (mounted) {
                 _patientService.syncDoctorReferralsFromApi();
+                _patientService.syncReferralsFromApi();
                 _patientService.syncNotificationsFromApi(role: 'Dentist');
               }
             },
@@ -1126,12 +1131,19 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               Row(
                 children: [
                   _buildActionChip(
+                    icon: Icons.person_add_alt_1_rounded,
+                    title: 'Refer a Patient',
+                    color: const Color(0xFF0D9488),
+                    onTap: () => ReferPatientFlowDialog.show(context, isDentistMode: true),
+                  ),
+                  const SizedBox(width: 8),
+                  _buildActionChip(
                     icon: Icons.receipt_long_rounded,
                     title: 'New E-Prescription',
                     color: const Color(0xFF10B981),
                     onTap: () => _showPrescriptionModal(context, requests.isNotEmpty ? requests.first.patientName : 'Patient'),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   _buildActionChip(
                     icon: Icons.view_in_ar_rounded,
                     title: '3D Teeth Logger',
@@ -1142,7 +1154,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                       );
                     },
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   _buildActionChip(
                     icon: Icons.local_hospital_rounded,
                     title: 'Queue Filter',
@@ -1912,6 +1924,11 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
       }
     }
     final myPatients = uniquePatientMap.values.toList();
+    final associatedPatients = _patientService.getDentistAssociatedPatients();
+    final Map<String, PatientProfile> patientProfileMap = {};
+    for (final p in associatedPatients) {
+      patientProfileMap[p.name.trim().toLowerCase()] = p;
+    }
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -1919,11 +1936,33 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Patient Medical Directory', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
-          const SizedBox(height: 4),
-          const Text('Access patient electronic dental records & X-rays', style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Text('Patient Medical Directory', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
+                    SizedBox(height: 4),
+                    Text('Access patient electronic dental records & X-rays', style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+                  ],
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => ReferPatientFlowDialog.show(context, isDentistMode: true),
+                icon: const Icon(Icons.person_add_alt_1_rounded, size: 15, color: Color(0xFF0D9488)),
+                label: const Text('Refer Patient', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0D9488))),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  backgroundColor: const Color(0xFF0D9488).withValues(alpha: 0.08),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 16),
-          if (myPatients.isEmpty)
+          if (myPatients.isEmpty && associatedPatients.isEmpty)
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
@@ -1937,13 +1976,16 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
             )
           else
             ...myPatients.map((p) {
+              final pName = p['name'] ?? 'Patient';
+              final profile = patientProfileMap[pName.trim().toLowerCase()];
               return Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: _buildPatientListTile(
-                  name: p['name'] ?? 'Patient',
+                  name: pName,
                   age: p['age'] ?? '28 Yrs',
                   blood: p['blood'] ?? 'O+',
                   issue: p['issue'] ?? 'Dental Care',
+                  profile: profile,
                 ),
               );
             }),
@@ -1952,34 +1994,74 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     );
   }
 
-  Widget _buildPatientListTile({required String name, required String age, required String blood, required String issue}) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-      ),
-      child: Row(
-        children: [
-          const CircleAvatar(
-            radius: 20,
-            backgroundColor: AppTheme.softBlueBg,
-            child: Icon(Icons.person_outline_rounded, color: AppTheme.primaryBlue, size: 20),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark)),
-                const SizedBox(height: 2),
-                Text('$age • Blood: $blood • $issue', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
-              ],
+  Widget _buildPatientListTile({
+    required String name,
+    required String age,
+    required String blood,
+    required String issue,
+    PatientProfile? profile,
+  }) {
+    return InkWell(
+      onTap: () {
+        final targetProfile = profile ?? PatientProfile(
+          name: name,
+          phone: '',
+          age: age.replaceAll(RegExp(r'\D'), ''),
+          gender: 'Female',
+          city: '',
+          address: '',
+          bloodGroup: blood,
+          emergencyContact: issue,
+        );
+        ReferPatientFlowDialog.show(
+          context,
+          isDentistMode: true,
+          preselectedPatient: targetProfile,
+        );
+      },
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+        ),
+        child: Row(
+          children: [
+            const CircleAvatar(
+              radius: 20,
+              backgroundColor: AppTheme.softBlueBg,
+              child: Icon(Icons.person_outline_rounded, color: AppTheme.primaryBlue, size: 20),
             ),
-          ),
-          const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppTheme.textMuted),
-        ],
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark)),
+                  const SizedBox(height: 2),
+                  Text('$age • Blood: $blood • $issue', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.person_add_alt_1_rounded, size: 12, color: Color(0xFF0D9488)),
+                  SizedBox(width: 4),
+                  Text('Refer', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF0D9488))),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2115,16 +2197,19 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   // DIRECT PATIENT REFERRALS SECTION & MODALS
   // ==========================================
   Widget _buildDoctorPatientReferralsSection() {
-    final allDoctorRefs = _patientService.doctorReceivedPatientReferrals;
+    final receivedRefs = _patientService.doctorReceivedPatientReferrals;
+    final createdRefs = _patientService.myCreatedPatientReferrals;
 
-    final filteredRefs = allDoctorRefs.where((r) {
+    final targetList = _referralSubTab == 0 ? receivedRefs : createdRefs;
+
+    final filteredRefs = targetList.where((r) {
       if (_doctorReferralFilter == 'Pending') return r.status == 'Pending';
       if (_doctorReferralFilter == 'Accepted') return r.status == 'Accepted';
       if (_doctorReferralFilter == 'Rejected') return r.status == 'Rejected';
       return true;
     }).toList();
 
-    final pendingCount = allDoctorRefs.where((r) => r.status == 'Pending').length;
+    final pendingCount = receivedRefs.where((r) => r.status == 'Pending').length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2156,17 +2241,132 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 ],
               ),
             ),
+            TextButton.icon(
+              onPressed: () => ReferPatientFlowDialog.show(context, isDentistMode: true),
+              icon: const Icon(Icons.person_add_alt_1_rounded, size: 15, color: Color(0xFF0D9488)),
+              label: const Text(
+                'Refer Patient',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0D9488)),
+              ),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                backgroundColor: const Color(0xFF0D9488).withValues(alpha: 0.08),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+            const SizedBox(width: 4),
             IconButton(
               icon: const Icon(Icons.refresh_rounded, size: 18, color: AppTheme.primaryBlue),
-              onPressed: () => _patientService.syncDoctorReferralsFromApi(),
+              onPressed: () {
+                _patientService.syncDoctorReferralsFromApi();
+                _patientService.syncReferralsFromApi();
+              },
               tooltip: 'Refresh Referrals',
             ),
           ],
         ),
         const SizedBox(height: 2),
         const Text(
-          'Patients referred directly to you by other patients',
+          'Patients referred to your clinic & referrals sent to specialists',
           style: TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
+        ),
+        const SizedBox(height: 10),
+
+        // Segmented SubTab (Received Referrals vs Referred by Me)
+        Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF1F5F9),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  onTap: () => setState(() => _referralSubTab = 0),
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    decoration: BoxDecoration(
+                      color: _referralSubTab == 0 ? Colors.white : Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
+                      boxShadow: _referralSubTab == 0
+                          ? [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.06),
+                                blurRadius: 4,
+                                offset: const Offset(0, 2),
+                              ),
+                            ]
+                          : null,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.inbox_rounded,
+                          size: 15,
+                          color: _referralSubTab == 0 ? AppTheme.primaryBlue : AppTheme.textMuted,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Received (${receivedRefs.length})',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: _referralSubTab == 0 ? FontWeight.bold : FontWeight.w600,
+                            color: _referralSubTab == 0 ? AppTheme.primaryBlue : AppTheme.textMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: InkWell(
+                  onTap: () => setState(() => _referralSubTab = 1),
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    decoration: BoxDecoration(
+                      color: _referralSubTab == 1 ? Colors.white : Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
+                      boxShadow: _referralSubTab == 1
+                          ? [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.06),
+                                blurRadius: 4,
+                                offset: const Offset(0, 2),
+                              ),
+                            ]
+                          : null,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.outbox_rounded,
+                          size: 15,
+                          color: _referralSubTab == 1 ? const Color(0xFF0D9488) : AppTheme.textMuted,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Referred by Me (${createdRefs.length})',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: _referralSubTab == 1 ? FontWeight.bold : FontWeight.w600,
+                            color: _referralSubTab == 1 ? const Color(0xFF0D9488) : AppTheme.textMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 10),
 
@@ -2176,10 +2376,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
           child: Row(
             children: ['All', 'Pending', 'Accepted', 'Rejected'].map((filter) {
               final isSelected = _doctorReferralFilter == filter;
-              int count = allDoctorRefs.length;
-              if (filter == 'Pending') count = allDoctorRefs.where((r) => r.status == 'Pending').length;
-              if (filter == 'Accepted') count = allDoctorRefs.where((r) => r.status == 'Accepted').length;
-              if (filter == 'Rejected') count = allDoctorRefs.where((r) => r.status == 'Rejected').length;
+              int count = targetList.length;
+              if (filter == 'Pending') count = targetList.where((r) => r.status == 'Pending').length;
+              if (filter == 'Accepted') count = targetList.where((r) => r.status == 'Accepted').length;
+              if (filter == 'Rejected') count = targetList.where((r) => r.status == 'Rejected').length;
 
               return Padding(
                 padding: const EdgeInsets.only(right: 8),
@@ -2193,13 +2393,15 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                     ),
                   ),
                   selected: isSelected,
-                  selectedColor: AppTheme.primaryBlue,
+                  selectedColor: _referralSubTab == 1 ? const Color(0xFF0D9488) : AppTheme.primaryBlue,
                   backgroundColor: Colors.white,
                   checkmarkColor: Colors.white,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(20),
                     side: BorderSide(
-                      color: isSelected ? AppTheme.primaryBlue : const Color(0xFFE2E8F0),
+                      color: isSelected
+                          ? (_referralSubTab == 1 ? const Color(0xFF0D9488) : AppTheme.primaryBlue)
+                          : const Color(0xFFE2E8F0),
                     ),
                   ),
                   onSelected: (selected) {
@@ -2225,20 +2427,43 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
             ),
             child: Column(
               children: [
-                Icon(Icons.person_add_disabled_rounded, size: 36, color: Colors.grey.withOpacity(0.4)),
+                Icon(
+                  _referralSubTab == 0 ? Icons.inbox_rounded : Icons.person_add_disabled_rounded,
+                  size: 36,
+                  color: Colors.grey.withValues(alpha: 0.4),
+                ),
                 const SizedBox(height: 8),
                 Text(
-                  _doctorReferralFilter == 'All'
-                      ? 'No direct patient referrals received yet.'
-                      : 'No $_doctorReferralFilter patient referrals.',
+                  _referralSubTab == 0
+                      ? (_doctorReferralFilter == 'All'
+                          ? 'No direct patient referrals received yet.'
+                          : 'No $_doctorReferralFilter patient referrals.')
+                      : (_doctorReferralFilter == 'All'
+                          ? 'No patient referrals created yet.'
+                          : 'No $_doctorReferralFilter patient referrals created.'),
                   style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppTheme.textDark),
                 ),
-                const SizedBox(height: 2),
-                const Text(
-                  'When patients refer friends or family to your clinic, they will appear here.',
-                  style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                const SizedBox(height: 4),
+                Text(
+                  _referralSubTab == 0
+                      ? 'When patients or other doctors refer patients to your clinic, they will appear here.'
+                      : 'Need to refer a patient to a dental specialist (Orthodontics, Oral Surgery, Endodontics)? Tap below.',
+                  style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
                   textAlign: TextAlign.center,
                 ),
+                if (_referralSubTab == 1) ...[
+                  const SizedBox(height: 12),
+                  ElevatedButton.icon(
+                    onPressed: () => ReferPatientFlowDialog.show(context, isDentistMode: true),
+                    icon: const Icon(Icons.person_add_alt_1_rounded, size: 15, color: Colors.white),
+                    label: const Text('Refer a Patient', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF0D9488),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ],
               ],
             ),
           )
@@ -2254,6 +2479,9 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
             final statusBg = isAccepted
                 ? const Color(0xFFDCFCE7)
                 : (isRejected ? const Color(0xFFFEE2E2) : const Color(0xFFFEF3C7));
+            final statusText = isAccepted
+                ? '🟢 Accepted by Doctor'
+                : (isRejected ? '🔴 Referral Declined' : '🟡 Doctor Reviewing');
 
             return Container(
               margin: const EdgeInsets.only(bottom: 12),
@@ -2263,13 +2491,13 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(
                   color: isPending
-                      ? const Color(0xFFF59E0B).withOpacity(0.5)
+                      ? const Color(0xFFF59E0B).withValues(alpha: 0.5)
                       : (isAccepted ? const Color(0xFF86EFAC) : const Color(0xFFE2E8F0)),
                   width: isPending ? 1.5 : 1,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: (isPending ? const Color(0xFFF59E0B) : Colors.black).withOpacity(0.04),
+                    color: (isPending ? const Color(0xFFF59E0B) : Colors.black).withValues(alpha: 0.04),
                     blurRadius: 10,
                     offset: const Offset(0, 3),
                   ),
@@ -2287,7 +2515,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                           children: [
                             CircleAvatar(
                               radius: 18,
-                              backgroundColor: AppTheme.primaryBlue.withOpacity(0.12),
+                              backgroundColor: AppTheme.primaryBlue.withValues(alpha: 0.12),
                               child: Text(
                                 ref.referredPatientName.isNotEmpty ? ref.referredPatientName[0].toUpperCase() : 'P',
                                 style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryBlue, fontSize: 14),
@@ -2344,7 +2572,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
-                          ref.status,
+                          _referralSubTab == 1 ? statusText : ref.status,
                           style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: statusColor),
                         ),
                       ),
@@ -2354,44 +2582,87 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                   const Divider(height: 1, thickness: 1, color: Color(0xFFF1F5F9)),
                   const SizedBox(height: 8),
 
-                  // Referrer & Specialty Info
-                  Row(
-                    children: [
-                      const Icon(Icons.person_pin_circle_outlined, size: 14, color: Color(0xFF6366F1)),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: RichText(
-                          text: TextSpan(
-                            style: const TextStyle(fontSize: 11.5, color: AppTheme.textDark),
-                            children: [
-                              const TextSpan(text: 'Referred by: ', style: TextStyle(color: AppTheme.textMuted)),
-                              TextSpan(text: ref.referrerPatientName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                              if (ref.referrerPatientPhone.isNotEmpty)
-                                TextSpan(text: ' (+91 ${ref.referrerPatientPhone})', style: const TextStyle(color: AppTheme.textMuted)),
-                            ],
+                  // Doctor / Referrer Info
+                  if (_referralSubTab == 0) ...[
+                    // Received referral: show Referrer info
+                    Row(
+                      children: [
+                        const Icon(Icons.person_pin_circle_outlined, size: 14, color: Color(0xFF6366F1)),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: RichText(
+                            text: TextSpan(
+                              style: const TextStyle(fontSize: 11.5, color: AppTheme.textDark),
+                              children: [
+                                const TextSpan(text: 'Referred by: ', style: TextStyle(color: AppTheme.textMuted)),
+                                TextSpan(text: ref.referrerPatientName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                if (ref.referrerPatientPhone.isNotEmpty)
+                                  TextSpan(text: ' (+91 ${ref.referrerPatientPhone})', style: const TextStyle(color: AppTheme.textMuted)),
+                              ],
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
+                  ] else ...[
+                    // Created referral: show Receiving Doctor & Clinic
+                    Row(
+                      children: [
+                        const Icon(Icons.medical_services_outlined, size: 14, color: Color(0xFF0D9488)),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            '${ref.doctorName} • ${ref.requiredSpecialist}',
+                            style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Icon(Icons.local_hospital_outlined, size: 14, color: Colors.black45),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            [
+                              ref.doctorClinicName.isNotEmpty ? ref.doctorClinicName : 'DentaGuru Partner Clinic',
+                              if (ref.doctorLocation.isNotEmpty || ref.doctorCity.isNotEmpty || ref.doctorPincode.isNotEmpty)
+                                [
+                                  if (ref.doctorLocation.isNotEmpty) ref.doctorLocation,
+                                  if (ref.doctorCity.isNotEmpty) ref.doctorCity,
+                                  if (ref.doctorPincode.isNotEmpty) ref.doctorPincode,
+                                ].join(', ')
+                            ].join(' • '),
+                            style: const TextStyle(fontSize: 11, color: AppTheme.textMedium),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 4),
 
-                  Row(
-                    children: [
-                      const Icon(Icons.medical_services_outlined, size: 14, color: Color(0xFF0D9488)),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          'Category: ${ref.requiredSpecialist}',
-                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF0D9488)),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                  if (_referralSubTab == 0)
+                    Row(
+                      children: [
+                        const Icon(Icons.medical_services_outlined, size: 14, color: Color(0xFF0D9488)),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Category: ${ref.requiredSpecialist}',
+                            style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF0D9488)),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
 
                   if (ref.clinicalComplaint.isNotEmpty) ...[
                     const SizedBox(height: 6),
@@ -2419,73 +2690,128 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                     ),
                   ],
 
-                  if (isRejected && ref.rejectionReason != null) ...[
+                  if (isRejected && ref.rejectionReason != null && ref.rejectionReason!.isNotEmpty) ...[
                     const SizedBox(height: 6),
-                    Text(
-                      'Rejection Reason: ${ref.rejectionReason}',
-                      style: const TextStyle(fontSize: 11, color: Color(0xFFDC2626), fontWeight: FontWeight.w600),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF2F2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        'Rejection Reason: ${ref.rejectionReason}',
+                        style: const TextStyle(fontSize: 11, color: Color(0xFF991B1B), fontWeight: FontWeight.w500),
+                      ),
                     ),
                   ],
 
                   const SizedBox(height: 12),
 
-                  // Actions: View Details, WhatsApp, Accept, Reject
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => _showDoctorReferralDetailModal(context, ref),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                          ),
-                          child: const Text('View Details', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          icon: const Icon(Icons.chat_rounded, size: 14, color: Colors.white),
-                          label: const Text('WhatsApp', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF25D366),
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                          ),
-                          onPressed: () => _sendWhatsAppToReferredPatient(ref),
-                        ),
-                      ),
-                      if (isPending) ...[
-                        const SizedBox(width: 8),
+                  // Actions:
+                  if (_referralSubTab == 0) ...[
+                    // Received Referrals Actions: View Details, WhatsApp, Accept, Reject
+                    Row(
+                      children: [
                         Expanded(
                           child: OutlinedButton(
-                            onPressed: () => _showRejectReferralDialog(context, ref),
+                            onPressed: () => _showDoctorReferralDetailModal(context, ref),
                             style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFFEF4444),
-                              side: const BorderSide(color: Color(0xFFFCA5A5)),
                               padding: const EdgeInsets.symmetric(vertical: 10),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
-                            child: const Text('Reject', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            child: const Text('View Details', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                           ),
                         ),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: ElevatedButton(
-                            onPressed: () => _acceptReferralDirectly(context, ref),
+                          child: ElevatedButton.icon(
+                            icon: const Icon(Icons.chat_rounded, size: 14, color: Colors.white),
+                            label: const Text('WhatsApp', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF10B981),
+                              backgroundColor: const Color(0xFF25D366),
                               foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(vertical: 10),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
-                            child: const Text('Accept', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            onPressed: () => _sendWhatsAppToReferredPatient(ref),
+                          ),
+                        ),
+                        if (isPending) ...[
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () => _showRejectReferralDialog(context, ref),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFFEF4444),
+                                side: const BorderSide(color: Color(0xFFFCA5A5)),
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              child: const Text('Reject', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: () => _acceptReferralDirectly(context, ref),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF10B981),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              child: const Text('Accept', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ] else ...[
+                    // Created Referrals ("Referred by Me") Actions: View Details, WhatsApp Patient, WhatsApp Specialist
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => _showDoctorReferralDetailModal(context, ref),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            child: const Text('View Details', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            icon: const Icon(Icons.chat_rounded, size: 14, color: Colors.white),
+                            label: const Text('Patient WA', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF25D366),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            onPressed: () => _sendWhatsAppToReferredPatient(ref),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.medical_services_outlined, size: 14, color: Color(0xFF0D9488)),
+                            label: const Text('Specialist', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0D9488))),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF0D9488),
+                              side: const BorderSide(color: Color(0xFF0D9488)),
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            onPressed: () => _sendWhatsAppToReferredDoctor(ref),
                           ),
                         ),
                       ],
-                    ],
-                  ),
+                    ),
+                  ],
                 ],
               ),
             );
@@ -2563,6 +2889,81 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
       }
     } catch (e) {
       debugPrint('Error launching WhatsApp: $e');
+    }
+  }
+
+  Future<void> _sendWhatsAppToReferredDoctor(PatientReferral ref) async {
+    DoctorModel? targetDoctor;
+    for (final d in _patientService.allDoctors) {
+      if (ref.doctorId.isNotEmpty && (d.id == ref.doctorId || d.userId == ref.doctorId)) {
+        targetDoctor = d;
+        break;
+      }
+      final cleanRefDoc = ref.doctorName.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
+      final cleanD = d.name.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
+      if (cleanRefDoc.isNotEmpty && (cleanD.contains(cleanRefDoc) || cleanRefDoc.contains(cleanD))) {
+        targetDoctor = d;
+        break;
+      }
+    }
+
+    final docPhone = (targetDoctor != null && targetDoctor.phone.isNotEmpty) ? targetDoctor.phone : '';
+
+    final myDoc = _patientService.currentDoctor;
+    final myDocName = (myDoc != null && myDoc.name.isNotEmpty)
+        ? (myDoc.name.startsWith('Dr.') ? myDoc.name : 'Dr. ${myDoc.name}')
+        : 'Referring Dentist';
+    final myClinic = (myDoc != null && myDoc.clinicName.isNotEmpty) ? myDoc.clinicName : 'Dental Practice';
+
+    final targetDocName = (targetDoctor != null && targetDoctor.name.isNotEmpty)
+        ? (targetDoctor.name.startsWith('Dr.') ? targetDoctor.name : 'Dr. ${targetDoctor.name}')
+        : (ref.doctorName.isNotEmpty ? ref.doctorName : 'Doctor');
+
+    final buffer = StringBuffer();
+    buffer.writeln('Hello $targetDocName,');
+    buffer.writeln();
+    buffer.writeln('This is $myDocName from *$myClinic* on DentaGuru.');
+    buffer.writeln('I have referred my patient *${ref.referredPatientName}* (+91 ${ref.referredPatientMobile}) to you for *${ref.requiredSpecialist}*.');
+    buffer.writeln();
+    buffer.writeln('📋 *Patient Details:*');
+    buffer.writeln('• *Patient:* ${ref.referredPatientName}');
+    buffer.writeln('• *Age & Gender:* ${ref.referredPatientAge} Yrs, ${ref.referredPatientGender}');
+    buffer.writeln('• *Mobile:* +91 ${ref.referredPatientMobile}');
+    if (ref.referredPatientCity.isNotEmpty) buffer.writeln('• *Location:* ${ref.referredPatientCity}');
+    if (ref.clinicalComplaint.isNotEmpty) {
+      buffer.writeln('• *Clinical Reason / Diagnosis:* ${ref.clinicalComplaint}');
+    }
+    buffer.writeln();
+    buffer.writeln('Please let me know if you need any additional diagnostic history, X-rays, or treatment notes. Thank you!');
+    buffer.writeln();
+    buffer.writeln('Best regards,');
+    buffer.writeln('$myDocName');
+    buffer.writeln('$myClinic');
+
+    String rawPhone = docPhone.replaceAll(RegExp(r'[^0-9]'), '');
+    if (rawPhone.startsWith('0') && rawPhone.length == 11) {
+      rawPhone = '91${rawPhone.substring(1)}';
+    } else if (rawPhone.length == 10) {
+      rawPhone = '91$rawPhone';
+    }
+
+    final waUrl = Uri.parse(rawPhone.isNotEmpty
+        ? 'https://wa.me/$rawPhone?text=${Uri.encodeComponent(buffer.toString())}'
+        : 'https://wa.me/?text=${Uri.encodeComponent(buffer.toString())}');
+
+    try {
+      await launchUrl(waUrl, mode: LaunchMode.externalApplication);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('📱 WhatsApp opened for $targetDocName!'),
+            backgroundColor: const Color(0xFF25D366),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error launching WhatsApp to doctor: $e');
     }
   }
 
@@ -2689,6 +3090,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
       backgroundColor: Colors.transparent,
       builder: (ctx) {
         final isPending = ref.status == 'Pending';
+        final isMyCreatedReferral = _referralSubTab == 1;
+
         return Container(
           height: MediaQuery.of(context).size.height * 0.85,
           padding: const EdgeInsets.all(20),
@@ -2702,7 +3105,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Referral Details', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
+                  Text(
+                    isMyCreatedReferral ? 'Sent Referral Details' : 'Received Referral Details',
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                  ),
                   IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
                 ],
               ),
@@ -2713,12 +3119,13 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                     children: [
                       // Section 1: Referrer
                       _buildDetailCard(
-                        title: '1. REFERRER INFO',
+                        title: isMyCreatedReferral ? '1. REFERRING DOCTOR (YOU)' : '1. REFERRER INFO',
                         icon: Icons.person_pin_rounded,
                         color: const Color(0xFF6366F1),
                         items: [
                           {'label': 'Referrer Name', 'value': ref.referrerPatientName},
-                          {'label': 'Referrer Mobile', 'value': '+91 ${ref.referrerPatientPhone}'},
+                          if (ref.referrerPatientPhone.isNotEmpty)
+                            {'label': 'Referrer Mobile', 'value': '+91 ${ref.referrerPatientPhone}'},
                           if (ref.referrerPatientEmail.isNotEmpty)
                             {'label': 'Referrer Email', 'value': ref.referrerPatientEmail},
                         ],
@@ -2739,17 +3146,36 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                       ),
                       const SizedBox(height: 12),
 
-                      // Section 3: Referral Details
+                      // Section 3: Receiving Specialist / Referral Details
+                      if (isMyCreatedReferral) ...[
+                        _buildDetailCard(
+                          title: '3. RECEIVING SPECIALIST DOCTOR',
+                          icon: Icons.medical_services_rounded,
+                          color: const Color(0xFF0D9488),
+                          items: [
+                            {'label': 'Specialist Doctor', 'value': ref.doctorName},
+                            {'label': 'Specialty Area', 'value': ref.requiredSpecialist},
+                            if (ref.doctorClinicName.isNotEmpty)
+                              {'label': 'Clinic Name', 'value': ref.doctorClinicName},
+                            if (ref.doctorCity.isNotEmpty)
+                              {'label': 'Clinic City', 'value': ref.doctorCity},
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+
+                      // Section 4: Referral Details
                       _buildDetailCard(
-                        title: '3. REFERRAL & CLINICAL COMPLAINT',
+                        title: isMyCreatedReferral ? '4. CLINICAL DETAILS & STATUS' : '3. REFERRAL & CLINICAL COMPLAINT',
                         icon: Icons.medical_information_rounded,
-                        color: const Color(0xFF0D9488),
+                        color: const Color(0xFF10B981),
                         items: [
                           {'label': 'Specialist Category', 'value': ref.requiredSpecialist},
-                          {'label': 'Complaint / Notes', 'value': ref.clinicalComplaint},
+                          {'label': 'Complaint / Notes', 'value': ref.clinicalComplaint.isNotEmpty ? ref.clinicalComplaint : 'General Specialist Consultation'},
                           {'label': 'Referral Date', 'value': '${ref.referralDate.day}/${ref.referralDate.month}/${ref.referralDate.year}'},
                           {'label': 'Current Status', 'value': ref.status},
-                          {'label': 'WhatsApp Status', 'value': ref.whatsappStatus},
+                          if (ref.rejectionReason != null && ref.rejectionReason!.isNotEmpty)
+                            {'label': 'Decline Reason', 'value': ref.rejectionReason!},
                         ],
                       ),
                     ],
@@ -2779,7 +3205,22 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                           onPressed: () => _sendWhatsAppToReferredPatient(ref),
                         ),
                       ),
-                      if (ref.referrerPatientPhone.isNotEmpty) ...[
+                      if (isMyCreatedReferral) ...[
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          icon: const Icon(Icons.medical_services_outlined, size: 15, color: Color(0xFF0D9488)),
+                          label: const Text(
+                            'Specialist',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5, color: Color(0xFF0D9488)),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Color(0xFF0D9488)),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          onPressed: () => _sendWhatsAppToReferredDoctor(ref),
+                        ),
+                      ] else if (ref.referrerPatientPhone.isNotEmpty) ...[
                         const SizedBox(width: 8),
                         OutlinedButton.icon(
                           icon: const Icon(Icons.person_pin_rounded, size: 15, color: Color(0xFF6366F1)),
@@ -2797,7 +3238,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                       ],
                     ],
                   ),
-                  if (isPending) ...[
+                  if (!isMyCreatedReferral && isPending) ...[
                     const SizedBox(height: 8),
                     Row(
                       children: [

@@ -1,20 +1,37 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/models/referral_model.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
 
 class ReferPatientFlowDialog extends StatefulWidget {
   final VoidCallback? onViewMyReferrals;
+  final bool isDentistMode;
+  final PatientProfile? preselectedPatient;
 
-  const ReferPatientFlowDialog({super.key, this.onViewMyReferrals});
+  const ReferPatientFlowDialog({
+    super.key,
+    this.onViewMyReferrals,
+    this.isDentistMode = false,
+    this.preselectedPatient,
+  });
 
-  static Future<void> show(BuildContext context, {VoidCallback? onViewMyReferrals}) {
+  static Future<void> show(
+    BuildContext context, {
+    VoidCallback? onViewMyReferrals,
+    bool isDentistMode = false,
+    PatientProfile? preselectedPatient,
+  }) {
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => ReferPatientFlowDialog(onViewMyReferrals: onViewMyReferrals),
+      builder: (ctx) => ReferPatientFlowDialog(
+        onViewMyReferrals: onViewMyReferrals,
+        isDentistMode: isDentistMode,
+        preselectedPatient: preselectedPatient,
+      ),
     );
   }
 
@@ -24,16 +41,22 @@ class ReferPatientFlowDialog extends StatefulWidget {
 
 class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
   final PatientProblemService _patientService = PatientProblemService();
-  int _currentStep = 1; // 1: Select Doctor, 2: Patient Details, 3: Confirm, 4: Success
+  int _currentStep = 1; // 1: Select (Patient/Doctor), 2: Next Step, 3: Confirm, 4: Success
 
-  // Step 1: Doctor Selection State
+  // Dentist Mode specific state
+  List<PatientProfile> _associatedPatients = [];
+  PatientProfile? _selectedPatient;
+  String _patientSearchQuery = '';
+  bool _isManualPatientEntry = false;
+
+  // Step 1 / 2: Doctor Selection State
   DoctorModel? _selectedDoctor;
   String _doctorSearchQuery = '';
   String _selectedSpecialtyFilter = 'All';
   String _selectedCityFilter = 'All';
   String _selectedLanguageFilter = 'All';
 
-  // Step 2: Referred Patient Details (Starts Clean & Empty!)
+  // Step 2 / 3: Referred Patient Details Form
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _mobileController = TextEditingController();
@@ -73,6 +96,41 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
   void initState() {
     super.initState();
     _patientService.syncAllDataFromApi();
+    if (widget.isDentistMode) {
+      _loadDentistAssociatedPatients();
+    }
+  }
+
+  void _loadDentistAssociatedPatients() {
+    _associatedPatients = _patientService.getDentistAssociatedPatients();
+    if (widget.preselectedPatient != null) {
+      _selectPatient(widget.preselectedPatient!);
+    } else if (_associatedPatients.isNotEmpty) {
+      _selectPatient(_associatedPatients.first);
+    }
+  }
+
+  void _selectPatient(PatientProfile patient) {
+    setState(() {
+      _selectedPatient = patient;
+      _isManualPatientEntry = false;
+      _nameController.text = patient.name;
+      final cleanPhone = patient.phone.replaceAll(RegExp(r'[^0-9]'), '');
+      _mobileController.text = cleanPhone.length >= 10 ? cleanPhone.substring(cleanPhone.length - 10) : cleanPhone;
+      _ageController.text = patient.age.isNotEmpty ? patient.age : '28';
+      _gender = _genderOptions.contains(patient.gender) ? patient.gender : 'Female';
+      _cityController.text = patient.city.isNotEmpty ? patient.city : 'Hyderabad';
+      _pincodeController.text = patient.pincode;
+      _locationController.text = patient.address.isNotEmpty ? patient.address : patient.city;
+      if (patient.emergencyContact.isNotEmpty && patient.emergencyContact.length > 3) {
+        _complaintController.text = patient.emergencyContact;
+        if (_specialtyOptions.contains(patient.emergencyContact)) {
+          _requiredSpecialist = patient.emergencyContact;
+        }
+      }
+      _isMobileRegistered = true;
+      _matchedPatientName = patient.name;
+    });
   }
 
   @override
@@ -124,6 +182,13 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
       _submissionErrorMessage = null;
     });
 
+    final currentDoc = _patientService.currentDoctor;
+    final referrerId = widget.isDentistMode
+        ? (currentDoc != null && currentDoc.id.isNotEmpty
+            ? (currentDoc.userId.isNotEmpty ? currentDoc.userId : currentDoc.id)
+            : null)
+        : null;
+
     final res = await _patientService.submitPatientReferral(
       referredPatientName: _nameController.text.trim(),
       referredPatientMobile: _mobileController.text.trim(),
@@ -133,8 +198,11 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
       referredPatientPincode: _pincodeController.text.trim(),
       referredPatientLocation: _locationController.text.trim(),
       requiredSpecialist: _requiredSpecialist,
-      clinicalComplaint: _complaintController.text.trim(),
+      clinicalComplaint: _complaintController.text.trim().isNotEmpty
+          ? _complaintController.text.trim()
+          : 'Specialist consultation and dental evaluation',
       doctorId: _selectedDoctor!.id,
+      referrerPatientId: referrerId,
     );
 
     if (!mounted) return;
@@ -211,7 +279,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Refer a Patient',
+                        widget.isDentistMode ? 'Dentist Referral Portal' : 'Refer a Patient',
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
@@ -221,7 +289,9 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                         overflow: TextOverflow.ellipsis,
                       ),
                       Text(
-                        'Connect a patient with a specialized doctor',
+                        widget.isDentistMode
+                            ? 'Refer your patient to a verified dental specialist'
+                            : 'Connect a patient with a specialized doctor',
                         style: TextStyle(
                           fontSize: 12,
                           color: isDark ? Colors.white60 : Colors.black54,
@@ -256,7 +326,9 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
   }
 
   Widget _buildStepProgressIndicator(bool isDark, Color primaryColor) {
-    final steps = ['Select Doctor', 'Patient Info', 'Confirm', 'Submitted'];
+    final steps = widget.isDentistMode
+        ? ['Select Patient', 'Select Doctor', 'Referral Details', 'Submitted']
+        : ['Select Doctor', 'Patient Info', 'Confirm', 'Submitted'];
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -328,28 +400,608 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
   }
 
   Widget _buildCurrentStepContent(bool isDark, Color primaryColor) {
-    switch (_currentStep) {
-      case 1:
-        return _buildStep1SelectDoctor(isDark, primaryColor);
-      case 2:
-        return _buildStep2PatientDetails(isDark, primaryColor);
-      case 3:
-        return _buildStep3ConfirmReferral(isDark, primaryColor);
-      case 4:
-        return _buildStep4Success(isDark, primaryColor);
-      default:
-        return const SizedBox.shrink();
+    if (widget.isDentistMode) {
+      switch (_currentStep) {
+        case 1:
+          return _buildDentistStep1SelectPatient(isDark, primaryColor);
+        case 2:
+          return _buildStep1SelectDoctor(isDark, primaryColor);
+        case 3:
+          return _buildDentistStep3ConfirmReferral(isDark, primaryColor);
+        case 4:
+          return _buildStep4Success(isDark, primaryColor);
+        default:
+          return const SizedBox.shrink();
+      }
+    } else {
+      switch (_currentStep) {
+        case 1:
+          return _buildStep1SelectDoctor(isDark, primaryColor);
+        case 2:
+          return _buildStep2PatientDetails(isDark, primaryColor);
+        case 3:
+          return _buildStep3ConfirmReferral(isDark, primaryColor);
+        case 4:
+          return _buildStep4Success(isDark, primaryColor);
+        default:
+          return const SizedBox.shrink();
+      }
     }
   }
 
   // ─────────────────────────────────────────────
-  // STEP 1: SELECT DOCTOR
+  // DENTIST FLOW - STEP 1: SELECT PATIENT
+  // ─────────────────────────────────────────────
+  Widget _buildDentistStep1SelectPatient(bool isDark, Color primaryColor) {
+    final filteredPatients = _associatedPatients.where((p) {
+      if (_patientSearchQuery.isNotEmpty) {
+        final q = _patientSearchQuery.toLowerCase().trim();
+        final cleanDigitsQ = q.replaceAll(RegExp(r'\D'), '');
+        final cleanPhone = p.phone.replaceAll(RegExp(r'\D'), '');
+        final matchName = p.name.toLowerCase().contains(q);
+        final matchCity = p.city.toLowerCase().contains(q);
+        final matchPhone = (cleanDigitsQ.isNotEmpty && cleanPhone.contains(cleanDigitsQ)) || p.phone.toLowerCase().contains(q);
+        if (!matchName && !matchCity && !matchPhone) return false;
+      }
+      return true;
+    }).toList();
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _isManualPatientEntry ? 'Enter Patient Details' : 'Select Associated Patient',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _isManualPatientEntry
+                          ? 'Enter the details of the walk-in or new patient to refer.'
+                          : 'Select a patient from your clinic directory or enter new details.',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isDark ? Colors.white60 : Colors.black54,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (_isManualPatientEntry)
+                TextButton.icon(
+                  onPressed: () => setState(() => _isManualPatientEntry = false),
+                  icon: const Icon(Icons.list_alt_rounded, size: 16),
+                  label: const Text('My Patients', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                ),
+            ],
+          ),
+        ),
+
+        if (_isManualPatientEntry) ...[
+          // Manual Patient Entry Form View
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildFieldLabel('Patient Name', isDark, isRequired: true),
+                    TextFormField(
+                      controller: _nameController,
+                      decoration: _inputDecoration('Enter full name of the patient', isDark),
+                      validator: (val) {
+                        if (val == null || val.trim().isEmpty) return 'Patient Name is required';
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 14),
+
+                    _buildFieldLabel('Mobile Number', isDark, isRequired: true),
+                    TextFormField(
+                      controller: _mobileController,
+                      keyboardType: TextInputType.phone,
+                      maxLength: 10,
+                      onChanged: _checkMobileNumber,
+                      decoration: _inputDecoration('10-digit mobile number', isDark).copyWith(
+                        counterText: '',
+                        prefixText: '+91 ',
+                        prefixStyle: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : Colors.black87),
+                        suffixIcon: _isCheckingMobile
+                            ? const Padding(
+                                padding: EdgeInsets.all(12),
+                                child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                              )
+                            : (_isMobileRegistered
+                                ? const Padding(
+                                    padding: EdgeInsets.only(right: 12),
+                                    child: Icon(Icons.verified_rounded, color: Color(0xFF10B981), size: 20),
+                                  )
+                                : null),
+                      ),
+                      validator: (val) {
+                        if (val == null || val.trim().isEmpty) return 'Mobile number is required';
+                        final clean = val.replaceAll(RegExp(r'[^0-9]'), '');
+                        if (clean.length != 10) return 'Please enter a valid 10-digit mobile number';
+                        return null;
+                      },
+                    ),
+                    if (_isMobileRegistered)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4, left: 4),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.check_circle_outline_rounded, color: Color(0xFF10B981), size: 14),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                _matchedPatientName != null
+                                    ? 'Registered patient: $_matchedPatientName (Will link directly)'
+                                    : 'Existing DentaGuru patient (Will link directly)',
+                                style: const TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.w600),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    const SizedBox(height: 14),
+
+                    Row(
+                      children: [
+                        Expanded(
+                          flex: 2,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _buildFieldLabel('Age', isDark, isRequired: true),
+                              TextFormField(
+                                controller: _ageController,
+                                keyboardType: TextInputType.number,
+                                maxLength: 3,
+                                decoration: _inputDecoration('e.g. 28', isDark).copyWith(counterText: ''),
+                                validator: (val) {
+                                  if (val == null || val.trim().isEmpty) return 'Required';
+                                  final n = int.tryParse(val.trim());
+                                  if (n == null || n <= 0 || n > 120) return 'Invalid age';
+                                  return null;
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 3,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _buildFieldLabel('Gender', isDark, isRequired: true),
+                              DropdownButtonFormField<String>(
+                                initialValue: _gender,
+                                dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                                decoration: _inputDecoration('Select', isDark),
+                                items: _genderOptions
+                                    .map((g) => DropdownMenuItem(value: g, child: Text(g)))
+                                    .toList(),
+                                onChanged: (val) => setState(() => _gender = val ?? 'Female'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+
+                    Row(
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _buildFieldLabel('City', isDark, isRequired: true),
+                              TextFormField(
+                                controller: _cityController,
+                                decoration: _inputDecoration('e.g. Hyderabad', isDark),
+                                validator: (val) {
+                                  if (val == null || val.trim().isEmpty) return 'City is required';
+                                  return null;
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 2,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _buildFieldLabel('Pincode', isDark, isRequired: true),
+                              TextFormField(
+                                controller: _pincodeController,
+                                keyboardType: TextInputType.number,
+                                maxLength: 6,
+                                decoration: _inputDecoration('6-digit', isDark).copyWith(counterText: ''),
+                                validator: (val) {
+                                  if (val == null || val.trim().isEmpty) return 'Required';
+                                  if (val.trim().length != 6) return '6 digits';
+                                  return null;
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+
+                    _buildFieldLabel('Location / Landmark', isDark, isRequired: true),
+                    TextFormField(
+                      controller: _locationController,
+                      decoration: _inputDecoration('e.g. Madhapur, near Metro Station', isDark),
+                      validator: (val) {
+                        if (val == null || val.trim().isEmpty) return 'Location is required';
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ] else ...[
+          // Search Bar for Associated Patients
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: TextField(
+              onChanged: (val) => setState(() => _patientSearchQuery = val),
+              decoration: InputDecoration(
+                hintText: 'Search patient by name, contact number, or city...',
+                hintStyle: TextStyle(fontSize: 13, color: isDark ? Colors.white38 : Colors.black38),
+                prefixIcon: Icon(Icons.search_rounded, size: 20, color: primaryColor),
+                suffixIcon: _patientSearchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear_rounded, size: 18),
+                        onPressed: () => setState(() => _patientSearchQuery = ''),
+                      )
+                    : null,
+                filled: true,
+                fillColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ),
+
+          // Associated Patients List & "+ Enter New Patient Details" Card
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              children: [
+                // "+ Enter New Patient Details" Card
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF0FDF4),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.4), width: 1.5),
+                  ),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () {
+                      setState(() {
+                        _isManualPatientEntry = true;
+                        _selectedPatient = null;
+                        _nameController.clear();
+                        _mobileController.clear();
+                        _ageController.clear();
+                        _cityController.clear();
+                        _pincodeController.clear();
+                        _locationController.clear();
+                        _complaintController.clear();
+                        _isMobileRegistered = false;
+                        _matchedPatientName = null;
+                      });
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.person_add_alt_1_rounded, color: Color(0xFF10B981), size: 20),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '+ Enter New Patient Details',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                  ),
+                                ),
+                                Text(
+                                  'Refer a walk-in patient or someone not in your directory',
+                                  style: TextStyle(fontSize: 11, color: isDark ? Colors.white60 : Colors.black54),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Color(0xFF10B981)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+                if (filteredPatients.isEmpty)
+                  Container(
+                    margin: const EdgeInsets.symmetric(vertical: 20),
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.person_search_rounded, size: 40, color: isDark ? Colors.white24 : Colors.black26),
+                        const SizedBox(height: 10),
+                        Text(
+                          _patientSearchQuery.isNotEmpty
+                              ? 'No matching associated patients found'
+                              : 'No patients associated with your practice yet',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white70 : Colors.black87,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Tap "+ Enter New Patient Details" above to refer any patient directly.',
+                          style: TextStyle(fontSize: 11, color: isDark ? Colors.white38 : Colors.black45),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  ...filteredPatients.map((patient) {
+                    final isSelected = !_isManualPatientEntry &&
+                        (_selectedPatient?.id == patient.id ||
+                            (_nameController.text.trim() == patient.name.trim() &&
+                                _mobileController.text.trim() == patient.phone.replaceAll(RegExp(r'[^0-9]'), '').trim()));
+
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? (isSelected ? const Color(0xFF1E293B) : const Color(0xFF131E31))
+                            : (isSelected ? const Color(0xFFF0F9FF) : Colors.white),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: isSelected
+                              ? primaryColor
+                              : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                          width: isSelected ? 2 : 1,
+                        ),
+                        boxShadow: isSelected
+                            ? [
+                                BoxShadow(
+                                  color: primaryColor.withValues(alpha: 0.12),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 3),
+                                )
+                              ]
+                            : null,
+                      ),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: () => _selectPatient(patient),
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Stack(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 24,
+                                    backgroundColor: primaryColor.withValues(alpha: 0.15),
+                                    child: Text(
+                                      patient.name.isNotEmpty ? patient.name.substring(0, 1).toUpperCase() : 'P',
+                                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: primaryColor),
+                                    ),
+                                  ),
+                                  if (isSelected)
+                                    Positioned(
+                                      right: 0,
+                                      bottom: 0,
+                                      child: Container(
+                                        padding: const EdgeInsets.all(2),
+                                        decoration: const BoxDecoration(
+                                          color: Color(0xFF10B981),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Icon(Icons.check, size: 12, color: Colors.white),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            patient.name,
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.bold,
+                                              color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: primaryColor.withValues(alpha: 0.12),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Text(
+                                            '${patient.age.isNotEmpty ? patient.age : "28"} Yrs • ${patient.gender}',
+                                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: primaryColor),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      children: [
+                                        Icon(Icons.phone_outlined, size: 13, color: isDark ? Colors.white54 : Colors.black45),
+                                        const SizedBox(width: 4),
+                                        Expanded(
+                                          child: Text(
+                                            patient.phone.startsWith('+91') ? patient.phone : '+91 ${patient.phone}',
+                                            style: TextStyle(fontSize: 12, color: isDark ? Colors.white60 : Colors.black54),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    if (patient.city.isNotEmpty || patient.address.isNotEmpty) ...[
+                                      const SizedBox(height: 2),
+                                      Row(
+                                        children: [
+                                          Icon(Icons.location_on_outlined, size: 13, color: isDark ? Colors.white54 : Colors.black45),
+                                          const SizedBox(width: 4),
+                                          Expanded(
+                                            child: Text(
+                                              [
+                                                if (patient.address.isNotEmpty) patient.address,
+                                                if (patient.city.isNotEmpty) patient.city,
+                                                if (patient.pincode.isNotEmpty) patient.pincode,
+                                              ].join(', '),
+                                              style: TextStyle(fontSize: 11, color: isDark ? Colors.white60 : Colors.black54),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+              ],
+            ),
+          ),
+        ],
+
+        // Bottom Action Bar
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF0F172A) : Colors.white,
+            border: Border(top: BorderSide(color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0))),
+          ),
+          child: SafeArea(
+            top: false,
+            child: SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton(
+                onPressed: () {
+                  if (_isManualPatientEntry) {
+                    if (_formKey.currentState?.validate() == true) {
+                      setState(() => _currentStep = 2);
+                    }
+                  } else {
+                    if (_nameController.text.trim().isNotEmpty && _mobileController.text.trim().isNotEmpty) {
+                      setState(() => _currentStep = 2);
+                    } else if (_associatedPatients.isNotEmpty) {
+                      _selectPatient(_associatedPatients.first);
+                      setState(() => _currentStep = 2);
+                    }
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: primaryColor,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: const [
+                    Text('Continue to Select Doctor', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
+                    SizedBox(width: 8),
+                    Icon(Icons.arrow_forward_rounded, size: 18, color: Colors.white),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // STEP 1 / 2: SELECT DOCTOR
   // ─────────────────────────────────────────────
   Widget _buildStep1SelectDoctor(bool isDark, Color primaryColor) {
     return AnimatedBuilder(
       animation: _patientService,
       builder: (context, _) {
         final allDoctors = _patientService.allDoctors;
+
+        final currentDoc = _patientService.currentDoctor;
+        final currentDocId = currentDoc?.id ?? '';
+        final currentDocUserId = currentDoc?.userId ?? '';
+        final currentDocEmail = currentDoc?.email.toLowerCase() ?? '';
+        final authUser = Supabase.instance.client.auth.currentUser;
+        final authUserId = authUser?.id ?? '';
+        final authEmail = authUser?.email?.toLowerCase() ?? '';
 
         // Extract available filter values
         final specialties = <String>[
@@ -362,8 +1014,15 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
         ];
         const languages = <String>['All', 'English', 'Hindi', 'Telugu', 'Tamil', 'Kannada'];
 
-        // Apply filters
+        // Apply filters & strictly exclude logged-in dentist to prevent self-referral
         final filteredDoctors = allDoctors.where((doc) {
+          if (widget.isDentistMode) {
+            if (currentDocId.isNotEmpty && doc.id == currentDocId) return false;
+            if (currentDocUserId.isNotEmpty && (doc.id == currentDocUserId || doc.userId == currentDocUserId)) return false;
+            if (authUserId.isNotEmpty && (doc.id == authUserId || doc.userId == authUserId)) return false;
+            if (currentDocEmail.isNotEmpty && doc.email.toLowerCase() == currentDocEmail) return false;
+            if (authEmail.isNotEmpty && doc.email.toLowerCase() == authEmail) return false;
+          }
           if (_selectedSpecialtyFilter != 'All' &&
               !doc.specialty.toLowerCase().contains(_selectedSpecialtyFilter.toLowerCase())) {
             return false;
@@ -402,7 +1061,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Select Doctor',
+                          widget.isDentistMode ? 'Select Receiving Specialist' : 'Select Doctor',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
@@ -411,7 +1070,9 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Select the doctor you want to refer the patient to.',
+                          widget.isDentistMode
+                              ? 'Select the specialized doctor you want to refer the patient to.'
+                              : 'Select the doctor you want to refer the patient to.',
                           style: TextStyle(
                             fontSize: 13,
                             color: isDark ? Colors.white60 : Colors.black54,
@@ -713,30 +1374,69 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
               ),
               child: SafeArea(
                 top: false,
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton(
-                    onPressed: _selectedDoctor == null
-                        ? null
-                        : () {
-                            setState(() => _currentStep = 2);
-                          },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: primaryColor,
-                      disabledBackgroundColor: primaryColor.withValues(alpha: 0.4),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: const [
-                        Text('Continue to Patient Details', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
-                        SizedBox(width: 8),
-                        Icon(Icons.arrow_forward_rounded, size: 18, color: Colors.white),
-                      ],
-                    ),
-                  ),
-                ),
+                child: widget.isDentistMode
+                    ? Row(
+                        children: [
+                          OutlinedButton(
+                            onPressed: () => setState(() => _currentStep = 1),
+                            style: OutlinedButton.styleFrom(
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                            ),
+                            child: const Text('Back'),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: SizedBox(
+                              height: 48,
+                              child: ElevatedButton(
+                                onPressed: _selectedDoctor == null
+                                    ? null
+                                    : () {
+                                        setState(() => _currentStep = 3);
+                                      },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: primaryColor,
+                                  disabledBackgroundColor: primaryColor.withValues(alpha: 0.4),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: const [
+                                    Text('Continue to Referral Details', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
+                                    SizedBox(width: 8),
+                                    Icon(Icons.arrow_forward_rounded, size: 18, color: Colors.white),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    : SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: ElevatedButton(
+                          onPressed: _selectedDoctor == null
+                              ? null
+                              : () {
+                                  setState(() => _currentStep = 2);
+                                },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: primaryColor,
+                            disabledBackgroundColor: primaryColor.withValues(alpha: 0.4),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: const [
+                              Text('Continue to Patient Details', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
+                              SizedBox(width: 8),
+                              Icon(Icons.arrow_forward_rounded, size: 18, color: Colors.white),
+                            ],
+                          ),
+                        ),
+                      ),
               ),
             ),
           ],
@@ -783,7 +1483,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
   }
 
   // ─────────────────────────────────────────────
-  // STEP 2: REFERRED PATIENT DETAILS
+  // PATIENT FLOW - STEP 2: REFERRED PATIENT DETAILS
   // ─────────────────────────────────────────────
   Widget _buildStep2PatientDetails(bool isDark, Color primaryColor) {
     return Column(
@@ -924,8 +1624,8 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                               dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
                               decoration: _inputDecoration('Select', isDark),
                               items: _genderOptions
-                                  .map((g) => DropdownMenuItem(value: g, child: Text(g)))
-                                  .toList(),
+                                    .map((g) => DropdownMenuItem(value: g, child: Text(g)))
+                                    .toList(),
                               onChanged: (val) => setState(() => _gender = val ?? 'Female'),
                             ),
                           ],
@@ -1118,7 +1818,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
   }
 
   // ─────────────────────────────────────────────
-  // STEP 3: CONFIRM REFERRAL
+  // STEP 3: CONFIRM REFERRAL (PATIENT MODE)
   // ─────────────────────────────────────────────
   Widget _buildStep3ConfirmReferral(bool isDark, Color primaryColor) {
     final referrerPatient = _patientService.currentPatient;
@@ -1212,7 +1912,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                     {'label': 'Age & Gender', 'value': '${_ageController.text.trim()} Years • $_gender'},
                     {'label': 'Location', 'value': '${_locationController.text.trim()}, ${_cityController.text.trim()} (${_pincodeController.text.trim()})'},
                     {'label': 'Specialist Category', 'value': _requiredSpecialist},
-                    {'label': 'Clinical Problem', 'value': _complaintController.text.trim()},
+                    {'label': 'Clinical Problem', 'value': _complaintController.text.trim().isNotEmpty ? _complaintController.text.trim() : 'General dental examination'},
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -1279,6 +1979,240 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                                 Icon(Icons.check_circle_outline_rounded, size: 18, color: Colors.white),
                                 SizedBox(width: 8),
                                 Text('Submit Referral', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
+                              ],
+                            ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // STEP 3: CONFIRM REFERRAL (DENTIST MODE)
+  // ─────────────────────────────────────────────
+  Widget _buildDentistStep3ConfirmReferral(bool isDark, Color primaryColor) {
+    final currentDoc = _patientService.currentDoctor;
+    final docName = (currentDoc != null && currentDoc.name.isNotEmpty)
+        ? (currentDoc.name.startsWith('Dr.') ? currentDoc.name : 'Dr. ${currentDoc.name}')
+        : 'Attending Dentist';
+    final clinicName = (currentDoc != null && currentDoc.clinicName.isNotEmpty) ? currentDoc.clinicName : 'Registered Clinic';
+    final docSpecialty = (currentDoc != null && currentDoc.specialty.isNotEmpty) ? currentDoc.specialty : 'Dental Practitioner';
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Referral Details & Confirmation',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Review patient clinical information before dispatching referral.',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isDark ? Colors.white60 : Colors.black54,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        if (_submissionErrorMessage != null)
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.red.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.error_outline_rounded, color: Colors.red, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _submissionErrorMessage!,
+                    style: const TextStyle(fontSize: 13, color: Colors.red, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+        // Summary Cards & Editable Clinical Notes
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Section 1: Referring Doctor (You)
+                _buildSummaryCard(
+                  title: '1. REFERRING DENTIST (You)',
+                  icon: Icons.person_pin_rounded,
+                  color: const Color(0xFF6366F1),
+                  isDark: isDark,
+                  items: [
+                    {'label': 'Doctor Name', 'value': docName},
+                    {'label': 'Specialty', 'value': docSpecialty},
+                    {'label': 'Clinic', 'value': clinicName},
+                    if (currentDoc != null && currentDoc.phone.isNotEmpty)
+                      {'label': 'Contact Phone', 'value': currentDoc.phone.startsWith('+91') ? currentDoc.phone : '+91 ${currentDoc.phone}'},
+                  ],
+                ),
+                const SizedBox(height: 12),
+
+                // Section 2: Referred Patient
+                _buildSummaryCard(
+                  title: '2. REFERRED PATIENT',
+                  icon: Icons.person_add_rounded,
+                  color: const Color(0xFF0284C7),
+                  isDark: isDark,
+                  items: [
+                    {'label': 'Patient Name', 'value': _nameController.text.trim()},
+                    {'label': 'Mobile Number', 'value': '+91 ${_mobileController.text.trim()}'},
+                    {'label': 'Age & Gender', 'value': '${_ageController.text.trim()} Years • $_gender'},
+                    {'label': 'Location', 'value': '${_locationController.text.trim()}, ${_cityController.text.trim()} (${_pincodeController.text.trim()})'},
+                  ],
+                ),
+                const SizedBox(height: 12),
+
+                // Section 3: Clinical Diagnosis / Notes
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: const [
+                          Icon(Icons.assignment_rounded, size: 18, color: Color(0xFF0D9488)),
+                          SizedBox(width: 8),
+                          Text(
+                            '3. CLINICAL REFERRAL NOTES',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5,
+                              color: Color(0xFF0D9488),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      const Divider(height: 1, thickness: 1),
+                      const SizedBox(height: 10),
+
+                      _buildFieldLabel('Required Specialist / Category', isDark, isRequired: true),
+                      DropdownButtonFormField<String>(
+                        initialValue: _specialtyOptions.contains(_requiredSpecialist) ? _requiredSpecialist : _specialtyOptions.first,
+                        dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                        decoration: _inputDecoration('Select category', isDark),
+                        items: _specialtyOptions
+                            .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                            .toList(),
+                        onChanged: (val) => setState(() => _requiredSpecialist = val ?? 'General Dentistry'),
+                      ),
+                      const SizedBox(height: 12),
+
+                      _buildFieldLabel('Clinical Complaint / Reason for Referral', isDark, isRequired: true),
+                      TextFormField(
+                        controller: _complaintController,
+                        maxLines: 3,
+                        decoration: _inputDecoration('Describe clinical findings, symptoms, x-ray notes, treatment required...', isDark),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // Section 4: Receiving Doctor
+                if (_selectedDoctor != null)
+                  _buildSummaryCard(
+                    title: '4. RECEIVING SPECIALIST',
+                    icon: Icons.medical_services_rounded,
+                    color: const Color(0xFF10B981),
+                    isDark: isDark,
+                    items: [
+                      {'label': 'Doctor Name', 'value': _selectedDoctor!.name.startsWith('Dr.') ? _selectedDoctor!.name : 'Dr. ${_selectedDoctor!.name}'},
+                      {'label': 'Specialty', 'value': _selectedDoctor!.specialty},
+                      if (_selectedDoctor!.phone.isNotEmpty)
+                        {'label': 'Contact Number', 'value': _selectedDoctor!.phone.startsWith('+91') ? _selectedDoctor!.phone : '+91 ${_selectedDoctor!.phone}'},
+                      {'label': 'Clinic', 'value': _selectedDoctor!.clinicName.isNotEmpty ? _selectedDoctor!.clinicName : 'DentaGuru Partner Clinic'},
+                      {'label': 'City & Pincode', 'value': '${_selectedDoctor!.city.isNotEmpty ? _selectedDoctor!.city : "City"} • ${_selectedDoctor!.pincode}'},
+                    ],
+                  ),
+              ],
+            ),
+          ),
+        ),
+
+        // Bottom Action Bar
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF0F172A) : Colors.white,
+            border: Border(top: BorderSide(color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0))),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Row(
+              children: [
+                OutlinedButton(
+                  onPressed: _isSubmitting ? null : () => setState(() => _currentStep = 2),
+                  style: OutlinedButton.styleFrom(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  ),
+                  child: const Text('Back'),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: SizedBox(
+                    height: 48,
+                    child: ElevatedButton(
+                      onPressed: _isSubmitting ? null : _submitReferral,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF10B981),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: _isSubmitting
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+                            )
+                          : Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: const [
+                                Icon(Icons.check_circle_outline_rounded, size: 18, color: Colors.white),
+                                SizedBox(width: 8),
+                                Text('Send Referral', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
                               ],
                             ),
                     ),
@@ -1361,7 +2295,6 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
     );
   }
 
-  // ─────────────────────────────────────────────
   // ─────────────────────────────────────────────
   // STEP 4: REFERRAL SUBMITTED (SUCCESS SCREEN)
   // ─────────────────────────────────────────────
@@ -1504,11 +2437,19 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                 ].where((s) => s.trim().isNotEmpty).toList();
 
                 final docPhone = (doc?.phone.isNotEmpty == true) ? doc!.phone : '';
+                final referringDoc = _patientService.currentDoctor;
+                final referringDocName = (referringDoc != null && referringDoc.name.isNotEmpty)
+                    ? (referringDoc.name.startsWith('Dr.') ? referringDoc.name : 'Dr. ${referringDoc.name}')
+                    : null;
 
                 final buffer = StringBuffer();
                 buffer.writeln('Hi $patientName,');
                 buffer.writeln();
-                buffer.writeln('I have referred you to *$docName*$qual on DentaGuru for your dental care.');
+                if (widget.isDentistMode && referringDocName != null) {
+                  buffer.writeln('This is $referringDocName from DentaGuru. I have referred you to *$docName*$qual for specialized dental care.');
+                } else {
+                  buffer.writeln('I have referred you to *$docName*$qual on DentaGuru for your dental care.');
+                }
                 buffer.writeln();
                 buffer.writeln('👨‍⚕️ *Doctor & Clinic Details:*');
                 buffer.writeln('• *Doctor:* $docName');
@@ -1519,7 +2460,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                 if (doc != null && doc.experienceYears > 0) buffer.writeln('• *Experience:* ${doc.experienceYears}+ Years (${doc.rating} ⭐)');
                 if (_complaintController.text.trim().isNotEmpty) {
                   buffer.writeln();
-                  buffer.writeln('📋 *Clinical Reason:* ${_complaintController.text.trim()}');
+                  buffer.writeln('📋 *Clinical Reason / Diagnosis:* ${_complaintController.text.trim()}');
                 }
                 buffer.writeln();
                 buffer.writeln('You can reach out directly to the clinic or doctor to schedule your appointment. Wishing you the best dental care!');
