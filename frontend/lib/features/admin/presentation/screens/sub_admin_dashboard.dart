@@ -447,6 +447,8 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
           TextField(
             onChanged: (v) => setState(() => _requestSearch = v),
             textInputAction: TextInputAction.search,
+            style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+            cursorColor: AppTheme.primaryBlue,
             onSubmitted: (_) => FocusScope.of(context).unfocus(),
             decoration: InputDecoration(
               hintText: 'Search patient, city, pincode...',
@@ -733,6 +735,8 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
         children: [
           TextField(
             onChanged: (v) => setState(() => _patientSearch = v),
+            style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+            cursorColor: AppTheme.primaryBlue,
             decoration: InputDecoration(
               hintText: 'Search patients by name, email, phone, city...',
               prefixIcon: const Icon(Icons.search_rounded, size: 18),
@@ -815,6 +819,8 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
         children: [
           TextField(
             onChanged: (v) => setState(() => _dentistSearch = v),
+            style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+            cursorColor: AppTheme.primaryBlue,
             decoration: InputDecoration(
               hintText: 'Search dentists by name, specialty, clinic, city...',
               prefixIcon: const Icon(Icons.search_rounded, size: 18),
@@ -864,6 +870,44 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                                 overflow: TextOverflow.ellipsis),
                           ],
                         ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 20),
+                        tooltip: 'Delete Doctor',
+                        onPressed: () {
+                          showDialog(
+                            context: context,
+                            builder: (dialogCtx) => AlertDialog(
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                              title: Row(
+                                children: [
+                                  const Icon(Icons.delete_forever_rounded, color: Colors.red, size: 22),
+                                  const SizedBox(width: 8),
+                                  Expanded(child: Text('Delete ${d.name}?', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
+                                ],
+                              ),
+                              content: Text('Are you sure you want to delete ${d.name} (${d.specialty}) from the platform?'),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.of(dialogCtx).pop(), child: const Text('Cancel')),
+                                ElevatedButton.icon(
+                                  icon: const Icon(Icons.delete_forever_rounded, size: 16),
+                                  label: const Text('Delete Doctor', style: TextStyle(fontWeight: FontWeight.bold)),
+                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                                  onPressed: () async {
+                                    Navigator.of(dialogCtx).pop();
+                                    await _service.deleteDoctor(d.id);
+                                    if (mounted) {
+                                      setState(() {});
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('🗑️ ${d.name} deleted successfully.'), backgroundColor: Colors.red),
+                                      );
+                                    }
+                                  },
+                                ),
+                              ],
+                            ),
+                          );
+                        },
                       ),
                     ],
                   ),
@@ -1076,6 +1120,8 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                         Expanded(
                           child: TextField(
                             onChanged: (v) => setModalState(() => searchKeyword = v),
+                            style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                            cursorColor: AppTheme.primaryBlue,
                             decoration: InputDecoration(
                               hintText: 'Search doctor, specialty...',
                               prefixIcon: const Icon(Icons.search_rounded, size: 16),
@@ -1092,6 +1138,8 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                           child: TextField(
                             controller: TextEditingController(text: pincodeFilter),
                             onChanged: (v) => setModalState(() => pincodeFilter = v),
+                            style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                            cursorColor: AppTheme.primaryBlue,
                             decoration: InputDecoration(
                               hintText: 'Pincode',
                               filled: true,
@@ -1151,6 +1199,8 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                     const SizedBox(height: 10),
                     TextField(
                       controller: notesCtrl,
+                      style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                      cursorColor: AppTheme.primaryBlue,
                       decoration: InputDecoration(
                         labelText: 'Admin Referral Notes',
                         filled: true,

@@ -9,8 +9,10 @@ import '../../../../core/services/api_service.dart';
 import '../../../../core/services/session_service.dart';
 import '../../../../core/widgets/dental_ads_banner.dart';
 import '../../../../core/widgets/whatsapp_chat_modal.dart';
-import '../../../../core/models/referral_model.dart';
 import '../widgets/refer_patient_flow_dialog.dart';
+import '../widgets/referred_patients_sheet.dart';
+import '../widgets/about_dentaguru_banner.dart';
+import '../../../../core/widgets/need_help_card.dart';
 
 class PatientDashboardScreen extends StatefulWidget {
   const PatientDashboardScreen({super.key});
@@ -262,6 +264,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                         controller: descriptionController,
                         maxLines: 3,
                         style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                        cursorColor: AppTheme.primaryBlue,
                         decoration: InputDecoration(
                           labelText: 'Describe Symptoms & Duration',
                           hintText: 'e.g. Sharp throbbing pain in lower molar when drinking cold liquids...',
@@ -771,8 +774,12 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               ),
               const SizedBox(height: 16),
 
-              // ── HERO ADS SECTION (GSI Implants Featured Partner) ──────
-              const DentalAdsBanner(isDentist: false, firstSlideOnly: true),
+              // ── HERO SECTION: ABOUT DENTAGURU & HOW IT WORKS ──────
+              AboutDentaGuruBanner(
+                onBookConsultation: () => _showReportProblemDialog(context),
+                onViewPrescriptions: () => setState(() => _currentIndex = 2),
+                onViewRecords: () => setState(() => _currentIndex = 2),
+              ),
               const SizedBox(height: 18),
 
               // 2. Main Hero Problem Banner with Pulsing Icon
@@ -842,13 +849,17 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
 
               LayoutBuilder(
                 builder: (context, constraints) {
+                  final myCreatedRefs = _patientService.myCreatedPatientReferrals;
+                  final receivedForMeRefs = _patientService.receivedForMePatientReferrals;
+                  final totalRefsCount = myCreatedRefs.length + receivedForMeRefs.length;
+
                   return SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     physics: const BouncingScrollPhysics(),
                     child: Row(
                       children: [
                         SizedBox(
-                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 24) / 4 : 85,
+                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 32) / 5 : 85,
                           child: _AnimatedPatientActionTile(
                             icon: Icons.calendar_month_rounded,
                             title: 'Appointments',
@@ -858,7 +869,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                         ),
                         const SizedBox(width: 8),
                         SizedBox(
-                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 24) / 4 : 85,
+                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 32) / 5 : 85,
                           child: _AnimatedPatientActionTile(
                             icon: Icons.person_search_rounded,
                             title: 'Find Doctors',
@@ -868,7 +879,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                         ),
                         const SizedBox(width: 8),
                         SizedBox(
-                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 24) / 4 : 85,
+                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 32) / 5 : 85,
                           child: _AnimatedPatientActionTile(
                             icon: Icons.person_add_alt_1_rounded,
                             title: 'Refer a Patient',
@@ -878,7 +889,18 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                         ),
                         const SizedBox(width: 8),
                         SizedBox(
-                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 24) / 4 : 85,
+                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 32) / 5 : 85,
+                          child: _AnimatedPatientActionTile(
+                            icon: Icons.groups_rounded,
+                            title: 'Referred Patients',
+                            color: const Color(0xFF6366F1),
+                            badgeCount: totalRefsCount,
+                            onTap: () => ReferredPatientsSheet.show(context),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 32) / 5 : 85,
                           child: _AnimatedPatientActionTile(
                             icon: Icons.receipt_long_rounded,
                             title: 'Prescriptions',
@@ -895,6 +917,10 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
 
               // ── REMAINING PRODUCTS ADS SECTION (Auto-rotating one by one above problems) ──
               const DentalAdsBanner(isDentist: false, remainingSlidesOnly: true),
+              const SizedBox(height: 18),
+
+              // ── 24/7 SUPPORT & ASSISTANCE (Call Us Now & Chat on WhatsApp) ──
+              const NeedHelpCard(),
               const SizedBox(height: 24),
 
               // 4. Section: Reported Problems & Doctor Suggestions
@@ -1317,10 +1343,6 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
 
               // 4a. Section: Dental Specialists & My Doctors Directory
               _buildDoctorsDirectorySection(),
-              const SizedBox(height: 20),
-
-              // 4b. Section: My Patient Referrals
-              _buildMyPatientReferralsSection(),
               const SizedBox(height: 20),
 
               // 5. Next Visit Card
@@ -2058,11 +2080,6 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     );
   }
 
-
-  void _showReferredPatientFlow(BuildContext context) {
-    ReferPatientFlowDialog.show(context);
-  }
-
   // ==========================================
   // SECTION: DENTAL SPECIALISTS & MY DOCTORS DIRECTORY
   // ==========================================
@@ -2232,7 +2249,8 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
           child: TextField(
             controller: _doctorSearchController,
             onChanged: (val) => setState(() => _doctorSearchQuery = val),
-            style: const TextStyle(fontSize: 13, color: AppTheme.textDark),
+            style: const TextStyle(fontSize: 13, color: AppTheme.textDark, fontWeight: FontWeight.w500),
+            cursorColor: AppTheme.primaryBlue,
             decoration: InputDecoration(
               hintText: 'Search by Doctor, Specialty, Clinic, City, Pincode...',
               hintStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
@@ -2697,448 +2715,6 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     );
   }
 
-  Widget _buildMyPatientReferralsSection() {
-    final myCreatedRefs = _patientService.myCreatedPatientReferrals;
-    final receivedForMeRefs = _patientService.receivedForMePatientReferrals;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
-                  Text(
-                    'My Patient Referrals',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    'Patients you referred to specialized doctors',
-                    style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            TextButton.icon(
-              onPressed: () => _showReferredPatientFlow(context),
-              icon: const Icon(Icons.add_rounded, size: 16, color: Color(0xFF0D9488)),
-              label: const Text(
-                'Refer Patient',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0D9488)),
-              ),
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                backgroundColor: const Color(0xFF0D9488).withOpacity(0.08),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-
-        if (myCreatedRefs.isEmpty && receivedForMeRefs.isEmpty)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFFEEF2F6)),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0D9488).withOpacity(0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.person_add_alt_1_rounded, color: Color(0xFF0D9488), size: 22),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const [
-                      Text(
-                        'No patient referrals yet',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-                      ),
-                      SizedBox(height: 2),
-                      Text(
-                        'Know someone who needs dental care? Refer them to our verified doctors in just a few clicks.',
-                        style: TextStyle(fontSize: 11, color: AppTheme.textMuted, height: 1.3),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          )
-        else ...[
-          // List of referrals created by logged-in patient
-          ...myCreatedRefs.map((ref) {
-            final isAccepted = ref.status == 'Accepted';
-            final isRejected = ref.status == 'Rejected';
-
-            final statusColor = isAccepted
-                ? const Color(0xFF10B981)
-                : (isRejected ? const Color(0xFFEF4444) : const Color(0xFFF59E0B));
-            final statusBg = isAccepted
-                ? const Color(0xFFDCFCE7)
-                : (isRejected ? const Color(0xFFFEE2E2) : const Color(0xFFFEF3C7));
-            final statusText = isAccepted
-                ? '🟢 Accepted by Doctor'
-                : (isRejected ? '🔴 Referral Declined' : '🟡 Doctor Reviewing');
-
-            return Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: isAccepted ? const Color(0xFF86EFAC) : const Color(0xFFE2E8F0)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.03),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 16,
-                              backgroundColor: const Color(0xFF0284C7).withOpacity(0.12),
-                              child: Text(
-                                ref.referredPatientName.isNotEmpty ? ref.referredPatientName[0].toUpperCase() : 'P',
-                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF0284C7)),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    ref.referredPatientName,
-                                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  Text(
-                                    [
-                                      '+91 ${ref.referredPatientMobile}',
-                                      if (ref.referredPatientAge.isNotEmpty) '${ref.referredPatientAge} Yrs',
-                                      if (ref.referredPatientGender.isNotEmpty) ref.referredPatientGender,
-                                    ].join(' • '),
-                                    style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  if (ref.referredPatientLocation.isNotEmpty || ref.referredPatientCity.isNotEmpty || ref.referredPatientPincode.isNotEmpty) ...[
-                                    const SizedBox(height: 2),
-                                    Row(
-                                      children: [
-                                        const Icon(Icons.location_on_outlined, size: 12, color: Color(0xFF0284C7)),
-                                        const SizedBox(width: 3),
-                                        Expanded(
-                                          child: Text(
-                                            [
-                                              if (ref.referredPatientLocation.isNotEmpty) ref.referredPatientLocation,
-                                              if (ref.referredPatientCity.isNotEmpty) ref.referredPatientCity,
-                                              if (ref.referredPatientPincode.isNotEmpty) '(${ref.referredPatientPincode})',
-                                            ].join(', '),
-                                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w500, color: Color(0xFF0369A1)),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: statusBg,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          statusText,
-                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: statusColor),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  const Divider(height: 1, thickness: 1, color: Color(0xFFF1F5F9)),
-                  const SizedBox(height: 8),
-
-                  Row(
-                    children: [
-                      const Icon(Icons.medical_services_outlined, size: 14, color: Color(0xFF0D9488)),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          '${ref.doctorName} • ${ref.requiredSpecialist}',
-                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      const Icon(Icons.local_hospital_outlined, size: 14, color: Colors.black45),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          [
-                            ref.doctorClinicName.isNotEmpty ? ref.doctorClinicName : 'DentaGuru Partner Clinic',
-                            if (ref.doctorLocation.isNotEmpty || ref.doctorCity.isNotEmpty || ref.doctorPincode.isNotEmpty)
-                              [
-                                if (ref.doctorLocation.isNotEmpty) ref.doctorLocation,
-                                if (ref.doctorCity.isNotEmpty) ref.doctorCity,
-                                if (ref.doctorPincode.isNotEmpty) ref.doctorPincode,
-                              ].join(', ')
-                          ].join(' • '),
-                          style: const TextStyle(fontSize: 11, color: AppTheme.textMedium),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  if (ref.clinicalComplaint.isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      'Reason: ${ref.clinicalComplaint}',
-                      style: const TextStyle(fontSize: 11, color: AppTheme.textMuted, fontStyle: FontStyle.italic),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-
-                  if (isRejected && ref.rejectionReason != null && ref.rejectionReason!.isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFEF2F2),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        'Reason: ${ref.rejectionReason}',
-                        style: const TextStyle(fontSize: 11, color: Color(0xFF991B1B), fontWeight: FontWeight.w500),
-                      ),
-                    ),
-                  ],
-
-                  const SizedBox(height: 10),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.chat_rounded, size: 13, color: Colors.white),
-                        label: Text(
-                          'WhatsApp ${ref.referredPatientName}',
-                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF25D366),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          elevation: 0,
-                        ),
-                        onPressed: () async {
-                          String rawPhone = ref.referredPatientMobile.replaceAll(RegExp(r'[^0-9]'), '');
-                          if (rawPhone.startsWith('0') && rawPhone.length == 11) {
-                            rawPhone = '91${rawPhone.substring(1)}';
-                          } else if (rawPhone.length == 10) {
-                            rawPhone = '91$rawPhone';
-                          }
-                          final msg = _buildReferralWhatsAppMessage(ref);
-                          final waUrl = Uri.parse(rawPhone.isNotEmpty
-                              ? 'https://wa.me/$rawPhone?text=${Uri.encodeComponent(msg)}'
-                              : 'https://wa.me/?text=${Uri.encodeComponent(msg)}');
-                          try {
-                            await launchUrl(waUrl, mode: LaunchMode.externalApplication);
-                          } catch (_) {}
-                        },
-                      ),
-                      Text(
-                        '${ref.referralDate.day}/${ref.referralDate.month}/${ref.referralDate.year}',
-                        style: const TextStyle(fontSize: 10.5, color: AppTheme.textMuted),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            );
-          }),
-
-          // List of referrals received by logged-in patient (Section 20)
-          if (receivedForMeRefs.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            const Text(
-              'Referrals For You',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-            ),
-            const SizedBox(height: 6),
-            ...receivedForMeRefs.map((ref) => Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF0FDF4),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFF86EFAC)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              'Referred by: ${ref.referrerPatientName}',
-                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF14532D)),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFDCFCE7),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              ref.status,
-                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF16A34A)),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Doctor: ${ref.doctorName} (${ref.requiredSpecialist})',
-                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF166534)),
-                      ),
-                      if (ref.doctorClinicName.isNotEmpty || ref.doctorCity.isNotEmpty || ref.doctorPincode.isNotEmpty) ...[
-                        const SizedBox(height: 3),
-                        Row(
-                          children: [
-                            const Icon(Icons.location_on_outlined, size: 12, color: Color(0xFF15803D)),
-                            const SizedBox(width: 3),
-                            Expanded(
-                              child: Text(
-                                [
-                                  if (ref.doctorClinicName.isNotEmpty) ref.doctorClinicName,
-                                  if (ref.doctorLocation.isNotEmpty) ref.doctorLocation,
-                                  if (ref.doctorCity.isNotEmpty) ref.doctorCity,
-                                  if (ref.doctorPincode.isNotEmpty) '(${ref.doctorPincode})',
-                                ].join(', '),
-                                style: const TextStyle(fontSize: 10.5, color: Color(0xFF15803D)),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                      if (ref.clinicalComplaint.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          'Complaint: ${ref.clinicalComplaint}',
-                          style: const TextStyle(fontSize: 11, color: Color(0xFF14532D)),
-                        ),
-                      ],
-                    ],
-                  ),
-                )),
-          ],
-        ],
-      ],
-    );
-  }
-
-  String _buildReferralWhatsAppMessage(PatientReferral ref) {
-    // Find doctor in platform directory if available
-    DoctorModel? doc;
-    for (final d in _patientService.allDoctors) {
-      if (ref.doctorId.isNotEmpty && (d.id == ref.doctorId || d.userId == ref.doctorId)) {
-        doc = d;
-        break;
-      }
-      final cleanRefDoc = ref.doctorName.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
-      final cleanD = d.name.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
-      if (cleanRefDoc.isNotEmpty && (cleanD.contains(cleanRefDoc) || cleanRefDoc.contains(cleanD))) {
-        doc = d;
-        break;
-      }
-    }
-
-    final docName = ref.doctorName.isNotEmpty
-        ? (ref.doctorName.startsWith('Dr.') ? ref.doctorName : 'Dr. ${ref.doctorName}')
-        : (doc != null ? (doc.name.startsWith('Dr.') ? doc.name : 'Dr. ${doc.name}') : 'Doctor');
-    final specialty = ref.requiredSpecialist.isNotEmpty ? ref.requiredSpecialist : (doc?.specialty ?? 'Dental Specialist');
-    final qual = (doc?.qualification.isNotEmpty == true && doc!.qualification != 'BDS, MDS') ? ' (${doc.qualification})' : '';
-    final clinic = ref.doctorClinicName.isNotEmpty ? ref.doctorClinicName : (doc?.clinicName.isNotEmpty == true ? doc!.clinicName : '');
-
-    final locationParts = [
-      if (ref.doctorLocation.isNotEmpty) ref.doctorLocation else if (doc?.clinicAddress.isNotEmpty == true) doc!.clinicAddress,
-      if (ref.doctorCity.isNotEmpty) ref.doctorCity else if (doc?.city.isNotEmpty == true) doc!.city,
-      if (ref.doctorPincode.isNotEmpty) 'PIN: ${ref.doctorPincode}' else if (doc?.pincode.isNotEmpty == true) 'PIN: ${doc!.pincode}',
-    ].where((s) => s.trim().isNotEmpty).toList();
-
-    final docPhone = (doc?.phone.isNotEmpty == true) ? doc!.phone : '';
-
-    final buffer = StringBuffer();
-    buffer.writeln('Hi ${ref.referredPatientName},');
-    buffer.writeln();
-    buffer.writeln('I have referred you to *$docName*$qual on DentaGuru for your dental care.');
-    buffer.writeln();
-    buffer.writeln('👨‍⚕️ *Doctor & Clinic Details:*');
-    buffer.writeln('• *Doctor:* $docName');
-    buffer.writeln('• *Specialty:* $specialty');
-    if (clinic.isNotEmpty) buffer.writeln('• *Clinic:* $clinic');
-    if (docPhone.isNotEmpty) buffer.writeln('• *Doctor Mobile:* +91 $docPhone');
-    if (locationParts.isNotEmpty) buffer.writeln('• *Address:* ${locationParts.join(", ")}');
-    if (doc != null && doc.experienceYears > 0) buffer.writeln('• *Experience:* ${doc.experienceYears}+ Years (${doc.rating} ⭐)');
-    if (ref.clinicalComplaint.isNotEmpty) {
-      buffer.writeln();
-      buffer.writeln('📋 *Clinical Reason:* ${ref.clinicalComplaint}');
-    }
-    buffer.writeln();
-    buffer.writeln('You can reach out directly to the clinic or doctor to schedule your appointment. Wishing you the best dental care!');
-
-    return buffer.toString();
-  }
-
   Widget _buildProfileDetailRow(String label, String value, IconData icon) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -3180,12 +2756,14 @@ class _AnimatedPatientActionTile extends StatefulWidget {
   final String title;
   final Color color;
   final VoidCallback onTap;
+  final int badgeCount;
 
   const _AnimatedPatientActionTile({
     required this.icon,
     required this.title,
     required this.color,
     required this.onTap,
+    this.badgeCount = 0,
   });
 
   @override
@@ -3230,14 +2808,46 @@ class _AnimatedPatientActionTileState extends State<_AnimatedPatientActionTile> 
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: widget.color.withValues(alpha: _isHovered ? 0.22 : 0.12),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(widget.icon, color: widget.color, size: 20),
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: widget.color.withValues(alpha: _isHovered ? 0.22 : 0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(widget.icon, color: widget.color, size: 20),
+                  ),
+                  if (widget.badgeCount > 0)
+                    Positioned(
+                      top: -3,
+                      right: -5,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1.5),
+                        decoration: BoxDecoration(
+                          color: widget.color,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.white, width: 1.5),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.1),
+                              blurRadius: 3,
+                            ),
+                          ],
+                        ),
+                        child: Text(
+                          widget.badgeCount > 99 ? '99+' : '${widget.badgeCount}',
+                          style: const TextStyle(
+                            fontSize: 8.5,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
               const SizedBox(height: 4),
               Padding(

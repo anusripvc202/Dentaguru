@@ -134,6 +134,8 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                 TextField(
                   controller: notesController,
                   maxLines: 2,
+                  style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                  cursorColor: AppTheme.primaryBlue,
                   decoration: InputDecoration(
                     hintText: 'Optional instructions for doctor...',
                     filled: true,
@@ -748,7 +750,8 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
           TextField(
             controller: _doctorSearchController,
             onChanged: (val) => setState(() => _doctorSearchQuery = val),
-            style: const TextStyle(fontSize: 12.5, color: AppTheme.textDark),
+            style: const TextStyle(fontSize: 12.5, color: AppTheme.textDark, fontWeight: FontWeight.w500),
+            cursorColor: AppTheme.primaryBlue,
             decoration: InputDecoration(
               hintText: 'Search by phone, city/location, pincode, dentist name...',
               hintStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),

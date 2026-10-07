@@ -246,8 +246,6 @@ exports.addPatientDoctor = async (req, res) => {
         console.error('Add Patient Doctor Error:', err.message);
         res.status(500).json({ success: false, message: 'Failed to add doctor to patient list.' });
     }
-};
-
 // 7. REMOVE DOCTOR FROM PATIENT'S "MY DOCTORS"
 exports.removePatientDoctor = async (req, res) => {
     try {
@@ -264,6 +262,47 @@ exports.removePatientDoctor = async (req, res) => {
     } catch (err) {
         console.error('Remove Patient Doctor Error:', err.message);
         res.status(500).json({ success: false, message: 'Failed to remove doctor from patient list.' });
+    }
+};
+
+// 8. DELETE DENTIST (PERMANENT REMOVAL)
+exports.deleteDentist = async (req, res) => {
+    const { id } = req.params;
+    try {
+        if (!id) {
+            return res.status(400).json({ success: false, message: 'Doctor ID is required.' });
+        }
+
+        const { supabaseAdmin } = require('../config/supabase');
+
+        // 1. Delete from patient_doctors junction if any
+        try {
+            await supabaseAdmin.from('patient_doctors').delete().or(`doctor_id.eq.${id},patient_id.eq.${id}`);
+        } catch (_) {}
+
+        // 2. Check dentists table and delete
+        let userId = null;
+        try {
+            const { data: dData } = await supabaseAdmin.from('dentists').select('id, user_id').or(`id.eq.${id},user_id.eq.${id}`).maybeSingle();
+            if (dData) {
+                userId = dData.user_id;
+                await supabaseAdmin.from('dentists').delete().or(`id.eq.${dData.id},id.eq.${id},user_id.eq.${id}`);
+            } else {
+                await supabaseAdmin.from('dentists').delete().or(`id.eq.${id},user_id.eq.${id}`);
+            }
+        } catch (_) {}
+
+        // 3. Delete from users table if applicable
+        const targetUserId = userId || id;
+        try {
+            await supabaseAdmin.from('users').delete().eq('id', targetUserId);
+            await supabaseAdmin.auth.admin.deleteUser(targetUserId);
+        } catch (_) {}
+
+        res.json({ success: true, message: 'Doctor deleted successfully.' });
+    } catch (err) {
+        console.error('Delete Dentist Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to delete doctor.' });
     }
 };
 

@@ -101,9 +101,6 @@ exports.register = async (req, res) => {
         if (!normalizedPincode) {
             return res.status(400).json({ success: false, message: 'Pincode is mandatory for registration.' });
         }
-        if (!normalizedLocation) {
-            return res.status(400).json({ success: false, message: 'Location / Address is mandatory for registration.' });
-        }
         if (cleanLanguages.length === 0) {
             return res.status(400).json({ success: false, message: 'Language selection is mandatory for registration.' });
         }
@@ -300,8 +297,10 @@ exports.register = async (req, res) => {
         }
 
         const { accessToken, refreshToken } = generateTokens(user);
+        const existingTokens = Array.isArray(user.refresh_tokens) ? user.refresh_tokens : [];
+        if (!existingTokens.includes(refreshToken)) existingTokens.push(refreshToken);
         await User.findByIdAndUpdate(user.id, {
-            refresh_tokens: [refreshToken]
+            refresh_tokens: existingTokens.slice(-20)
         });
 
         // Also sync user_metadata to Supabase Auth for permanent cloud persistence
@@ -454,8 +453,10 @@ exports.login = async (req, res) => {
         }
 
         const { accessToken, refreshToken } = generateTokens(user);
+        const existingTokens = Array.isArray(user.refresh_tokens) ? user.refresh_tokens : [];
+        if (!existingTokens.includes(refreshToken)) existingTokens.push(refreshToken);
         await User.findByIdAndUpdate(user.id, {
-            refresh_tokens: [refreshToken]
+            refresh_tokens: existingTokens.slice(-20)
         });
 
         let userLanguages = user.languages || ['English'];
@@ -1082,9 +1083,9 @@ exports.verifyOTP = async (req, res) => {
 
         if (user) {
             const { accessToken, refreshToken } = generateTokens(user);
-            const existingTokens = user.refresh_tokens || [];
-            existingTokens.push(refreshToken);
-            await User.findByIdAndUpdate(user.id, { refresh_tokens: existingTokens });
+            const existingTokens = Array.isArray(user.refresh_tokens) ? user.refresh_tokens : [];
+            if (!existingTokens.includes(refreshToken)) existingTokens.push(refreshToken);
+            await User.findByIdAndUpdate(user.id, { refresh_tokens: existingTokens.slice(-20) });
 
             return res.json({
                 success: true,
@@ -1198,7 +1199,7 @@ exports.resetPassword = async (req, res) => {
 
 // 4. REFRESH TOKEN
 exports.refreshToken = async (req, res) => {
-    const { token } = req.body;
+    const token = req.body.token || req.body.refreshToken;
     if (!token) return res.status(401).json({ success: false, message: 'Token required.' });
 
     try {

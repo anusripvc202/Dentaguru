@@ -505,6 +505,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 final isMobile = constraints.maxWidth < 520;
                                 final searchField = TextField(
                                   onChanged: (val) => setModalState(() => searchKeyword = val),
+                                  style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                                  cursorColor: AppTheme.primaryBlue,
                                   decoration: InputDecoration(
                                     hintText: 'Search doctor / clinic...',
                                     prefixIcon: const Icon(Icons.search_rounded, size: 16, color: AppTheme.textMuted),
@@ -520,6 +522,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     Expanded(
                                       child: TextField(
                                         controller: stateFilterController,
+                                        style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                                        cursorColor: AppTheme.primaryBlue,
                                         decoration: InputDecoration(
                                           hintText: 'State...',
                                           prefixIcon: const Icon(Icons.map_rounded, size: 15, color: AppTheme.textMuted),
@@ -534,6 +538,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     Expanded(
                                       child: TextField(
                                         controller: cityFilterController,
+                                        style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                                        cursorColor: AppTheme.primaryBlue,
                                         decoration: InputDecoration(
                                           hintText: 'City...',
                                           prefixIcon: const Icon(Icons.location_city_rounded, size: 15, color: AppTheme.textMuted),
@@ -549,6 +555,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                       child: TextField(
                                         controller: pincodeFilterController,
                                         keyboardType: TextInputType.number,
+                                        style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                                        cursorColor: AppTheme.primaryBlue,
                                         decoration: InputDecoration(
                                           hintText: 'Pincode...',
                                           prefixIcon: const Icon(Icons.pin_drop_rounded, size: 15, color: AppTheme.textMuted),
@@ -983,6 +991,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               TextField(
                                 controller: adminNotesController,
                                 maxLines: 2,
+                                style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                                cursorColor: AppTheme.primaryBlue,
                                 onChanged: (val) => setModalState(() {}),
                                 decoration: InputDecoration(
                                   filled: true,
@@ -2336,9 +2346,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
               // Search Bar
               TextField(
+                style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                cursorColor: AppTheme.primaryBlue,
                 decoration: InputDecoration(
                   hintText: 'Search conversations by patient, doctor, or keyword...',
-                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                  hintStyle: const TextStyle(fontSize: 13, color: AppTheme.textMuted),
+                  prefixIcon: const Icon(Icons.search_rounded, size: 20, color: AppTheme.primaryBlue),
                   filled: true,
                   fillColor: Colors.white,
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
@@ -2561,9 +2574,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   Expanded(
                     child: TextField(
                       onChanged: (v) => setState(() => _subAdminSearch = v),
+                      style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                      cursorColor: AppTheme.primaryBlue,
                       decoration: InputDecoration(
                         hintText: 'Search sub-admins by name, email, phone...',
-                        prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                        hintStyle: const TextStyle(fontSize: 13, color: AppTheme.textMuted),
+                        prefixIcon: const Icon(Icons.search_rounded, size: 18, color: AppTheme.primaryBlue),
                         filled: true,
                         fillColor: Colors.white,
                         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -3008,6 +3024,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             // Full Name *
                             TextField(
                               controller: nameCtrl,
+                              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                              cursorColor: AppTheme.primaryBlue,
                               decoration: InputDecoration(
                                 labelText: 'Full Name *',
                                 hintText: 'e.g. Rahul Sharma',
@@ -3023,6 +3041,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             TextField(
                               controller: phoneCtrl,
                               keyboardType: TextInputType.phone,
+                              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                              cursorColor: AppTheme.primaryBlue,
                               decoration: InputDecoration(
                                 labelText: 'Mobile Phone Number *',
                                 hintText: '+91 98765 43210',
@@ -3038,6 +3058,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             TextField(
                               controller: emailCtrl,
                               keyboardType: TextInputType.emailAddress,
+                              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                              cursorColor: AppTheme.primaryBlue,
                               decoration: InputDecoration(
                                 labelText: 'Email Address (Optional)',
                                 hintText: 'subadmin@dentaguru.com (Optional)',
@@ -3056,6 +3078,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   flex: 3,
                                   child: TextField(
                                     controller: cityCtrl,
+                                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                                    cursorColor: AppTheme.primaryBlue,
                                     decoration: InputDecoration(
                                       labelText: 'City *',
                                       hintText: 'e.g. Hyderabad',
@@ -3072,6 +3096,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   child: TextField(
                                     controller: pincodeCtrl,
                                     keyboardType: TextInputType.number,
+                                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                                    cursorColor: AppTheme.primaryBlue,
                                     decoration: InputDecoration(
                                       labelText: 'Pincode *',
                                       hintText: '500032',
@@ -3355,6 +3381,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             // Full Name
                             TextField(
                               controller: nameCtrl,
+                              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                              cursorColor: AppTheme.primaryBlue,
                               decoration: InputDecoration(
                                 labelText: 'Full Name',
                                 prefixIcon: const Icon(Icons.person_outline_rounded, size: 18),
@@ -3369,6 +3397,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             TextField(
                               controller: phoneCtrl,
                               keyboardType: TextInputType.phone,
+                              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                              cursorColor: AppTheme.primaryBlue,
                               decoration: InputDecoration(
                                 labelText: 'Phone Number',
                                 prefixIcon: const Icon(Icons.phone_outlined, size: 18),
@@ -3383,6 +3413,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             TextField(
                               controller: passwordCtrl,
                               obscureText: !showPassword,
+                              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                              cursorColor: AppTheme.primaryBlue,
                               decoration: InputDecoration(
                                 labelText: 'Reset Password (Leave blank to keep unchanged)',
                                 hintText: 'New password',
@@ -4232,6 +4264,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                       const Divider(height: 24),
                       TextField(
                         controller: nameCtrl,
+                        style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                        cursorColor: AppTheme.primaryBlue,
                         decoration: InputDecoration(
                           labelText: 'Clinic Name *',
                           hintText: 'e.g. City Dental Care Center',
@@ -4244,6 +4278,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                       TextField(
                         controller: locationCtrl,
                         maxLines: 2,
+                        style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                        cursorColor: AppTheme.primaryBlue,
                         decoration: InputDecoration(
                           labelText: 'Full Address / Location *',
                           hintText: 'e.g. Door No, Street / Area / City / Pincode',
@@ -4255,6 +4291,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                       const SizedBox(height: 14),
                       TextField(
                         controller: servicesCtrl,
+                        style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                        cursorColor: AppTheme.primaryBlue,
                         decoration: InputDecoration(
                           labelText: 'Services Offered (Comma separated)',
                           hintText: 'Teeth Cleaning, Root Canal, Orthodontics',
@@ -4509,6 +4547,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             // Doctor Name *
                             TextField(
                               controller: nameCtrl,
+                              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                              cursorColor: AppTheme.primaryBlue,
                               decoration: InputDecoration(
                                 labelText: 'Doctor Full Name *',
                                 hintText: 'e.g. Dr. Jane Miller',
@@ -4525,6 +4565,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             TextField(
                               controller: phoneCtrl,
                               keyboardType: TextInputType.phone,
+                              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                              cursorColor: AppTheme.primaryBlue,
                               decoration: InputDecoration(
                                 labelText: 'Mobile Phone Number *',
                                 hintText: 'e.g. +91 98765 43210',
@@ -4541,6 +4583,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             TextField(
                               controller: emailCtrl,
                               keyboardType: TextInputType.emailAddress,
+                              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                              cursorColor: AppTheme.primaryBlue,
                               decoration: InputDecoration(
                                 labelText: 'Email Address (Optional)',
                                 hintText: 'e.g. jane@dentaguru.com (Optional)',
@@ -4587,6 +4631,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   flex: 2,
                                   child: TextField(
                                     controller: qualCtrl,
+                                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                                    cursorColor: AppTheme.primaryBlue,
                                     decoration: InputDecoration(
                                       labelText: 'Qualification',
                                       hintText: 'BDS, MDS',
@@ -4609,6 +4655,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   flex: 3,
                                   child: TextField(
                                     controller: licenseCtrl,
+                                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                                    cursorColor: AppTheme.primaryBlue,
                                     decoration: InputDecoration(
                                       labelText: 'License Number *',
                                       hintText: 'e.g. DEN-88490',
@@ -4626,6 +4674,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   child: TextField(
                                     controller: expCtrl,
                                     keyboardType: TextInputType.number,
+                                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                                    cursorColor: AppTheme.primaryBlue,
                                     decoration: InputDecoration(
                                       labelText: 'Years Exp.',
                                       hintText: '5',
@@ -4647,6 +4697,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 Expanded(
                                   child: TextField(
                                     controller: stateCtrl,
+                                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                                    cursorColor: AppTheme.primaryBlue,
                                     decoration: InputDecoration(
                                       labelText: 'State',
                                       hintText: 'e.g. Telangana',
@@ -4662,6 +4714,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 Expanded(
                                   child: TextField(
                                     controller: cityCtrl,
+                                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                                    cursorColor: AppTheme.primaryBlue,
                                     decoration: InputDecoration(
                                       labelText: 'City *',
                                       hintText: 'e.g. Hyderabad',
@@ -4678,6 +4732,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   child: TextField(
                                     controller: pincodeCtrl,
                                     keyboardType: TextInputType.number,
+                                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                                    cursorColor: AppTheme.primaryBlue,
                                     decoration: InputDecoration(
                                       labelText: 'Pincode *',
                                       hintText: 'e.g. 500032',
@@ -4700,6 +4756,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   flex: 3,
                                   child: TextField(
                                     controller: clinicCtrl,
+                                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                                    cursorColor: AppTheme.primaryBlue,
                                     decoration: InputDecoration(
                                       labelText: 'Practice / Clinic Name *',
                                       hintText: 'e.g. Apex Care Dental',
@@ -4716,6 +4774,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   flex: 2,
                                   child: TextField(
                                     controller: feeCtrl,
+                                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                                    cursorColor: AppTheme.primaryBlue,
                                     decoration: InputDecoration(
                                       labelText: 'Fee',
                                       hintText: '\$75',
@@ -4734,6 +4794,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             // Clinic Address
                             TextField(
                               controller: addressCtrl,
+                              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                              cursorColor: AppTheme.primaryBlue,
                               decoration: InputDecoration(
                                 labelText: 'Clinic Address / Location',
                                 hintText: 'e.g. 123 Healthcare Blvd, Suite 400',
@@ -4860,6 +4922,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
             children: [
               TextField(
                 controller: feeCtrl,
+                style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                cursorColor: AppTheme.primaryBlue,
                 decoration: InputDecoration(
                   labelText: 'Standard Consultation Fee',
                   hintText: 'e.g. \$85',
@@ -4872,6 +4936,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               const SizedBox(height: 12),
               TextField(
                 controller: slotCtrl,
+                style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                cursorColor: AppTheme.primaryBlue,
                 decoration: InputDecoration(
                   labelText: 'Next Available Time Slot',
                   hintText: 'e.g. Today, 3:30 PM',
@@ -6807,18 +6873,24 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                       const SizedBox(height: 16),
                       TextField(
                         controller: nameCtrl,
+                        style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                        cursorColor: AppTheme.primaryBlue,
                         decoration: const InputDecoration(labelText: 'Patient Full Name *', prefixIcon: Icon(Icons.person_outline_rounded)),
                       ),
                       const SizedBox(height: 10),
                       TextField(
                         controller: phoneCtrl,
                         keyboardType: TextInputType.phone,
+                        style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                        cursorColor: AppTheme.primaryBlue,
                         decoration: const InputDecoration(labelText: 'Mobile Phone Number *', prefixIcon: Icon(Icons.phone_android_rounded)),
                       ),
                       const SizedBox(height: 10),
                       TextField(
                         controller: emailCtrl,
                         keyboardType: TextInputType.emailAddress,
+                        style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                        cursorColor: AppTheme.primaryBlue,
                         decoration: const InputDecoration(labelText: 'Email Address (Optional)', prefixIcon: Icon(Icons.email_outlined)),
                       ),
                       const SizedBox(height: 10),
@@ -6828,6 +6900,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             flex: 3,
                             child: TextField(
                               controller: cityCtrl,
+                              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                              cursorColor: AppTheme.primaryBlue,
                               decoration: const InputDecoration(labelText: 'City *', prefixIcon: Icon(Icons.location_city_rounded)),
                             ),
                           ),
@@ -6837,6 +6911,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             child: TextField(
                               controller: pincodeCtrl,
                               keyboardType: TextInputType.number,
+                              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                              cursorColor: AppTheme.primaryBlue,
                               decoration: const InputDecoration(labelText: 'Pincode *', prefixIcon: Icon(Icons.pin_drop_outlined)),
                             ),
                           ),
@@ -6849,6 +6925,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             child: TextField(
                               controller: ageCtrl,
                               keyboardType: TextInputType.number,
+                              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                              cursorColor: AppTheme.primaryBlue,
                               decoration: const InputDecoration(labelText: 'Age', prefixIcon: Icon(Icons.cake_outlined)),
                             ),
                           ),
@@ -7120,10 +7198,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 width: isNarrow ? double.infinity : 280,
                 child: TextField(
                   onChanged: (val) => setState(() => _referralSearchQuery = val.trim()),
-                  style: const TextStyle(fontSize: 12),
+                  style: const TextStyle(fontSize: 12.5, color: Color(0xFF0F172A), fontWeight: FontWeight.w500),
+                  cursorColor: AppTheme.primaryBlue,
                   decoration: InputDecoration(
                     hintText: 'Search patient, doctor, location...',
-                    prefixIcon: const Icon(Icons.search_rounded, size: 16, color: AppTheme.textMuted),
+                    hintStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                    prefixIcon: const Icon(Icons.search_rounded, size: 16, color: AppTheme.primaryBlue),
                     filled: true,
                     fillColor: Colors.white,
                     contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),

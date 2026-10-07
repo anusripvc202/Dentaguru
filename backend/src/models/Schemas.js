@@ -1557,6 +1557,22 @@ const Referral = {
         return null;
     },
 
+    async findByIdAndDelete(id) {
+        if (!id) return null;
+        try {
+            await supabaseAdmin.from('referrals').delete().eq('id', id);
+        } catch (e) {
+            console.warn('⚠️ Supabase referral delete notice:', e.message);
+        }
+
+        const idx = _inMemoryReferrals.findIndex(r => r.id === id);
+        if (idx !== -1) {
+            const removed = _inMemoryReferrals.splice(idx, 1)[0];
+            return removed;
+        }
+        return { id };
+    },
+
     async checkDuplicate(referrerPatientId, referredPatientMobile, doctorId) {
         if (!referrerPatientId || !referredPatientMobile || !doctorId) return null;
         try {

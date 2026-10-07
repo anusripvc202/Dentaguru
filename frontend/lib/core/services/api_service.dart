@@ -57,6 +57,8 @@ class ApiService {
     String? state,
     String? city,
     String? pincode,
+    double? latitude,
+    double? longitude,
     String? qualification,
     int? experienceYears,
     String? profilePhoto,
@@ -88,6 +90,8 @@ class ApiService {
       if (state != null) 'state': state,
       if (city != null) 'city': city,
       if (pincode != null) 'pincode': pincode,
+      if (latitude != null) 'latitude': latitude,
+      if (longitude != null) 'longitude': longitude,
       if (qualification != null) 'qualification': qualification,
       if (experienceYears != null) 'experienceYears': experienceYears,
       if (profilePhoto != null) 'profilePhoto': profilePhoto,
@@ -654,6 +658,45 @@ class ApiService {
       }
     } catch (e) {
       debugPrint('Remove My Doctors API error: $e');
+    }
+    return true;
+  }
+
+  /// Delete a doctor / dentist permanently from Supabase & Backend API
+  Future<bool> deleteDoctor(String doctorId) async {
+    if (doctorId.trim().isEmpty) return false;
+    final cleanId = doctorId.trim();
+
+    // 1. Direct Supabase Delete (handles both dentists table and users table)
+    try {
+      final docRes = await Supabase.instance.client
+          .from('dentists')
+          .select('id, user_id')
+          .or('id.eq.$cleanId,user_id.eq.$cleanId')
+          .maybeSingle();
+
+      final dTableId = docRes?['id']?.toString() ?? cleanId;
+      final uId = docRes?['user_id']?.toString();
+
+      await Supabase.instance.client.from('patient_doctors').delete().or('doctor_id.eq.$dTableId,doctor_id.eq.$cleanId');
+      await Supabase.instance.client.from('dentists').delete().or('id.eq.$dTableId,user_id.eq.$cleanId,id.eq.$cleanId');
+
+      if (uId != null && uId.isNotEmpty) {
+        await Supabase.instance.client.from('users').delete().eq('id', uId);
+      } else {
+        await Supabase.instance.client.from('users').delete().eq('id', cleanId);
+      }
+    } catch (sErr) {
+      debugPrint('Supabase direct delete doctor notice: $sErr');
+    }
+
+    // 2. Express Backend API
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/dentists/$cleanId');
+      final response = await http.delete(url, headers: _headers).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) return true;
+    } catch (e) {
+      debugPrint('deleteDoctor API error: $e');
     }
     return true;
   }
@@ -2366,9 +2409,19 @@ class ApiService {
     required String clinicalComplaint,
     required String doctorId,
     String? referrerPatientId,
+    String? doctorName,
+    String? doctorClinicName,
+    String? doctorLocation,
+    String? doctorCity,
+    String? doctorPincode,
+    String? doctorPhone,
   }) async {
     final client = Supabase.instance.client;
     final currentUserId = referrerPatientId ?? client.auth.currentUser?.id ?? '';
+
+    final cleanDocName = (doctorName != null && doctorName.trim().isNotEmpty)
+        ? (doctorName.trim().startsWith('Dr.') ? doctorName.trim() : 'Dr. ${doctorName.trim()}')
+        : 'Doctor';
 
     final payload = {
       'referrerPatientId': currentUserId,
@@ -2384,6 +2437,12 @@ class ApiService {
       'clinicalComplaint': clinicalComplaint.trim(),
       'doctorId': doctorId,
       'doctor_id': doctorId,
+      'doctorName': cleanDocName,
+      if (doctorClinicName != null && doctorClinicName.isNotEmpty) 'doctorClinicName': doctorClinicName,
+      if (doctorLocation != null && doctorLocation.isNotEmpty) 'doctorLocation': doctorLocation,
+      if (doctorCity != null && doctorCity.isNotEmpty) 'doctorCity': doctorCity,
+      if (doctorPincode != null && doctorPincode.isNotEmpty) 'doctorPincode': doctorPincode,
+      if (doctorPhone != null && doctorPhone.isNotEmpty) 'doctorPhone': doctorPhone,
     };
 
     // 1. Primary Express Backend Call
@@ -2463,6 +2522,14 @@ class ApiService {
         'clinical_complaint': clinicalComplaint.trim(),
         'doctor_id': doctorId,
         'assigned_doctor_id': doctorId,
+        'doctor_name': cleanDocName,
+        'doctorName': cleanDocName,
+        'doctorSpecialty': requiredSpecialist.trim(),
+        'doctorClinicName': doctorClinicName ?? 'DentaGuru Partner Clinic',
+        'doctorLocation': doctorLocation ?? referredPatientLocation.trim(),
+        'doctorCity': doctorCity ?? referredPatientCity.trim(),
+        'doctorPincode': doctorPincode ?? referredPatientPincode.trim(),
+        'doctorPhone': doctorPhone ?? '',
         'status': 'Pending',
         'whatsapp_status': 'Sent',
         'referral_date': DateTime.now().toIso8601String(),
@@ -2885,6 +2952,35 @@ class ApiService {
     }
 
     return {'success': false, 'message': 'Failed to reject referral'};
+  }
+
+  /// Delete a patient referral
+  Future<Map<String, dynamic>> deletePatientReferral(String referralId) async {
+    // 1. Primary Express Backend Call
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/referrals/$referralId');
+      final response = await http.delete(url, headers: _headers).timeout(const Duration(seconds: 25));
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        return jsonDecode(response.body);
+      }
+    } catch (e) {
+      debugPrint('⚠️ Express delete referral notice: $e');
+    }
+
+    // 2. Direct Supabase Cloud Fallback
+    try {
+      final client = Supabase.instance.client;
+      try {
+        await client.from('referrals').delete().eq('id', referralId);
+      } catch (_) {}
+      try {
+        await client.from('patient_problem_requests').delete().eq('id', referralId);
+      } catch (_) {}
+      return {'success': true, 'message': 'Referral deleted successfully.'};
+    } catch (supaErr) {
+      debugPrint('❌ Supabase delete referral error: $supaErr');
+      return {'success': false, 'message': supaErr.toString()};
+    }
   }
 
   /// Check whether patient mobile already exists in DentaGuru

@@ -87,6 +87,8 @@ router.post('/clinics', optionalAuth, clinics.registerClinicProfile);
 router.get('/clinics', optionalAuth, clinics.getClinics);
 router.get('/clinics/:clinicId/dentists', optionalAuth, clinics.getClinicDentists);
 router.get('/dentists', optionalAuth, clinics.getAllDentists);
+router.delete('/dentists/:id', optionalAuth, clinics.deleteDentist);
+router.delete('/admin/dentists/:id', optionalAuth, clinics.deleteDentist);
 
 // Patient Saved Doctors (My Doctors) Endpoints
 router.get('/patient/my-doctors', optionalAuth, clinics.getPatientDoctors);
@@ -130,6 +132,7 @@ router.get('/referrals/analytics', optionalAuth, referrals.getAdminReferralAnaly
 router.get('/referrals/:referralId', optionalAuth, referrals.getReferralById);
 router.patch('/referrals/:referralId/accept', optionalAuth, referrals.acceptReferral);
 router.patch('/referrals/:referralId/reject', optionalAuth, referrals.rejectReferral);
+router.delete('/referrals/:referralId', optionalAuth, referrals.deleteReferral);
 router.post('/referrals/:referralId/notify-whatsapp', optionalAuth, referrals.notifyWhatsApp);
 
 module.exports = router;

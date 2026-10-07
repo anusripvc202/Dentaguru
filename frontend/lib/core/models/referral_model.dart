@@ -24,6 +24,7 @@ class PatientReferral {
   final String doctorCity;
   final String doctorPincode;
   final String doctorLocation;
+  final String doctorPhone;
   final List<String> doctorLanguages;
 
   final String status; // 'Pending' | 'Accepted' | 'Rejected'
@@ -56,6 +57,7 @@ class PatientReferral {
     this.doctorCity = '',
     this.doctorPincode = '',
     this.doctorLocation = '',
+    this.doctorPhone = '',
     this.doctorLanguages = const ['English'],
     this.status = 'Pending',
     this.rejectionReason,
@@ -76,8 +78,15 @@ class PatientReferral {
     }
 
     String docName = json['doctorName']?.toString() ??
+        json['doctor_name']?.toString() ??
         (json['doctor'] is Map ? (json['doctor']['users']?['name'] ?? json['doctor']['name'])?.toString() : null) ??
         'Specialist';
+    while (docName.toLowerCase().startsWith('dr. dr.') ||
+        docName.toLowerCase().startsWith('dr. dr ') ||
+        docName.toLowerCase().startsWith('dr dr ')) {
+      docName = docName.substring(3).trim();
+      if (docName.startsWith('.')) docName = docName.substring(1).trim();
+    }
     if (!docName.startsWith('Dr.') && !docName.startsWith('Dr ')) {
       docName = 'Dr. $docName';
     }
@@ -86,6 +95,27 @@ class PatientReferral {
         (json['referrer'] is Map ? json['referrer']['name']?.toString() : null) ??
         json['referrerName']?.toString() ??
         'Patient Referrer';
+
+    final clinic = json['doctorClinicName']?.toString() ??
+        json['doctor_clinic_name']?.toString() ??
+        (json['doctor'] is Map && json['doctor']['clinics'] is Map
+            ? json['doctor']['clinics']['clinic_name']?.toString()
+            : (json['doctor'] is Map ? json['doctor']['clinic_name']?.toString() : null)) ??
+        '';
+
+    final loc = json['doctorLocation']?.toString() ??
+        json['doctor_location']?.toString() ??
+        (json['doctor'] is Map && json['doctor']['clinics'] is Map
+            ? json['doctor']['clinics']['location']?.toString()
+            : (json['doctor'] is Map ? json['doctor']['clinic_address']?.toString() : '')) ??
+        '';
+
+    final phone = json['doctorPhone']?.toString() ??
+        json['doctor_phone']?.toString() ??
+        (json['doctor'] is Map && json['doctor']['users'] is Map
+            ? json['doctor']['users']['phone']?.toString()
+            : (json['doctor'] is Map ? json['doctor']['phone']?.toString() : '')) ??
+        '';
 
     return PatientReferral(
       id: json['id']?.toString() ?? json['referralId']?.toString() ?? '',
@@ -108,11 +138,12 @@ class PatientReferral {
 
       doctorId: json['doctorId']?.toString() ?? json['doctor_id']?.toString() ?? json['assigned_doctor_id']?.toString() ?? '',
       doctorName: docName,
-      doctorSpecialty: json['doctorSpecialty']?.toString() ?? (json['doctor'] is Map ? (json['doctor']['speciality'] ?? json['doctor']['specialty'])?.toString() : null) ?? '',
-      doctorClinicName: json['doctorClinicName']?.toString() ?? (json['doctor'] is Map && json['doctor']['clinics'] is Map ? json['doctor']['clinics']['clinic_name']?.toString() : (json['doctor'] is Map ? json['doctor']['clinic_name']?.toString() : null)) ?? '',
-      doctorCity: json['doctorCity']?.toString() ?? '',
-      doctorPincode: json['doctorPincode']?.toString() ?? '',
-      doctorLocation: json['doctorLocation']?.toString() ?? (json['doctor'] is Map && json['doctor']['clinics'] is Map ? json['doctor']['clinics']['location']?.toString() : '') ?? '',
+      doctorSpecialty: json['doctorSpecialty']?.toString() ?? json['doctor_specialty']?.toString() ?? (json['doctor'] is Map ? (json['doctor']['speciality'] ?? json['doctor']['specialty'])?.toString() : null) ?? '',
+      doctorClinicName: clinic,
+      doctorCity: json['doctorCity']?.toString() ?? json['doctor_city']?.toString() ?? (json['doctor'] is Map ? json['doctor']['city']?.toString() : '') ?? '',
+      doctorPincode: json['doctorPincode']?.toString() ?? json['doctor_pincode']?.toString() ?? (json['doctor'] is Map ? json['doctor']['pincode']?.toString() : '') ?? '',
+      doctorLocation: loc,
+      doctorPhone: phone,
       doctorLanguages: langs,
 
       status: json['status']?.toString() ?? json['referralStatus']?.toString() ?? 'Pending',
@@ -147,6 +178,11 @@ class PatientReferral {
       'clinical_complaint': clinicalComplaint,
       'doctor_id': doctorId,
       'doctor_name': doctorName,
+      'doctor_clinic_name': doctorClinicName,
+      'doctor_city': doctorCity,
+      'doctor_pincode': doctorPincode,
+      'doctor_location': doctorLocation,
+      'doctor_phone': doctorPhone,
       'status': status,
       'rejection_reason': rejectionReason,
       'whatsapp_status': whatsappStatus,

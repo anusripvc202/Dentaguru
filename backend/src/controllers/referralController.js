@@ -40,6 +40,22 @@ const populateReferralData = async (ref) => {
         if (!doctor) {
             doctor = await Dentist.findOne({ user_id: doctorId });
         }
+        if (!doctor) {
+            const userDoc = await User.findById(doctorId);
+            if (userDoc) {
+                doctor = {
+                    id: userDoc.id,
+                    user_id: userDoc.id,
+                    name: userDoc.name,
+                    phone: userDoc.phone,
+                    city: userDoc.city,
+                    pincode: userDoc.pincode,
+                    specialty: userDoc.specialty,
+                    clinic_name: userDoc.clinic_name,
+                    users: userDoc
+                };
+            }
+        }
         if (doctor && doctor.clinic_id) {
             clinic = await Clinic.findById(doctor.clinic_id);
         }
@@ -53,10 +69,16 @@ const populateReferralData = async (ref) => {
         referredUser = await User.findOne({ phone: ref.referred_patient_mobile });
     }
 
-    const docName = doctor?.users?.name || doctor?.name || 'Attending Specialist';
-    const formattedDoctorName = docName.startsWith('Dr.') ? docName : `Dr. ${docName}`;
+    let rawDocName = ref.doctor_name || ref.doctorName || doctor?.users?.name || doctor?.name || 'Attending Doctor';
+    while (rawDocName.toLowerCase().startsWith('dr. dr.') || rawDocName.toLowerCase().startsWith('dr. dr ') || rawDocName.toLowerCase().startsWith('dr dr ')) {
+        rawDocName = rawDocName.substring(3).trim();
+        if (rawDocName.startsWith('.')) rawDocName = rawDocName.substring(1).trim();
+    }
+    const formattedDoctorName = (rawDocName.toLowerCase().startsWith('dr.') || rawDocName.toLowerCase().startsWith('dr '))
+        ? rawDocName
+        : `Dr. ${rawDocName}`;
     const docSpecialty = doctor?.speciality || doctor?.specialty || ref.required_specialist || 'Specialist Consultation';
-    const clinicName = clinic?.clinic_name || doctor?.clinics?.clinic_name || doctor?.clinic_name || 'DentaGuru Partner Clinic';
+    const clinicName = ref.doctor_clinic_name || ref.doctorClinicName || clinic?.clinic_name || doctor?.clinics?.clinic_name || doctor?.clinic_name || 'DentaGuru Partner Clinic';
 
     let referrerName = referrer?.name || 'Patient Referrer';
     if (referrer && (referrer.role === 'Dentist' || referrer.role === 'dentist')) {
@@ -89,9 +111,10 @@ const populateReferralData = async (ref) => {
         doctorName: formattedDoctorName,
         doctorSpecialty: docSpecialty,
         doctorClinicName: clinicName,
-        doctorCity: doctor?.city || clinic?.location || '',
-        doctorPincode: doctor?.pincode || '',
-        doctorLocation: doctor?.clinics?.location || doctor?.location || clinic?.location || '',
+        doctorCity: ref.doctor_city || ref.doctorCity || doctor?.city || clinic?.location || '',
+        doctorPincode: ref.doctor_pincode || ref.doctorPincode || doctor?.pincode || '',
+        doctorLocation: ref.doctor_location || ref.doctorLocation || doctor?.clinic_address || doctor?.clinics?.location || doctor?.location || clinic?.location || '',
+        doctorPhone: ref.doctor_phone || ref.doctorPhone || doctor?.users?.phone || doctor?.phone || '',
         doctorLanguages: doctor?.languages || ['English'],
 
         status: ref.status || 'Pending',
@@ -133,7 +156,13 @@ exports.createReferral = async (req, res) => {
             referredPatientLocation,
             requiredSpecialist,
             clinicalComplaint,
-            doctorId
+            doctorId,
+            doctorName: incomingDocName,
+            doctorClinicName: incomingClinicName,
+            doctorLocation: incomingLocation,
+            doctorCity: incomingCity,
+            doctorPincode: incomingPincode,
+            doctorPhone: incomingPhone
         } = req.body;
 
         // Mandatory Field Validation
@@ -232,15 +261,46 @@ exports.createReferral = async (req, res) => {
         
         let doctor = await Dentist.findById(doctorId);
         if (!doctor) doctor = await Dentist.findOne({ user_id: doctorId });
+        if (!doctor) doctor = await Dentist.findOne({ id: doctorId });
+        if (!doctor) {
+            const userDoc = await User.findById(doctorId);
+            if (userDoc) {
+                doctor = {
+                    id: userDoc.id,
+                    user_id: userDoc.id,
+                    name: userDoc.name,
+                    phone: userDoc.phone,
+                    city: userDoc.city,
+                    pincode: userDoc.pincode,
+                    specialty: userDoc.specialty,
+                    clinic_name: userDoc.clinic_name,
+                    clinic_address: userDoc.address,
+                    users: userDoc
+                };
+            }
+        }
         
         let clinic = null;
         if (doctor?.clinic_id) {
             clinic = await Clinic.findById(doctor.clinic_id);
         }
-        const doctorName = doctor?.users?.name || doctor?.name || 'Specialist';
-        const formattedDoctorName = doctorName.startsWith('Dr.') ? doctorName : `Dr. ${doctorName}`;
-        const doctorClinic = clinic?.clinic_name || doctor?.clinic_name || 'DentaGuru Dental Clinic';
+        let doctorName = incomingDocName || doctor?.users?.name || doctor?.name || 'Specialist';
+        if (incomingDocName && incomingDocName.trim() && incomingDocName !== 'Dr. Specialist' && incomingDocName !== 'Doctor') {
+            doctorName = incomingDocName.trim();
+        }
+        while (doctorName.toLowerCase().startsWith('dr. dr.') || doctorName.toLowerCase().startsWith('dr. dr ') || doctorName.toLowerCase().startsWith('dr dr ')) {
+            doctorName = doctorName.substring(3).trim();
+            if (doctorName.startsWith('.')) doctorName = doctorName.substring(1).trim();
+        }
+        const formattedDoctorName = (doctorName.toLowerCase().startsWith('dr.') || doctorName.toLowerCase().startsWith('dr '))
+            ? doctorName
+            : `Dr. ${doctorName}`;
+        const doctorClinic = incomingClinicName || clinic?.clinic_name || doctor?.clinics?.clinic_name || doctor?.clinic_name || 'DentaGuru Partner Clinic';
         const doctorSpecialty = doctor?.speciality || doctor?.specialty || requiredSpecialist;
+        const doctorLocation = incomingLocation || doctor?.clinic_address || doctor?.clinics?.location || clinic?.address || clinic?.location || '';
+        const doctorCity = incomingCity || doctor?.city || clinic?.city || '';
+        const doctorPincode = incomingPincode || doctor?.pincode || clinic?.pincode || '';
+        const doctorPhone = incomingPhone || doctor?.users?.phone || doctor?.phone || '';
 
         // 4. Create Referral Record
         const newReferralRecord = await Referral.create({
@@ -259,6 +319,12 @@ exports.createReferral = async (req, res) => {
             clinical_complaint: clinicalComplaint.trim(),
             doctor_id: doctorId,
             assigned_doctor_id: doctorId,
+            doctor_name: formattedDoctorName,
+            doctor_clinic_name: doctorClinic,
+            doctor_location: doctorLocation,
+            doctor_city: doctorCity,
+            doctor_pincode: doctorPincode,
+            doctor_phone: doctorPhone,
             status: 'Pending',
             whatsapp_status: 'Pending',
             referral_date: new Date().toISOString()
@@ -311,6 +377,10 @@ exports.createReferral = async (req, res) => {
                 doctorName: formattedDoctorName,
                 doctorSpecialty: doctorSpecialty,
                 doctorClinic: doctorClinic,
+                doctorAddress: doctorLocation,
+                doctorCity: doctorCity,
+                doctorPincode: doctorPincode,
+                doctorPhone: doctorPhone,
                 referrerName: referrerName,
                 clinicalComplaint: clinicalComplaint.trim()
             });
@@ -716,6 +786,10 @@ exports.notifyWhatsApp = async (req, res) => {
             doctorName: populated.doctorName,
             doctorSpecialty: populated.doctorSpecialty,
             doctorClinic: populated.doctorClinicName,
+            doctorAddress: populated.doctorLocation,
+            doctorCity: populated.doctorCity,
+            doctorPincode: populated.doctorPincode,
+            doctorPhone: populated.doctorPhone,
             referrerName: populated.referrerPatientName,
             clinicalComplaint: populated.clinicalComplaint
         });
@@ -834,3 +908,40 @@ exports.getAdminReferralAnalytics = async (req, res) => {
         });
     }
 };
+
+/**
+ * 12. DELETE REFERRAL (Referrer / Patient / Admin deletes referral record)
+ */
+exports.deleteReferral = async (req, res) => {
+    try {
+        const { referralId } = req.params;
+        if (!referralId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Referral ID is required.'
+            });
+        }
+
+        const ref = await Referral.findById(referralId);
+        if (ref) {
+            await Referral.findByIdAndDelete(referralId);
+        } else {
+            // Also attempt deletion on patient_problem_requests
+            try {
+                await PatientProblemRequest.findByIdAndDelete(referralId);
+            } catch (_) {}
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'Referral deleted successfully.'
+        });
+    } catch (err) {
+        console.error('❌ Error deleting referral:', err);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to delete referral: ' + err.message
+        });
+    }
+};
+

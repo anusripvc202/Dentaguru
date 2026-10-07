@@ -301,6 +301,8 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
           title: Text('Edit Rate for $service', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           content: TextField(
             controller: priceCtrl,
+            style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+            cursorColor: const Color(0xFF0D9488),
             decoration: InputDecoration(
               labelText: 'New Procedure Rate',
               filled: true,

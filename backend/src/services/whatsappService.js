@@ -116,15 +116,71 @@ const sendNewReferralWhatsApp = async ({
     doctorName,
     doctorSpecialty,
     doctorClinic,
+    doctorAddress,
+    doctorCity,
+    doctorPincode,
+    doctorPhone,
     referrerName,
     clinicalComplaint
 }) => {
-    const formattedDoctor = doctorName.startsWith('Dr.') ? doctorName : `Dr. ${doctorName}`;
+    let cleanDoc = doctorName || 'Specialist Doctor';
+    while (cleanDoc.toLowerCase().startsWith('dr. dr.') || cleanDoc.toLowerCase().startsWith('dr. dr ') || cleanDoc.toLowerCase().startsWith('dr dr ')) {
+        cleanDoc = cleanDoc.substring(3).trim();
+        if (cleanDoc.startsWith('.')) cleanDoc = cleanDoc.substring(1).trim();
+    }
+    const formattedDoctor = (cleanDoc.toLowerCase().startsWith('dr.') || cleanDoc.toLowerCase().startsWith('dr '))
+        ? cleanDoc
+        : `Dr. ${cleanDoc}`;
+
     const cleanComplaint = clinicalComplaint || 'General Dental Consultation';
-    const cleanClinic = doctorClinic || 'DentaGuru Partner Dental Clinic';
+    const cleanClinic = doctorClinic && doctorClinic !== 'DentaGuru Partner Dental Clinic' ? doctorClinic : (doctorClinic || 'DentaGuru Partner Dental Clinic');
     const cleanSpecialty = doctorSpecialty || 'Specialized Dental Care';
 
-    const message = `Hello ${referredPatientName || 'Patient'},\n\nYou have been referred to ${formattedDoctor} through DentaGuru by ${referrerName || 'your referrer'}.\n\nDoctor:\n${formattedDoctor}\n\nSpecialty:\n${cleanSpecialty}\n\nClinic:\n${cleanClinic}\n\nProblem/Reason:\n${cleanComplaint}\n\nPlease open DentaGuru to view the referral details and continue with the consultation.\n\nThank you,\nDentaGuru`;
+    const locationParts = [
+        doctorAddress,
+        doctorCity,
+        doctorPincode ? `PIN: ${doctorPincode}` : ''
+    ].filter(s => s && s.trim().length > 0);
+    const fullAddress = locationParts.join(', ');
+
+    const mapQueryParts = [
+        cleanClinic && cleanClinic !== 'DentaGuru Partner Dental Clinic' ? cleanClinic : '',
+        doctorAddress,
+        doctorCity,
+        doctorPincode
+    ].filter(s => s && s.trim().length > 0);
+    const mapQuery = mapQueryParts.join(', ');
+    const mapUrl = mapQuery.length > 0 ? `https://maps.google.com/?q=${encodeURIComponent(mapQuery)}` : '';
+
+    const lines = [];
+    lines.push(`Hi ${referredPatientName || 'Patient'},`);
+    lines.push('');
+    lines.push(`I have referred you to *${formattedDoctor}* on DentaGuru for your dental care.`);
+    lines.push('');
+    lines.push('👨‍⚕️ *Doctor & Clinic Details:*');
+    lines.push(`• *Doctor:* ${formattedDoctor}`);
+    lines.push(`• *Specialty:* ${cleanSpecialty}`);
+    if (cleanClinic && cleanClinic.length > 0) {
+        lines.push(`• *Clinic:* ${cleanClinic}`);
+    }
+    if (doctorPhone && doctorPhone.trim().length > 0) {
+        const cleanPhone = doctorPhone.replace(/^\+91\s*/, '').trim();
+        lines.push(`• *Doctor Mobile:* +91 ${cleanPhone}`);
+    }
+    if (fullAddress && fullAddress.length > 0) {
+        lines.push(`• *Address:* ${fullAddress}`);
+    }
+    if (mapUrl && mapUrl.length > 0) {
+        lines.push(`• 📍 *Location Map:* ${mapUrl}`);
+    }
+    if (cleanComplaint) {
+        lines.push('');
+        lines.push(`📋 *Clinical Reason / Diagnosis:* ${cleanComplaint}`);
+    }
+    lines.push('');
+    lines.push('You can reach out directly to the clinic or doctor to schedule your appointment. Wishing you the best dental care!');
+
+    const message = lines.join('\n');
 
     return await dispatchWhatsApp({
         to: referredPatientMobile,

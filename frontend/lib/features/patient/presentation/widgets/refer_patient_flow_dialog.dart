@@ -196,13 +196,23 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
       referredPatientGender: _gender,
       referredPatientCity: _cityController.text.trim(),
       referredPatientPincode: _pincodeController.text.trim(),
-      referredPatientLocation: _locationController.text.trim(),
-      requiredSpecialist: _requiredSpecialist,
+      referredPatientLocation: _locationController.text.trim().isNotEmpty
+          ? _locationController.text.trim()
+          : _cityController.text.trim(),
+      requiredSpecialist: (_selectedDoctor != null && _selectedDoctor!.specialty.isNotEmpty)
+          ? _selectedDoctor!.specialty
+          : _requiredSpecialist,
       clinicalComplaint: _complaintController.text.trim().isNotEmpty
           ? _complaintController.text.trim()
           : 'Specialist consultation and dental evaluation',
       doctorId: _selectedDoctor!.id,
       referrerPatientId: referrerId,
+      doctorName: _selectedDoctor?.name,
+      doctorClinicName: _selectedDoctor?.clinicName,
+      doctorLocation: _selectedDoctor?.clinicAddress,
+      doctorCity: _selectedDoctor?.city,
+      doctorPincode: _selectedDoctor?.pincode,
+      doctorPhone: _selectedDoctor?.phone,
     );
 
     if (!mounted) return;
@@ -500,6 +510,8 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                     _buildFieldLabel('Patient Name', isDark, isRequired: true),
                     TextFormField(
                       controller: _nameController,
+                      style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                      cursorColor: primaryColor,
                       decoration: _inputDecoration('Enter full name of the patient', isDark),
                       validator: (val) {
                         if (val == null || val.trim().isEmpty) return 'Patient Name is required';
@@ -511,6 +523,8 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                     _buildFieldLabel('Mobile Number', isDark, isRequired: true),
                     TextFormField(
                       controller: _mobileController,
+                      style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                      cursorColor: primaryColor,
                       keyboardType: TextInputType.phone,
                       maxLength: 10,
                       onChanged: _checkMobileNumber,
@@ -569,6 +583,8 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                               _buildFieldLabel('Age', isDark, isRequired: true),
                               TextFormField(
                                 controller: _ageController,
+                                style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                                cursorColor: primaryColor,
                                 keyboardType: TextInputType.number,
                                 maxLength: 3,
                                 decoration: _inputDecoration('e.g. 28', isDark).copyWith(counterText: ''),
@@ -605,56 +621,14 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                     ),
                     const SizedBox(height: 14),
 
-                    Row(
-                      children: [
-                        Expanded(
-                          flex: 3,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _buildFieldLabel('City', isDark, isRequired: true),
-                              TextFormField(
-                                controller: _cityController,
-                                decoration: _inputDecoration('e.g. Hyderabad', isDark),
-                                validator: (val) {
-                                  if (val == null || val.trim().isEmpty) return 'City is required';
-                                  return null;
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          flex: 2,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _buildFieldLabel('Pincode', isDark, isRequired: true),
-                              TextFormField(
-                                controller: _pincodeController,
-                                keyboardType: TextInputType.number,
-                                maxLength: 6,
-                                decoration: _inputDecoration('6-digit', isDark).copyWith(counterText: ''),
-                                validator: (val) {
-                                  if (val == null || val.trim().isEmpty) return 'Required';
-                                  if (val.trim().length != 6) return '6 digits';
-                                  return null;
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-
-                    _buildFieldLabel('Location / Landmark', isDark, isRequired: true),
+                    _buildFieldLabel('City', isDark, isRequired: true),
                     TextFormField(
-                      controller: _locationController,
-                      decoration: _inputDecoration('e.g. Madhapur, near Metro Station', isDark),
+                      controller: _cityController,
+                      style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                      cursorColor: primaryColor,
+                      decoration: _inputDecoration('e.g. Hyderabad', isDark),
                       validator: (val) {
-                        if (val == null || val.trim().isEmpty) return 'Location is required';
+                        if (val == null || val.trim().isEmpty) return 'City is required';
                         return null;
                       },
                     ),
@@ -670,6 +644,8 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: TextField(
               onChanged: (val) => setState(() => _patientSearchQuery = val),
+              style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+              cursorColor: primaryColor,
               decoration: InputDecoration(
                 hintText: 'Search patient by name, contact number, or city...',
                 hintStyle: TextStyle(fontSize: 13, color: isDark ? Colors.white38 : Colors.black38),
@@ -1014,41 +990,50 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
         ];
         const languages = <String>['All', 'English', 'Hindi', 'Telugu', 'Tamil', 'Kannada'];
 
+        // Check if user has entered search criteria (Doctor Name, Phone Number, PIN, or filter)
+        final hasSearchCriteria = _doctorSearchQuery.trim().isNotEmpty ||
+            _selectedSpecialtyFilter != 'All' ||
+            _selectedCityFilter != 'All' ||
+            _selectedLanguageFilter != 'All';
+
         // Apply filters & strictly exclude logged-in dentist to prevent self-referral
-        final filteredDoctors = allDoctors.where((doc) {
-          if (widget.isDentistMode) {
-            if (currentDocId.isNotEmpty && doc.id == currentDocId) return false;
-            if (currentDocUserId.isNotEmpty && (doc.id == currentDocUserId || doc.userId == currentDocUserId)) return false;
-            if (authUserId.isNotEmpty && (doc.id == authUserId || doc.userId == authUserId)) return false;
-            if (currentDocEmail.isNotEmpty && doc.email.toLowerCase() == currentDocEmail) return false;
-            if (authEmail.isNotEmpty && doc.email.toLowerCase() == authEmail) return false;
-          }
-          if (_selectedSpecialtyFilter != 'All' &&
-              !doc.specialty.toLowerCase().contains(_selectedSpecialtyFilter.toLowerCase())) {
-            return false;
-          }
-          if (_selectedCityFilter != 'All' &&
-              !doc.city.toLowerCase().contains(_selectedCityFilter.toLowerCase())) {
-            return false;
-          }
-          if (_selectedLanguageFilter != 'All' &&
-              !doc.languages.any((l) => l.toLowerCase() == _selectedLanguageFilter.toLowerCase())) {
-            return false;
-          }
-          if (_doctorSearchQuery.isNotEmpty) {
-            final q = _doctorSearchQuery.toLowerCase().trim();
-            final cleanDigitsQ = q.replaceAll(RegExp(r'\D'), '');
-            final cleanDocPhone = doc.phone.replaceAll(RegExp(r'\D'), '');
-            final matchName = doc.name.toLowerCase().contains(q);
-            final matchSpec = doc.specialty.toLowerCase().contains(q);
-            final matchClinic = doc.clinicName.toLowerCase().contains(q) || doc.clinicAddress.toLowerCase().contains(q);
-            final matchCity = doc.city.toLowerCase().contains(q);
-            final matchPincode = doc.pincode.contains(q);
-            final matchPhone = (cleanDigitsQ.isNotEmpty && cleanDocPhone.contains(cleanDigitsQ)) || doc.phone.toLowerCase().contains(q);
-            if (!matchName && !matchSpec && !matchClinic && !matchCity && !matchPincode && !matchPhone) return false;
-          }
-          return true;
-        }).toList();
+        // Doctors are only searched and displayed when search criteria is entered
+        final filteredDoctors = !hasSearchCriteria
+            ? <DoctorModel>[]
+            : allDoctors.where((doc) {
+                if (widget.isDentistMode) {
+                  if (currentDocId.isNotEmpty && doc.id == currentDocId) return false;
+                  if (currentDocUserId.isNotEmpty && (doc.id == currentDocUserId || doc.userId == currentDocUserId)) return false;
+                  if (authUserId.isNotEmpty && (doc.id == authUserId || doc.userId == authUserId)) return false;
+                  if (currentDocEmail.isNotEmpty && doc.email.toLowerCase() == currentDocEmail) return false;
+                  if (authEmail.isNotEmpty && doc.email.toLowerCase() == authEmail) return false;
+                }
+                if (_selectedSpecialtyFilter != 'All' &&
+                    !doc.specialty.toLowerCase().contains(_selectedSpecialtyFilter.toLowerCase())) {
+                  return false;
+                }
+                if (_selectedCityFilter != 'All' &&
+                    !doc.city.toLowerCase().contains(_selectedCityFilter.toLowerCase())) {
+                  return false;
+                }
+                if (_selectedLanguageFilter != 'All' &&
+                    !doc.languages.any((l) => l.toLowerCase() == _selectedLanguageFilter.toLowerCase())) {
+                  return false;
+                }
+                if (_doctorSearchQuery.trim().isNotEmpty) {
+                  final q = _doctorSearchQuery.toLowerCase().trim();
+                  final cleanDigitsQ = q.replaceAll(RegExp(r'\D'), '');
+                  final cleanDocPhone = doc.phone.replaceAll(RegExp(r'\D'), '');
+                  final matchName = doc.name.toLowerCase().contains(q);
+                  final matchSpec = doc.specialty.toLowerCase().contains(q);
+                  final matchClinic = doc.clinicName.toLowerCase().contains(q) || doc.clinicAddress.toLowerCase().contains(q);
+                  final matchCity = doc.city.toLowerCase().contains(q);
+                  final matchPincode = doc.pincode.contains(q);
+                  final matchPhone = (cleanDigitsQ.isNotEmpty && cleanDocPhone.contains(cleanDigitsQ)) || doc.phone.toLowerCase().contains(q);
+                  if (!matchName && !matchSpec && !matchClinic && !matchCity && !matchPincode && !matchPhone) return false;
+                }
+                return true;
+              }).toList();
 
         return Column(
           children: [
@@ -1071,8 +1056,8 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                         const SizedBox(height: 2),
                         Text(
                           widget.isDentistMode
-                              ? 'Select the specialized doctor you want to refer the patient to.'
-                              : 'Select the doctor you want to refer the patient to.',
+                              ? 'Search and select the specialized doctor you want to refer the patient to.'
+                              : 'Search and select the doctor you want to refer the patient to.',
                           style: TextStyle(
                             fontSize: 13,
                             color: isDark ? Colors.white60 : Colors.black54,
@@ -1090,6 +1075,8 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: TextField(
                 onChanged: (val) => setState(() => _doctorSearchQuery = val),
+                style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                cursorColor: primaryColor,
                 decoration: InputDecoration(
                   hintText: 'Search doctor, contact number, specialty, clinic, city or pincode...',
                   hintStyle: TextStyle(fontSize: 13, color: isDark ? Colors.white38 : Colors.black38),
@@ -1151,30 +1138,61 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
 
             // Doctors List View
             Expanded(
-              child: filteredDoctors.isEmpty
+              child: !hasSearchCriteria
                   ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.person_search_rounded, size: 48, color: isDark ? Colors.white24 : Colors.black26),
-                          const SizedBox(height: 12),
-                          Text(
-                            'No matching doctors found',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: isDark ? Colors.white60 : Colors.black54,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.search_rounded, size: 48, color: isDark ? Colors.white24 : Colors.black26),
+                            const SizedBox(height: 12),
+                            Text(
+                              'Doctor Search',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: isDark ? Colors.white60 : Colors.black54,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Try adjusting your search or filters.',
-                            style: TextStyle(fontSize: 12, color: isDark ? Colors.white38 : Colors.black38),
-                          ),
-                        ],
+                            const SizedBox(height: 4),
+                            Text(
+                              'Enter Doctor Name, Phone Number, or PIN code above to view matching doctors.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(fontSize: 12, color: isDark ? Colors.white38 : Colors.black38),
+                            ),
+                          ],
+                        ),
                       ),
                     )
-                  : ListView.builder(
+                  : filteredDoctors.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.person_search_rounded, size: 48, color: isDark ? Colors.white24 : Colors.black26),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'No matching doctors found',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: isDark ? Colors.white60 : Colors.black54,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Try searching with a different Doctor Name, Phone Number, or PIN.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(fontSize: 12, color: isDark ? Colors.white38 : Colors.black38),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      : ListView.builder(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                       itemCount: filteredDoctors.length,
                       itemBuilder: (ctx, idx) {
@@ -1283,6 +1301,14 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                                                   color: primaryColor,
                                                 ),
                                               ),
+                                            ),
+                                            const SizedBox(width: 4),
+                                            IconButton(
+                                              icon: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 18),
+                                              tooltip: 'Delete Doctor',
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                              onPressed: () => _confirmDeleteDoctor(doc),
                                             ),
                                           ],
                                         ),
@@ -1445,6 +1471,70 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
     );
   }
 
+  void _confirmDeleteDoctor(DoctorModel doc) {
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: Row(
+            children: [
+              const Icon(Icons.delete_forever_rounded, color: Colors.red, size: 24),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Delete ${doc.name}?',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          content: Text(
+            'Are you sure you want to permanently delete ${doc.name} (${doc.specialty})? This will remove the doctor from the platform directory.',
+            style: TextStyle(
+              fontSize: 13,
+              color: isDark ? Colors.white70 : Colors.black87,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.delete_forever_rounded, size: 16),
+              label: const Text('Delete Doctor', style: TextStyle(fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+              onPressed: () async {
+                Navigator.of(dialogCtx).pop();
+                if (_selectedDoctor?.id == doc.id) {
+                  setState(() => _selectedDoctor = null);
+                }
+                await _patientService.deleteDoctor(doc.id);
+                if (mounted) {
+                  setState(() {});
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('🗑️ ${doc.name} deleted successfully.'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildFilterDropdown({
     required String label,
     required String currentValue,
@@ -1530,6 +1620,8 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                   _buildFieldLabel('Patient Name', isDark, isRequired: true),
                   TextFormField(
                     controller: _nameController,
+                    style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                    cursorColor: primaryColor,
                     decoration: _inputDecoration('Enter full name of the patient', isDark),
                     validator: (val) {
                       if (val == null || val.trim().isEmpty) return 'Patient Name is required';
@@ -1541,6 +1633,8 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                   _buildFieldLabel('Mobile Number', isDark, isRequired: true),
                   TextFormField(
                     controller: _mobileController,
+                    style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                    cursorColor: primaryColor,
                     keyboardType: TextInputType.phone,
                     maxLength: 10,
                     onChanged: _checkMobileNumber,
@@ -1599,6 +1693,8 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                             _buildFieldLabel('Age', isDark, isRequired: true),
                             TextFormField(
                               controller: _ageController,
+                              style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                              cursorColor: primaryColor,
                               keyboardType: TextInputType.number,
                               maxLength: 3,
                               decoration: _inputDecoration('e.g. 28', isDark).copyWith(counterText: ''),
@@ -1635,80 +1731,28 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                   ),
                   const SizedBox(height: 14),
 
-                  Row(
-                    children: [
-                      Expanded(
-                        flex: 3,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildFieldLabel('City', isDark, isRequired: true),
-                            TextFormField(
-                              controller: _cityController,
-                              decoration: _inputDecoration('e.g. Hyderabad', isDark),
-                              validator: (val) {
-                                if (val == null || val.trim().isEmpty) return 'City is required';
-                                return null;
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        flex: 2,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildFieldLabel('Pincode', isDark, isRequired: true),
-                            TextFormField(
-                              controller: _pincodeController,
-                              keyboardType: TextInputType.number,
-                              maxLength: 6,
-                              decoration: _inputDecoration('6-digit', isDark).copyWith(counterText: ''),
-                              validator: (val) {
-                                if (val == null || val.trim().isEmpty) return 'Required';
-                                if (val.trim().length != 6) return '6 digits';
-                                return null;
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-
-                  _buildFieldLabel('Location / Landmark', isDark, isRequired: true),
+                  _buildFieldLabel('City', isDark, isRequired: true),
                   TextFormField(
-                    controller: _locationController,
-                    decoration: _inputDecoration('e.g. Madhapur, near Metro Station', isDark),
+                    controller: _cityController,
+                    style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                    cursorColor: primaryColor,
+                    decoration: _inputDecoration('e.g. Hyderabad', isDark),
                     validator: (val) {
-                      if (val == null || val.trim().isEmpty) return 'Location is required';
+                      if (val == null || val.trim().isEmpty) return 'City is required';
                       return null;
                     },
                   ),
                   const SizedBox(height: 14),
 
-                  _buildFieldLabel('Required Specialist / Category', isDark, isRequired: true),
-                  DropdownButtonFormField<String>(
-                    initialValue: _specialtyOptions.contains(_requiredSpecialist) ? _requiredSpecialist : _specialtyOptions.first,
-                    dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-                    decoration: _inputDecoration('Select category', isDark),
-                    items: _specialtyOptions
-                        .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                        .toList(),
-                    onChanged: (val) => setState(() => _requiredSpecialist = val ?? 'General Dentistry'),
-                  ),
-                  const SizedBox(height: 14),
-
-                  _buildFieldLabel('Problem / Clinical Complaint', isDark, isRequired: true),
+                  _buildFieldLabel('Problem', isDark, isRequired: true),
                   TextFormField(
                     controller: _complaintController,
+                    style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                    cursorColor: primaryColor,
                     maxLines: 3,
                     decoration: _inputDecoration('Describe the dental problem, pain, symptoms or reason for referral...', isDark),
                     validator: (val) {
-                      if (val == null || val.trim().isEmpty) return 'Please describe the problem or clinical complaint';
+                      if (val == null || val.trim().isEmpty) return 'Please describe the problem';
                       return null;
                     },
                   ),
@@ -1910,9 +1954,8 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                     {'label': 'Patient Name', 'value': _nameController.text.trim()},
                     {'label': 'Mobile Number', 'value': '+91 ${_mobileController.text.trim()}'},
                     {'label': 'Age & Gender', 'value': '${_ageController.text.trim()} Years • $_gender'},
-                    {'label': 'Location', 'value': '${_locationController.text.trim()}, ${_cityController.text.trim()} (${_pincodeController.text.trim()})'},
-                    {'label': 'Specialist Category', 'value': _requiredSpecialist},
-                    {'label': 'Clinical Problem', 'value': _complaintController.text.trim().isNotEmpty ? _complaintController.text.trim() : 'General dental examination'},
+                    {'label': 'City', 'value': _cityController.text.trim()},
+                    {'label': 'Problem', 'value': _complaintController.text.trim().isNotEmpty ? _complaintController.text.trim() : 'General dental examination'},
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -2092,7 +2135,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                     {'label': 'Patient Name', 'value': _nameController.text.trim()},
                     {'label': 'Mobile Number', 'value': '+91 ${_mobileController.text.trim()}'},
                     {'label': 'Age & Gender', 'value': '${_ageController.text.trim()} Years • $_gender'},
-                    {'label': 'Location', 'value': '${_locationController.text.trim()}, ${_cityController.text.trim()} (${_pincodeController.text.trim()})'},
+                    {'label': 'City', 'value': _cityController.text.trim()},
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -2143,6 +2186,8 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                       _buildFieldLabel('Clinical Complaint / Reason for Referral', isDark, isRequired: true),
                       TextFormField(
                         controller: _complaintController,
+                        style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+                        cursorColor: primaryColor,
                         maxLines: 3,
                         decoration: _inputDecoration('Describe clinical findings, symptoms, x-ray notes, treatment required...', isDark),
                       ),
@@ -2356,22 +2401,14 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
             child: Column(
               children: [
                 _buildSuccessRow('Referred Patient', patientName, isDark),
-                if (_locationController.text.trim().isNotEmpty || _cityController.text.trim().isNotEmpty || _pincodeController.text.trim().isNotEmpty) ...[
+                if (_cityController.text.trim().isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  _buildSuccessRow(
-                    'Location & Pincode',
-                    [
-                      if (_locationController.text.trim().isNotEmpty) _locationController.text.trim(),
-                      if (_cityController.text.trim().isNotEmpty) _cityController.text.trim(),
-                      if (_pincodeController.text.trim().isNotEmpty) '(${_pincodeController.text.trim()})',
-                    ].join(', '),
-                    isDark,
-                  ),
+                  _buildSuccessRow('City', _cityController.text.trim(), isDark),
                 ],
                 const SizedBox(height: 8),
                 _buildSuccessRow('Receiving Doctor', doctorName, isDark),
                 const SizedBox(height: 8),
-                _buildSuccessRow('Specialty', _requiredSpecialist, isDark),
+                _buildSuccessRow('Problem', _complaintController.text.trim().isNotEmpty ? _complaintController.text.trim() : 'General dental examination', isDark),
                 const SizedBox(height: 8),
                 _buildSuccessRow('Status', 'Pending Review', isDark, isBadge: true, badgeColor: const Color(0xFFF59E0B)),
               ],
@@ -2424,19 +2461,67 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
               onPressed: () async {
                 final ref = _createdReferral;
                 final doc = _selectedDoctor;
-                final docName = ref?.doctorName.isNotEmpty == true
-                    ? ref!.doctorName
-                    : (doc != null ? (doc.name.startsWith('Dr.') ? doc.name : 'Dr. ${doc.name}') : 'Doctor');
-                final specialty = ref?.requiredSpecialist.isNotEmpty == true ? ref!.requiredSpecialist : (doc?.specialty ?? _requiredSpecialist);
+
+                // Priority for doctor name:
+                // 1. Explicitly selected doctor in this session
+                // 2. Created referral doctorName (if not fallback)
+                String rawDocName = '';
+                if (doc != null && doc.name.trim().isNotEmpty && doc.name != 'Dr. Specialist' && doc.name != 'Doctor') {
+                  rawDocName = doc.name.trim();
+                } else if (ref != null && ref.doctorName.trim().isNotEmpty && ref.doctorName != 'Dr. Specialist' && ref.doctorName != 'Doctor') {
+                  rawDocName = ref.doctorName.trim();
+                } else if (doc != null && doc.name.trim().isNotEmpty) {
+                  rawDocName = doc.name.trim();
+                } else {
+                  rawDocName = ref?.doctorName.trim() ?? 'Specialist Doctor';
+                }
+
+                // Clean duplicate "Dr. Dr" prefixes
+                while (rawDocName.toLowerCase().startsWith('dr. dr.') || 
+                       rawDocName.toLowerCase().startsWith('dr. dr ') || 
+                       rawDocName.toLowerCase().startsWith('dr dr ')) {
+                  rawDocName = rawDocName.substring(3).trim();
+                  if (rawDocName.startsWith('.')) rawDocName = rawDocName.substring(1).trim();
+                }
+                final docName = (rawDocName.toLowerCase().startsWith('dr.') || rawDocName.toLowerCase().startsWith('dr '))
+                    ? rawDocName
+                    : 'Dr. $rawDocName';
+
+                final specialty = (doc?.specialty.isNotEmpty == true && doc!.specialty != 'General Dentistry')
+                    ? doc.specialty
+                    : (ref?.requiredSpecialist.isNotEmpty == true ? ref!.requiredSpecialist : (doc?.specialty ?? _requiredSpecialist));
                 final qual = (doc?.qualification.isNotEmpty == true && doc!.qualification != 'BDS, MDS') ? ' (${doc.qualification})' : '';
-                final clinic = ref?.doctorClinicName.isNotEmpty == true ? ref!.doctorClinicName : (doc?.clinicName ?? '');
+                final clinic = (doc?.clinicName.isNotEmpty == true && doc!.clinicName != 'DentaGuru Partner Clinic')
+                    ? doc.clinicName
+                    : (ref?.doctorClinicName.isNotEmpty == true ? ref!.doctorClinicName : (doc?.clinicName ?? ''));
+                
                 final locationParts = [
-                  if (ref?.doctorLocation.isNotEmpty == true) ref!.doctorLocation else if (doc?.clinicAddress.isNotEmpty == true) doc!.clinicAddress,
-                  if (ref?.doctorCity.isNotEmpty == true) ref!.doctorCity else if (doc?.city.isNotEmpty == true) doc!.city,
-                  if (ref?.doctorPincode.isNotEmpty == true) 'PIN: ${ref!.doctorPincode}' else if (doc?.pincode.isNotEmpty == true) 'PIN: ${doc!.pincode}',
+                  if (doc?.clinicAddress.isNotEmpty == true) doc!.clinicAddress else if (ref?.doctorLocation.isNotEmpty == true) ref!.doctorLocation,
+                  if (doc?.city.isNotEmpty == true) doc!.city else if (ref?.doctorCity.isNotEmpty == true) ref!.doctorCity,
+                  if (doc?.pincode.isNotEmpty == true) 'PIN: ${doc!.pincode}' else if (ref?.doctorPincode.isNotEmpty == true) 'PIN: ${ref!.doctorPincode}',
                 ].where((s) => s.trim().isNotEmpty).toList();
 
-                final docPhone = (doc?.phone.isNotEmpty == true) ? doc!.phone : '';
+                final fullAddress = locationParts.join(', ');
+
+                // Build Google Maps query for pinpoint navigation
+                String mapUrl = '';
+                if (doc != null && doc.latitude != null && doc.longitude != null) {
+                  mapUrl = 'https://maps.google.com/?q=${doc.latitude},${doc.longitude}';
+                } else {
+                  final mapQueryParts = [
+                    if (clinic.isNotEmpty && clinic != 'DentaGuru Partner Clinic') clinic,
+                    if (doc?.clinicAddress.isNotEmpty == true) doc!.clinicAddress else if (ref?.doctorLocation.isNotEmpty == true) ref!.doctorLocation,
+                    if (doc?.city.isNotEmpty == true) doc!.city else if (ref?.doctorCity.isNotEmpty == true) ref!.doctorCity,
+                    if (doc?.pincode.isNotEmpty == true) doc!.pincode else if (ref?.doctorPincode.isNotEmpty == true) ref!.doctorPincode,
+                  ].where((s) => s.trim().isNotEmpty).toList();
+
+                  final mapQuery = mapQueryParts.join(', ');
+                  if (mapQuery.isNotEmpty) {
+                    mapUrl = 'https://maps.google.com/?q=${Uri.encodeComponent(mapQuery)}';
+                  }
+                }
+
+                final docPhone = (doc?.phone.isNotEmpty == true) ? doc!.phone : (ref?.doctorPhone ?? '');
                 final referringDoc = _patientService.currentDoctor;
                 final referringDocName = (referringDoc != null && referringDoc.name.isNotEmpty)
                     ? (referringDoc.name.startsWith('Dr.') ? referringDoc.name : 'Dr. ${referringDoc.name}')
@@ -2456,7 +2541,8 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                 buffer.writeln('• *Specialty:* $specialty');
                 if (clinic.isNotEmpty) buffer.writeln('• *Clinic:* $clinic');
                 if (docPhone.isNotEmpty) buffer.writeln('• *Doctor Mobile:* +91 $docPhone');
-                if (locationParts.isNotEmpty) buffer.writeln('• *Address:* ${locationParts.join(", ")}');
+                if (fullAddress.isNotEmpty) buffer.writeln('• *Address:* $fullAddress');
+                if (mapUrl.isNotEmpty) buffer.writeln('• 📍 *Location Map:* $mapUrl');
                 if (doc != null && doc.experienceYears > 0) buffer.writeln('• *Experience:* ${doc.experienceYears}+ Years (${doc.rating} ⭐)');
                 if (_complaintController.text.trim().isNotEmpty) {
                   buffer.writeln();

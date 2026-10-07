@@ -2705,13 +2705,23 @@ class PatientProblemService extends ChangeNotifier {
     }
   }
 
-  void removeDoctor(String doctorId) {
-    _allDoctors.removeWhere((d) => d.id == doctorId);
-    if (currentDoctor?.id == doctorId) {
+  Future<void> deleteDoctor(String doctorId) async {
+    _allDoctors.removeWhere((d) => d.id == doctorId || d.userId == doctorId);
+    if (currentDoctor?.id == doctorId || currentDoctor?.userId == doctorId) {
       currentDoctor = _allDoctors.firstOrNull;
     }
     _saveToStorage();
     notifyListeners();
+
+    try {
+      await ApiService().deleteDoctor(doctorId);
+    } catch (e) {
+      debugPrint('PatientProblemService deleteDoctor error: $e');
+    }
+  }
+
+  void removeDoctor(String doctorId) {
+    deleteDoctor(doctorId);
   }
 
   void removePatient(String email) {
@@ -2740,6 +2750,8 @@ class PatientProblemService extends ChangeNotifier {
     String state = '',
     String city = '',
     String pincode = '',
+    double? latitude,
+    double? longitude,
     List<String>? languages,
   }) {
     if (photoBytes != null) {
@@ -2787,6 +2799,8 @@ class PatientProblemService extends ChangeNotifier {
       clinicAddress: cleanAddress,
       city: cleanCity,
       pincode: cleanPincode,
+      latitude: latitude,
+      longitude: longitude,
       languages: doctorLangs,
     );
 
@@ -3214,6 +3228,12 @@ class PatientProblemService extends ChangeNotifier {
     required String clinicalComplaint,
     required String doctorId,
     String? referrerPatientId,
+    String? doctorName,
+    String? doctorClinicName,
+    String? doctorLocation,
+    String? doctorCity,
+    String? doctorPincode,
+    String? doctorPhone,
   }) async {
     try {
       final authUser = Supabase.instance.client.auth.currentUser;
@@ -3235,6 +3255,12 @@ class PatientProblemService extends ChangeNotifier {
         clinicalComplaint: clinicalComplaint,
         doctorId: doctorId,
         referrerPatientId: referrerId,
+        doctorName: doctorName,
+        doctorClinicName: doctorClinicName,
+        doctorLocation: doctorLocation,
+        doctorCity: doctorCity,
+        doctorPincode: doctorPincode,
+        doctorPhone: doctorPhone,
       );
 
       if (res['success'] == true && res['referral'] != null) {
@@ -3367,6 +3393,25 @@ class PatientProblemService extends ChangeNotifier {
       debugPrint('Error rejecting referral: $e');
     }
     return false;
+  }
+
+  /// Delete a Patient Referral
+  Future<bool> deletePatientReferral(String referralId) async {
+    try {
+      _myCreatedPatientReferrals.removeWhere((r) => r.id == referralId);
+      _doctorReceivedPatientReferrals.removeWhere((r) => r.id == referralId);
+      _receivedForMePatientReferrals.removeWhere((r) => r.id == referralId);
+      _adminPatientReferrals.removeWhere((r) => r.id == referralId);
+      _myReferrals.removeWhere((r) => r.id == referralId);
+      _adminReferrals.removeWhere((r) => r.id == referralId);
+      notifyListeners();
+
+      final res = await ApiService().deletePatientReferral(referralId);
+      return res['success'] == true;
+    } catch (e) {
+      debugPrint('Error deleting patient referral: $e');
+      return false;
+    }
   }
 
   Future<void> syncAdminReferralsFromApi() async {

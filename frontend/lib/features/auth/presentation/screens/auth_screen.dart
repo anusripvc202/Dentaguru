@@ -12,13 +12,14 @@ import '../../../../core/services/analytics_service.dart';
 import '../../../../core/services/session_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../../core/widgets/map_location_picker_dialog.dart';
 
 /// Role enum for authentication
 enum UserRole { patient, dentist, admin }
 
 class AuthScreen extends StatefulWidget {
   final String? initialRole; // 'Patient', 'Dentist', 'Admin'
-  final int initialTab; // 0 for Sign In, 1 for Register
+  final int initialTab; // 0 for Register, 1 for Sign In
   final bool? allowAdminRole;
 
   const AuthScreen({
@@ -53,6 +54,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   final _cityController = TextEditingController();
   final _pincodeController = TextEditingController();
   final _locationController = TextEditingController();
+  double? _selectedLatitude;
+  double? _selectedLongitude;
+  String? _selectedMapLocationName;
 
   // Role-Specific Fields - Patient
   final _ageController = TextEditingController();
@@ -151,7 +155,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       case UserRole.dentist:
         return 'Dentist';
       case UserRole.admin:
-        if (_tabController.index == 1) {
+        if (_tabController.index == 0) {
           return _selectedAdminRoleType == 'Admin' ? 'Primary Admin' : 'Sub-Admin';
         }
         return 'Admin';
@@ -496,14 +500,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       return;
     }
 
-    if (location.isEmpty) {
-      setState(() => _isRegistering = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('⚠️ Location / Address is a mandatory field.'), backgroundColor: Color(0xFFEF4444)),
-      );
-      return;
-    }
-
     // Language selection is mandatory for registration
     if (_selectedLanguage == null || _selectedLanguage!.trim().isEmpty) {
       setState(() => _isRegistering = false);
@@ -532,6 +528,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         location: location.isNotEmpty ? location : clinicAddress,
         city: city,
         pincode: pincode,
+        latitude: _selectedRole == UserRole.patient ? null : _selectedLatitude,
+        longitude: _selectedRole == UserRole.patient ? null : _selectedLongitude,
         profilePhoto: photoBase64,
         languages: selectedLangs,
         referralCode: _selectedRole == UserRole.patient && _referralCodeController.text.trim().isNotEmpty
@@ -581,6 +579,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               'city': city,
               'pincode': pincode,
               'address': location,
+              if (_selectedLatitude != null) 'latitude': _selectedLatitude,
+              if (_selectedLongitude != null) 'longitude': _selectedLongitude,
             },
           );
         } else if (_selectedRole == UserRole.dentist) {
@@ -597,6 +597,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             clinicAddress: clinicAddress.isNotEmpty ? clinicAddress : location,
             city: city,
             pincode: pincode,
+            latitude: _selectedLatitude,
+            longitude: _selectedLongitude,
             qualification: 'BDS, MDS',
             experienceYears: exp,
             photoBytes: _pickedImageBytes,
@@ -616,6 +618,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               'clinicAddress': clinicAddress.isNotEmpty ? clinicAddress : location,
               'city': city,
               'pincode': pincode,
+              if (_selectedLatitude != null) 'latitude': _selectedLatitude,
+              if (_selectedLongitude != null) 'longitude': _selectedLongitude,
               'experienceYears': exp,
               'languages': selectedLangs,
             },
@@ -1091,8 +1095,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             Expanded(
               child: Text(
                 _isAdminMode
-                    ? (_tabController.index == 1 ? 'Admin / Sub-Admin Registration' : 'Admin Portal Authentication')
-                    : (_tabController.index == 1 ? '$_roleName Registration' : '$_roleName Portal Authentication'),
+                    ? (_tabController.index == 0 ? 'Admin / Sub-Admin Registration' : 'Admin Portal Authentication')
+                    : (_tabController.index == 0 ? '$_roleName Registration' : '$_roleName Portal Authentication'),
                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -1207,7 +1211,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  _tabController.index == 1
+                                  _tabController.index == 0
                                       ? 'Create your $_roleName account on DentaGuru'
                                       : 'Select your role to access $_roleName Workspace',
                                   style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
@@ -1223,7 +1227,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     // Material 3 Dynamic Role Selector Segmented Bar
                     if (!_isAdminMode) ...[
                       Text(
-                        _tabController.index == 1 ? 'Registering as:' : 'Select User Role:',
+                        _tabController.index == 0 ? 'Registering as:' : 'Select User Role:',
                         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textDark),
                       ),
                       const SizedBox(height: 8),
@@ -1248,7 +1252,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            _tabController.index == 1 ? 'Registering Administrative Account:' : 'Administrative Workspace:',
+                            _tabController.index == 0 ? 'Registering Administrative Account:' : 'Administrative Workspace:',
                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textDark),
                           ),
                           InkWell(
@@ -1276,14 +1280,14 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                         ),
                         child: Row(
                           children: [
-                            _buildRoleTile(UserRole.admin, _tabController.index == 1 ? 'Sub-Admin / Admin' : 'Admin & Sub-Admin Portal', Icons.admin_panel_settings_rounded),
+                            _buildRoleTile(UserRole.admin, _tabController.index == 0 ? 'Sub-Admin / Admin' : 'Admin & Sub-Admin Portal', Icons.admin_panel_settings_rounded),
                           ],
                         ),
                       ),
                     ],
                     const SizedBox(height: 18),
 
-                    // Tab Bar (Sign In & Register)
+                    // Tab Bar (Register & Sign In)
                     Container(
                       height: 48,
                       padding: const EdgeInsets.all(4),
@@ -1323,9 +1327,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(Icons.login_rounded, size: 16),
+                                Icon(Icons.person_add_alt_1_rounded, size: 16),
                                 SizedBox(width: 6),
-                                Text('Sign In'),
+                                Text('Register'),
                               ],
                             ),
                           ),
@@ -1333,9 +1337,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(Icons.person_add_alt_1_rounded, size: 16),
+                                Icon(Icons.login_rounded, size: 16),
                                 SizedBox(width: 6),
-                                Text('Register'),
+                                Text('Sign In'),
                               ],
                             ),
                           ),
@@ -1348,8 +1352,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     AnimatedSwitcher(
                       duration: const Duration(milliseconds: 250),
                       child: _tabController.index == 0
-                          ? KeyedSubtree(key: const ValueKey('signin_tab'), child: _buildSignInForm())
-                          : KeyedSubtree(key: const ValueKey('register_tab'), child: _buildRegisterForm()),
+                          ? KeyedSubtree(key: const ValueKey('register_tab'), child: _buildRegisterForm())
+                          : KeyedSubtree(key: const ValueKey('signin_tab'), child: _buildSignInForm()),
                     ),
 
                     if (!_isAdminMode) ...[
@@ -1674,6 +1678,53 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ),
             const SizedBox(height: 12),
 
+            // Age & Gender Row (Directly after Name)
+            Row(
+              children: [
+                Expanded(
+                  flex: 4,
+                  child: TextFormField(
+                    controller: _ageController,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                    decoration: _buildInputDecoration(
+                      label: 'Age',
+                      hint: '28',
+                      icon: Icons.cake_outlined,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 6,
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _selectedGender,
+                    dropdownColor: Colors.white,
+                    isExpanded: true,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
+                    decoration: _buildInputDecoration(
+                      label: 'Gender',
+                      hint: '',
+                      icon: Icons.people_outline_rounded,
+                    ),
+                    items: ['Female', 'Male', 'Other', 'Prefer not to say'].map((g) {
+                      return DropdownMenuItem(
+                        value: g,
+                        child: Text(
+                          g,
+                          style: const TextStyle(color: Color(0xFF0F172A), fontSize: 12.5, fontWeight: FontWeight.w600),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (val) => setState(() => _selectedGender = val ?? 'Female'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
             // Mandatory Primary Identifier: Mobile Phone Number
             TextFormField(
               controller: _phoneController,
@@ -1726,6 +1777,47 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ),
             const SizedBox(height: 12),
 
+            // City & Pincode Row (Directly after Language)
+            Row(
+              children: [
+                // MANDATORY FIELD 1: City *
+                Expanded(
+                  child: TextFormField(
+                    controller: _cityController,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter City' : null,
+                    decoration: _buildInputDecoration(
+                      label: 'City',
+                      hint: 'e.g. City Name',
+                      isRequired: true,
+                      icon: Icons.location_city_rounded,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // MANDATORY FIELD 2: Pincode *
+                Expanded(
+                  child: TextFormField(
+                    controller: _pincodeController,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                    validator: (val) {
+                      if (val == null || val.trim().isEmpty) return 'Enter Pincode';
+                      if (val.trim().length != 6) return '6-digit PIN';
+                      return null;
+                    },
+                    decoration: _buildInputDecoration(
+                      label: 'Pincode',
+                      hint: '6-Digit PIN',
+                      isRequired: true,
+                      icon: Icons.pin_drop_outlined,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
             // Optional Field: Email Address
             TextFormField(
               controller: _emailController,
@@ -1743,6 +1835,95 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 isRequired: false,
                 icon: Icons.email_outlined,
               ),
+            ),
+            const SizedBox(height: 12),
+
+            // Optional Field: Location / Clinic Address (with Map Pinning for Dentists/Admins)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextFormField(
+                  controller: _selectedRole == UserRole.dentist ? _clinicAddressController : _locationController,
+                  style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                  decoration: _buildInputDecoration(
+                    label: _selectedRole == UserRole.dentist
+                        ? 'Location / Clinic Address'
+                        : _selectedRole == UserRole.admin
+                            ? 'Location / Office Address (Optional)'
+                            : 'Location / Address (Optional)',
+                    hint: _selectedRole == UserRole.dentist
+                        ? 'Tap "Pick from Map" or enter clinic address'
+                        : _selectedRole == UserRole.admin
+                            ? 'e.g. Headquarters / Branch Area'
+                            : 'e.g. Door No, Street / Area Name',
+                    isRequired: false,
+                    icon: Icons.location_on_outlined,
+                    suffixIcon: _selectedRole == UserRole.patient
+                        ? null
+                        : Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: InkWell(
+                              onTap: _openMapLocationPicker,
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: _accentColor.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: _accentColor.withValues(alpha: 0.3)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.map_rounded, size: 14, color: _accentColor),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Pick on Map',
+                                      style: TextStyle(
+                                        color: _accentColor,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                  ),
+                ),
+                if (_selectedRole != UserRole.patient && _selectedLatitude != null && _selectedLongitude != null) ...[
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFECFDF5),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFA7F3D0)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.location_pin, size: 14, color: Color(0xFF059669)),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            '📍 Map Pin: ${_selectedMapLocationName ?? 'Pinned Location'} (${_selectedLatitude!.toStringAsFixed(4)}, ${_selectedLongitude!.toStringAsFixed(4)})',
+                            style: const TextStyle(fontSize: 11, color: Color(0xFF065F46), fontWeight: FontWeight.w600),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        InkWell(
+                          onTap: _openMapLocationPicker,
+                          child: const Text(
+                            'Change',
+                            style: TextStyle(fontSize: 11, color: Color(0xFF059669), fontWeight: FontWeight.bold, decoration: TextDecoration.underline),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
             ),
             const SizedBox(height: 12),
 
@@ -1830,51 +2011,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         return Column(
           key: const ValueKey('patient_fields'),
           children: [
-            Row(
-              children: [
-                Expanded(
-                  flex: 4,
-                  child: TextFormField(
-                    controller: _ageController,
-                    keyboardType: TextInputType.number,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                    decoration: _buildInputDecoration(
-                      label: 'Age',
-                      hint: '28',
-                      icon: Icons.cake_outlined,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 6,
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _selectedGender,
-                    dropdownColor: Colors.white,
-                    isExpanded: true,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
-                    decoration: _buildInputDecoration(
-                      label: 'Gender',
-                      hint: '',
-                      icon: Icons.people_outline_rounded,
-                    ),
-                    items: ['Female', 'Male', 'Other', 'Prefer not to say'].map((g) {
-                      return DropdownMenuItem(
-                        value: g,
-                        child: Text(
-                          g,
-                          style: const TextStyle(color: Color(0xFF0F172A), fontSize: 12.5, fontWeight: FontWeight.w600),
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 1,
-                        ),
-                      );
-                    }).toList(),
-                    onChanged: (val) => setState(() => _selectedGender = val ?? 'Female'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               initialValue: _selectedBloodGroup,
               dropdownColor: Colors.white,
@@ -1928,58 +2064,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 hint: 'e.g. DG-RAH7302',
                 icon: Icons.card_giftcard_rounded,
               ),
-            ),
-            const SizedBox(height: 12),
-            // MANDATORY FIELD 1: Location *
-            TextFormField(
-              controller: _locationController,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-              validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter Location / Street Address' : null,
-              decoration: _buildInputDecoration(
-                label: 'Location / Address',
-                hint: 'e.g. Door No, Street / Area Name',
-                isRequired: true,
-                icon: Icons.location_on_outlined,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                // MANDATORY FIELD 2: City *
-                Expanded(
-                  child: TextFormField(
-                    controller: _cityController,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter City' : null,
-                    decoration: _buildInputDecoration(
-                      label: 'City',
-                      hint: 'e.g. City Name',
-                      isRequired: true,
-                      icon: Icons.location_city_rounded,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // MANDATORY FIELD 3: Pincode *
-                Expanded(
-                  child: TextFormField(
-                    controller: _pincodeController,
-                    keyboardType: TextInputType.number,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                    validator: (val) {
-                      if (val == null || val.trim().isEmpty) return 'Enter Pincode';
-                      if (val.trim().length != 6) return '6-digit PIN';
-                      return null;
-                    },
-                    decoration: _buildInputDecoration(
-                      label: 'Pincode',
-                      hint: '6-Digit PIN',
-                      isRequired: true,
-                      icon: Icons.pin_drop_outlined,
-                    ),
-                  ),
-                ),
-              ],
             ),
           ],
         );
@@ -2057,60 +2141,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 hint: '5',
                 icon: Icons.work_outline_rounded,
               ),
-            ),
-            const SizedBox(height: 12),
-
-            // MANDATORY FIELD 1: Location / Clinic Address *
-            TextFormField(
-              controller: _clinicAddressController,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-              validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter Location / Clinic Address' : null,
-              decoration: _buildInputDecoration(
-                label: 'Location / Clinic Address',
-                hint: 'e.g. Area / Landmark / Street',
-                isRequired: true,
-                icon: Icons.location_on_outlined,
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            Row(
-              children: [
-                // MANDATORY FIELD 2: City *
-                Expanded(
-                  child: TextFormField(
-                    controller: _cityController,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter City' : null,
-                    decoration: _buildInputDecoration(
-                      label: 'City',
-                      hint: 'e.g. City Name',
-                      isRequired: true,
-                      icon: Icons.location_city_rounded,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // MANDATORY FIELD 3: Pincode *
-                Expanded(
-                  child: TextFormField(
-                    controller: _pincodeController,
-                    keyboardType: TextInputType.number,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                    validator: (val) {
-                      if (val == null || val.trim().isEmpty) return 'Enter Pincode';
-                      if (val.trim().length != 6) return '6-digit PIN';
-                      return null;
-                    },
-                    decoration: _buildInputDecoration(
-                      label: 'Pincode',
-                      hint: '6-Digit PIN',
-                      isRequired: true,
-                      icon: Icons.pin_drop_outlined,
-                    ),
-                  ),
-                ),
-              ],
             ),
           ],
         );
@@ -2249,58 +2279,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               ),
             ),
             const SizedBox(height: 12),
-            // MANDATORY FIELD 1: Location *
-            TextFormField(
-              controller: _locationController,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-              validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter Location / Office Address' : null,
-              decoration: _buildInputDecoration(
-                label: 'Location / Office Address',
-                hint: 'e.g. Headquarters / Branch Area',
-                isRequired: true,
-                icon: Icons.location_on_outlined,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                // MANDATORY FIELD 2: City *
-                Expanded(
-                  child: TextFormField(
-                    controller: _cityController,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter City' : null,
-                    decoration: _buildInputDecoration(
-                      label: 'City',
-                      hint: 'e.g. City Name',
-                      isRequired: true,
-                      icon: Icons.location_city_rounded,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // MANDATORY FIELD 3: Pincode *
-                Expanded(
-                  child: TextFormField(
-                    controller: _pincodeController,
-                    keyboardType: TextInputType.number,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                    validator: (val) {
-                      if (val == null || val.trim().isEmpty) return 'Enter Pincode';
-                      if (val.trim().length != 6) return '6-digit PIN';
-                      return null;
-                    },
-                    decoration: _buildInputDecoration(
-                      label: 'Pincode',
-                      hint: '6-Digit PIN',
-                      isRequired: true,
-                      icon: Icons.pin_drop_outlined,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
             TextFormField(
               controller: _adminEmployeeIdController,
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
@@ -2382,6 +2360,39 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: Color(0xFFEF4444)),
       ),
+    );
+  }
+
+  void _openMapLocationPicker() {
+    MapLocationPickerDialog.show(
+      context: context,
+      initialAddress: _selectedRole == UserRole.dentist ? _clinicAddressController.text : _locationController.text,
+      initialCity: _cityController.text,
+      initialPincode: _pincodeController.text,
+      initialLat: _selectedLatitude,
+      initialLng: _selectedLongitude,
+      isDentist: _selectedRole == UserRole.dentist,
+      onLocationSelected: (address, city, pincode, lat, lng, locationName) {
+        setState(() {
+          if (_selectedRole == UserRole.dentist) {
+            _clinicAddressController.text = address;
+          } else {
+            _locationController.text = address;
+          }
+          if (city.isNotEmpty) _cityController.text = city;
+          if (pincode.isNotEmpty) _pincodeController.text = pincode;
+          _selectedLatitude = lat;
+          _selectedLongitude = lng;
+          _selectedMapLocationName = locationName;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('📍 Map Location Attached: $address, $city ($pincode)'),
+            backgroundColor: const Color(0xFF10B981),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      },
     );
   }
 }
