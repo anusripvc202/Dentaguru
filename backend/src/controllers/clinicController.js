@@ -246,6 +246,8 @@ exports.addPatientDoctor = async (req, res) => {
         console.error('Add Patient Doctor Error:', err.message);
         res.status(500).json({ success: false, message: 'Failed to add doctor to patient list.' });
     }
+};
+
 // 7. REMOVE DOCTOR FROM PATIENT'S "MY DOCTORS"
 exports.removePatientDoctor = async (req, res) => {
     try {
