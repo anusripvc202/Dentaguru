@@ -83,7 +83,7 @@ exports.register = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Phone number already registered. Please sign in with OTP.' });
         }
 
-        // 2. Mandatory Fields Validation: City, Pincode, Language, Location
+        // 2. Mandatory Fields Validation: City, Pincode
         const normalizedCity = (city || '').toString().trim();
         const normalizedPincode = (pincode || '').toString().trim();
         const normalizedLocation = (location || clinicAddress || state || '').toString().trim();
@@ -101,9 +101,6 @@ exports.register = async (req, res) => {
         if (!normalizedPincode) {
             return res.status(400).json({ success: false, message: 'Pincode is mandatory for registration.' });
         }
-        if (cleanLanguages.length === 0) {
-            return res.status(400).json({ success: false, message: 'Language selection is mandatory for registration.' });
-        }
 
         // Generate unique referral code for this user
         const cleanNamePrefix = (name || 'PAT').replace(/[^a-zA-Z]/g, '').substring(0, 3).toUpperCase() || 'DEN';
@@ -114,7 +111,7 @@ exports.register = async (req, res) => {
             ? password.trim()
             : (`OTP_SECURE_${require('crypto').randomBytes(12).toString('hex')}`);
 
-        const finalLanguages = cleanLanguages;
+        const finalLanguages = cleanLanguages.length > 0 ? cleanLanguages : ['English'];
 
         let user;
         const profileMetaObj = {

@@ -95,6 +95,43 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   final _otpController = TextEditingController();
   String? _otpErrorMessage;
   String? _currentExpectedOtp;
+  String? _verifiedPhone;
+  String? _verifiedEmail;
+
+  String _normalizePhone(String raw) {
+    final digits = raw.trim().replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length == 12 && digits.startsWith('91')) {
+      return digits.substring(2);
+    }
+    if (digits.length == 11 && digits.startsWith('0')) {
+      return digits.substring(1);
+    }
+    return digits;
+  }
+
+  bool _isValidMobilePhone(String raw) {
+    final normalized = _normalizePhone(raw);
+    return normalized.length == 10 && RegExp(r'^\d{10}$').hasMatch(normalized);
+  }
+
+  void _onContactDetailsChanged() {
+    final currentPhone = _normalizePhone(_phoneController.text);
+    final currentEmail = _emailController.text.trim().toLowerCase();
+    final phoneChanged = _verifiedPhone != null && currentPhone != _verifiedPhone;
+    final emailChanged = _verifiedEmail != null && currentEmail != _verifiedEmail;
+
+    if ((_isOtpVerified || _isOtpSent) && (phoneChanged || emailChanged)) {
+      setState(() {
+        _isOtpVerified = false;
+        _isOtpSent = false;
+        _currentExpectedOtp = null;
+        _otpErrorMessage = null;
+        _verifiedPhone = null;
+        _verifiedEmail = null;
+        _otpController.clear();
+      });
+    }
+  }
 
   @override
   void initState() {
@@ -103,6 +140,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     _tabController.addListener(() {
       setState(() {});
     });
+    _phoneController.addListener(_onContactDetailsChanged);
+    _emailController.addListener(_onContactDetailsChanged);
 
     // Auto-populate referral code if opened with ?ref=... parameter
     try {
@@ -128,6 +167,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
   @override
   void dispose() {
+    _phoneController.removeListener(_onContactDetailsChanged);
+    _emailController.removeListener(_onContactDetailsChanged);
     _tabController.dispose();
     _loginEmailController.dispose();
     _nameController.dispose();
@@ -142,6 +183,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     _clinicAddressController.dispose();
     _adminEmployeeIdController.dispose();
     _adminDeptController.dispose();
+    _cityController.dispose();
     _pincodeController.dispose();
     _locationController.dispose();
     _otpController.dispose();
@@ -459,14 +501,40 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   }
 
   void _handleRegister() async {
+    if (_isRegistering) return;
     if (!_registerFormKey.currentState!.validate()) return;
-    setState(() => _isRegistering = true);
 
     final name = _nameController.text.trim();
     final email = _emailController.text.trim();
-    final phone = _phoneController.text.trim();
+    final rawPhone = _phoneController.text.trim();
+    final phone = _normalizePhone(rawPhone);
     final registeredAge = _ageController.text.trim();
 
+    if (rawPhone.isEmpty || !_isValidMobilePhone(rawPhone)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('⚠️ Please enter a valid 10-digit Mobile Phone Number.'),
+          backgroundColor: Color(0xFFEF4444),
+        ),
+      );
+      return;
+    }
+
+    if (!_isOtpVerified || _verifiedPhone == null || _verifiedPhone != phone) {
+      setState(() {
+        _isOtpVerified = false;
+        _isOtpSent = false;
+        _currentExpectedOtp = null;
+        _verifiedPhone = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('⚠️ Mobile number changed or not verified. Please verify OTP for the current number.'),
+          backgroundColor: Color(0xFFEF4444),
+        ),
+      );
+      return;
+    }
 
     String? photoBase64;
     if (_pickedImageBytes != null) {
@@ -485,31 +553,24 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
     // Mandatory Field Validations
     if (city.isEmpty) {
-      setState(() => _isRegistering = false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('⚠️ City is a mandatory field.'), backgroundColor: Color(0xFFEF4444)),
       );
       return;
     }
 
-    if (pincode.isEmpty || pincode.length != 6) {
-      setState(() => _isRegistering = false);
+    if (pincode.isEmpty || !RegExp(r'^\d{6}$').hasMatch(pincode)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('⚠️ Please enter a valid 6-digit Pincode.'), backgroundColor: Color(0xFFEF4444)),
       );
       return;
     }
 
-    // Language selection is mandatory for registration
-    if (_selectedLanguage == null || _selectedLanguage!.trim().isEmpty) {
-      setState(() => _isRegistering = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('⚠️ Preferred Language selection is mandatory.'), backgroundColor: Color(0xFFEF4444)),
-      );
-      return;
-    }
+    setState(() => _isRegistering = true);
 
-    final selectedLangs = [_selectedLanguage!];
+    final List<String> selectedLangs = (_selectedLanguage != null && _selectedLanguage!.trim().isNotEmpty)
+        ? [_selectedLanguage!.trim()]
+        : <String>['English'];
 
     try {
       final res = await ApiService().registerUser(
@@ -524,8 +585,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         specialty: _selectedRole == UserRole.dentist ? _selectedSpecialty : null,
         licenseNumber: _selectedRole == UserRole.dentist ? _licenseNoController.text.trim() : null,
         clinicName: _selectedRole == UserRole.dentist ? _clinicNameController.text.trim() : null,
-        clinicAddress: _selectedRole == UserRole.dentist ? clinicAddress : null,
-        location: location.isNotEmpty ? location : clinicAddress,
+        clinicAddress: _selectedRole == UserRole.dentist && clinicAddress.isNotEmpty ? clinicAddress : null,
+        location: location.isNotEmpty ? location : (_selectedRole == UserRole.dentist && clinicAddress.isNotEmpty ? clinicAddress : null),
         city: city,
         pincode: pincode,
         latitude: _selectedRole == UserRole.patient ? null : _selectedLatitude,
@@ -538,7 +599,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       );
 
       if (!mounted) return;
-      setState(() => _isRegistering = false);
 
       if (res['success'] == true) {
         final Map<String, dynamic> regData = res['data'] is Map<String, dynamic> ? res['data'] : {};
@@ -667,8 +727,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           );
         }
 
-        await PatientProblemService().syncAllDataFromApi();
+        // Trigger background data sync without blocking UI navigation
+        PatientProblemService().syncAllDataFromApi();
         if (!mounted) return;
+        setState(() => _isRegistering = false);
         AnalyticsService.logRegistration(method: 'Mobile_OTP', role: chosenRole);
 
         ScaffoldMessenger.of(context).clearSnackBars();
@@ -681,6 +743,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         );
         context.go(_targetRoute);
       } else {
+        setState(() => _isRegistering = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('❌ ${res['message'] ?? 'Could not register user.'}'),
@@ -701,13 +764,17 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   }
 
   Future<void> _handleSendOtp() async {
-    final phone = _phoneController.text.trim();
+    final rawPhone = _phoneController.text.trim();
+    final phone = _normalizePhone(rawPhone);
     final email = _emailController.text.trim();
 
-    if (phone.isEmpty && email.isEmpty) {
+    if (rawPhone.isEmpty || !_isValidMobilePhone(rawPhone)) {
+      setState(() {
+        _otpErrorMessage = 'Please enter a valid 10-digit mobile phone number.';
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('⚠️ Please enter your Mobile Number or Email Address to receive OTP.'),
+          content: Text('⚠️ Please enter a valid 10-digit Mobile Phone Number to receive OTP.'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -716,8 +783,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
     setState(() {
       _isSendingOtp = true;
+      _isOtpVerified = false;
       _otpErrorMessage = null;
       _currentExpectedOtp = null;
+      _verifiedPhone = phone;
+      _verifiedEmail = email.toLowerCase();
     });
 
     bool sendSuccess = false;
@@ -781,13 +851,33 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       return;
     }
 
+    final rawPhone = _phoneController.text.trim();
+    final phone = _normalizePhone(rawPhone);
+    final email = _emailController.text.trim();
+
+    if (rawPhone.isEmpty || !_isValidMobilePhone(rawPhone)) {
+      setState(() {
+        _isOtpVerified = false;
+        _isOtpSent = false;
+        _otpErrorMessage = 'Please enter a valid 10-digit mobile number.';
+      });
+      return;
+    }
+
+    if (_verifiedPhone != null && _verifiedPhone != phone) {
+      setState(() {
+        _isOtpVerified = false;
+        _isOtpSent = false;
+        _currentExpectedOtp = null;
+        _otpErrorMessage = 'Mobile number changed. Please send a new OTP.';
+      });
+      return;
+    }
+
     setState(() {
       _isVerifyingOtp = true;
       _otpErrorMessage = null;
     });
-
-    final phone = _phoneController.text.trim();
-    final email = _emailController.text.trim();
 
     bool verified = false;
 
@@ -815,6 +905,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       AnalyticsService.logOtpVerification(status: 'verified', method: phone.isNotEmpty ? 'SMS_Mobile_OTP' : 'Email_OTP');
       setState(() {
         _isOtpVerified = true;
+        _verifiedPhone = phone;
+        _verifiedEmail = email.toLowerCase();
         _otpErrorMessage = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(
@@ -907,6 +999,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 onPressed: _isSendingOtp ? null : _handleSendOtp,
               ),
             ),
+            if (_otpErrorMessage != null) ...[
+              const SizedBox(height: 6),
+              Text(_otpErrorMessage!, style: const TextStyle(color: Color(0xFFEF4444), fontSize: 11, fontWeight: FontWeight.w600)),
+            ],
           ] else if (!_isOtpVerified && _isOtpSent) ...[
             Container(
               margin: const EdgeInsets.only(bottom: 10),
@@ -1672,7 +1768,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                         ? 'Administrator / Sub-Admin Full Name'
                         : 'Patient Full Name',
                 hint: _selectedRole == UserRole.dentist ? 'e.g. Dr. Jane Smith' : 'e.g. Jane Smith',
-                isRequired: false,
+                isRequired: true,
                 icon: Icons.person_outline_rounded,
               ),
             ),
@@ -1732,25 +1828,24 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
               validator: (val) {
                 if (val == null || val.trim().isEmpty) return 'Mobile phone number is mandatory';
-                final clean = val.replaceAll(RegExp(r'[^0-9]'), '');
-                if (clean.length < 10) return 'Enter valid 10-digit mobile number';
+                if (!_isValidMobilePhone(val)) return 'Enter valid 10-digit mobile number';
                 return null;
               },
               decoration: _buildInputDecoration(
                 label: 'Mobile Phone Number',
                 hint: '+91 98765 43210',
-                isRequired: false,
+                isRequired: true,
                 icon: Icons.phone_android_rounded,
               ),
             ),
             const SizedBox(height: 12),
 
-            // Mandatory Primary Identifier: Preferred Language
+            // Optional Field: Preferred Language
             DropdownButtonFormField<String>(
               initialValue: _selectedLanguage,
               dropdownColor: Colors.white,
               isExpanded: true,
-              validator: (val) => (val == null || val.isEmpty) ? 'Please select a preferred Language' : null,
+              validator: (val) => null,
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
               decoration: _buildInputDecoration(
                 label: 'Select Language',
@@ -1785,11 +1880,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   child: TextFormField(
                     controller: _cityController,
                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                    validator: (val) => null,
+                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter your city' : null,
                     decoration: _buildInputDecoration(
                       label: 'City',
                       hint: 'e.g. City Name',
-                      isRequired: false,
+                      isRequired: true,
                       icon: Icons.location_city_rounded,
                     ),
                   ),
@@ -1803,13 +1898,13 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                     validator: (val) {
                       if (val == null || val.trim().isEmpty) return 'Enter Pincode';
-                      if (val.trim().length != 6) return '6-digit PIN';
+                      if (!RegExp(r'^\d{6}$').hasMatch(val.trim())) return '6-digit PIN';
                       return null;
                     },
                     decoration: _buildInputDecoration(
                       label: 'Pincode',
                       hint: '6-Digit PIN',
-                      isRequired: false,
+                      isRequired: true,
                       icon: Icons.pin_drop_outlined,
                     ),
                   ),
@@ -1832,7 +1927,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               decoration: _buildInputDecoration(
                 label: 'Email Address (Optional)',
                 hint: 'user@dentaguru.com (Optional)',
-                isRequired: false,
+                isRequired: false, // optional per requirement
                 icon: Icons.email_outlined,
               ),
             ),
@@ -1844,6 +1939,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               children: [
                 TextFormField(
                   controller: _selectedRole == UserRole.dentist ? _clinicAddressController : _locationController,
+                  validator: (val) => null,
                   style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                   decoration: _buildInputDecoration(
                     label: _selectedRole == UserRole.dentist
@@ -1856,7 +1952,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                         : _selectedRole == UserRole.admin
                             ? 'e.g. Headquarters / Branch Area'
                             : 'e.g. Door No, Street / Area Name',
-                    isRequired: false,
+                    isRequired: false, // optional per requirement
                     icon: Icons.location_on_outlined,
                     suffixIcon: _selectedRole == UserRole.patient
                         ? null
@@ -2079,7 +2175,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               decoration: _buildInputDecoration(
                 label: 'Dental Council License Number',
                 hint: 'e.g. DEN-LIC-88490',
-                isRequired: false,
+                isRequired: true,
                 icon: Icons.badge_outlined,
               ),
             ),
@@ -2089,11 +2185,12 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               initialValue: _selectedSpecialty,
               isExpanded: true,
               dropdownColor: Colors.white,
+              validator: (val) => (val == null || val.trim().isEmpty) ? 'Please select a specialty' : null,
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
               decoration: _buildInputDecoration(
                 label: 'Select Specialty',
                 hint: '',
-                isRequired: false,
+                isRequired: true,
                 icon: Icons.medical_services_outlined,
               ),
               items: [
@@ -2126,7 +2223,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               decoration: _buildInputDecoration(
                 label: 'Primary Clinic Name',
                 hint: 'e.g. Metro Dental Care Practice',
-                isRequired: false,
+                isRequired: true,
                 icon: Icons.domain_rounded,
               ),
             ),
