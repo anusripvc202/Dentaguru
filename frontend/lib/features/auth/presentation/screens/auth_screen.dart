@@ -1664,7 +1664,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             TextFormField(
               controller: _nameController,
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-              validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter full name' : null,
+              validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter your name' : null,
               decoration: _buildInputDecoration(
                 label: _selectedRole == UserRole.dentist
                     ? 'Practice Full Name & Title'
@@ -1672,7 +1672,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                         ? 'Administrator / Sub-Admin Full Name'
                         : 'Patient Full Name',
                 hint: _selectedRole == UserRole.dentist ? 'e.g. Dr. Jane Smith' : 'e.g. Jane Smith',
-                isRequired: true,
+                isRequired: false,
                 icon: Icons.person_outline_rounded,
               ),
             ),
@@ -1739,7 +1739,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               decoration: _buildInputDecoration(
                 label: 'Mobile Phone Number',
                 hint: '+91 98765 43210',
-                isRequired: true,
+                isRequired: false,
                 icon: Icons.phone_android_rounded,
               ),
             ),
@@ -1755,7 +1755,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               decoration: _buildInputDecoration(
                 label: 'Select Language',
                 hint: '',
-                isRequired: true,
+                isRequired: false,
                 icon: Icons.translate_rounded,
               ),
               items: _availableLanguages.map((lang) {
@@ -1785,11 +1785,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   child: TextFormField(
                     controller: _cityController,
                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter City' : null,
+                    validator: (val) => null,
                     decoration: _buildInputDecoration(
                       label: 'City',
                       hint: 'e.g. City Name',
-                      isRequired: true,
+                      isRequired: false,
                       icon: Icons.location_city_rounded,
                     ),
                   ),
@@ -1809,7 +1809,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     decoration: _buildInputDecoration(
                       label: 'Pincode',
                       hint: '6-Digit PIN',
-                      isRequired: true,
+                      isRequired: false,
                       icon: Icons.pin_drop_outlined,
                     ),
                   ),
@@ -2079,7 +2079,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               decoration: _buildInputDecoration(
                 label: 'Dental Council License Number',
                 hint: 'e.g. DEN-LIC-88490',
-                isRequired: true,
+                isRequired: false,
                 icon: Icons.badge_outlined,
               ),
             ),
@@ -2093,7 +2093,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               decoration: _buildInputDecoration(
                 label: 'Select Specialty',
                 hint: '',
-                isRequired: true,
+                isRequired: false,
                 icon: Icons.medical_services_outlined,
               ),
               items: [
@@ -2126,7 +2126,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               decoration: _buildInputDecoration(
                 label: 'Primary Clinic Name',
                 hint: 'e.g. Metro Dental Care Practice',
-                isRequired: true,
+                isRequired: false,
                 icon: Icons.domain_rounded,
               ),
             ),
