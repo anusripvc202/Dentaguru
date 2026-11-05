@@ -38,7 +38,7 @@ const AndroidNotificationChannel _channel = AndroidNotificationChannel(
 /// and foreground/background notification handling.
 class FirebaseService {
   static FirebaseMessaging get _messaging => FirebaseMessaging.instance;
-  static final FirebaseAuth _auth = FirebaseAuth.instance;
+  static FirebaseAuth get _auth => FirebaseAuth.instance;
   static const _secureStorage = FlutterSecureStorage();
   static String? _verificationId;
 

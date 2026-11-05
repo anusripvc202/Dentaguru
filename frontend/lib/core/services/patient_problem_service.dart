@@ -700,6 +700,15 @@ class PatientProblemService extends ChangeNotifier {
     }
   }
 
+  // Helper to safely access auth user email without throwing when uninitialized
+  String? get _safeAuthUserEmail {
+    try {
+      return Supabase.instance.client.auth.currentUser?.email?.trim().toLowerCase();
+    } catch (_) {
+      return null;
+    }
+  }
+
   // Scoped "My Doctors" saved by the currently logged-in patient
   final Set<String> _myDoctorIds = {};
 
@@ -875,7 +884,7 @@ class PatientProblemService extends ChangeNotifier {
       }
 
       // 2. Load Doctor Profile scoped to authenticated email
-      final authEmail = Supabase.instance.client.auth.currentUser?.email?.trim().toLowerCase();
+      final authEmail = _safeAuthUserEmail;
       String? dStr;
       if (authEmail != null && authEmail.isNotEmpty) {
         dStr = prefs.getString('dentaguru_current_doctor_$authEmail');

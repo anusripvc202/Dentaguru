@@ -1,14 +1,15 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
 
 /// CrashlyticsService — Centralized error and crash reporting service
 /// Captures fatal crashes, non-fatal errors, and diagnostic logs safely without storing PII/PHI.
 class CrashlyticsService {
-  static final FirebaseCrashlytics _crashlytics = FirebaseCrashlytics.instance;
+  static FirebaseCrashlytics get _crashlytics => FirebaseCrashlytics.instance;
 
   /// Initialize Crashlytics Error Handlers
   static Future<void> initialize() async {
-    if (kIsWeb) {
+    if (kIsWeb || Firebase.apps.isEmpty) {
       debugPrint('💥 Crashlytics: Skipping setup on Web platform');
       return;
     }

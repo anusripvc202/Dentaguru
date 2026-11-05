@@ -1,15 +1,18 @@
 import 'package:firebase_analytics/firebase_analytics.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 
 /// AnalyticsService — Centralized Firebase Analytics tracking service
 /// Tracks user engagement & events without logging sensitive patient/medical data.
 class AnalyticsService {
-  static final FirebaseAnalytics _analytics = FirebaseAnalytics.instance;
+  static bool get _isFirebaseReady => !kIsWeb && Firebase.apps.isNotEmpty;
+  static FirebaseAnalytics get _analytics => FirebaseAnalytics.instance;
   static FirebaseAnalyticsObserver get observer =>
       FirebaseAnalyticsObserver(analytics: _analytics);
 
   /// 1. App Open Event
   static Future<void> logAppOpen() async {
+    if (!_isFirebaseReady) return;
     try {
       await _analytics.logAppOpen();
       debugPrint('📊 Firebase Analytics: logAppOpen');
@@ -23,6 +26,7 @@ class AnalyticsService {
     required String method,
     required String role,
   }) async {
+    if (!_isFirebaseReady) return;
     try {
       await _analytics.logLogin(
         loginMethod: method,
@@ -41,6 +45,7 @@ class AnalyticsService {
     required String role,
     String method = 'Email_Password',
   }) async {
+    if (!_isFirebaseReady) return;
     try {
       await _analytics.logSignUp(
         signUpMethod: method,
@@ -59,6 +64,7 @@ class AnalyticsService {
     required String status,
     required String method,
   }) async {
+    if (!_isFirebaseReady) return;
     try {
       await _analytics.logEvent(
         name: 'otp_verification',
@@ -79,6 +85,7 @@ class AnalyticsService {
     String? serviceName,
     String? clinicId,
   }) async {
+    if (!_isFirebaseReady) return;
     try {
       await _analytics.logEvent(
         name: 'appointment_booked',
@@ -99,6 +106,7 @@ class AnalyticsService {
     required String doctorId,
     String? specialty,
   }) async {
+    if (!_isFirebaseReady) return;
     try {
       await _analytics.logEvent(
         name: 'doctor_selected',
@@ -117,6 +125,7 @@ class AnalyticsService {
   static Future<void> logConsultationCompleted({
     required String appointmentId,
   }) async {
+    if (!_isFirebaseReady) return;
     try {
       await _analytics.logEvent(
         name: 'consultation_completed',
@@ -135,6 +144,7 @@ class AnalyticsService {
     required String notificationType,
     String action = 'received',
   }) async {
+    if (!_isFirebaseReady) return;
     try {
       await _analytics.logEvent(
         name: 'notification_interaction',
@@ -151,6 +161,7 @@ class AnalyticsService {
 
   /// Set User ID for Analytics (Non-sensitive ID)
   static Future<void> setUserId(String userId) async {
+    if (!_isFirebaseReady) return;
     try {
       await _analytics.setUserId(id: userId);
       debugPrint('📊 Firebase Analytics: setUserId ($userId)');

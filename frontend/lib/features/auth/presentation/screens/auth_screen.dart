@@ -812,11 +812,15 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
     // 2. Email OTP via Supabase Auth & Supabase Email Service
     if (email.isNotEmpty) {
-      final supabaseRes = await SupabaseService().sendEmailOtp(email);
-      final emailSent = supabaseRes['success'] == true;
-      sendSuccess = sendSuccess || emailSent;
-      if (emailSent && successMsg.isEmpty) {
-        successMsg = 'OTP sent to your email address.';
+      if (sendSuccess) {
+        SupabaseService().sendEmailOtp(email);
+      } else {
+        final supabaseRes = await SupabaseService().sendEmailOtp(email);
+        final emailSent = supabaseRes['success'] == true;
+        sendSuccess = sendSuccess || emailSent;
+        if (emailSent && successMsg.isEmpty) {
+          successMsg = 'OTP sent to your email address.';
+        }
       }
     }
 
