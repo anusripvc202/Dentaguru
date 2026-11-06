@@ -199,13 +199,13 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  preselectedDoctor != null ? 'Book with ${preselectedDoctor.name}' : 'Book a Dentist',
+                                  preselectedDoctor != null ? 'Book with ${preselectedDoctor.name}' : 'Connect to a Doctor',
                                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppTheme.textDark),
                                 ),
                                 Text(
                                   preselectedDoctor != null
                                       ? '${preselectedDoctor.specialty} • ${preselectedDoctor.clinicName.isNotEmpty ? preselectedDoctor.clinicName : "DentaGuru Clinic"}'
-                                      : 'Submit symptoms & get recommended a specialized Doctor',
+                                      : 'Explore doctors and connect with a specialized dentist.',
                                   style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                 ),
                               ],
@@ -835,12 +835,12 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Book a Dentist',
+                              'Connect to a Doctor',
                               style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
                             ),
                             SizedBox(height: 3),
                             Text(
-                              'Report symptoms & get recommended a specialized Doctor',
+                              'Explore doctors and connect with a specialized dentist.',
                               style: TextStyle(color: Colors.white70, fontSize: 11, height: 1.3),
                             ),
                           ],
@@ -3219,7 +3219,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
 
                     // Step 1: Select Favourite Doctor
                     const Text(
-                      '1. Select Favourite Doctor ("My Doctors")',
+                      '1. Select Favourite Doctor ("My Favourite Doctors")',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
@@ -3247,7 +3247,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                             ),
                             const SizedBox(height: 4),
                             const Text(
-                              'Add a doctor to "My Doctors" on the Home tab first, or quick-add from available specialists below:',
+                              'Add a doctor to "My Favourite Doctors" on the Home tab first, or quick-add from available specialists below:',
                               textAlign: TextAlign.center,
                               style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
                             ),
@@ -4187,12 +4187,16 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                           color: _doctorTabFilter == 0 ? const Color(0xFFD97706) : AppTheme.textMuted,
                         ),
                         const SizedBox(width: 6),
-                        Text(
-                          'My Doctors (${myDoctors.length})',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: _doctorTabFilter == 0 ? AppTheme.textDark : AppTheme.textMuted,
+                        Flexible(
+                          child: Text(
+                            'My Favourite Doctors (${myDoctors.length})',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: _doctorTabFilter == 0 ? AppTheme.textDark : AppTheme.textMuted,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
@@ -4229,12 +4233,16 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                           color: _doctorTabFilter == 1 ? AppTheme.primaryBlue : AppTheme.textMuted,
                         ),
                         const SizedBox(width: 6),
-                        Text(
-                          'All Doctors (${allDoctors.length})',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: _doctorTabFilter == 1 ? AppTheme.textDark : AppTheme.textMuted,
+                        Flexible(
+                          child: Text(
+                            'All Doctors (${allDoctors.length})',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: _doctorTabFilter == 1 ? AppTheme.textDark : AppTheme.textMuted,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
@@ -4358,7 +4366,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                   _doctorSearchQuery.isNotEmpty
                       ? 'No doctors matching "$_doctorSearchQuery"'
                       : (_doctorTabFilter == 0
-                          ? 'No doctors added to "My Doctors" yet'
+                          ? 'No doctors added to "My Favourite Doctors" yet'
                           : 'No dental specialists found'),
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, color: AppTheme.textDark),
@@ -4368,7 +4376,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                   _doctorSearchQuery.isNotEmpty
                       ? 'Try searching with another name, specialty, city, or pincode.'
                       : (_doctorTabFilter == 0
-                          ? 'Browse all verified platform doctors and add them to your favorites for quick booking.'
+                          ? 'Browse all verified platform doctors and add them to your favourite doctors for quick booking.'
                           : 'Our medical network is constantly expanding with verified dental experts.'),
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 11, color: AppTheme.textMuted, height: 1.35),
@@ -4611,12 +4619,12 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
           ),
           const SizedBox(height: 12),
 
-          // Action Buttons: Add/Remove Doctor & Book & WhatsApp
+          // Action Buttons: Add/Remove Favourite Doctor & Book Visit
           Row(
             children: [
-              // Add / Remove Toggle Button
+              // Add / Remove Favourite Toggle Button
               Expanded(
-                flex: 5,
+                flex: 6,
                 child: ElevatedButton.icon(
                   onPressed: () async {
                     if (isAdded) {
@@ -4624,18 +4632,33 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            content: Text('Removed ${doc.name} from My Doctors'),
+                            content: Text('Removed ${doc.name} from Favourite Doctors'),
                             backgroundColor: const Color(0xFFEF4444),
                             duration: const Duration(seconds: 2),
                           ),
                         );
                       }
                     } else {
+                      // Prevent duplicate additions
+                      if (_patientService.isDoctorAdded(doc.id) ||
+                          (doc.userId.isNotEmpty && _patientService.isDoctorAdded(doc.userId)) ||
+                          (doc.email.isNotEmpty && _patientService.isDoctorAdded(doc.email))) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('${doc.name} is already in your Favourite Doctors'),
+                              backgroundColor: const Color(0xFFD97706),
+                              duration: const Duration(seconds: 2),
+                            ),
+                          );
+                        }
+                        return;
+                      }
                       await _patientService.addDoctorToMyDoctors(doc);
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            content: Text('⭐ Added ${doc.name} to My Doctors!'),
+                            content: Text('⭐ Added ${doc.name} to Favourite Doctors!'),
                             backgroundColor: const Color(0xFF10B981),
                             duration: const Duration(seconds: 2),
                           ),
@@ -4644,29 +4667,29 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                     }
                   },
                   icon: Icon(
-                    isAdded ? Icons.remove_circle_outline_rounded : Icons.person_add_alt_1_rounded,
+                    isAdded ? Icons.check_circle_rounded : Icons.person_add_alt_1_rounded,
                     size: 14,
-                    color: isAdded ? const Color(0xFFDC2626) : Colors.white,
+                    color: isAdded ? const Color(0xFF15803D) : Colors.white,
                   ),
                   label: Text(
-                    isAdded ? 'Remove Doctor' : 'Add Doctor',
+                    isAdded ? 'Added to Favourites' : 'Add Favourite Doctor',
                     style: TextStyle(
-                      fontSize: 11.5,
+                      fontSize: 11,
                       fontWeight: FontWeight.bold,
-                      color: isAdded ? const Color(0xFFDC2626) : Colors.white,
+                      color: isAdded ? const Color(0xFF15803D) : Colors.white,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: isAdded ? const Color(0xFFFEF2F2) : AppTheme.primaryBlue,
-                    foregroundColor: isAdded ? const Color(0xFFDC2626) : Colors.white,
+                    backgroundColor: isAdded ? const Color(0xFFF0FDF4) : const Color(0xFF0F172A),
+                    foregroundColor: isAdded ? const Color(0xFF15803D) : Colors.white,
                     elevation: 0,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),
                       side: BorderSide(
-                        color: isAdded ? const Color(0xFFFCA5A5) : Colors.transparent,
+                        color: isAdded ? const Color(0xFFBBF7D0) : Colors.transparent,
                       ),
                     ),
                   ),

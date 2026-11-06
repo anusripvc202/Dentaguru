@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'api_service.dart';
 import '../models/referral_model.dart';
+import '../models/doctor_availability.dart';
 
 /// Model representing a Doctor/Dentist registered in DentaGuru platform
 class DoctorModel {
@@ -3916,6 +3917,184 @@ class PatientProblemService extends ChangeNotifier {
     }
     notifyListeners();
     _saveToStorage();
+  }
+
+  // ─────────────────────────────────────────────
+  // DOCTOR AVAILABILITY STATE & API INTEGRATION
+  // ─────────────────────────────────────────────
+  final Map<String, DoctorAvailabilityModel> _availabilityCache = {};
+
+  DoctorAvailabilityModel? getCachedAvailability(String doctorId, String dateStr) {
+    return _availabilityCache['${doctorId}_$dateStr'];
+  }
+
+  /// Helper: Generate time slots given start, end, and duration
+  List<String> generateTimeSlots({
+    String startTime = '09:00 AM',
+    String endTime = '05:00 PM',
+    int durationMinutes = 30,
+  }) {
+    int timeToMinutes(String timeStr) {
+      final parts = timeStr.trim().split(' ');
+      if (parts.length < 2) return 0;
+      final timeParts = parts[0].split(':');
+      int hours = int.tryParse(timeParts[0]) ?? 0;
+      final minutes = int.tryParse(timeParts[1]) ?? 0;
+      final period = parts[1].toUpperCase();
+      if (period == 'PM' && hours < 12) hours += 12;
+      if (period == 'AM' && hours == 12) hours = 0;
+      return hours * 60 + minutes;
+    }
+
+    String minutesToTime(int totalMinutes) {
+      int hours = (totalMinutes ~/ 60) % 24;
+      final minutes = totalMinutes % 60;
+      final period = hours >= 12 ? 'PM' : 'AM';
+      if (hours > 12) hours -= 12;
+      if (hours == 0) hours = 12;
+      return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')} $period';
+    }
+
+    final start = timeToMinutes(startTime);
+    final end = timeToMinutes(endTime);
+    final duration = durationMinutes < 15 ? 30 : durationMinutes;
+    if (start >= end) return [];
+
+    final slots = <String>[];
+    int current = start;
+    while (current + duration <= end) {
+      slots.add(minutesToTime(current));
+      current += duration;
+    }
+    return slots;
+  }
+
+  /// Get Doctor Availability for a specific date (reads backend, fallback to doctor default slots)
+  Future<DoctorAvailabilityModel> getDoctorAvailability(String doctorId, DateTime date) async {
+    final dateStr = '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    final cacheKey = '${doctorId}_$dateStr';
+
+    try {
+      final res = await _api.fetchDoctorAvailability(dentistId: doctorId, date: dateStr);
+      if (res['success'] == true && res['availability'] != null) {
+        final model = DoctorAvailabilityModel.fromJson(Map<String, dynamic>.from(res['availability']));
+        _availabilityCache[cacheKey] = model;
+        notifyListeners();
+        return model;
+      }
+    } catch (e) {
+      debugPrint('getDoctorAvailability api fetch notice: $e');
+    }
+
+    // Check if we have cached model
+    if (_availabilityCache.containsKey(cacheKey)) {
+      return _availabilityCache[cacheKey]!;
+    }
+
+    // Fallback: Generate standard slots for this doctor minus already booked local appointments
+    final doctor = _allDoctors.firstWhere(
+      (d) => d.id == doctorId || d.userId == doctorId,
+      orElse: () => DoctorModel(id: doctorId, name: '', specialty: '', qualification: '', experienceYears: 0, rating: 0, reviewCount: 0, clinicName: '', phone: '', email: '', status: '', nextAvailableSlots: [], consultationFee: ''),
+    );
+
+    List<String> defaultSlots = doctor.nextAvailableSlots.isNotEmpty
+        ? List<String>.from(doctor.nextAvailableSlots)
+        : generateTimeSlots(startTime: '09:00 AM', endTime: '05:00 PM', durationMinutes: 30);
+
+    // Cross-reference existing appointments in memory
+    final booked = <String>[];
+    for (final req in _requests) {
+      if (req.assignedDoctorId == doctorId || (doctor.name.isNotEmpty && req.assignedDoctorName == doctor.name)) {
+        final s = req.status.toUpperCase();
+        if (s != 'CANCELLED' && s != 'REJECTED') {
+          final rDate = req.confirmedDate?.split('T').first ?? req.submittedAt.toIso8601String().split('T').first;
+          if (rDate == dateStr) {
+            final slot = req.confirmedTimeSlot?.trim() ?? '';
+            if (slot.isNotEmpty) {
+              booked.add(slot);
+            }
+          }
+        }
+      }
+    }
+
+    final available = defaultSlots.where((s) => !booked.any((b) => b.toLowerCase() == s.toLowerCase())).toList();
+
+    final fallbackModel = DoctorAvailabilityModel(
+      dentistId: doctorId,
+      date: dateStr,
+      startTime: '09:00 AM',
+      endTime: '05:00 PM',
+      slotDurationMinutes: 30,
+      allSlots: defaultSlots,
+      bookedSlots: booked,
+      availableSlots: available,
+      isBlocked: false,
+    );
+
+    _availabilityCache[cacheKey] = fallbackModel;
+    return fallbackModel;
+  }
+
+  /// Admin or Doctor publishes/saves availability slots
+  Future<bool> publishDoctorAvailability({
+    required String doctorId,
+    required DateTime date,
+    required List<String> slots,
+    String startTime = '09:00 AM',
+    String endTime = '05:00 PM',
+    int slotDurationMinutes = 30,
+    bool isBlocked = false,
+    String? blockedReason,
+    String dayOfWeek = '',
+  }) async {
+    final dateStr = '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
+    final res = await _api.saveDoctorAvailability(
+      dentistId: doctorId,
+      date: dateStr,
+      slots: slots,
+      startTime: startTime,
+      endTime: endTime,
+      slotDurationMinutes: slotDurationMinutes,
+      isBlocked: isBlocked,
+      blockedReason: blockedReason,
+      dayOfWeek: dayOfWeek,
+    );
+
+    if (res['success'] == true) {
+      // Refresh cached model
+      await getDoctorAvailability(doctorId, date);
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  /// Block a doctor date
+  Future<bool> blockDoctorDate({
+    required String doctorId,
+    required DateTime date,
+    String reason = 'Doctor on Leave / Clinic Closed',
+  }) async {
+    final dateStr = '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    final cacheKey = '${doctorId}_$dateStr';
+
+    final res = await _api.blockDoctorDate(
+      dentistId: doctorId,
+      date: dateStr,
+      reason: reason,
+    );
+
+    if (res['success'] == true) {
+      final existing = _availabilityCache[cacheKey];
+      if (existing != null) {
+        _availabilityCache[cacheKey] = existing.copyWith(isBlocked: true, blockedReason: reason, availableSlots: []);
+      }
+      notifyListeners();
+      return true;
+    }
+    return false;
   }
 }
 

@@ -1343,7 +1343,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                           children: [
                             _buildRoleTile(UserRole.patient, 'Patient', Icons.person_rounded),
                             const SizedBox(width: 4),
-                            _buildRoleTile(UserRole.dentist, 'Dentist', Icons.medical_services_rounded),
+                            _buildRoleTile(UserRole.dentist, 'Doctor', Icons.medical_services_rounded),
                           ],
                         ),
                       ),

@@ -1779,6 +1779,134 @@ const PatientDoctor = {
     }
 };
 
+// 12. DOCTOR AVAILABILITY MODEL (Doctor Slots, Working Hours, Blocked Dates)
+const _inMemoryAvailability = [];
+
+const DoctorAvailability = {
+    async findOne(query = {}) {
+        const dentistId = query.dentist_id || query.dentistId;
+        const date = query.date;
+        if (!dentistId || !date) return null;
+
+        try {
+            const { data, error } = await supabaseAdmin
+                .from('doctor_availability')
+                .select('*')
+                .eq('dentist_id', dentistId)
+                .eq('date', date)
+                .maybeSingle();
+            if (!error && data) return data;
+        } catch (e) {
+            console.warn('⚠️ DoctorAvailability.findOne Supabase notice:', e.message);
+        }
+
+        return _inMemoryAvailability.find(a => 
+            (a.dentist_id === dentistId || a.dentistId === dentistId) && 
+            a.date === date
+        ) || null;
+    },
+
+    async find(query = {}) {
+        const dentistId = query.dentist_id || query.dentistId;
+        try {
+            let req = supabaseAdmin.from('doctor_availability').select('*');
+            if (dentistId) req = req.eq('dentist_id', dentistId);
+            if (query.date) req = req.eq('date', query.date);
+            const { data, error } = await req.order('date', { ascending: true });
+            if (!error && data && data.length > 0) return data;
+        } catch (e) {
+            console.warn('⚠️ DoctorAvailability.find Supabase notice:', e.message);
+        }
+
+        return _inMemoryAvailability.filter(a => {
+            if (dentistId && a.dentist_id !== dentistId && a.dentistId !== dentistId) return false;
+            if (query.date && a.date !== query.date) return false;
+            return true;
+        });
+    },
+
+    async upsert(availData) {
+        const dentistId = availData.dentist_id || availData.dentistId;
+        const date = availData.date;
+        const slots = Array.isArray(availData.slots) ? availData.slots : [];
+        const isBlocked = Boolean(availData.is_blocked || availData.isBlocked);
+        const blockedReason = availData.blocked_reason || availData.blockedReason || null;
+        const startTime = availData.start_time || availData.startTime || '09:00 AM';
+        const endTime = availData.end_time || availData.endTime || '05:00 PM';
+        const slotDuration = parseInt(availData.slot_duration_minutes || availData.slotDurationMinutes, 10) || 30;
+        const dayOfWeek = availData.day_of_week || availData.dayOfWeek || '';
+
+        const payload = {
+            id: availData.id || `avail-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            dentist_id: dentistId,
+            date: date,
+            day_of_week: dayOfWeek,
+            start_time: startTime,
+            end_time: endTime,
+            slot_duration_minutes: slotDuration,
+            slots: slots,
+            is_blocked: isBlocked,
+            blocked_reason: blockedReason,
+            updated_at: new Date().toISOString()
+        };
+
+        try {
+            const { data, error } = await supabaseAdmin
+                .from('doctor_availability')
+                .upsert({
+                    dentist_id: dentistId,
+                    date: date,
+                    day_of_week: dayOfWeek,
+                    start_time: startTime,
+                    end_time: endTime,
+                    slot_duration_minutes: slotDuration,
+                    slots: slots,
+                    is_blocked: isBlocked,
+                    blocked_reason: blockedReason,
+                    updated_at: payload.updated_at
+                }, { onConflict: 'dentist_id,date' })
+                .select()
+                .single();
+            if (!error && data) return data;
+        } catch (e) {
+            console.warn('⚠️ DoctorAvailability.upsert Supabase notice:', e.message);
+        }
+
+        const idx = _inMemoryAvailability.findIndex(a => 
+            (a.dentist_id === dentistId || a.dentistId === dentistId) && a.date === date
+        );
+        if (idx !== -1) {
+            _inMemoryAvailability[idx] = { ..._inMemoryAvailability[idx], ...payload };
+            return _inMemoryAvailability[idx];
+        } else {
+            _inMemoryAvailability.push(payload);
+            return payload;
+        }
+    },
+
+    async deleteOne(query = {}) {
+        const dentistId = query.dentist_id || query.dentistId;
+        const date = query.date;
+        try {
+            await supabaseAdmin
+                .from('doctor_availability')
+                .delete()
+                .eq('dentist_id', dentistId)
+                .eq('date', date);
+        } catch (e) {
+            console.warn('⚠️ DoctorAvailability.deleteOne Supabase notice:', e.message);
+        }
+
+        const idx = _inMemoryAvailability.findIndex(a => 
+            (a.dentist_id === dentistId || a.dentistId === dentistId) && a.date === date
+        );
+        if (idx !== -1) {
+            _inMemoryAvailability.splice(idx, 1);
+        }
+        return { success: true };
+    }
+};
+
 module.exports = {
     User,
     SubAdminPermission,
@@ -1794,6 +1922,7 @@ module.exports = {
     AuditLog,
     Referral,
     PatientDoctor,
+    DoctorAvailability,
     resolveUserUuid,
     resolveDentistIds,
     comparePassword

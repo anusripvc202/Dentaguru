@@ -4389,6 +4389,238 @@ class ApiService {
       return false;
     }
   }
+
+  // ─────────────────────────────────────────────
+  // DOCTOR AVAILABILITY & TIME SLOT MANAGEMENT
+  // ─────────────────────────────────────────────
+
+  /// Fetch Doctor Availability (Express API with 35s timeout & Direct Supabase Fallback)
+  Future<Map<String, dynamic>> fetchDoctorAvailability({
+    required String dentistId,
+    String? date,
+  }) async {
+    // 1. Primary Express Backend Call
+    try {
+      final queryParams = {
+        'dentistId': dentistId,
+        if (date != null && date.isNotEmpty) 'date': date.contains('T') ? date.split('T').first : date,
+      };
+      final uri = Uri.parse('${ApiConstants.baseUrl}/doctor-availability').replace(queryParameters: queryParams);
+      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return {'success': true, 'availability': data['availability'], 'availabilities': data['availabilities']};
+      }
+    } catch (e) {
+      debugPrint('Express fetchDoctorAvailability notice: $e');
+    }
+
+    // 2. Direct 24/7 Supabase Cloud Fallback
+    try {
+      final client = Supabase.instance.client;
+      final cleanDate = (date != null && date.isNotEmpty)
+          ? (date.contains('T') ? date.split('T').first : date)
+          : null;
+
+      if (cleanDate != null) {
+        final record = await client
+            .from('doctor_availability')
+            .select('*')
+            .eq('dentist_id', dentistId)
+            .eq('date', cleanDate)
+            .maybeSingle();
+
+        // Cross-reference appointments for booked slots
+        final appts = await client
+            .from('appointments')
+            .select('date, appointment_date, time_slot, status')
+            .eq('dentist_id', dentistId)
+            .catchError((_) => []);
+
+        final bookedSlots = <String>[];
+        for (final a in (appts as List)) {
+          final status = (a['status'] ?? '').toString().toUpperCase();
+          if (status == 'CANCELLED' || status == 'REJECTED') continue;
+          final aDate = (a['appointment_date'] ?? a['date'] ?? '').toString().split('T').first;
+          if (aDate == cleanDate) {
+            final slot = (a['time_slot'] ?? '').toString().trim();
+            if (slot.isNotEmpty) bookedSlots.add(slot);
+          }
+        }
+
+        final isBlocked = record != null && (record['is_blocked'] == true);
+        final blockedReason = record?['blocked_reason']?.toString();
+        final rawSlots = record?['slots'];
+        final List<String> allSlots = rawSlots is List
+            ? rawSlots.map((e) => e.toString().trim()).where((s) => s.isNotEmpty).toList()
+            : [];
+
+        final availableSlots = isBlocked
+            ? <String>[]
+            : allSlots.where((s) => !bookedSlots.any((b) => b.toLowerCase() == s.toLowerCase())).toList();
+
+        return {
+          'success': true,
+          'availability': {
+            'dentistId': dentistId,
+            'date': cleanDate,
+            'dayOfWeek': record?['day_of_week'] ?? '',
+            'startTime': record?['start_time'] ?? '09:00 AM',
+            'endTime': record?['end_time'] ?? '05:00 PM',
+            'slotDurationMinutes': record?['slot_duration_minutes'] ?? 30,
+            'allSlots': allSlots,
+            'bookedSlots': bookedSlots,
+            'availableSlots': availableSlots,
+            'isBlocked': isBlocked,
+            'blockedReason': blockedReason,
+          }
+        };
+      } else {
+        final records = await client
+            .from('doctor_availability')
+            .select('*')
+            .eq('dentist_id', dentistId);
+        return {'success': true, 'availabilities': records};
+      }
+    } catch (e) {
+      debugPrint('Supabase direct fetchDoctorAvailability notice: $e');
+      return {'success': false, 'message': 'Failed to fetch doctor availability: $e'};
+    }
+  }
+
+  /// Save or Publish Doctor Availability (Express API with 35s timeout & Direct Supabase Fallback)
+  Future<Map<String, dynamic>> saveDoctorAvailability({
+    required String dentistId,
+    required String date,
+    required List<String> slots,
+    String startTime = '09:00 AM',
+    String endTime = '05:00 PM',
+    int slotDurationMinutes = 30,
+    bool isBlocked = false,
+    String? blockedReason,
+    String dayOfWeek = '',
+  }) async {
+    final cleanDate = date.contains('T') ? date.split('T').first : date;
+    final payload = {
+      'dentistId': dentistId,
+      'date': cleanDate,
+      'dayOfWeek': dayOfWeek,
+      'startTime': startTime,
+      'endTime': endTime,
+      'slotDurationMinutes': slotDurationMinutes,
+      'slots': slots,
+      'isBlocked': isBlocked,
+      if (blockedReason != null) 'blockedReason': blockedReason,
+    };
+
+    // 1. Primary Express Backend Call
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/doctor-availability');
+      final response = await http.post(
+        uri,
+        headers: _headers,
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 35));
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return jsonDecode(response.body);
+      }
+      if (response.statusCode == 403) {
+        return {'success': false, 'message': 'Access Denied: Not authorized to modify availability.'};
+      }
+    } catch (e) {
+      debugPrint('Express saveDoctorAvailability notice: $e');
+    }
+
+    // 2. Direct Supabase Fallback
+    try {
+      final client = Supabase.instance.client;
+      final res = await client.from('doctor_availability').upsert({
+        'dentist_id': dentistId,
+        'date': cleanDate,
+        'day_of_week': dayOfWeek,
+        'start_time': startTime,
+        'end_time': endTime,
+        'slot_duration_minutes': slotDurationMinutes,
+        'slots': slots,
+        'is_blocked': isBlocked,
+        'blocked_reason': blockedReason,
+        'updated_at': DateTime.now().toIso8601String(),
+      }, onConflict: 'dentist_id,date').select().single();
+
+      return {'success': true, 'message': 'Availability saved successfully.', 'availability': res};
+    } catch (e) {
+      debugPrint('Supabase direct saveDoctorAvailability notice: $e');
+      return {'success': false, 'message': 'Failed to save doctor availability: $e'};
+    }
+  }
+
+  /// Block specific doctor date (Express with Direct Supabase Fallback)
+  Future<Map<String, dynamic>> blockDoctorDate({
+    required String dentistId,
+    required String date,
+    String reason = 'Doctor on Leave / Clinic Closed',
+  }) async {
+    final cleanDate = date.contains('T') ? date.split('T').first : date;
+
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/doctor-availability/block-date');
+      final response = await http.post(
+        uri,
+        headers: _headers,
+        body: jsonEncode({'dentistId': dentistId, 'date': cleanDate, 'reason': reason}),
+      ).timeout(const Duration(seconds: 35));
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+    } catch (e) {
+      debugPrint('Express blockDoctorDate notice: $e');
+    }
+
+    try {
+      final client = Supabase.instance.client;
+      final res = await client.from('doctor_availability').upsert({
+        'dentist_id': dentistId,
+        'date': cleanDate,
+        'is_blocked': true,
+        'blocked_reason': reason,
+        'slots': <String>[],
+        'updated_at': DateTime.now().toIso8601String(),
+      }, onConflict: 'dentist_id,date').select().single();
+
+      return {'success': true, 'message': 'Date blocked successfully.', 'availability': res};
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to block doctor date: $e'};
+    }
+  }
+
+  /// Delete Doctor Availability for a date
+  Future<bool> deleteDoctorAvailability({
+    required String dentistId,
+    required String date,
+  }) async {
+    final cleanDate = date.contains('T') ? date.split('T').first : date;
+
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/doctor-availability')
+          .replace(queryParameters: {'dentistId': dentistId, 'date': cleanDate});
+      final response = await http.delete(uri, headers: _headers).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) return true;
+    } catch (_) {}
+
+    try {
+      await Supabase.instance.client
+          .from('doctor_availability')
+          .delete()
+          .eq('dentist_id', dentistId)
+          .eq('date', cleanDate);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
 }
 
 

@@ -11,6 +11,7 @@ const records = require('../controllers/recordController');
 const problemRequests = require('../controllers/problemRequestController');
 const verification = require('../controllers/verificationController');
 const referrals = require('../controllers/referralController');
+const availability = require('../controllers/availabilityController');
 
 // Middlewares
 const { authenticateJWT, optionalAuth, requireRole, requireMainAdmin, requirePermission, requireChatAccess } = require('../middleware/auth');
@@ -143,6 +144,15 @@ router.patch('/referrals/:referralId/accept', optionalAuth, referrals.acceptRefe
 router.patch('/referrals/:referralId/reject', optionalAuth, referrals.rejectReferral);
 router.delete('/referrals/:referralId', optionalAuth, referrals.deleteReferral);
 router.post('/referrals/:referralId/notify-whatsapp', optionalAuth, referrals.notifyWhatsApp);
+
+// ─────────────────────────────────────────────
+// 10. DOCTOR AVAILABILITY & TIME SLOT MANAGEMENT
+// ─────────────────────────────────────────────
+router.get('/doctor-availability', optionalAuth, availability.getDoctorAvailability);
+router.post('/doctor-availability', optionalAuth, availability.saveDoctorAvailability);
+router.post('/doctor-availability/generate-slots', optionalAuth, availability.generateSlots);
+router.post('/doctor-availability/block-date', optionalAuth, availability.blockDoctorDate);
+router.delete('/doctor-availability', optionalAuth, availability.deleteDoctorAvailability);
 
 module.exports = router;
 

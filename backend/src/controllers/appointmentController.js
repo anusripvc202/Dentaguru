@@ -1,4 +1,4 @@
-const { Appointment, Clinic, Dentist, User, Notification, MedicalRecord, Referral } = require('../models/Schemas');
+const { Appointment, Clinic, Dentist, User, Notification, MedicalRecord, Referral, DoctorAvailability } = require('../models/Schemas');
 const { sendPushNotification } = require('../services/notificationService');
 
 // 1. BOOK APPOINTMENT (Patient -> Dentist) [Initial Status: PENDING]
@@ -8,6 +8,30 @@ exports.bookAppointment = async (req, res) => {
         const targetPatientId = patientId || (req.user ? req.user.id : null);
         const requestedDateStr = date ? new Date(date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
         const normalizedSlot = (timeSlot || 'Today, 2:30 PM').trim();
+
+        // 🛡️ Verify doctor availability publication and block status
+        if (dentistId) {
+            try {
+                const avail = await DoctorAvailability.findOne({ dentist_id: dentistId, date: requestedDateStr });
+                if (avail) {
+                    if (avail.is_blocked) {
+                        return res.status(409).json({
+                            success: false,
+                            message: `The doctor is unavailable on this date (${avail.blocked_reason || 'Blocked / On Leave'}). Please choose another date.`
+                        });
+                    }
+                    if (Array.isArray(avail.slots) && avail.slots.length > 0) {
+                        const inSlots = avail.slots.some(s => s.trim().toLowerCase() === normalizedSlot.toLowerCase());
+                        if (!inSlots) {
+                            return res.status(400).json({
+                                success: false,
+                                message: `The time slot (${normalizedSlot}) is not a published slot for this doctor.`
+                            });
+                        }
+                    }
+                }
+            } catch (_) {}
+        }
 
         // 🛡️ Prevent duplicate bookings & unavailable time-slot bookings
         if (dentistId) {

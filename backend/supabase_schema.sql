@@ -316,6 +316,25 @@ CREATE TABLE IF NOT EXISTS public.patient_doctors (
 CREATE INDEX IF NOT EXISTS idx_patient_doctors_patient_id ON public.patient_doctors(patient_id);
 ALTER TABLE public.patient_doctors ENABLE ROW LEVEL SECURITY;
 
+-- 12. DOCTOR AVAILABILITY & SLOTS TABLE
+CREATE TABLE IF NOT EXISTS public.doctor_availability (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    dentist_id UUID REFERENCES public.dentists(id) ON DELETE CASCADE,
+    date VARCHAR(20) NOT NULL,
+    day_of_week VARCHAR(20),
+    start_time VARCHAR(20) DEFAULT '09:00 AM',
+    end_time VARCHAR(20) DEFAULT '05:00 PM',
+    slot_duration_minutes INTEGER DEFAULT 30,
+    slots TEXT[] DEFAULT '{}',
+    is_blocked BOOLEAN DEFAULT false,
+    blocked_reason TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT unique_dentist_date_availability UNIQUE (dentist_id, date)
+);
+CREATE INDEX IF NOT EXISTS idx_doctor_availability_dentist_date ON public.doctor_availability(dentist_id, date);
+ALTER TABLE public.doctor_availability ENABLE ROW LEVEL SECURITY;
+
 -- Allow Service Role Access
 DO $$ 
 BEGIN
@@ -354,6 +373,9 @@ BEGIN
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow All Patient Doctors') THEN
         CREATE POLICY "Allow All Patient Doctors" ON public.patient_doctors FOR ALL USING (true);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow All Doctor Availability') THEN
+        CREATE POLICY "Allow All Doctor Availability" ON public.doctor_availability FOR ALL USING (true);
     END IF;
 END $$;
 

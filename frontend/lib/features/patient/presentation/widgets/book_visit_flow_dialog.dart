@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/services/patient_problem_service.dart';
+import '../../../../core/models/doctor_availability.dart';
 
 class BookVisitFlowDialog extends StatefulWidget {
   final DoctorModel? preselectedDoctor;
@@ -45,6 +46,8 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
   // Step 2: Date & Slot
   DateTime _selectedDate = DateTime.now().add(const Duration(days: 1));
   String? _selectedTimeSlot;
+  DoctorAvailabilityModel? _doctorAvailability;
+  bool _isLoadingSlots = false;
 
   // Step 3: Reason & Symptoms
   String _selectedCategory = 'Routine Dental Checkup';
@@ -79,27 +82,43 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
     'Other Dental Problem',
   ];
 
-  static const List<String> _timeSlots = [
-    '09:30 AM',
-    '10:30 AM',
-    '11:30 AM',
-    '02:00 PM',
-    '03:00 PM',
-    '04:00 PM',
-    '05:00 PM',
-    '06:00 PM',
-    '07:00 PM',
-  ];
-
   @override
   void initState() {
     super.initState();
     if (widget.preselectedDoctor != null) {
       _selectedDoctor = widget.preselectedDoctor;
       _currentStep = 2; // Jump directly to Date & Slot if doctor preselected
+      _loadDoctorAvailability();
     }
     // Refresh live doctors in background
     _patientService.syncDoctorsFromApi();
+  }
+
+  Future<void> _loadDoctorAvailability() async {
+    if (_selectedDoctor == null) return;
+    final docId = _selectedDoctor!.id.isNotEmpty ? _selectedDoctor!.id : _selectedDoctor!.userId;
+    if (docId.isEmpty) return;
+
+    setState(() {
+      _isLoadingSlots = true;
+      _selectedTimeSlot = null;
+    });
+
+    try {
+      final avail = await _patientService.getDoctorAvailability(docId, _selectedDate);
+      if (mounted) {
+        setState(() {
+          _doctorAvailability = avail;
+          _isLoadingSlots = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _isLoadingSlots = false;
+        });
+      }
+    }
   }
 
   @override
@@ -345,6 +364,7 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
                             _selectedDoctor = doc;
                             _selectedTimeSlot = null; // reset slot on doctor change
                           });
+                          _loadDoctorAvailability();
                         },
                         child: Padding(
                           padding: const EdgeInsets.all(14),
@@ -447,7 +467,10 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
             child: ElevatedButton(
               onPressed: _selectedDoctor == null
                   ? null
-                  : () => setState(() => _currentStep = 2),
+                  : () {
+                      setState(() => _currentStep = 2);
+                      _loadDoctorAvailability();
+                    },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.primaryBlue,
                 foregroundColor: Colors.white,
@@ -543,6 +566,7 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
                       _selectedDate = date;
                       _selectedTimeSlot = null; // reset slot on date change
                     });
+                    _loadDoctorAvailability();
                   },
                   borderRadius: BorderRadius.circular(12),
                   child: Container(
@@ -594,84 +618,141 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
           const Text('2. Select Available Time Slot', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark)),
           const SizedBox(height: 10),
 
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: _timeSlots.map((slot) {
-              final isBooked = _isSlotBooked(slot);
-              final isSelected = _selectedTimeSlot == slot;
-
-              return SizedBox(
-                width: 135,
-                child: InkWell(
-                  onTap: isBooked
-                      ? null
-                      : () => setState(() => _selectedTimeSlot = slot),
-                  borderRadius: BorderRadius.circular(10),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-                    decoration: BoxDecoration(
-                      color: isBooked
-                          ? const Color(0xFFF1F5F9)
-                          : isSelected
-                              ? AppTheme.primaryBlue
-                              : Colors.white,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: isBooked
-                            ? const Color(0xFFE2E8F0)
-                            : isSelected
-                                ? AppTheme.primaryBlue
-                                : const Color(0xFFCBD5E1),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          isBooked
-                              ? Icons.block_rounded
-                              : isSelected
-                                  ? Icons.check_circle_rounded
-                                  : Icons.access_time_rounded,
-                          size: 14,
-                          color: isBooked
-                              ? const Color(0xFF94A3B8)
-                              : isSelected
-                                  ? Colors.white
-                                  : AppTheme.primaryBlue,
-                        ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            slot,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: isBooked
-                                  ? const Color(0xFF94A3B8)
-                                  : isSelected
-                                      ? Colors.white
-                                      : AppTheme.textDark,
-                              decoration: isBooked ? TextDecoration.lineThrough : null,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
+          if (_isLoadingSlots)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: Column(
+                  children: [
+                    SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)),
+                    SizedBox(height: 8),
+                    Text('Fetching published doctor availability...', style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+                  ],
+                ),
+              ),
+            )
+          else if (_doctorAvailability != null && _doctorAvailability!.isBlocked)
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF2F2),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFFCA5A5)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.block_rounded, color: Color(0xFFDC2626), size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Doctor is unavailable on this date (${_doctorAvailability!.blockedReason ?? "Doctor on Leave / Clinic Closed"}). Please choose another date.',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFDC2626)),
                     ),
                   ),
-                ),
-              );
-            }).toList(),
-          ),
+                ],
+              ),
+            )
+          else if ((_doctorAvailability?.allSlots.isEmpty ?? true))
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.event_busy_rounded, color: AppTheme.textMuted, size: 20),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'No published consultation slots available for this doctor on this date. Please select another date.',
+                      style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: (_doctorAvailability!.allSlots).map((slot) {
+                final isBooked = (_doctorAvailability?.bookedSlots.any((b) => b.trim().toLowerCase() == slot.trim().toLowerCase()) ?? false) || _isSlotBooked(slot);
+                final isSelected = _selectedTimeSlot == slot;
+
+                return SizedBox(
+                  width: 135,
+                  child: InkWell(
+                    onTap: isBooked
+                        ? null
+                        : () => setState(() => _selectedTimeSlot = slot),
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                      decoration: BoxDecoration(
+                        color: isBooked
+                            ? const Color(0xFFF1F5F9)
+                            : isSelected
+                                ? AppTheme.primaryBlue
+                                : Colors.white,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: isBooked
+                              ? const Color(0xFFE2E8F0)
+                              : isSelected
+                                  ? AppTheme.primaryBlue
+                                  : const Color(0xFFCBD5E1),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            isBooked
+                                ? Icons.block_rounded
+                                : isSelected
+                                    ? Icons.check_circle_rounded
+                                    : Icons.access_time_rounded,
+                            size: 14,
+                            color: isBooked
+                                ? const Color(0xFF94A3B8)
+                                : isSelected
+                                    ? Colors.white
+                                    : AppTheme.primaryBlue,
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              slot,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: isBooked
+                                    ? const Color(0xFF94A3B8)
+                                    : isSelected
+                                        ? Colors.white
+                                        : AppTheme.textDark,
+                                decoration: isBooked ? TextDecoration.lineThrough : null,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
           const SizedBox(height: 24),
 
           // Next button
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: _selectedTimeSlot == null
+              onPressed: (_selectedTimeSlot == null || (_doctorAvailability?.isBlocked ?? false))
                   ? null
                   : () => setState(() => _currentStep = 3),
               style: ElevatedButton.styleFrom(

@@ -16,6 +16,7 @@ import '../../../patient/presentation/widgets/referred_patients_sheet.dart';
 import '../../../../core/widgets/map_location_picker_dialog.dart';
 import '../../../../core/widgets/need_help_card.dart';
 import '../../../../core/models/prescription_template_model.dart';
+import '../../../admin/presentation/widgets/doctor_slot_management_dialog.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class DentistTimelineScreen extends StatefulWidget {
@@ -1693,8 +1694,38 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               const NeedHelpCard(),
               const SizedBox(height: 24),
 
-              // 5. Daily Consultation Timeline Queue
-              const Text("Today's Patient Schedule", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
+              // 5. Daily Consultation Timeline Queue & Availability Slot Management
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Flexible(
+                    child: Text(
+                      "Today's Patient Schedule",
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      final currentDoc = _patientService.currentDoctor ??
+                          (_patientService.allDoctors.isNotEmpty ? _patientService.allDoctors.first : null);
+                      DoctorSlotManagementDialog.show(
+                        context,
+                        initialDoctor: currentDoc,
+                        isDoctorSelfManage: true,
+                      );
+                    },
+                    icon: const Icon(Icons.edit_calendar_rounded, size: 14),
+                    label: const Text('Manage My Slots', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.primaryBlue,
+                      side: const BorderSide(color: AppTheme.primaryBlue),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 12),
 
               Builder(
