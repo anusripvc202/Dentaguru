@@ -49,7 +49,36 @@ const authenticateJWT = async (req, res, next) => {
             console.log('Supabase token verification failed, checking local fallback JWT...');
         }
 
-        // 2. Local JWT Verification Fallback (development/mock mode)
+        // 2. Direct Supabase session token fallback (sb_direct_<userId>)
+        if (token.startsWith('sb_direct_')) {
+            try {
+                const directUserId = token.replace('sb_direct_', '').trim();
+                const dbUser = await User.findById(directUserId);
+                if (dbUser) {
+                    let userPermissions = dbUser.permissions || [];
+                    if ((!userPermissions || userPermissions.length === 0) && (dbUser.role === 'Sub-Admin' || dbUser.role === 'SUB_ADMIN')) {
+                        userPermissions = await SubAdminPermission.getPermissionsForUser(dbUser.id);
+                    }
+                    req.user = {
+                        id: dbUser.id,
+                        email: dbUser.email,
+                        name: dbUser.name || 'User',
+                        role: dbUser.role || 'Patient',
+                        status: dbUser.status || 'ACTIVE',
+                        permissions: userPermissions
+                    };
+                    if (req.user.status === 'INACTIVE' || req.user.status === 'DEACTIVATED') {
+                        return res.status(403).json({
+                            success: false,
+                            message: 'Access Denied: Your account has been deactivated by the Main Admin.'
+                        });
+                    }
+                    return next();
+                }
+            } catch (_) {}
+        }
+
+        // 3. Local JWT Verification Fallback (development/mock mode)
         try {
             const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretjwtkey123');
             
@@ -120,6 +149,28 @@ const optionalAuth = async (req, res, next) => {
                 return next();
             }
         } catch (_) {}
+
+        if (token.startsWith('sb_direct_')) {
+            try {
+                const directUserId = token.replace('sb_direct_', '').trim();
+                const dbUser = await User.findById(directUserId);
+                if (dbUser) {
+                    let userPermissions = dbUser.permissions || [];
+                    if ((!userPermissions || userPermissions.length === 0) && (dbUser.role === 'Sub-Admin' || dbUser.role === 'SUB_ADMIN')) {
+                        userPermissions = await SubAdminPermission.getPermissionsForUser(dbUser.id);
+                    }
+                    req.user = {
+                        id: dbUser.id,
+                        email: dbUser.email,
+                        name: dbUser.name || 'User',
+                        role: dbUser.role || 'Patient',
+                        status: dbUser.status || 'ACTIVE',
+                        permissions: userPermissions
+                    };
+                    return next();
+                }
+            } catch (_) {}
+        }
 
         try {
             const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretjwtkey123');

@@ -1,8 +1,8 @@
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 
-const supabaseUrl = process.env.SUPABASE_URL || 'https://placeholder-url.supabase.co';
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || 'placeholder-anon-key';
+const supabaseUrl = process.env.SUPABASE_URL || 'https://fommrwxpqzkcktweosgp.supabase.co';
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZvbW1yd3hwcXprY2t0d2Vvc2dwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU4MTM3MTAsImV4cCI6MjEwMTM4OTcxMH0.VcuNyxIEeUDMGzMf3upGHzDCE_ihdYn0qZY5sjdOD3g';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey;
 
 // Public client (with Anon key)

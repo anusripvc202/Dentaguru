@@ -714,18 +714,33 @@ const Appointment = {
 const MedicalRecord = {
     async create(recordData) {
         const patientId = await resolveUserUuid(recordData.patient_id || recordData.patientId);
-        const dentistId = await resolveDentistUuid(recordData.dentist_id || recordData.dentistId);
-        const appointmentId = recordData.appointment_id || recordData.appointmentId;
+        const rawDentist = recordData.dentist_id || recordData.dentistId;
+        const dentistId = rawDentist ? await resolveDentistUuid(rawDentist) : null;
+
+        const notesVal = typeof recordData.notes === 'object' && recordData.notes !== null
+            ? JSON.stringify(recordData.notes)
+            : (recordData.notes || recordData.clinical_notes || recordData.clinicalNotes || '');
+
+        const prescriptionsVal = Array.isArray(recordData.prescriptions)
+            ? recordData.prescriptions
+            : (Array.isArray(recordData.items) ? recordData.items : []);
+
+        const xrayUrls = Array.isArray(recordData.xray_urls)
+            ? recordData.xray_urls
+            : (Array.isArray(recordData.xrayUrls) ? recordData.xrayUrls : []);
+
+        const labReportUrls = Array.isArray(recordData.lab_report_urls)
+            ? recordData.lab_report_urls
+            : (Array.isArray(recordData.labReportUrls) ? recordData.labReportUrls : []);
 
         const payload = {
             patient_id: patientId,
             dentist_id: dentistId,
-            appointment_id: (appointmentId && isUUID(appointmentId)) ? appointmentId : null,
-            diagnosis: recordData.diagnosis || '',
-            prescription: recordData.prescription || '',
-            treatment_plan: recordData.treatment_plan || recordData.treatmentPlan || '',
-            clinical_notes: recordData.clinical_notes || recordData.clinicalNotes || '',
-            attachments: recordData.attachments || []
+            diagnosis: recordData.diagnosis || recordData.title || 'Dental Health Record',
+            notes: notesVal,
+            prescriptions: prescriptionsVal,
+            xray_urls: xrayUrls,
+            lab_report_urls: labReportUrls
         };
 
         const { data, error } = await supabaseAdmin.from('medical_records').insert(payload).select().single();
@@ -737,7 +752,7 @@ const MedicalRecord = {
     },
 
     async find(query = {}) {
-        let req = supabaseAdmin.from('medical_records').select('*');
+        let req = supabaseAdmin.from('medical_records').select('*, patient:users!patient_id(id, name, email, phone)');
         const pId = query.patient_id || query.patientId;
         if (pId) {
             const resolvedP = await resolveUserUuid(pId);
@@ -745,11 +760,75 @@ const MedicalRecord = {
                 req = req.in('patient_id', resolvedP);
             } else if (typeof resolvedP === 'string' && resolvedP.length > 0) {
                 req = req.eq('patient_id', resolvedP);
+            } else {
+                return [];
             }
         }
         const { data, error } = await req.order('created_at', { ascending: false });
-        if (error) throw error;
+        if (error) {
+            // Fallback without join if foreign key join fails
+            let simpleReq = supabaseAdmin.from('medical_records').select('*');
+            if (pId) {
+                const resolvedP = await resolveUserUuid(pId);
+                if (Array.isArray(resolvedP) && resolvedP.length > 0) {
+                    simpleReq = simpleReq.in('patient_id', resolvedP);
+                } else if (typeof resolvedP === 'string' && resolvedP.length > 0) {
+                    simpleReq = simpleReq.eq('patient_id', resolvedP);
+                } else {
+                    return [];
+                }
+            }
+            const simple = await simpleReq.order('created_at', { ascending: false });
+            if (simple.error) throw simple.error;
+            return simple.data || [];
+        }
         return data || [];
+    },
+
+    async findById(id) {
+        if (!id || !isUUID(String(id).trim())) return null;
+        const { data, error } = await supabaseAdmin
+            .from('medical_records')
+            .select('*, patient:users!patient_id(id, name, email, phone)')
+            .eq('id', String(id).trim())
+            .maybeSingle();
+        if (error || !data) {
+            const simple = await supabaseAdmin
+                .from('medical_records')
+                .select('*')
+                .eq('id', String(id).trim())
+                .maybeSingle();
+            return simple.data || null;
+        }
+        return data;
+    },
+
+    async findByIdAndUpdate(id, updateData) {
+        if (!id || !isUUID(String(id).trim())) return null;
+        const payload = {
+            ...updateData,
+            updated_at: new Date().toISOString()
+        };
+        const { data, error } = await supabaseAdmin
+            .from('medical_records')
+            .update(payload)
+            .eq('id', String(id).trim())
+            .select()
+            .single();
+        if (error) throw error;
+        return data;
+    },
+
+    async findByIdAndDelete(id) {
+        if (!id || !isUUID(String(id).trim())) return null;
+        const { data, error } = await supabaseAdmin
+            .from('medical_records')
+            .delete()
+            .eq('id', String(id).trim())
+            .select()
+            .maybeSingle();
+        if (error) throw error;
+        return data;
     }
 };
 
@@ -1715,6 +1794,8 @@ module.exports = {
     AuditLog,
     Referral,
     PatientDoctor,
+    resolveUserUuid,
+    resolveDentistIds,
     comparePassword
 };
 

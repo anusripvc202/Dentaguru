@@ -580,7 +580,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              _buildFieldLabel('Age', isDark, isRequired: true),
+                              _buildFieldLabel('Age', isDark, isRequired: false),
                               TextFormField(
                                 controller: _ageController,
                                 style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
@@ -589,7 +589,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                                 maxLength: 3,
                                 decoration: _inputDecoration('e.g. 28', isDark).copyWith(counterText: ''),
                                 validator: (val) {
-                                  if (val == null || val.trim().isEmpty) return 'Required';
+                                  if (val == null || val.trim().isEmpty) return null;
                                   final n = int.tryParse(val.trim());
                                   if (n == null || n <= 0 || n > 120) return 'Invalid age';
                                   return null;
@@ -604,7 +604,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              _buildFieldLabel('Gender', isDark, isRequired: true),
+                              _buildFieldLabel('Gender', isDark, isRequired: false),
                               DropdownButtonFormField<String>(
                                 initialValue: _gender,
                                 dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
@@ -621,16 +621,13 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                     ),
                     const SizedBox(height: 14),
 
-                    _buildFieldLabel('City', isDark, isRequired: true),
+                    _buildFieldLabel('City', isDark, isRequired: false),
                     TextFormField(
                       controller: _cityController,
                       style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
                       cursorColor: primaryColor,
                       decoration: _inputDecoration('e.g. Hyderabad', isDark),
-                      validator: (val) {
-                        if (val == null || val.trim().isEmpty) return 'City is required';
-                        return null;
-                      },
+                      validator: (val) => null,
                     ),
                     const SizedBox(height: 14),
                   ],
@@ -1690,7 +1687,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            _buildFieldLabel('Age', isDark, isRequired: true),
+                            _buildFieldLabel('Age', isDark, isRequired: false),
                             TextFormField(
                               controller: _ageController,
                               style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
@@ -1699,7 +1696,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                               maxLength: 3,
                               decoration: _inputDecoration('e.g. 28', isDark).copyWith(counterText: ''),
                               validator: (val) {
-                                if (val == null || val.trim().isEmpty) return 'Required';
+                                if (val == null || val.trim().isEmpty) return null;
                                 final n = int.tryParse(val.trim());
                                 if (n == null || n <= 0 || n > 120) return 'Invalid age';
                                 return null;
@@ -1714,7 +1711,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            _buildFieldLabel('Gender', isDark, isRequired: true),
+                            _buildFieldLabel('Gender', isDark, isRequired: false),
                             DropdownButtonFormField<String>(
                               initialValue: _gender,
                               dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
@@ -1731,16 +1728,13 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                   ),
                   const SizedBox(height: 14),
 
-                  _buildFieldLabel('City', isDark, isRequired: true),
+                  _buildFieldLabel('City', isDark, isRequired: false),
                   TextFormField(
                     controller: _cityController,
                     style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
                     cursorColor: primaryColor,
                     decoration: _inputDecoration('e.g. Hyderabad', isDark),
-                    validator: (val) {
-                      if (val == null || val.trim().isEmpty) return 'City is required';
-                      return null;
-                    },
+                    validator: (val) => null,
                   ),
                   const SizedBox(height: 14),
 

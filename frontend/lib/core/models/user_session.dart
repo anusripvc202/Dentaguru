@@ -39,7 +39,10 @@ class UserSession {
     if (normalized.contains('clinic')) {
       return '/clinic';
     }
-    if (normalized.contains('admin') || normalized.contains('sub-admin') || normalized.contains('subadmin')) {
+    if (normalized.contains('sub-admin') || normalized.contains('subadmin') || normalized.contains('sub_admin')) {
+      return '/sub-admin';
+    }
+    if (normalized.contains('admin')) {
       return '/admin';
     }
     return '/patient';
@@ -54,7 +57,7 @@ class UserSession {
     if (normalized.contains('clinic')) {
       return 'Clinic';
     }
-    if (normalized.contains('sub-admin') || normalized.contains('subadmin')) {
+    if (normalized.contains('sub-admin') || normalized.contains('subadmin') || normalized.contains('sub_admin')) {
       return 'Sub-Admin';
     }
     if (normalized.contains('admin')) {

@@ -6,6 +6,44 @@ exports.bookAppointment = async (req, res) => {
     const { dentistId, clinicId, date, timeSlot, treatment, patientId, requestId } = req.body;
     try {
         const targetPatientId = patientId || (req.user ? req.user.id : null);
+        const requestedDateStr = date ? new Date(date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+        const normalizedSlot = (timeSlot || 'Today, 2:30 PM').trim();
+
+        // 🛡️ Prevent duplicate bookings & unavailable time-slot bookings
+        if (dentistId) {
+            const existingDentistAppts = await Appointment.find({ dentistId });
+            const conflict = existingDentistAppts.find(a => {
+                const aStatus = (a.status || '').toUpperCase();
+                if (aStatus === 'CANCELLED' || aStatus === 'REJECTED') return false;
+                const aDateStr = (a.date || a.appointment_date || '').split('T')[0];
+                const aSlot = (a.time_slot || a.timeSlot || '').trim();
+                return aDateStr === requestedDateStr && aSlot.toLowerCase() === normalizedSlot.toLowerCase();
+            });
+            if (conflict) {
+                return res.status(409).json({
+                    success: false,
+                    message: `The time slot (${normalizedSlot}) is already booked for this doctor on this date. Please select another slot.`
+                });
+            }
+        }
+
+        if (targetPatientId) {
+            const existingPatientAppts = await Appointment.find({ patientId: targetPatientId });
+            const patientConflict = existingPatientAppts.find(a => {
+                const aStatus = (a.status || '').toUpperCase();
+                if (aStatus === 'CANCELLED' || aStatus === 'REJECTED') return false;
+                const aDateStr = (a.date || a.appointment_date || '').split('T')[0];
+                const aSlot = (a.time_slot || a.timeSlot || '').trim();
+                return aDateStr === requestedDateStr && aSlot.toLowerCase() === normalizedSlot.toLowerCase();
+            });
+            if (patientConflict) {
+                return res.status(409).json({
+                    success: false,
+                    message: `You already have an appointment booked for ${normalizedSlot} on this date. Please select another slot.`
+                });
+            }
+        }
+
         const appointment = await Appointment.create({
             patient_id: targetPatientId,
             dentist_id: dentistId || null,
@@ -203,6 +241,27 @@ exports.rescheduleAppointment = async (req, res) => {
         const appointment = await Appointment.findById(id);
         if (!appointment) {
             return res.status(404).json({ success: false, message: 'Appointment not found.' });
+        }
+
+        // 🛡️ Prevent slot conflict on reschedule
+        const newDateStr = date ? new Date(date).toISOString().split('T')[0] : (appointment.date ? new Date(appointment.date).toISOString().split('T')[0] : '');
+        const newSlot = (timeSlot || appointment.time_slot || '').trim();
+        if (appointment.dentist_id && newSlot) {
+            const existingDentistAppts = await Appointment.find({ dentistId: appointment.dentist_id });
+            const conflict = existingDentistAppts.find(a => {
+                if (String(a.id) === String(id)) return false;
+                const aStatus = (a.status || '').toUpperCase();
+                if (aStatus === 'CANCELLED' || aStatus === 'REJECTED') return false;
+                const aDateStr = (a.date || a.appointment_date || '').split('T')[0];
+                const aSlot = (a.time_slot || a.timeSlot || '').trim();
+                return aDateStr === newDateStr && aSlot.toLowerCase() === newSlot.toLowerCase();
+            });
+            if (conflict) {
+                return res.status(409).json({
+                    success: false,
+                    message: `The time slot (${newSlot}) is already booked for this doctor on this date. Please select another slot.`
+                });
+            }
         }
 
         const updated = await Appointment.findByIdAndUpdate(id, {

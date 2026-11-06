@@ -1,11 +1,14 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/services/session_service.dart';
+import '../../../../core/utils/record_file_helper.dart';
 import '../../../../core/widgets/dental_ads_banner.dart';
 import '../../../../core/widgets/whatsapp_chat_modal.dart';
 import '../../../patient/presentation/widgets/refer_patient_flow_dialog.dart';
@@ -1080,12 +1083,20 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     }
   }
 
+  User? get _safeAuthUser {
+    try {
+      return Supabase.instance.client.auth.currentUser;
+    } catch (_) {
+      return null;
+    }
+  }
+
   // ==========================================
   // TAB 1: DENTIST TIMELINE & QUEUE DASHBOARD
   // ==========================================
   Widget _buildDashboardTab() {
     var currentDoc = _patientService.currentDoctor;
-    final authUser = Supabase.instance.client.auth.currentUser;
+    final authUser = _safeAuthUser;
     if (authUser != null && authUser.email != null && authUser.email!.isNotEmpty) {
       final authEmailLower = authUser.email!.toLowerCase();
       final authName = (authUser.userMetadata?['name'] ?? '').toString().toLowerCase();
@@ -1850,7 +1861,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     required String time,
   }) {
     final patientName = (req.patientName.contains('-') && req.patientName.length > 20)
-        ? (_patientService.currentPatient.name.isNotEmpty ? _patientService.currentPatient.name : 'anusha')
+        ? (_patientService.currentPatient.name.isNotEmpty ? _patientService.currentPatient.name : 'Patient')
         : req.patientName;
 
     return Container(
@@ -2129,73 +2140,686 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         };
       }
     }
-    final myPatients = uniquePatientMap.values.toList();
     final associatedPatients = _patientService.getDentistAssociatedPatients();
     final Map<String, PatientProfile> patientProfileMap = {};
     for (final p in associatedPatients) {
       patientProfileMap[p.name.trim().toLowerCase()] = p;
     }
+    for (final p in _patientService.allPatients) {
+      patientProfileMap.putIfAbsent(p.name.trim().toLowerCase(), () => p);
+    }
 
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.all(16),
+    final effectiveDocId = currentDocId.isNotEmpty
+        ? currentDocId
+        : (currentDocUserId.isNotEmpty ? currentDocUserId : authUserId);
+    final effectiveDocUserId = currentDocUserId.isNotEmpty ? currentDocUserId : authUserId;
+    final effectiveDocEmail = currentDocEmail.isNotEmpty ? currentDocEmail : authEmail;
+
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: (effectiveDocId.isNotEmpty || effectiveDocEmail.isNotEmpty)
+          ? ApiService().fetchSharedRecordsForDoctor(
+              doctorId: effectiveDocId.isNotEmpty ? effectiveDocId : effectiveDocEmail,
+              doctorUserId: effectiveDocUserId,
+              doctorEmail: effectiveDocEmail,
+            )
+          : Future.value(const <Map<String, dynamic>>[]),
+      builder: (context, sharedSnapshot) {
+        final rawShared = <Map<String, dynamic>>[
+          ..._patientService.doctorSharedRecords,
+          ...(sharedSnapshot.data ?? const <Map<String, dynamic>>[]),
+        ];
+
+        // Deduplicate & strictly verify doctor authorization
+        final sharedMap = <String, Map<String, dynamic>>{};
+        for (final rec in rawShared) {
+          final id = (rec['id'] ?? '').toString();
+          if (id.isEmpty) continue;
+          final isAuthorized = ApiService.isDoctorAuthorizedForRecordMap(
+            rec,
+            doctorId: effectiveDocId,
+            doctorUserId: effectiveDocUserId,
+            doctorEmail: effectiveDocEmail,
+          );
+          if (!isAuthorized) continue;
+
+          // Resolve patientName if missing
+          final recCopy = Map<String, dynamic>.from(rec);
+          final recPid = (recCopy['patientId'] ?? recCopy['patient_id'] ?? '').toString();
+          final curPName = (recCopy['patientName'] ?? '').toString();
+          if ((curPName.isEmpty || curPName == 'Patient') && recPid.isNotEmpty) {
+            final matchP = _patientService.allPatients.where((p) => p.id == recPid).firstOrNull;
+            if (matchP != null && matchP.name.isNotEmpty) {
+              recCopy['patientName'] = matchP.name;
+            }
+          }
+          sharedMap[id] = recCopy;
+
+          // Ensure patients who shared records also appear in the doctor's patient directory
+          final pName = (recCopy['patientName'] ?? 'Patient').toString().trim();
+          final pKey = pName.toLowerCase();
+          if (pName.isNotEmpty && !uniquePatientMap.containsKey(pKey)) {
+            final matchP = patientProfileMap[pKey];
+            uniquePatientMap[pKey] = {
+              'name': pName,
+              'age': '${(matchP?.age.isNotEmpty == true) ? matchP!.age : '28'} Yrs',
+              'blood': (matchP?.bloodGroup.isNotEmpty == true) ? matchP!.bloodGroup : 'O+',
+              'issue': 'Shared Dental Record (${recCopy['category'] ?? 'Record'})',
+              'patientId': recPid,
+            };
+          }
+        }
+
+        final authorizedSharedRecords = sharedMap.values.toList()
+          ..sort((a, b) {
+            final aDate = (a['uploadedAt'] ?? a['date'] ?? '').toString();
+            final bDate = (b['uploadedAt'] ?? b['date'] ?? '').toString();
+            return bDate.compareTo(aDate);
+          });
+
+        final combinedPatients = uniquePatientMap.values.toList();
+
+        return SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Patient Medical Directory',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.textDark,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'Access patient electronic dental records & shared X-rays',
+                          style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => ReferPatientFlowDialog.show(context, isDentistMode: true),
+                    icon: const Icon(Icons.person_add_alt_1_rounded, size: 15, color: Color(0xFF0D9488)),
+                    label: const Text(
+                      'Refer Patient',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0D9488)),
+                    ),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      backgroundColor: const Color(0xFF0D9488).withValues(alpha: 0.08),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // ==========================================
+              // SHARED PATIENT DENTAL RECORDS SECTION
+              // ==========================================
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryBlue.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(
+                            Icons.folder_shared_rounded,
+                            color: AppTheme.primaryBlue,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Dental Records Shared With You',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppTheme.textDark,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                'Only records explicitly shared by your patients appear here',
+                                style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEFF6FF),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            '${authorizedSharedRecords.length}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.primaryBlue,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    if (authorizedSharedRecords.isEmpty)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Text(
+                          'No patient dental records have been shared with you yet. When a patient shares an X-ray, prescription, or report with you from their Records tab, it will appear here.',
+                          style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                          textAlign: TextAlign.center,
+                        ),
+                      )
+                    else
+                      ...authorizedSharedRecords.map((rec) => _buildDoctorSharedRecordTile(
+                            context,
+                            record: rec,
+                            doctorId: effectiveDocId,
+                            doctorUserId: effectiveDocUserId,
+                            doctorEmail: effectiveDocEmail,
+                          )),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 20),
+              const Text(
+                'Assigned & Associated Patients',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textDark,
+                ),
+              ),
+              const SizedBox(height: 10),
+
+              if (combinedPatients.isEmpty && associatedPatients.isEmpty)
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: const Center(
+                    child: Text(
+                      'No patient records found.',
+                      style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                    ),
+                  ),
+                )
+              else
+                ...combinedPatients.map((p) {
+                  final pName = p['name'] ?? 'Patient';
+                  final profile = patientProfileMap[pName.trim().toLowerCase()];
+                  final pId = p['patientId'] ?? profile?.id ?? '';
+                  final patientSharedRecs = authorizedSharedRecords.where((r) {
+                    final rPid = (r['patientId'] ?? r['patient_id'] ?? '').toString();
+                    final rPName = (r['patientName'] ?? '').toString().trim().toLowerCase();
+                    if (pId.isNotEmpty && rPid == pId) return true;
+                    return rPName == pName.trim().toLowerCase();
+                  }).toList();
+
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _buildPatientListTile(
+                      name: pName,
+                      age: p['age'] ?? '28 Yrs',
+                      blood: p['blood'] ?? 'O+',
+                      issue: p['issue'] ?? 'Dental Care',
+                      profile: profile,
+                      sharedRecords: patientSharedRecs,
+                      doctorId: effectiveDocId,
+                      doctorUserId: effectiveDocUserId,
+                      doctorEmail: effectiveDocEmail,
+                    ),
+                  );
+                }),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDoctorSharedRecordTile(
+    BuildContext context, {
+    required Map<String, dynamic> record,
+    required String doctorId,
+    required String doctorUserId,
+    required String doctorEmail,
+  }) {
+    final title = (record['title'] ?? 'Dental Record').toString();
+    final patientName = (record['patientName'] ?? 'Patient').toString();
+    final category = (record['category'] ?? 'Dental Report').toString();
+    final date = (record['date'] ?? '').toString();
+    final fileType = (record['fileType'] ?? 'PDF').toString().toUpperCase();
+    final description = (record['description'] ?? '').toString().trim();
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryBlue.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  fileType == 'PDF'
+                      ? Icons.picture_as_pdf_rounded
+                      : Icons.image_rounded,
+                  color: fileType == 'PDF'
+                      ? const Color(0xFFDC2626)
+                      : AppTheme.primaryBlue,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text('Patient Medical Directory', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
-                    SizedBox(height: 4),
-                    Text('Access patient electronic dental records & X-rays', style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: AppTheme.textDark,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Patient: $patientName • $category • $date',
+                      style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (description.isNotEmpty)
+                      Text(
+                        description,
+                        style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                   ],
                 ),
               ),
-              TextButton.icon(
-                onPressed: () => ReferPatientFlowDialog.show(context, isDentistMode: true),
-                icon: const Icon(Icons.person_add_alt_1_rounded, size: 15, color: Color(0xFF0D9488)),
-                label: const Text('Refer Patient', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0D9488))),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  backgroundColor: const Color(0xFF0D9488).withValues(alpha: 0.08),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFDCFCE7),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  fileType,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF15803D),
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          if (myPatients.isEmpty && associatedPatients.isEmpty)
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-              ),
-              child: const Center(
-                child: Text('No patient records found.', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
-              ),
-            )
-          else
-            ...myPatients.map((p) {
-              final pName = p['name'] ?? 'Patient';
-              final profile = patientProfileMap[pName.trim().toLowerCase()];
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _buildPatientListTile(
-                  name: pName,
-                  age: p['age'] ?? '28 Yrs',
-                  blood: p['blood'] ?? 'O+',
-                  issue: p['issue'] ?? 'Dental Care',
-                  profile: profile,
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              OutlinedButton.icon(
+                onPressed: () => _showDoctorRecordPreviewModal(
+                  context,
+                  record: record,
+                  doctorId: doctorId,
+                  doctorUserId: doctorUserId,
+                  doctorEmail: doctorEmail,
                 ),
-              );
-            }),
+                icon: const Icon(Icons.visibility_rounded, size: 14),
+                label: const Text('View Record', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.primaryBlue,
+                  side: const BorderSide(color: AppTheme.primaryBlue),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: () => _handleDoctorDownloadSharedRecord(
+                  context,
+                  record: record,
+                  doctorId: doctorId,
+                  doctorUserId: doctorUserId,
+                  doctorEmail: doctorEmail,
+                ),
+                icon: const Icon(Icons.download_rounded, size: 14),
+                label: const Text('Download', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryBlue,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+            ],
+          ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _handleDoctorDownloadSharedRecord(
+    BuildContext context, {
+    required Map<String, dynamic> record,
+    required String doctorId,
+    required String doctorUserId,
+    required String doctorEmail,
+  }) async {
+    final recId = (record['id'] ?? '').toString();
+    final title = (record['title'] ?? 'dental_record').toString();
+    final fileName = (record['fileName'] ?? '$title.pdf').toString();
+    final mimeType = (record['mimeType'] ?? 'application/pdf').toString();
+
+    final accessRes = await ApiService().getAuthorizedRecordAccess(
+      recordId: recId,
+      requesterId: doctorId,
+      requesterRole: 'Dentist',
+      doctorUserId: doctorUserId,
+      doctorEmail: doctorEmail,
+    );
+
+    if (!context.mounted) return;
+    if (accessRes['success'] != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text((accessRes['message'] ?? 'Access denied: Record is not shared with you.').toString()),
+          backgroundColor: const Color(0xFFDC2626),
+        ),
+      );
+      return;
+    }
+
+    if (accessRes['fileBytes'] is Uint8List) {
+      final bytes = accessRes['fileBytes'] as Uint8List;
+      await RecordFileHelper.downloadOrOpenFile(
+        bytes: bytes,
+        fileName: fileName,
+        mimeType: mimeType,
+      );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Downloaded "$fileName" (${RecordFileHelper.formatFileSize(bytes.length)}).'),
+          backgroundColor: const Color(0xFF10B981),
+        ),
+      );
+      return;
+    }
+
+    final signedUrl = (accessRes['signedUrl'] ?? '').toString();
+    if (signedUrl.isNotEmpty) {
+      final uri = Uri.tryParse(signedUrl);
+      if (uri != null) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        return;
+      }
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Authorized download completed for "$title".'),
+        backgroundColor: const Color(0xFF10B981),
+      ),
+    );
+  }
+
+  void _showDoctorRecordPreviewModal(
+    BuildContext context, {
+    required Map<String, dynamic> record,
+    required String doctorId,
+    required String doctorUserId,
+    required String doctorEmail,
+  }) {
+    final recId = (record['id'] ?? '').toString();
+    final title = (record['title'] ?? 'Shared Dental Record').toString();
+    final patientName = (record['patientName'] ?? 'Patient').toString();
+    final category = (record['category'] ?? 'Dental Report').toString();
+    final date = (record['date'] ?? '').toString();
+    final description = (record['description'] ?? '').toString();
+    final fileName = (record['fileName'] ?? '').toString();
+    final fileType = (record['fileType'] ?? 'PDF').toString().toUpperCase();
+    final isImage = fileType == 'JPG' || fileType == 'JPEG' || fileType == 'PNG';
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 540, maxHeight: 620),
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.textDark,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          'Patient: $patientName • $category • $date',
+                          style: const TextStyle(fontSize: 11, color: AppTheme.primaryBlue),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(dialogCtx).pop(),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+              const Divider(height: 20, color: Color(0xFFE2E8F0)),
+              if (description.isNotEmpty) ...[
+                Text(
+                  'Patient Notes: $description',
+                  style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                ),
+                const SizedBox(height: 12),
+              ],
+              Expanded(
+                child: FutureBuilder<Map<String, dynamic>>(
+                  future: ApiService().getAuthorizedRecordAccess(
+                    recordId: recId,
+                    requesterId: doctorId,
+                    requesterRole: 'Dentist',
+                    doctorUserId: doctorUserId,
+                    doctorEmail: doctorEmail,
+                  ),
+                  builder: (ctx, snap) {
+                    if (snap.connectionState == ConnectionState.waiting) {
+                      return const Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            CircularProgressIndicator(strokeWidth: 2),
+                            SizedBox(height: 8),
+                            Text(
+                              'Verifying sharing permission & loading record...',
+                              style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+
+                    final res = snap.data ?? {};
+                    if (res['success'] != true) {
+                      return Center(
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF2F2),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.lock_person_rounded, size: 36, color: Color(0xFFDC2626)),
+                              const SizedBox(height: 8),
+                              Text(
+                                (res['message'] ?? 'Access Denied: Patient has not shared this record with you.').toString(),
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFFB91C1C),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }
+
+                    final bytes = res['fileBytes'] is Uint8List ? res['fileBytes'] as Uint8List : null;
+                    if (isImage && bytes != null && bytes.isNotEmpty) {
+                      return ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: Container(
+                          color: const Color(0xFF0F172A),
+                          width: double.infinity,
+                          child: InteractiveViewer(
+                            child: Image.memory(
+                              bytes,
+                              fit: BoxFit.contain,
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+
+                    return Center(
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFEF2F2),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFFECACA)),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.picture_as_pdf_rounded, size: 48, color: Color(0xFFDC2626)),
+                            const SizedBox(height: 10),
+                            Text(
+                              fileName.isNotEmpty ? fileName : '$title.pdf',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              bytes != null
+                                  ? 'Authorized PDF Record • ${RecordFileHelper.formatFileSize(bytes.length)}'
+                                  : 'Authorized PDF Record',
+                              style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.of(dialogCtx).pop();
+                    _handleDoctorDownloadSharedRecord(
+                      context,
+                      record: record,
+                      doctorId: doctorId,
+                      doctorUserId: doctorUserId,
+                      doctorEmail: doctorEmail,
+                    );
+                  },
+                  icon: const Icon(Icons.download_rounded, size: 16),
+                  label: const Text('Download Authorized Copy'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryBlue,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(44),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -2206,68 +2830,119 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     required String blood,
     required String issue,
     PatientProfile? profile,
+    List<Map<String, dynamic>> sharedRecords = const [],
+    String doctorId = '',
+    String doctorUserId = '',
+    String doctorEmail = '',
   }) {
-    return InkWell(
-      onTap: () {
-        final targetProfile = profile ?? PatientProfile(
-          name: name,
-          phone: '',
-          age: age.replaceAll(RegExp(r'\D'), ''),
-          gender: 'Female',
-          city: '',
-          address: '',
-          bloodGroup: blood,
-          emergencyContact: issue,
-        );
-        ReferPatientFlowDialog.show(
-          context,
-          isDentistMode: true,
-          preselectedPatient: targetProfile,
-        );
-      },
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFFE2E8F0)),
-        ),
-        child: Row(
-          children: [
-            const CircleAvatar(
-              radius: 20,
-              backgroundColor: AppTheme.softBlueBg,
-              child: Icon(Icons.person_outline_rounded, color: AppTheme.primaryBlue, size: 20),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark)),
-                  const SizedBox(height: 2),
-                  Text('$age • Blood: $blood • $issue', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
-                ],
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const CircleAvatar(
+                radius: 20,
+                backgroundColor: AppTheme.softBlueBg,
+                child: Icon(Icons.person_outline_rounded, color: AppTheme.primaryBlue, size: 20),
               ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: AppTheme.textDark,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '$age • Blood: $blood • $issue',
+                      style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 6),
+              InkWell(
+                onTap: () {
+                  final targetProfile = profile ??
+                      PatientProfile(
+                        name: name,
+                        phone: '',
+                        age: age.replaceAll(RegExp(r'\D'), ''),
+                        gender: 'Female',
+                        city: '',
+                        address: '',
+                        bloodGroup: blood,
+                        emergencyContact: issue,
+                      );
+                  ReferPatientFlowDialog.show(
+                    context,
+                    isDentistMode: true,
+                    preselectedPatient: targetProfile,
+                  );
+                },
                 borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.person_add_alt_1_rounded, size: 12, color: Color(0xFF0D9488)),
+                      SizedBox(width: 4),
+                      Text(
+                        'Refer',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF0D9488),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.person_add_alt_1_rounded, size: 12, color: Color(0xFF0D9488)),
-                  SizedBox(width: 4),
-                  Text('Refer', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF0D9488))),
-                ],
+            ],
+          ),
+          if (sharedRecords.isNotEmpty) ...[
+            const Divider(height: 18, color: Color(0xFFE2E8F0)),
+            Text(
+              'Shared Dental Records (${sharedRecords.length}):',
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.primaryBlue,
+              ),
+            ),
+            const SizedBox(height: 6),
+            ...sharedRecords.map(
+              (rec) => _buildDoctorSharedRecordTile(
+                context,
+                record: rec,
+                doctorId: doctorId,
+                doctorUserId: doctorUserId,
+                doctorEmail: doctorEmail,
               ),
             ),
           ],
-        ),
+        ],
       ),
     );
   }

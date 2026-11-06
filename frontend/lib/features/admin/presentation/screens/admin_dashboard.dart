@@ -27,17 +27,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   Timer? _autoSyncTimer;
   RealtimeChannel? _realtimeChannel;
 
-  // Sub-Admin Management State
-  final List<Map<String, String>> _subAdmins = [];
-
-  void _addSubAdmin(Map<String, String> subAdmin) {
-    setState(() => _subAdmins.add(subAdmin));
-  }
-
-  void _removeSubAdmin(int index) {
-    setState(() => _subAdmins.removeAt(index));
-  }
-
   late AnimationController _entryController;
   late AnimationController _pulseController;
   late Animation<double> _fadeAnimation;
@@ -1667,7 +1656,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 children: [
                   _buildSubNavItem(8, Icons.settings_rounded, 'General Settings'),
                   _buildSubNavItem(8, Icons.security_rounded, 'Role & Permissions'),
-                  _buildSubNavItem(9, Icons.supervisor_account_rounded, 'Sub-Admins', badgeCount: _subAdmins.length),
+                  _buildSubNavItem(9, Icons.supervisor_account_rounded, 'Sub-Admins', badgeCount: _problemService.subAdmins.length),
                 ],
               ),
             ],
@@ -1773,7 +1762,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
       case 3:
         return _buildPatientsPanel();
       case 5:
+      case 6:
         return _buildRevenuePanel();
+      case 8:
       case 9:
         return _buildSubAdminsPanel();
       case 10:
@@ -3081,7 +3072,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                                     cursorColor: AppTheme.primaryBlue,
                                     decoration: InputDecoration(
-                                      labelText: 'City *',
+                                      labelText: 'City (Optional)',
                                       hintText: 'e.g. Hyderabad',
                                       prefixIcon: const Icon(Icons.location_city_rounded, size: 18),
                                       filled: true,
@@ -3099,7 +3090,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                                     cursorColor: AppTheme.primaryBlue,
                                     decoration: InputDecoration(
-                                      labelText: 'Pincode *',
+                                      labelText: 'Pincode (Optional)',
                                       hintText: '500032',
                                       prefixIcon: const Icon(Icons.pin_drop_outlined, size: 18),
                                       filled: true,
@@ -3378,13 +3369,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            // Full Name
+                            // Full Name *
                             TextField(
                               controller: nameCtrl,
                               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                               cursorColor: AppTheme.primaryBlue,
                               decoration: InputDecoration(
-                                labelText: 'Full Name',
+                                label: const Text.rich(
+                                  TextSpan(
+                                    text: 'Full Name',
+                                    style: TextStyle(color: Color(0xFF0F172A)),
+                                    children: [
+                                      TextSpan(text: ' *', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                ),
                                 prefixIcon: const Icon(Icons.person_outline_rounded, size: 18),
                                 filled: true,
                                 fillColor: const Color(0xFFF8FAFC),
@@ -3393,14 +3392,22 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             ),
                             const SizedBox(height: 12),
 
-                            // Phone
+                            // Contact Number *
                             TextField(
                               controller: phoneCtrl,
                               keyboardType: TextInputType.phone,
                               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                               cursorColor: AppTheme.primaryBlue,
                               decoration: InputDecoration(
-                                labelText: 'Phone Number',
+                                label: const Text.rich(
+                                  TextSpan(
+                                    text: 'Contact Number',
+                                    style: TextStyle(color: Color(0xFF0F172A)),
+                                    children: [
+                                      TextSpan(text: ' *', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                ),
                                 prefixIcon: const Icon(Icons.phone_outlined, size: 18),
                                 filled: true,
                                 fillColor: const Color(0xFFF8FAFC),
@@ -3551,6 +3558,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         onPressed: isLoading
                             ? null
                             : () async {
+                                final name = nameCtrl.text.trim();
+                                final phone = phoneCtrl.text.trim();
+                                if (name.isEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('⚠️ Full Name cannot be empty.')),
+                                  );
+                                  return;
+                                }
+                                final cleanPhone = phone.replaceAll(RegExp(r'[^0-9]'), '');
+                                if (cleanPhone.length < 10) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('⚠️ Enter a valid 10-digit Contact Number.')),
+                                  );
+                                  return;
+                                }
                                 setModalState(() => isLoading = true);
 
                                 try {
@@ -4717,7 +4739,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                                     cursorColor: AppTheme.primaryBlue,
                                     decoration: InputDecoration(
-                                      labelText: 'City *',
+                                      labelText: 'City (Optional)',
                                       hintText: 'e.g. Hyderabad',
                                       prefixIcon: const Icon(Icons.location_city_outlined, size: 15),
                                       filled: true,
@@ -4735,7 +4757,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                                     cursorColor: AppTheme.primaryBlue,
                                     decoration: InputDecoration(
-                                      labelText: 'Pincode *',
+                                      labelText: 'Pincode (Optional)',
                                       hintText: 'e.g. 500032',
                                       prefixIcon: const Icon(Icons.pin_drop_outlined, size: 15),
                                       filled: true,
@@ -4759,7 +4781,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                                     cursorColor: AppTheme.primaryBlue,
                                     decoration: InputDecoration(
-                                      labelText: 'Practice / Clinic Name *',
+                                      labelText: 'Practice / Clinic Name (Optional)',
                                       hintText: 'e.g. Apex Care Dental',
                                       prefixIcon: const Icon(Icons.storefront_outlined, size: 16),
                                       filled: true,
@@ -5181,7 +5203,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               radius: 22,
                               backgroundColor: AppTheme.primaryBlue.withValues(alpha: 0.12),
                               child: Text(
-                                doc.name.replaceAll('Dr.', '').trim().split(' ').last[0],
+                                doc.name.replaceAll('Dr.', '').trim().split(' ').where((s) => s.isNotEmpty).lastOrNull?[0].toUpperCase() ?? 'D',
                                 style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryBlue, fontSize: 16),
                               ),
                             ),
@@ -5262,7 +5284,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             const SizedBox(width: 3),
                             Text('${doc.rating}', style: const TextStyle(fontSize: 11, color: AppTheme.textDark, fontWeight: FontWeight.w600)),
                             const Spacer(),
-                            Text('Slots: ${doc.nextAvailableSlots.first}', style: const TextStyle(fontSize: 10, color: Color(0xFF10B981), fontWeight: FontWeight.w600)),
+                            Text('Slots: ${doc.nextAvailableSlots.isNotEmpty ? doc.nextAvailableSlots.first : "Available Today"}', style: const TextStyle(fontSize: 10, color: Color(0xFF10B981), fontWeight: FontWeight.w600)),
                           ],
                         ),
                         const SizedBox(height: 6),
@@ -6902,7 +6924,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               controller: cityCtrl,
                               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                               cursorColor: AppTheme.primaryBlue,
-                              decoration: const InputDecoration(labelText: 'City *', prefixIcon: Icon(Icons.location_city_rounded)),
+                              decoration: const InputDecoration(labelText: 'City', prefixIcon: Icon(Icons.location_city_rounded)),
                             ),
                           ),
                           const SizedBox(width: 8),
@@ -6913,7 +6935,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               keyboardType: TextInputType.number,
                               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                               cursorColor: AppTheme.primaryBlue,
-                              decoration: const InputDecoration(labelText: 'Pincode *', prefixIcon: Icon(Icons.pin_drop_outlined)),
+                              decoration: const InputDecoration(labelText: 'Pincode', prefixIcon: Icon(Icons.pin_drop_outlined)),
                             ),
                           ),
                         ],
@@ -6955,14 +6977,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
                         onPressed: () async {
-                          final name = nameCtrl.text.trim().isEmpty ? 'New Patient' : nameCtrl.text.trim();
+                          final name = nameCtrl.text.trim();
                           final phone = phoneCtrl.text.trim();
                           final email = emailCtrl.text.trim();
                           final city = cityCtrl.text.trim().isNotEmpty ? cityCtrl.text.trim() : 'Hyderabad';
                           final pin = pincodeCtrl.text.trim().isNotEmpty ? pincodeCtrl.text.trim() : '500032';
 
-                          if (phone.isEmpty) {
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter mobile phone number.')));
+                          if (name.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('⚠️ Full Name cannot be empty.')));
+                            return;
+                          }
+                          final cleanPhone = phone.replaceAll(RegExp(r'[^0-9]'), '');
+                          if (cleanPhone.length < 10) {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('⚠️ Enter a valid 10-digit Contact Number.')));
                             return;
                           }
 

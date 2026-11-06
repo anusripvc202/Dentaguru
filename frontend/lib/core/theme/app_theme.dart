@@ -5,9 +5,9 @@ class AppTheme {
   AppTheme._();
 
   // Brand Colors matching DentaGuru design mockup & logo
-  static const Color primaryBlue = Color(0xFF0052CC);
+  static const Color primaryBlue = Color(0xFF102747);
   static const Color primaryBlueDark = Color(0xFF0B46A4);
-  static const Color brandOrange = Color(0xFFFF7A00);
+  static const Color brandOrange = Color(0xFFF47B20);
   static const Color brandOrangeLight = Color(0xFFFF9500);
 
   // Soft Tint & Background Colors
@@ -23,7 +23,7 @@ class AppTheme {
 
   // Status Colors
   static const Color statusConfirmedBg = Color(0xFFEBF2FE);
-  static const Color statusConfirmedText = Color(0xFF0052CC);
+  static const Color statusConfirmedText = primaryBlue;
   static const Color statusCancelBg = Color(0xFFFEE2E2);
   static const Color statusCancelText = Color(0xFFEF4444);
 

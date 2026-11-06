@@ -185,10 +185,14 @@ CREATE TABLE IF NOT EXISTS public.medical_records (
     notes TEXT,
     prescriptions JSONB DEFAULT '[]',
     attachments JSONB DEFAULT '[]',
+    xray_urls TEXT[] DEFAULT '{}',
+    lab_report_urls TEXT[] DEFAULT '{}',
     follow_up_date TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE public.medical_records ADD COLUMN IF NOT EXISTS xray_urls TEXT[] DEFAULT '{}';
+ALTER TABLE public.medical_records ADD COLUMN IF NOT EXISTS lab_report_urls TEXT[] DEFAULT '{}';
 
 -- 8. CHAT MESSAGES TABLE
 CREATE TABLE IF NOT EXISTS public.chat_messages (

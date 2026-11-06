@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../services/session_service.dart';
 import '../widgets/session_gate_screen.dart';
 import '../../features/home/presentation/screens/home_screen.dart';
 import '../../features/patient/presentation/screens/patient_dashboard.dart';
@@ -21,6 +22,34 @@ class LoginScreen extends StatelessWidget {
 // Router Configurations with Persistent Session Resolution Gate
 final GoRouter appRouter = GoRouter(
   initialLocation: '/',
+  redirect: (context, state) async {
+    final path = state.uri.path;
+    const protectedRoutes = {
+      '/patient',
+      '/dentist',
+      '/clinic',
+      '/admin',
+      '/sub-admin',
+    };
+
+    if (!protectedRoutes.contains(path)) {
+      return null;
+    }
+
+    var session = SessionService().currentSession;
+    session ??= await SessionService().restoreAppSession();
+
+    if (session == null || session.isExpired || session.token.trim().isEmpty) {
+      return '/login';
+    }
+
+    final expectedRoute = session.targetRoute;
+    if (path != expectedRoute) {
+      return expectedRoute;
+    }
+
+    return null;
+  },
   routes: [
     GoRoute(
       path: '/',
@@ -74,7 +103,7 @@ final GoRouter appRouter = GoRouter(
     ),
     GoRoute(
       path: '/sub-admin',
-      builder: (context, state) => const AdminDashboardScreen(),
+      builder: (context, state) => const SubAdminDashboardScreen(),
     ),
   ],
 );

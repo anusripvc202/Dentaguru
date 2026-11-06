@@ -198,7 +198,7 @@ class NeedHelpCard extends StatelessWidget {
         border: Border.all(color: const Color(0xFFDBEAFE), width: 1.2),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF0052CC).withValues(alpha: 0.06),
+            color: AppTheme.primaryBlue.withValues(alpha: 0.06),
             blurRadius: 16,
             offset: const Offset(0, 6),
           ),

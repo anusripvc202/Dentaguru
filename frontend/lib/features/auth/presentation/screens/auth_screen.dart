@@ -233,7 +233,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       case UserRole.dentist:
         return '/dentist';
       case UserRole.admin:
-        return '/admin';
+        return _selectedAdminRoleType == 'Sub-Admin' ? '/sub-admin' : '/admin';
     }
   }
 
@@ -406,11 +406,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('🎉 Welcome back, ${userData['name'] ?? 'Admin'}! Opening Admin Dashboard...'),
+              content: Text('🎉 Welcome back, ${userData['name'] ?? (isSubAdmin ? 'Sub-Admin' : 'Admin')}! Opening ${isSubAdmin ? 'Sub-Admin Workspace' : 'Admin Dashboard'}...'),
               backgroundColor: const Color(0xFF6366F1),
             ),
           );
-          context.go('/admin');
+          context.go(isSubAdmin ? '/sub-admin' : '/admin');
         } else {
           // Patient Role
           final prefs = await SharedPreferences.getInstance();
@@ -741,7 +741,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             duration: const Duration(seconds: 2),
           ),
         );
-        context.go(_targetRoute);
+        context.go(SessionService().currentSession?.targetRoute ?? _targetRoute);
       } else {
         setState(() => _isRegistering = false);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1879,36 +1879,36 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             // City & Pincode Row (Directly after Language)
             Row(
               children: [
-                // MANDATORY FIELD 1: City *
+                // Optional Field: City
                 Expanded(
                   child: TextFormField(
                     controller: _cityController,
                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                    validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter your city' : null,
+                    validator: (val) => null,
                     decoration: _buildInputDecoration(
                       label: 'City',
                       hint: 'e.g. City Name',
-                      isRequired: true,
+                      isRequired: false,
                       icon: Icons.location_city_rounded,
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
-                // MANDATORY FIELD 2: Pincode *
+                // Optional Field: Pincode (Format checked if provided)
                 Expanded(
                   child: TextFormField(
                     controller: _pincodeController,
                     keyboardType: TextInputType.number,
                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                     validator: (val) {
-                      if (val == null || val.trim().isEmpty) return 'Enter Pincode';
+                      if (val == null || val.trim().isEmpty) return null;
                       if (!RegExp(r'^\d{6}$').hasMatch(val.trim())) return '6-digit PIN';
                       return null;
                     },
                     decoration: _buildInputDecoration(
                       label: 'Pincode',
                       hint: '6-Digit PIN',
-                      isRequired: true,
+                      isRequired: false,
                       icon: Icons.pin_drop_outlined,
                     ),
                   ),
@@ -2175,11 +2175,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             TextFormField(
               controller: _licenseNoController,
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-              validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter Dental License Number' : null,
+              validator: (val) => null,
               decoration: _buildInputDecoration(
                 label: 'Dental Council License Number',
-                hint: 'e.g. DEN-LIC-88490',
-                isRequired: true,
+                hint: 'e.g. DEN-LIC-88490 (Optional)',
+                isRequired: false,
                 icon: Icons.badge_outlined,
               ),
             ),
@@ -2189,12 +2189,12 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               initialValue: _selectedSpecialty,
               isExpanded: true,
               dropdownColor: Colors.white,
-              validator: (val) => (val == null || val.trim().isEmpty) ? 'Please select a specialty' : null,
+              validator: (val) => null,
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
               decoration: _buildInputDecoration(
                 label: 'Select Specialty',
                 hint: '',
-                isRequired: true,
+                isRequired: false,
                 icon: Icons.medical_services_outlined,
               ),
               items: [
@@ -2223,11 +2223,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             TextFormField(
               controller: _clinicNameController,
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-              validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter clinic name' : null,
+              validator: (val) => null,
               decoration: _buildInputDecoration(
                 label: 'Primary Clinic Name',
-                hint: 'e.g. Metro Dental Care Practice',
-                isRequired: true,
+                hint: 'e.g. Metro Dental Care Practice (Optional)',
+                isRequired: false,
                 icon: Icons.domain_rounded,
               ),
             ),

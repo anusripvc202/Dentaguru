@@ -155,8 +155,8 @@ class SessionService {
         languages: meta['languages'] is List ? List<String>.from(meta['languages']) : ['English'],
       );
     }
-    // 2. Restore Sub-Admin State
-    else if (normalizedRole.contains('sub-admin') || normalizedRole.contains('subadmin')) {
+    // 2. Restore Sub-Admin or Admin State
+    else if (normalizedRole.contains('sub-admin') || normalizedRole.contains('subadmin') || normalizedRole.contains('sub_admin')) {
       final meta = session.metadata;
       List<String> perms = [];
       if (meta['permissions'] is List) {
@@ -170,6 +170,9 @@ class SessionService {
         permissions: perms,
         status: meta['status']?.toString() ?? 'ACTIVE',
       );
+    }
+    else if (normalizedRole.contains('admin')) {
+      PatientProblemService().clearSubAdminSession();
     }
     // 3. Restore Patient State
     else if (normalizedRole.contains('patient')) {

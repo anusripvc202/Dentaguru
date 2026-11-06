@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/session_service.dart';
@@ -19,7 +21,32 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
   void initState() {
     super.initState();
     _problemService.addListener(_onServiceUpdate);
+    _loadSavedProcedurePrices();
     _problemService.syncAllDataFromApi();
+  }
+
+  Future<void> _loadSavedProcedurePrices() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('dentaguru_clinic_procedure_prices');
+      if (raw != null && raw.isNotEmpty) {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map && mounted) {
+          setState(() {
+            decoded.forEach((k, v) {
+              _procedurePrices[k.toString()] = v.toString();
+            });
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveProcedurePrices() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('dentaguru_clinic_procedure_prices', jsonEncode(_procedurePrices));
+    } catch (_) {}
   }
 
   @override
@@ -217,7 +244,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
               icon: const Icon(Icons.add, size: 16, color: Colors.white),
               label: const Text('Add Doctor', style: TextStyle(color: Colors.white, fontSize: 12)),
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D9488)),
-              onPressed: () {},
+              onPressed: () => _showAddDoctorDialog(context),
             )
           ],
         ),
@@ -318,12 +345,255 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                 setState(() {
                   _procedurePrices[service] = priceCtrl.text.trim();
                 });
+                _saveProcedurePrices();
                 Navigator.of(dialogCtx).pop();
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(content: Text('💰 Rate for $service updated to ${priceCtrl.text.trim()}!')),
                 );
               },
               child: const Text('Save Rate', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showAddProcedureDialog(BuildContext context) {
+    final nameCtrl = TextEditingController();
+    final priceCtrl = TextEditingController(text: '\$75');
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: const Text('Add Procedure Rate', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                cursorColor: const Color(0xFF0D9488),
+                decoration: InputDecoration(
+                  labelText: 'Procedure Name *',
+                  filled: true,
+                  fillColor: const Color(0xFFF8FAFC),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: priceCtrl,
+                style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                cursorColor: const Color(0xFF0D9488),
+                decoration: InputDecoration(
+                  labelText: 'Rate *',
+                  filled: true,
+                  fillColor: const Color(0xFFF8FAFC),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(dialogCtx).pop(), child: const Text('Cancel')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D9488)),
+              onPressed: () {
+                final name = nameCtrl.text.trim();
+                final rate = priceCtrl.text.trim();
+                if (name.isEmpty || rate.isEmpty) return;
+                setState(() {
+                  _procedurePrices[name] = rate;
+                });
+                _saveProcedurePrices();
+                Navigator.of(dialogCtx).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('✅ Added procedure "$name" ($rate)')),
+                );
+              },
+              child: const Text('Add Procedure', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showAddDoctorDialog(BuildContext context) {
+    final nameCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    final emailCtrl = TextEditingController();
+    final licenseCtrl = TextEditingController();
+    final specialtyCtrl = TextEditingController(text: 'General Dentistry');
+    final expCtrl = TextEditingController(text: '5');
+    final cityCtrl = TextEditingController();
+    final pincodeCtrl = TextEditingController();
+    final clinicName = SessionService().currentSession?.name ?? 'DentaGuru Partner Clinic';
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: const Text('Add Attached Doctor', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  decoration: InputDecoration(
+                    label: const Text.rich(
+                      TextSpan(
+                        text: 'Doctor Full Name',
+                        style: TextStyle(color: Color(0xFF0F172A)),
+                        children: [
+                          TextSpan(text: ' *', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    ),
+                    filled: true,
+                    fillColor: const Color(0xFFF8FAFC),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: phoneCtrl,
+                  keyboardType: TextInputType.phone,
+                  decoration: InputDecoration(
+                    label: const Text.rich(
+                      TextSpan(
+                        text: 'Contact Number',
+                        style: TextStyle(color: Color(0xFF0F172A)),
+                        children: [
+                          TextSpan(text: ' *', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    ),
+                    filled: true,
+                    fillColor: const Color(0xFFF8FAFC),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: licenseCtrl,
+                  decoration: InputDecoration(
+                    labelText: 'Dental License Number (Optional)',
+                    filled: true,
+                    fillColor: const Color(0xFFF8FAFC),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: specialtyCtrl,
+                  decoration: InputDecoration(
+                    labelText: 'Specialty (Optional)',
+                    filled: true,
+                    fillColor: const Color(0xFFF8FAFC),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: expCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: 'Experience (Years)',
+                    filled: true,
+                    fillColor: const Color(0xFFF8FAFC),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: cityCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'City (Optional)',
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: pincodeCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: 'Pincode (Optional)',
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: emailCtrl,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: InputDecoration(
+                    labelText: 'Email Address (Optional)',
+                    filled: true,
+                    fillColor: const Color(0xFFF8FAFC),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(dialogCtx).pop(), child: const Text('Cancel')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D9488)),
+              onPressed: () {
+                final name = nameCtrl.text.trim();
+                final phone = phoneCtrl.text.trim();
+                final license = licenseCtrl.text.trim();
+                final specialty = specialtyCtrl.text.trim();
+                final city = cityCtrl.text.trim();
+                final pincode = pincodeCtrl.text.trim();
+                if (name.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('⚠️ Full Name is mandatory.')),
+                  );
+                  return;
+                }
+                final cleanPhone = phone.replaceAll(RegExp(r'[^0-9]'), '');
+                if (cleanPhone.length < 10) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('⚠️ Enter a valid 10-digit Contact Number.')),
+                  );
+                  return;
+                }
+                final expYears = int.tryParse(expCtrl.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 5;
+                _problemService.registerDoctor(
+                  name: name,
+                  phone: phone,
+                  email: emailCtrl.text.trim(),
+                  licenseNumber: license.isNotEmpty ? license : 'DEN-LIC-REG',
+                  specialty: specialty.isNotEmpty ? specialty : 'General Dentistry',
+                  clinicName: clinicName,
+                  experienceYears: expYears,
+                  city: city,
+                  pincode: pincode,
+                );
+                Navigator.of(dialogCtx).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('🎉 Doctor $name added to clinic directory!')),
+                );
+              },
+              child: const Text('Save Doctor', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             ),
           ],
         );
@@ -341,7 +611,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
             Text('Procedure Price List', style: theme.textTheme.titleMedium),
             IconButton(
               icon: const Icon(Icons.add_box_outlined, color: Color(0xFF0D9488)),
-              onPressed: () {},
+              onPressed: () => _showAddProcedureDialog(context),
             )
           ],
         ),

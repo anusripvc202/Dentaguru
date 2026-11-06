@@ -4,6 +4,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:dentaguru/core/models/user_session.dart';
 import 'package:dentaguru/core/services/session_service.dart';
 import 'package:dentaguru/core/services/api_service.dart';
+import 'package:dentaguru/core/services/patient_problem_service.dart';
+import 'package:dentaguru/core/constants/permissions.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -59,7 +61,7 @@ void main() {
         role: 'Sub-Admin',
         createdAt: now,
       );
-      expect(subAdminSession.targetRoute, '/admin');
+      expect(subAdminSession.targetRoute, '/sub-admin');
       expect(subAdminSession.displayRole, 'Sub-Admin');
 
       final clinicSession = UserSession(
@@ -186,6 +188,48 @@ void main() {
       expect(await sessionService.getSession(), isNull);
       expect(await sessionService.hasValidSession(), isFalse);
       expect(ApiService().currentToken, isNull);
+    });
+
+    test('Restores Sub-Admin RBAC permissions and separates Admin vs Sub-Admin sessions', () async {
+      final sessionService = SessionService();
+      final problemService = PatientProblemService();
+
+      await sessionService.saveSession(
+        token: 'sub_admin_token_1',
+        role: 'Sub-Admin',
+        userId: 'sa_101',
+        email: 'subadmin@dentaguru.com',
+        phone: '9876543210',
+        name: 'Rahul SubAdmin',
+        metadata: {
+          'permissions': [AppPermissions.patientView, AppPermissions.assignmentView],
+          'status': 'ACTIVE',
+        },
+      );
+
+      final restoredSa = await sessionService.restoreAppSession();
+      expect(restoredSa, isNotNull);
+      expect(restoredSa!.targetRoute, '/sub-admin');
+      expect(problemService.isSubAdminMode, isTrue);
+      expect(problemService.hasPermission(AppPermissions.patientView), isTrue);
+      expect(problemService.hasPermission(AppPermissions.dentistCreate), isFalse);
+
+      // Restoring a Main Admin session clears Sub-Admin mode
+      await sessionService.saveSession(
+        token: 'main_admin_token_1',
+        role: 'Admin',
+        userId: 'admin_1',
+        email: 'admin@dentaguru.com',
+        name: 'Main Admin',
+      );
+
+      final restoredAdmin = await sessionService.restoreAppSession();
+      expect(restoredAdmin, isNotNull);
+      expect(restoredAdmin!.targetRoute, '/admin');
+      expect(problemService.isSubAdminMode, isFalse);
+      expect(problemService.hasPermission(AppPermissions.dentistCreate), isTrue);
+
+      await sessionService.clearSession();
     });
   });
 }

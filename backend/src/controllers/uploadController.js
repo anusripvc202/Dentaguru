@@ -8,14 +8,14 @@ const upload = multer({
     limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB max per file
     fileFilter: (req, file, cb) => {
         const allowed = [
-            'image/jpeg', 'image/png', 'image/webp',
+            'image/jpeg', 'image/jpg', 'image/png', 'image/webp',
             'application/pdf',
             'application/dicom', 'image/dicom' // DICOM X-ray support
         ];
-        if (allowed.includes(file.mimetype)) {
+        if (allowed.includes((file.mimetype || '').toLowerCase())) {
             cb(null, true);
         } else {
-            cb(new Error(`Unsupported file type: ${file.mimetype}`), false);
+            cb(new Error(`Unsupported file type: ${file.mimetype}. Allowed: JPG, JPEG, PNG, PDF.`), false);
         }
     },
 });

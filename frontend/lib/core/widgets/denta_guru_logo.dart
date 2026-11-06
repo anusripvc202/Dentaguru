@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:dentaguru/core/theme/app_theme.dart';
 
 class DentaGuruLogo extends StatelessWidget {
   final double height;
@@ -19,7 +20,7 @@ class DentaGuruLogo extends StatelessWidget {
   Widget build(BuildContext context) {
     // 100% Perfect High-Resolution DentaGuru Logo Image Asset with Transparent Background
     final Widget logoImage = Image.asset(
-      'assets/dentaguru_logo.png',
+      'assets/gs_health_full_logo.png',
       height: height,
       fit: fit,
       alignment: Alignment.centerLeft,
@@ -73,7 +74,7 @@ class DentaGuruToothIcon extends StatelessWidget {
         return Icon(
           Icons.medical_services_rounded,
           size: size,
-          color: const Color(0xFF0052CC),
+          color: AppTheme.primaryBlue,
         );
       },
     );

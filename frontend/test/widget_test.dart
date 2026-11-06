@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:dentaguru/main.dart';
 import 'package:dentaguru/features/auth/presentation/screens/auth_screen.dart';
+import 'package:dentaguru/features/clinic/presentation/screens/clinic_dashboard.dart';
 import 'package:dentaguru/core/services/api_service.dart';
 
 void main() {
@@ -22,7 +23,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
   });
 
-  testWidgets('Patient Registration mandatory fields, optional fields, and 6-digit Pincode validation', (WidgetTester tester) async {
+  testWidgets('Patient Registration enforces ONLY Full Name and Contact Number as mandatory', (WidgetTester tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
@@ -39,30 +40,34 @@ void main() {
     final formFinder = find.byType(Form);
     final FormState formState = tester.state<FormState>(formFinder.first);
 
-    // 1. Empty form fails validation on the 4 mandatory fields only
+    // 1. Empty form fails validation ONLY on Full Name and Contact Number
     expect(formState.validate(), isFalse);
     await tester.pump();
     expect(find.text('Please enter your name'), findsOneWidget);
     expect(find.text('Mobile phone number is mandatory'), findsOneWidget);
-    expect(find.text('Please enter your city'), findsOneWidget);
-    expect(find.text('Enter Pincode'), findsOneWidget);
+    // City and Pincode are optional: no validation error when empty
+    expect(find.text('Please enter your city'), findsNothing);
+    expect(find.text('Enter Pincode'), findsNothing);
 
-    // 2. Fill the 4 mandatory fields while leaving Language, Location/Address, Email, Age, etc. empty
+    // 2. If user enters an invalid 5-digit Pincode, format check applies
     final textFields = find.byType(TextFormField);
     await tester.enterText(textFields.at(0), 'Aarav Sharma'); // Patient Full Name *
     await tester.enterText(textFields.at(2), '9876543219');   // Mobile Phone Number *
-    await tester.enterText(textFields.at(3), 'Hyderabad');    // City *
-    await tester.enterText(textFields.at(4), '50008');        // Invalid 5-digit Pincode *
+    await tester.enterText(textFields.at(4), '50008');        // Invalid 5-digit Pincode (optional format check)
     expect(formState.validate(), isFalse);
     await tester.pump();
     expect(find.text('6-digit PIN'), findsOneWidget);
 
-    // 3. Enter valid 6-digit Pincode -> form validation passes with optional fields empty
+    // 3. Clear pincode (leave blank) -> validation passes since it is optional
+    await tester.enterText(textFields.at(4), '');
+    expect(formState.validate(), isTrue);
+
+    // 4. Enter valid 6-digit Pincode -> validation also passes
     await tester.enterText(textFields.at(4), '500081');
     expect(formState.validate(), isTrue);
   });
 
-  testWidgets('Dentist Registration enforces License Number, Specialty, and Clinic Name validators', (WidgetTester tester) async {
+  testWidgets('Dentist Registration enforces ONLY Full Name and Contact Number, keeping License and Clinic optional', (WidgetTester tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
@@ -81,8 +86,19 @@ void main() {
     expect(formState.validate(), isFalse);
     await tester.pump();
 
-    expect(find.text('Enter Dental License Number'), findsOneWidget);
-    expect(find.text('Enter clinic name'), findsOneWidget);
+    // Mandatory fields
+    expect(find.text('Please enter your name'), findsOneWidget);
+    expect(find.text('Mobile phone number is mandatory'), findsOneWidget);
+
+    // Optional fields should NOT produce validation errors
+    expect(find.text('Enter Dental License Number'), findsNothing);
+    expect(find.text('Enter clinic name'), findsNothing);
+
+    // Providing only Full Name and Contact Number passes validation
+    final textFields = find.byType(TextFormField);
+    await tester.enterText(textFields.at(0), 'Dr. Priya Nair');
+    await tester.enterText(textFields.at(2), '9812345678');
+    expect(formState.validate(), isTrue);
   });
 
   test('ApiService.registerUser rejects empty or invalid phone numbers without false duplicate error', () async {
@@ -95,5 +111,27 @@ void main() {
     expect(emptyRes['success'], isFalse);
     expect(emptyRes['message'], contains('valid 10-digit mobile phone number'));
     expect(emptyRes['message'], isNot(contains('already registered')));
+  });
+
+  testWidgets('ClinicDashboardScreen Add Doctor button opens Add Attached Doctor dialog', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: MaterialApp(
+          home: ClinicDashboardScreen(),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // Switch to Doctors tab
+    await tester.tap(find.text('Doctors'));
+    await tester.pumpAndSettle();
+
+    // Tap Add Doctor button
+    expect(find.text('Add Doctor'), findsOneWidget);
+    await tester.tap(find.text('Add Doctor'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Add Attached Doctor'), findsOneWidget);
   });
 }

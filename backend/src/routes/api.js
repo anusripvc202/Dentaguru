@@ -97,9 +97,10 @@ router.delete('/patient/my-doctors/:doctorId', optionalAuth, clinics.removePatie
 router.delete('/patient/my-doctors', optionalAuth, clinics.removePatientDoctor);
 
 // ─────────────────────────────────────────────
-// 6. SECURE CLOUD STORAGE ENDPOINTS (AWS S3)
+// 6. SECURE CLOUD STORAGE ENDPOINTS (SUPABASE / AWS S3)
 // ─────────────────────────────────────────────
 router.post('/upload', authenticateJWT, upload.uploadFile);
+router.get('/upload/signed-url', authenticateJWT, upload.getSignedFileUrl);
 
 // ─────────────────────────────────────────────
 // 7. CHAT MESSAGES & CONVERSATIONS ENDPOINTS (Role-Based Access & Audit Logging)
@@ -116,7 +117,15 @@ router.get('/chat/audit-logs', optionalAuth, requireMainAdmin, chat.getAuditLogs
 // 8. MEDICAL RECORDS & PRESCRIPTIONS ENDPOINTS
 // ─────────────────────────────────────────────
 router.get('/records', optionalAuth, records.getPatientRecords);
+router.get('/records/shared-with-doctor', optionalAuth, records.getSharedRecordsForDoctor);
 router.post('/records', optionalAuth, records.createRecord);
+router.post('/records/share', optionalAuth, records.shareRecordsWithDoctor);
+router.put('/records/:id', optionalAuth, records.updateRecord);
+router.patch('/records/:id', optionalAuth, records.updateRecord);
+router.delete('/records/:id', optionalAuth, records.deleteRecord);
+router.post('/records/:id/revoke-share', optionalAuth, records.revokeRecordShare);
+router.delete('/records/:id/share/:doctorId', optionalAuth, records.revokeRecordShare);
+router.get('/records/:id/access', optionalAuth, records.getRecordFileAccess);
 
 // ─────────────────────────────────────────────
 // 9. REFERRAL MANAGEMENT & GROWTH ENDPOINTS
