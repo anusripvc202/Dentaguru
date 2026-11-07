@@ -67,12 +67,12 @@ app.use('/api/', generalLimiter);
 // ─────────────────────────────────────────────
 app.use('/api/v1', apiRoutes);
 
-const { isConnected } = require('./config/db');
+const { isPostgresConnected, isConnected } = require('./config/db');
 const { checkSupabaseHealth } = require('./config/supabase');
 
-// Health check endpoint with MongoDB & Supabase diagnostic status
+// Health check endpoint with Supabase PostgreSQL diagnostic status
 app.get('/health', async (req, res) => {
-    const mongoStatus = isConnected() ? 'connected' : 'disconnected';
+    const postgresStatus = isPostgresConnected() ? 'connected' : 'disconnected';
     const supabaseHealth = await checkSupabaseHealth();
 
     res.json({
@@ -80,8 +80,9 @@ app.get('/health', async (req, res) => {
         timestamp: new Date(),
         version: '2.0.0',
         services: {
-            mongodb: {
-                status: mongoStatus,
+            database: {
+                engine: 'PostgreSQL (Supabase)',
+                status: postgresStatus,
             },
             supabase: supabaseHealth
         }

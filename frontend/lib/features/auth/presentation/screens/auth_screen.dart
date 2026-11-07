@@ -258,11 +258,18 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   }
 
   Future<void> _handleLogin() async {
+    if (_isLoggingIn) return;
     if (!_loginFormKey.currentState!.validate()) return;
 
-    final identifier = _loginEmailController.text.trim();
+    FocusManager.instance.primaryFocus?.unfocus();
+
+    final rawIdentifier = _loginEmailController.text.trim();
+    final identifier = (!rawIdentifier.contains('@') && RegExp(r'^[+\d\s\-()]+$').hasMatch(rawIdentifier))
+        ? _normalizePhone(rawIdentifier)
+        : rawIdentifier;
 
     setState(() => _isLoggingIn = true);
+    ScaffoldMessenger.of(context).clearSnackBars();
 
     try {
       final res = await ApiService().loginUser(
@@ -272,7 +279,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       );
 
       if (!mounted) return;
-      setState(() => _isLoggingIn = false);
 
       if (res['success'] == true) {
         final Map<String, dynamic> responseData = res['data'] is Map<String, dynamic> ? res['data'] : {};
@@ -294,6 +300,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
         // Sub-admins should be treated as admin-class for portal routing
         if ((isSelAdmin && !isRegAdmin && !isRegSubAdmin) || (isSelDentist && !isRegDentist) || (isSelPatient && !isRegPatient)) {
+          setState(() => _isLoggingIn = false);
           final displayRole = userData['role'] ?? (isRegDentist ? 'Dentist' : (isRegAdmin || isRegSubAdmin ? 'Admin' : 'Patient'));
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -362,8 +369,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               'specialty': 'General Dentistry',
             },
           );
-          await PatientProblemService().syncAllDataFromApi();
           if (!mounted) return;
+          setState(() => _isLoggingIn = false);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('🎉 Welcome back, ${userData['name'] ?? 'Doctor'}! Logging into Dentist Workspace...'),
@@ -402,8 +409,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               'isSubAdmin': isSubAdmin,
             },
           );
-          await PatientProblemService().syncAllDataFromApi();
           if (!mounted) return;
+          setState(() => _isLoggingIn = false);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('🎉 Welcome back, ${userData['name'] ?? (isSubAdmin ? 'Sub-Admin' : 'Admin')}! Opening ${isSubAdmin ? 'Sub-Admin Workspace' : 'Admin Dashboard'}...'),
@@ -424,13 +431,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           }
 
           Map<String, dynamic> dbProfileMeta = {};
-          try {
-            var q = Supabase.instance.client.from('users').select('device_token, city, pincode, state');
-            final uRow = identifier.contains('@') ? await q.ilike('email', identifier).maybeSingle() : await q.eq('phone', identifier).maybeSingle();
-            if (uRow != null && uRow['device_token'] != null && uRow['device_token'].toString().startsWith('{')) {
-              dbProfileMeta = jsonDecode(uRow['device_token'].toString());
-            }
-          } catch (_) {}
+          if (userData['device_token'] != null && userData['device_token'].toString().startsWith('{')) {
+            try {
+              dbProfileMeta = jsonDecode(userData['device_token'].toString());
+            } catch (_) {}
+          }
 
           final authMeta = Supabase.instance.client.auth.currentUser?.userMetadata ?? {};
           final String loginAge = (userData['age'] ?? dbProfileMeta['age'] ?? cachedMap['age'] ?? authMeta['age'] ?? authMeta['patient_age'] ?? '').toString();
@@ -468,8 +473,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               'pincode': (userData['pincode'] ?? dbProfileMeta['pincode'] ?? cachedMap['pincode'] ?? '').toString(),
             },
           );
-          await PatientProblemService().syncAllDataFromApi();
           if (!mounted) return;
+          setState(() => _isLoggingIn = false);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('🎉 Welcome back, ${userData['name'] ?? 'Patient'}! Logging into Patient Portal...'),
@@ -479,6 +484,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           context.go('/patient');
         }
       } else {
+        setState(() => _isLoggingIn = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('❌ Login Failed: ${res['message'] ?? 'User not registered. Please Register first.'}'),
@@ -1170,11 +1176,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     setState(() {
       _selectedRole = role;
       if (role == UserRole.admin) {
-        _loginEmailController.text = '9063663180';
+        _loginEmailController.text = '9281030535';
       } else if (role == UserRole.dentist) {
-        _loginEmailController.text = '9063663177';
+        _loginEmailController.text = '8688815865';
       } else {
-        _loginEmailController.text = '8985732915';
+        _loginEmailController.text = '9063663180';
       }
     });
   }
@@ -1583,114 +1589,120 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   Widget _buildSignInForm() {
     return Form(
       key: _loginFormKey,
-      child: SingleChildScrollView(
-        physics: const BouncingScrollPhysics(),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const SizedBox(height: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SizedBox(height: 6),
 
-            // Demo Auto-fill Banner
-            InkWell(
-              onTap: () => _autoFillDemo(_selectedRole),
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: _accentColor.withValues(alpha: 0.06),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _accentColor.withValues(alpha: 0.18)),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: _accentColor.withValues(alpha: 0.12),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(Icons.touch_app_rounded, color: _accentColor, size: 14),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Tap to auto-fill $_roleName demo credentials',
-                        style: TextStyle(fontSize: 12, color: _accentColor, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    Icon(Icons.arrow_forward_ios_rounded, color: _accentColor.withValues(alpha: 0.6), size: 12),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // Fast Direct Login Flow (Mobile Number OR Email Address - No password/OTP required)
-            TextFormField(
-              controller: _loginEmailController,
-              keyboardType: TextInputType.emailAddress,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-              validator: (val) {
-                if (val == null || val.trim().isEmpty) {
-                  return 'Please enter your registered mobile number or email address';
-                }
-                return null;
-              },
-              decoration: _buildInputDecoration(
-                label: 'Registered Mobile Number or Email *',
-                hint: 'e.g. +91 98765 43210 or user@dentaguru.com',
-                icon: Icons.phone_android_rounded,
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // Direct Sign In Button
-            Container(
-              height: 48,
+          // Demo Auto-fill Banner
+          InkWell(
+            onTap: _isLoggingIn ? null : () => _autoFillDemo(_selectedRole),
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                gradient: LinearGradient(
-                  colors: [
-                    _accentColor,
-                    _accentColor.withValues(alpha: 0.88),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: _accentColor.withValues(alpha: 0.35),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
+                color: _accentColor.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _accentColor.withValues(alpha: 0.18)),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: _accentColor.withValues(alpha: 0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.touch_app_rounded, color: _accentColor, size: 14),
                   ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Tap to auto-fill $_roleName demo credentials',
+                      style: TextStyle(fontSize: 12, color: _accentColor, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  Icon(Icons.arrow_forward_ios_rounded, color: _accentColor.withValues(alpha: 0.6), size: 12),
                 ],
               ),
-              child: ElevatedButton.icon(
-                icon: _isLoggingIn
-                    ? const SizedBox.shrink()
-                    : const Icon(Icons.arrow_forward_rounded, size: 18),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.transparent,
-                  foregroundColor: Colors.white,
-                  shadowColor: Colors.transparent,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Fast Direct Login Flow (Mobile Number OR Email Address - No password/OTP required)
+          TextFormField(
+            controller: _loginEmailController,
+            enabled: !_isLoggingIn,
+            keyboardType: TextInputType.emailAddress,
+            textInputAction: TextInputAction.done,
+            onFieldSubmitted: (_) => _handleLogin(),
+            style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
+            validator: (val) {
+              if (val == null || val.trim().isEmpty) {
+                return 'Please enter your registered mobile number or email address';
+              }
+              return null;
+            },
+            decoration: _buildInputDecoration(
+              label: 'Registered Mobile Number or Email *',
+              hint: 'e.g. +91 98765 43210 or user@dentaguru.com',
+              icon: Icons.phone_android_rounded,
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Direct Sign In Button
+          Container(
+            height: 48,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              gradient: LinearGradient(
+                colors: [
+                  _accentColor,
+                  _accentColor.withValues(alpha: 0.88),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: _accentColor.withValues(alpha: 0.35),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
                 ),
-                onPressed: _isLoggingIn ? null : _handleLogin,
-                label: _isLoggingIn
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.2),
-                      )
-                    : Text(
-                        'Sign In as $_roleName',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5, letterSpacing: 0.3),
-                      ),
+              ],
+            ),
+            child: ElevatedButton.icon(
+              icon: _isLoggingIn
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.2),
+                    )
+                  : const Icon(Icons.arrow_forward_rounded, size: 18),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.transparent,
+                foregroundColor: Colors.white,
+                disabledForegroundColor: Colors.white,
+                disabledBackgroundColor: Colors.transparent,
+                shadowColor: Colors.transparent,
+                minimumSize: const Size(double.infinity, 48),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              onPressed: _isLoggingIn ? null : _handleLogin,
+              label: Text(
+                _isLoggingIn ? 'Signing In...' : 'Sign In as $_roleName',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14.5,
+                  letterSpacing: 0.3,
+                  color: Colors.white,
+                ),
               ),
             ),
-            const SizedBox(height: 12),
-          ],
-        ),
+          ),
+          const SizedBox(height: 12),
+        ],
       ),
     );
   }

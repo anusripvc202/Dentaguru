@@ -352,19 +352,38 @@ exports.register = async (req, res) => {
 exports.login = async (req, res) => {
     const { email, phone, password, otp, code, role, fcmToken } = req.body;
     try {
-        const identifier = (phone || email || '').toString().trim();
+        const rawIdentifier = (phone || email || '').toString().trim();
+        let identifier = rawIdentifier;
+        if (rawIdentifier && !rawIdentifier.includes('@') && /^[+\d\s\-()]+$/.test(rawIdentifier)) {
+            const digits = rawIdentifier.replace(/[^0-9]/g, '');
+            if (digits.length === 12 && digits.startsWith('91')) {
+                identifier = digits.substring(2);
+            } else if (digits.length === 11 && digits.startsWith('0')) {
+                identifier = digits.substring(1);
+            } else if (digits.length > 0) {
+                identifier = digits;
+            }
+        }
         const otpCode = (otp || code || '').toString().trim();
 
         if (!identifier) {
             return res.status(400).json({ success: false, message: 'Please provide your registered mobile number or email address.' });
         }
 
-        let user = await User.findOne({ phone: identifier });
-        if (!user) {
+        let user = null;
+        if (identifier.includes('@')) {
             user = await User.findOne({ email: identifier.toLowerCase() });
-        }
-        if (!user) {
-            user = await User.findOne({ email: identifier });
+            if (!user && identifier !== identifier.toLowerCase()) {
+                user = await User.findOne({ email: identifier });
+            }
+        } else {
+            user = await User.findOne({ phone: identifier });
+            if (!user && rawIdentifier !== identifier) {
+                user = await User.findOne({ phone: rawIdentifier });
+            }
+            if (!user) {
+                user = await User.findOne({ email: identifier.toLowerCase() });
+            }
         }
         if (!user) {
             return res.status(400).json({ success: false, message: 'Invalid credentials. User not registered.' });
@@ -385,13 +404,20 @@ exports.login = async (req, res) => {
         }
         // Direct registered mobile / email sign in permitted without requiring OTP code
 
-        const normalizedUserEmail = (user.email || '').toString().trim().toLowerCase();
         const userRoleStr = (user.role || '').toString().trim().toLowerCase();
-        const reqRoleStr = (role || '').toString().trim().toLowerCase();
         const isSubAdminUser = userRoleStr === 'sub-admin' || userRoleStr === 'subadmin' || userRoleStr === 'sub_admin';
 
+        let tokenMeta = {};
+        if (user.device_token && typeof user.device_token === 'string' && user.device_token.startsWith('{')) {
+            try {
+                tokenMeta = JSON.parse(user.device_token);
+            } catch (_) {}
+        }
+
+        const effectiveStatus = (user.status || tokenMeta.status || 'ACTIVE').toString().toUpperCase();
+
         // Check active status for Sub-Admins
-        if (isSubAdminUser && (user.status === 'INACTIVE' || user.status === 'DEACTIVATED')) {
+        if (isSubAdminUser && (effectiveStatus === 'INACTIVE' || effectiveStatus === 'DEACTIVATED')) {
             return res.status(403).json({
                 success: false,
                 message: 'Access Denied: Your Sub-Admin account has been deactivated by the Main Admin. Please contact the administrator.'
@@ -417,33 +443,23 @@ exports.login = async (req, res) => {
             if (isReqDentist && !isUserDentist) {
                 return res.status(403).json({ success: false, message: `Role Mismatch: Your account is registered as '${user.role}'. Cannot log into Dentist Portal.` });
             }
-            if (isReqPatient && !isUserPatient && !isUserAdmin) {
+            if (isReqPatient && !isUserPatient) {
                 return res.status(403).json({ success: false, message: `Role Mismatch: Your account is registered as '${user.role}'. Cannot log into Patient Portal.` });
             }
         }
 
         if (fcmToken) {
-            await User.findByIdAndUpdate(user.id, { device_token: fcmToken });
+            User.findByIdAndUpdate(user.id, { device_token: fcmToken }).catch(() => {});
         }
 
-        let userAge = user.age || user.patient_age || '';
-        let userGender = user.gender || '';
-        let userBloodGroup = user.blood_group || user.bloodGroup || '';
-        let userEmergency = user.emergency_contact || user.emergencyContact || '';
+        const userAge = user.age || user.patient_age || tokenMeta.age || '';
+        const userGender = user.gender || tokenMeta.gender || '';
+        const userBloodGroup = user.blood_group || user.bloodGroup || tokenMeta.bloodGroup || '';
+        const userEmergency = user.emergency_contact || user.emergencyContact || tokenMeta.emergencyContact || '';
 
-        if (!userAge || !userGender) {
-            try {
-                const { data: { user: sbAuthUser } } = await supabaseAdmin.auth.admin.getUserById(user.id);
-                if (sbAuthUser && sbAuthUser.user_metadata) {
-                    if (!userAge) userAge = sbAuthUser.user_metadata.age || sbAuthUser.user_metadata.patient_age || '';
-                    if (!userGender) userGender = sbAuthUser.user_metadata.gender || '';
-                    if (!userBloodGroup) userBloodGroup = sbAuthUser.user_metadata.bloodGroup || sbAuthUser.user_metadata.blood_group || '';
-                    if (!userEmergency) userEmergency = sbAuthUser.user_metadata.emergencyContact || sbAuthUser.user_metadata.emergency_contact || '';
-                }
-            } catch (_) {}
-        }
-
-        let userPermissions = user.permissions || [];
+        let userPermissions = (Array.isArray(user.permissions) && user.permissions.length > 0)
+            ? user.permissions
+            : (Array.isArray(tokenMeta.permissions) ? tokenMeta.permissions : []);
         if (isSubAdminUser && (!userPermissions || userPermissions.length === 0)) {
             const { SubAdminPermission } = require('../models/Schemas');
             userPermissions = await SubAdminPermission.getPermissionsForUser(user.id);
@@ -452,17 +468,13 @@ exports.login = async (req, res) => {
         const { accessToken, refreshToken } = generateTokens(user);
         const existingTokens = Array.isArray(user.refresh_tokens) ? user.refresh_tokens : [];
         if (!existingTokens.includes(refreshToken)) existingTokens.push(refreshToken);
-        await User.findByIdAndUpdate(user.id, {
+        User.findByIdAndUpdate(user.id, {
             refresh_tokens: existingTokens.slice(-20)
-        });
+        }).catch(() => {});
 
-        let userLanguages = user.languages || ['English'];
-        if (user.device_token && user.device_token.startsWith('{')) {
-            try {
-                const meta = JSON.parse(user.device_token);
-                if (meta.languages && Array.isArray(meta.languages)) userLanguages = meta.languages;
-            } catch (_) {}
-        }
+        const userLanguages = (Array.isArray(user.languages) && user.languages.length > 0)
+            ? user.languages
+            : (Array.isArray(tokenMeta.languages) && tokenMeta.languages.length > 0 ? tokenMeta.languages : ['English']);
 
         res.json({
             success: true,
@@ -475,14 +487,14 @@ exports.login = async (req, res) => {
                 email: user.email,
                 phone: user.phone,
                 role: user.role,
-                status: user.status || 'ACTIVE',
+                status: effectiveStatus,
                 permissions: userPermissions,
                 age: userAge,
                 gender: userGender,
                 bloodGroup: userBloodGroup,
                 emergencyContact: userEmergency,
-                city: user.city || '',
-                pincode: user.pincode || '',
+                city: user.city || tokenMeta.city || '',
+                pincode: user.pincode || tokenMeta.pincode || '',
                 languages: userLanguages,
                 profilePhoto: user.biometric_token
             }

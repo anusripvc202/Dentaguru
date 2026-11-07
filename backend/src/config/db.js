@@ -3,6 +3,7 @@ const { supabaseAdmin } = require('./supabase');
 let isConnectedFlag = false;
 
 const isConnected = () => isConnectedFlag;
+const isPostgresConnected = () => isConnectedFlag;
 
 const connectDB = async () => {
     try {
@@ -26,7 +27,11 @@ const connectDB = async () => {
     }
 };
 
+const connectPostgresDB = connectDB;
+
 module.exports = {
     connectDB,
-    isConnected
+    connectPostgresDB,
+    isConnected,
+    isPostgresConnected
 };

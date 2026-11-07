@@ -2998,7 +2998,7 @@ class PatientProblemService extends ChangeNotifier {
       }).eq('request_id', requestId);
     } catch (_) {}
 
-    // 2. Call backend API to persist acceptance to MongoDB and trigger notifications
+    // 2. Call backend API to persist acceptance to Supabase PostgreSQL and trigger notifications
     try {
       await ApiService().acceptProblemRequest(
         requestId: requestId,

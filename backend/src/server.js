@@ -2,7 +2,7 @@ require('dotenv').config();
 const http = require('http');
 const https = require('https');
 const app = require('./app');
-const { connectDB } = require('./config/db');
+const { connectPostgresDB } = require('./config/db');
 const { Server } = require('socket.io');
 const { initializeFirebase } = require('./services/notificationService');
 
@@ -11,8 +11,8 @@ const PORT = process.env.PORT || 5000;
 // Initialize Firebase Admin SDK for FCM push notifications
 initializeFirebase();
 
-// Connect to MongoDB Database
-connectDB();
+// Connect to Supabase PostgreSQL Database
+connectPostgresDB();
 
 // Create HTTP Server
 const server = http.createServer(app);

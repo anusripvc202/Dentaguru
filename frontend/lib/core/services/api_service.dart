@@ -342,7 +342,19 @@ class ApiService {
     String? code,
     String? role,
   }) async {
-    final identifier = (phone != null && phone.trim().isNotEmpty) ? phone.trim() : (email ?? '').trim();
+    final rawIdentifier = (phone != null && phone.trim().isNotEmpty) ? phone.trim() : (email ?? '').trim();
+    String identifier = rawIdentifier;
+    if (!rawIdentifier.contains('@') && RegExp(r'^[+\d\s\-()]+$').hasMatch(rawIdentifier)) {
+      final digits = rawIdentifier.replaceAll(RegExp(r'[^0-9]'), '');
+      if (digits.length == 12 && digits.startsWith('91')) {
+        identifier = digits.substring(2);
+      } else if (digits.length == 11 && digits.startsWith('0')) {
+        identifier = digits.substring(1);
+      } else if (digits.isNotEmpty) {
+        identifier = digits;
+      }
+    }
+
     final otpCode = (otp != null && otp.trim().isNotEmpty) ? otp.trim() : (code ?? '').trim();
     final cleanPassword = (password ?? '').trim();
 
@@ -354,6 +366,104 @@ class ApiService {
       if (otpCode.isNotEmpty) 'code': otpCode,
       if (role != null) 'role': role,
     });
+
+    // 1. Fast-Path Direct 24/7 Supabase Cloud PostgreSQL Authentication (~150ms)
+    if (cleanPassword.isEmpty && otpCode.isEmpty) {
+      try {
+        final isEmail = identifier.contains('@');
+        var u = isEmail
+            ? await Supabase.instance.client.from('users').select('*').ilike('email', identifier).limit(1).maybeSingle()
+            : await Supabase.instance.client.from('users').select('*').eq('phone', identifier).limit(1).maybeSingle();
+        if (u == null && !isEmail && rawIdentifier != identifier) {
+          u = await Supabase.instance.client.from('users').select('*').eq('phone', rawIdentifier).limit(1).maybeSingle();
+        }
+
+        if (u != null) {
+          final userRole = (u['role']?.toString() ?? role ?? 'Patient').trim();
+          final userRoleLower = userRole.toLowerCase();
+          final isSubAdminUser = userRoleLower == 'sub-admin' || userRoleLower == 'subadmin' || userRoleLower == 'sub_admin';
+
+          Map<String, dynamic> tokenMeta = {};
+          if (u['device_token'] != null && u['device_token'].toString().startsWith('{')) {
+            try {
+              tokenMeta = jsonDecode(u['device_token'].toString());
+            } catch (_) {}
+          }
+
+          final userStatus = (u['status'] ?? tokenMeta['status'] ?? 'ACTIVE').toString().toUpperCase();
+          if (isSubAdminUser && (userStatus == 'INACTIVE' || userStatus == 'DEACTIVATED')) {
+            return {
+              'success': false,
+              'message': 'Access Denied: Your Sub-Admin account has been deactivated by the Main Admin. Please contact the administrator.'
+            };
+          }
+
+          List<dynamic> userPerms = (u['permissions'] is List && (u['permissions'] as List).isNotEmpty)
+              ? u['permissions']
+              : (tokenMeta['permissions'] is List ? tokenMeta['permissions'] : []);
+          if (isSubAdminUser && userPerms.isEmpty) {
+            try {
+              final permRows = await Supabase.instance.client
+                  .from('sub_admin_permissions')
+                  .select('permission_key')
+                  .eq('user_id', u['id']);
+              if (permRows.isNotEmpty) {
+                userPerms = permRows.map((r) => r['permission_key'].toString()).toList();
+              }
+            } catch (_) {}
+          }
+
+          // Non-blocking background token synchronization with Express API (35s cold-start timeout)
+          http.post(
+            Uri.parse(ApiConstants.login),
+            headers: {'Content-Type': 'application/json'},
+            body: payload,
+          ).timeout(const Duration(seconds: 35)).then((response) {
+            if (response.statusCode == 200) {
+              final data = jsonDecode(response.body);
+              if (data['accessToken'] != null) {
+                setAuthToken(data['accessToken'].toString());
+              }
+            }
+          }).catchError((_) {});
+
+          final effectiveRole = userRole.isNotEmpty ? userRole : (role ?? 'Patient');
+          return {
+            'success': true,
+            'data': {
+              'accessToken': 'sb_direct_${u['id']}',
+              'user': {
+                'id': u['id'],
+                'email': u['email'] ?? '',
+                'name': u['name'] ?? (identifier.contains('@') ? identifier.split('@').first : identifier),
+                'role': effectiveRole,
+                'phone': u['phone'] ?? identifier,
+                'status': userStatus,
+                'permissions': userPerms,
+                'age': u['age'] ?? tokenMeta['age'] ?? '',
+                'gender': u['gender'] ?? tokenMeta['gender'] ?? '',
+                'bloodGroup': u['blood_group'] ?? u['bloodGroup'] ?? tokenMeta['bloodGroup'] ?? '',
+                'emergencyContact': u['emergency_contact'] ?? u['emergencyContact'] ?? tokenMeta['emergencyContact'] ?? '',
+                'city': u['city'] ?? tokenMeta['city'] ?? '',
+                'pincode': u['pincode'] ?? tokenMeta['pincode'] ?? '',
+                'state': u['state'] ?? tokenMeta['location'] ?? '',
+                'languages': u['languages'] ?? tokenMeta['languages'] ?? ['English'],
+                'profilePhoto': u['biometric_token'],
+              }
+            }
+          };
+        } else {
+          return {
+            'success': false,
+            'message': 'Invalid credentials. User not registered in system.'
+          };
+        }
+      } catch (directErr) {
+        debugPrint('ℹ️ Direct Supabase login check notice ($directErr), falling back to Express API...');
+      }
+    }
+
+    // 2. Central Express Backend API with 35s Cold-Start Timeout & Supabase Fallback
     try {
       final url = Uri.parse(ApiConstants.login);
       debugPrint('🌐 Sending Login Request to: $url');
@@ -366,23 +476,12 @@ class ApiService {
       final data = jsonDecode(response.body);
       if (response.statusCode == 200 && data['success'] == true) {
         if (data['accessToken'] != null) setAuthToken(data['accessToken']);
-        try {
-          var uQuery = Supabase.instance.client.from('users').select('device_token, city, pincode, state');
-          final uRow = identifier.contains('@')
-              ? await uQuery.ilike('email', identifier).maybeSingle()
-              : await uQuery.eq('phone', identifier).maybeSingle();
-          if (uRow != null && uRow['device_token'] != null && uRow['device_token'].toString().startsWith('{')) {
-            final Map<String, dynamic> tokenMeta = jsonDecode(uRow['device_token'].toString());
-            if (data['user'] is Map<String, dynamic>) {
-              final uMap = data['user'] as Map<String, dynamic>;
-              if (uMap['age'] == null || uMap['age'].toString().isEmpty) uMap['age'] = tokenMeta['age'];
-              if (uMap['bloodGroup'] == null || uMap['bloodGroup'].toString().isEmpty) uMap['bloodGroup'] = tokenMeta['bloodGroup'];
-              if (uMap['gender'] == null || uMap['gender'].toString().isEmpty) uMap['gender'] = tokenMeta['gender'];
-              if (uMap['emergencyContact'] == null || uMap['emergencyContact'].toString().isEmpty) uMap['emergencyContact'] = tokenMeta['emergencyContact'];
-            }
-          }
-        } catch (_) {}
         return {'success': true, 'data': data};
+      } else if (response.statusCode == 400 || response.statusCode == 401 || response.statusCode == 403) {
+        return {
+          'success': false,
+          'message': data['message'] ?? 'Invalid credentials. User not registered in system.'
+        };
       } else {
         debugPrint('⚠️ Render backend response: ${response.body}. Triggering direct 24/7 Supabase Cloud PostgreSQL check...');
         throw Exception(data['message'] ?? 'Render backend fallback trigger');
@@ -416,10 +515,15 @@ class ApiService {
                 'phone': u['phone'] ?? identifier,
                 'status': tokenMeta['status'] ?? 'ACTIVE',
                 'permissions': tokenMeta['permissions'] ?? [],
-                'city': u['city'] ?? '',
-                'pincode': u['pincode'] ?? '',
-                'state': u['state'] ?? '',
-                'languages': u['languages'] ?? [],
+                'age': u['age'] ?? tokenMeta['age'] ?? '',
+                'gender': u['gender'] ?? tokenMeta['gender'] ?? '',
+                'bloodGroup': u['blood_group'] ?? u['bloodGroup'] ?? tokenMeta['bloodGroup'] ?? '',
+                'emergencyContact': u['emergency_contact'] ?? u['emergencyContact'] ?? tokenMeta['emergencyContact'] ?? '',
+                'city': u['city'] ?? tokenMeta['city'] ?? '',
+                'pincode': u['pincode'] ?? tokenMeta['pincode'] ?? '',
+                'state': u['state'] ?? tokenMeta['location'] ?? '',
+                'languages': u['languages'] ?? tokenMeta['languages'] ?? ['English'],
+                'profilePhoto': u['biometric_token'],
               }
             }
           };

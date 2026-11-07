@@ -10,7 +10,7 @@ const app = require('../src/app');
 
 console.log('--- STARTING DENTA GURU CORE COMPONENT TESTS ---');
 
-// 1. Validate Mongoose Schemas compilation
+// 1. Validate Supabase PostgreSQL Models compilation
 try {
     assert.ok(User, 'User model compiled successfully.');
     assert.ok(Clinic, 'Clinic model compiled successfully.');
@@ -20,7 +20,7 @@ try {
     assert.ok(ChatMessage, 'ChatMessage model compiled successfully.');
     assert.ok(AuditLog, 'AuditLog model compiled successfully.');
     assert.ok(DoctorAvailability, 'DoctorAvailability model compiled successfully.');
-    console.log('✓ SUCCESS: Core Mongoose Schemas loaded and compiled.');
+    console.log('✓ SUCCESS: Core Supabase PostgreSQL Models loaded and compiled.');
 
 } catch (error) {
     console.error('✗ ERROR: Schema validation failed:', error.message);
@@ -119,5 +119,7 @@ try {
     }
 
     console.log('--- ALL FOUNDATION CHECKS PASSED SUCCESSFULLY ---');
-    process.exit(0);
+    setTimeout(() => {
+        process.exit(0);
+    }, 100);
 })();
