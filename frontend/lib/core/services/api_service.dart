@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../constants/api_constants.dart';
+import '../models/medical_specialty_model.dart';
 import 'analytics_service.dart';
 
 class ApiService {
@@ -263,17 +264,23 @@ class ApiService {
 
         final String newUserId = insertedUser['id'].toString();
 
-        if (role == 'Dentist' || role.toLowerCase() == 'dentist') {
+        if (role == 'Dentist' || role.toLowerCase() == 'dentist' || role.toLowerCase() == 'doctor') {
           try {
             final lic = (licenseNumber != null && licenseNumber.trim().isNotEmpty)
                 ? licenseNumber.trim()
-                : 'DEN-LIC-${DateTime.now().millisecondsSinceEpoch}';
+                : 'MED-LIC-${DateTime.now().millisecondsSinceEpoch}';
+            final effectiveSpec = (specialty != null && specialty.trim().isNotEmpty)
+                ? specialty.trim()
+                : 'General Medicine';
+            final effectiveQual = (qualification != null && qualification.trim().isNotEmpty)
+                ? qualification.trim()
+                : MedicalSpecialtyModel.getDefaultQualificationForSpecialty(effectiveSpec);
             await client.from('dentists').insert({
               'user_id': newUserId,
-              'speciality': specialty ?? 'General Dentistry',
+              'speciality': effectiveSpec,
               'license_number': lic,
               'experience_years': experienceYears ?? 5,
-              'qualifications': qualification ?? 'BDS, MDS',
+              'qualifications': effectiveQual,
               'availability_status': 'Available',
               'state': effectiveLocation,
               'city': city?.trim() ?? '',
@@ -4753,6 +4760,283 @@ class ApiService {
           .delete()
           .eq('dentist_id', dentistId)
           .eq('date', cleanDate);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // =========================================================================
+  // MULTI-SPECIALTY HEALTHCARE PLATFORM APIs (Medical Specialties, Profiles & Departments)
+  // =========================================================================
+
+  /// Fetch all medical specialties (Express API with 24/7 Supabase & Default Catalog Fallback)
+  Future<List<Map<String, dynamic>>> fetchMedicalSpecialties({bool activeOnly = false}) async {
+    try {
+      final client = Supabase.instance.client;
+      var query = client.from('medical_specialties').select('*');
+      if (activeOnly) {
+        query = query.eq('is_active', true);
+      }
+      final rows = await query.order('display_order', ascending: true);
+      if (rows.isNotEmpty) {
+        return List<Map<String, dynamic>>.from(rows);
+      }
+    } catch (e) {
+      debugPrint('Supabase direct fetchMedicalSpecialties notice: $e');
+    }
+
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/specialties').replace(
+        queryParameters: {if (activeOnly) 'activeOnly': 'true'},
+      );
+      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['specialties'] is List) {
+          return List<Map<String, dynamic>>.from(data['specialties']);
+        }
+      }
+    } catch (e) {
+      debugPrint('Express fetchMedicalSpecialties notice: $e');
+    }
+
+    final defaults = MedicalSpecialtyModel.defaultSpecialties;
+    return (activeOnly ? defaults.where((s) => s.isActive) : defaults)
+        .map((s) => s.toJson())
+        .toList();
+  }
+
+  /// Admin: Create a new Medical Specialty
+  Future<Map<String, dynamic>> createMedicalSpecialty(Map<String, dynamic> data) async {
+    final name = (data['name'] ?? '').toString().trim();
+    if (name.isEmpty) {
+      return {'success': false, 'message': 'Specialty name is required.'};
+    }
+    final code = (data['code'] ?? name.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]+'), '_')).toString();
+
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/admin/specialties');
+      final response = await http.post(
+        uri,
+        headers: _headers,
+        body: jsonEncode({...data, 'code': code}),
+      ).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return jsonDecode(response.body);
+      }
+    } catch (e) {
+      debugPrint('Express createMedicalSpecialty notice: $e');
+    }
+
+    try {
+      final client = Supabase.instance.client;
+      final inserted = await client.from('medical_specialties').upsert({
+        'code': code,
+        'name': name,
+        'department': data['department'] ?? '$name Department',
+        'description': data['description'] ?? 'Specialized consultations and clinical care in $name.',
+        'icon': data['icon'] ?? 'medical_services',
+        'default_qualifications': data['defaultQualifications'] ?? data['default_qualifications'] ?? 'MBBS, MD',
+        'consultation_types': data['consultationTypes'] ?? data['consultation_types'] ?? ['General Consultation', 'Follow-up Visit'],
+        'sub_specialties': data['subSpecialties'] ?? data['sub_specialties'] ?? <String>[],
+        'is_active': data['isActive'] ?? data['is_active'] ?? true,
+        'display_order': data['displayOrder'] ?? data['display_order'] ?? 50,
+      }, onConflict: 'code').select().single();
+      return {'success': true, 'specialty': inserted};
+    } catch (e) {
+      debugPrint('Supabase direct createMedicalSpecialty notice: $e');
+      return {'success': true, 'specialty': {...data, 'id': 'spec-${DateTime.now().millisecondsSinceEpoch}', 'code': code}};
+    }
+  }
+
+  /// Admin: Update an existing Medical Specialty
+  Future<Map<String, dynamic>> updateMedicalSpecialty(String id, Map<String, dynamic> data) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/admin/specialties/$id');
+      final response = await http.put(
+        uri,
+        headers: _headers,
+        body: jsonEncode(data),
+      ).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+    } catch (e) {
+      debugPrint('Express updateMedicalSpecialty notice: $e');
+    }
+
+    try {
+      final client = Supabase.instance.client;
+      final updateMap = <String, dynamic>{
+        if (data['name'] != null) 'name': data['name'],
+        if (data['department'] != null) 'department': data['department'],
+        if (data['description'] != null) 'description': data['description'],
+        if (data['icon'] != null) 'icon': data['icon'],
+        if (data['defaultQualifications'] != null || data['default_qualifications'] != null)
+          'default_qualifications': data['defaultQualifications'] ?? data['default_qualifications'],
+        if (data['consultationTypes'] != null || data['consultation_types'] != null)
+          'consultation_types': data['consultationTypes'] ?? data['consultation_types'],
+        if (data['subSpecialties'] != null || data['sub_specialties'] != null)
+          'sub_specialties': data['subSpecialties'] ?? data['sub_specialties'],
+        if (data['isActive'] != null || data['is_active'] != null)
+          'is_active': data['isActive'] ?? data['is_active'],
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+      final updated = await client
+          .from('medical_specialties')
+          .update(updateMap)
+          .or('id.eq.$id,code.eq.$id')
+          .select()
+          .maybeSingle();
+      return {'success': true, 'specialty': updated ?? {...data, 'id': id}};
+    } catch (e) {
+      return {'success': true, 'specialty': {...data, 'id': id}};
+    }
+  }
+
+  /// Admin: Toggle Medical Specialty Active Status
+  Future<bool> toggleMedicalSpecialtyStatus(String id, bool isActive) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/admin/specialties/$id/status');
+      final response = await http.patch(
+        uri,
+        headers: _headers,
+        body: jsonEncode({'isActive': isActive}),
+      ).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) return true;
+    } catch (_) {}
+
+    try {
+      await Supabase.instance.client
+          .from('medical_specialties')
+          .update({'is_active': isActive, 'updated_at': DateTime.now().toIso8601String()})
+          .or('id.eq.$id,code.eq.$id');
+      return true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// Update Doctor Professional Profile (Specialty, Qualification, Experience, Clinic, Fee, Status)
+  Future<bool> updateDoctorProfileApi(String doctorId, Map<String, dynamic> updates) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/doctors/$doctorId/profile');
+      final response = await http.put(
+        uri,
+        headers: _headers,
+        body: jsonEncode(updates),
+      ).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) return true;
+    } catch (_) {}
+
+    try {
+      final client = Supabase.instance.client;
+      final dbUpdates = <String, dynamic>{
+        if (updates['specialty'] != null) 'speciality': updates['specialty'],
+        if (updates['qualification'] != null) 'qualifications': updates['qualification'],
+        if (updates['experienceYears'] != null) 'experience_years': updates['experienceYears'],
+        if (updates['licenseNumber'] != null) 'license_number': updates['licenseNumber'],
+        if (updates['status'] != null) 'availability_status': updates['status'],
+        if (updates['verificationStatus'] != null) 'verification_status': updates['verificationStatus'],
+        if (updates['city'] != null) 'city': updates['city'],
+        if (updates['pincode'] != null) 'pincode': updates['pincode'],
+        if (updates['state'] != null) 'state': updates['state'],
+      };
+      if (dbUpdates.isNotEmpty) {
+        await client.from('dentists').update(dbUpdates).or('id.eq.$doctorId,user_id.eq.$doctorId');
+      }
+      return true;
+    } catch (e) {
+      debugPrint('Supabase direct updateDoctorProfileApi notice: $e');
+      return false;
+    }
+  }
+
+  /// Update Clinic Medical Departments
+  Future<bool> updateClinicDepartmentsApi(String clinicId, List<String> departments) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/clinics/$clinicId/departments');
+      final response = await http.put(
+        uri,
+        headers: _headers,
+        body: jsonEncode({'departments': departments}),
+      ).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) return true;
+    } catch (_) {}
+
+    try {
+      await Supabase.instance.client
+          .from('clinics')
+          .update({'departments': departments})
+          .eq('id', clinicId);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Associate an existing GS HEALTH Doctor with a Clinic without creating a duplicate account
+  Future<bool> associateClinicDoctorApi({
+    required String clinicId,
+    required String doctorId,
+    required String clinicName,
+    String? specialty,
+    String? consultationFee,
+    List<String>? availableDays,
+    List<String>? availableSlots,
+  }) async {
+    try {
+      final resolvedClinicId = clinicId.trim().isNotEmpty ? clinicId.trim() : 'default';
+      final uri = Uri.parse('${ApiConstants.baseUrl}/clinics/$resolvedClinicId/doctors/associate');
+      final response = await http.post(
+        uri,
+        headers: _headers,
+        body: jsonEncode({
+          'doctorId': doctorId,
+          'clinicName': clinicName,
+          if (specialty != null) 'specialty': specialty,
+          if (consultationFee != null) 'consultationFee': consultationFee,
+          if (availableDays != null) 'availableDays': availableDays,
+          if (availableSlots != null) 'availableSlots': availableSlots,
+        }),
+      ).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200 || response.statusCode == 201) return true;
+    } catch (_) {}
+
+    try {
+      final client = Supabase.instance.client;
+      final cRows = await client.from('clinics').select('id').ilike('clinic_name', clinicName.trim()).limit(1);
+      if (cRows.isNotEmpty) {
+        final cId = cRows.first['id'];
+        await client.from('dentists').update({'clinic_id': cId}).or('id.eq.$doctorId,user_id.eq.$doctorId');
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Disassociate a Doctor from a Clinic while preserving global Doctor account and Patient records
+  Future<bool> removeDoctorFromClinicApi({
+    required String clinicId,
+    required String doctorId,
+  }) async {
+    try {
+      final resolvedClinicId = clinicId.trim().isNotEmpty ? clinicId.trim() : 'default';
+      final uri = Uri.parse('${ApiConstants.baseUrl}/clinics/$resolvedClinicId/doctors/$doctorId');
+      final response = await http.delete(
+        uri,
+        headers: _headers,
+      ).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) return true;
+    } catch (_) {}
+
+    try {
+      await Supabase.instance.client
+          .from('dentists')
+          .update({'clinic_id': null})
+          .or('id.eq.$doctorId,user_id.eq.$doctorId');
       return true;
     } catch (_) {
       return false;

@@ -1,14 +1,28 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/models/doctor_availability.dart';
+import '../../../../core/models/medical_specialty_model.dart';
 import '../../../../core/services/patient_problem_service.dart';
+import '../../../admin/presentation/widgets/doctor_slot_management_dialog.dart';
 
 class DoctorProfileScreen extends StatefulWidget {
   final DoctorModel doctor;
+  final bool isAdminView;
+  final bool isClinicView;
+  final VoidCallback? onAdminEditDoctor;
+  final VoidCallback? onAdminDeleteDoctor;
+  final VoidCallback? onAdminAssignDoctor;
+  final VoidCallback? onClinicRemoveDoctor;
 
   const DoctorProfileScreen({
     super.key,
     required this.doctor,
+    this.isAdminView = false,
+    this.isClinicView = false,
+    this.onAdminEditDoctor,
+    this.onAdminDeleteDoctor,
+    this.onAdminAssignDoctor,
+    this.onClinicRemoveDoctor,
   });
 
   @override
@@ -38,16 +52,16 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
     end: Alignment.bottomRight,
   );
 
-  static const List<String> _treatmentOptions = [
-    'General Consultation',
-    'Dental Pain / Toothache',
-    'Tooth Decay / Cavity',
-    'Root Canal Consultation',
-    'Orthodontics / Braces',
-    'Periodontics / Gum Care',
-    'Tooth Extraction',
-    'Dental Cleaning & Scaling',
-  ];
+  List<String> get _treatmentOptions {
+    final options = MedicalSpecialtyModel.getConsultationTypesForSpecialty(
+      widget.doctor.specialty,
+      specialties: _patientService.specialties,
+    );
+    if (!options.contains(_selectedTreatment)) {
+      return [_selectedTreatment, ...options];
+    }
+    return options;
+  }
 
   static const List<String> _weekdayNames = [
     'Mon',
@@ -227,7 +241,7 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
       final loc = doc.city.trim().isNotEmpty ? ' in ${doc.city.trim()}' : '';
       parts.add('Currently practicing at ${doc.clinicName.trim()}$loc.');
     } else if (doc.city.trim().isNotEmpty) {
-      parts.add('Providing comprehensive dental care in ${doc.city.trim()}.');
+      parts.add('Providing comprehensive $specText care in ${doc.city.trim()}.');
     }
 
     if (doc.languages.isNotEmpty) {
@@ -445,7 +459,12 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final doc = widget.doctor;
+    final latestDoc = _patientService.allDoctors.cast<DoctorModel?>().firstWhere(
+          (d) => d != null && (d.id == widget.doctor.id || (widget.doctor.userId.isNotEmpty && d.userId == widget.doctor.userId)),
+          orElse: () => null,
+        ) ??
+        widget.doctor;
+    final doc = latestDoc;
     final isFav = _patientService.isDoctorAdded(doc.id.isNotEmpty ? doc.id : doc.userId);
     final isAvailableStatus = doc.status.trim().toLowerCase() == 'available';
 
@@ -482,32 +501,35 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
             ),
           ),
         ),
-        title: const Text(
-          'Doctor Details',
-          style: TextStyle(
+        title: Text(
+          widget.isAdminView
+              ? 'Doctor Profile (Admin)'
+              : (widget.isClinicView ? 'Doctor Profile' : 'Doctor Details'),
+          style: const TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.w800,
             color: AppTheme.textDark,
           ),
         ),
         actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: IconButton(
-              tooltip: isFav ? 'Remove from Favourites' : 'Add to Favourites',
-              onPressed: () async {
-                if (isFav) {
-                  await _patientService.removeDoctorFromMyDoctors(doc);
-                } else {
-                  await _patientService.addDoctorToMyDoctors(doc);
-                }
-              },
-              icon: Icon(
-                isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                color: isFav ? AppTheme.statusCancelText : AppTheme.textMedium,
+          if (!widget.isAdminView && !widget.isClinicView)
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: IconButton(
+                tooltip: isFav ? 'Remove from Favourites' : 'Add to Favourites',
+                onPressed: () async {
+                  if (isFav) {
+                    await _patientService.removeDoctorFromMyDoctors(doc);
+                  } else {
+                    await _patientService.addDoctorToMyDoctors(doc);
+                  }
+                },
+                icon: Icon(
+                  isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                  color: isFav ? AppTheme.statusCancelText : AppTheme.textMedium,
+                ),
               ),
             ),
-          ),
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
@@ -524,6 +546,13 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildDoctorHeroCard(doc, isAvailableStatus, isFav),
+                  if (widget.isAdminView) ...[
+                    const SizedBox(height: 18),
+                    _buildAdminManagementCard(doc),
+                  ] else if (widget.isClinicView) ...[
+                    const SizedBox(height: 18),
+                    _buildClinicManagementCard(doc),
+                  ],
                   const SizedBox(height: 18),
                   _buildAboutAndCredentialsCard(doc),
                   const SizedBox(height: 18),
@@ -568,14 +597,14 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Doctor Profile Image
+              // Circular Doctor Profile Image
               Stack(
                 children: [
                   Container(
                     width: 84,
                     height: 84,
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(20),
+                      shape: BoxShape.circle,
                       gradient: doc.photoBytes == null ? _primaryGradient : null,
                       image: doc.photoBytes != null
                           ? DecorationImage(
@@ -739,6 +768,37 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                 ),
             ],
           ),
+          if (!widget.isAdminView && !widget.isClinicView) ...[
+            const SizedBox(height: 14),
+            OutlinedButton.icon(
+              onPressed: () async {
+                if (isFav) {
+                  await _patientService.removeDoctorFromMyDoctors(doc);
+                } else {
+                  await _patientService.addDoctorToMyDoctors(doc);
+                }
+              },
+              icon: Icon(
+                isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                size: 16,
+                color: isFav ? AppTheme.statusCancelText : AppTheme.primaryBlue,
+              ),
+              label: Text(
+                isFav ? 'Added to Favourites' : 'Add Favourite Doctor',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: isFav ? AppTheme.textDark : AppTheme.primaryBlue,
+                ),
+              ),
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(
+                  color: isFav ? Colors.grey.shade300 : AppTheme.primaryBlue.withValues(alpha: 0.4),
+                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -953,6 +1013,250 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
               value: doc.email.trim(),
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAdminManagementCard(DoctorModel doc) {
+    return Container(
+      key: const Key('admin_doctor_management_card'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.primaryBlue.withValues(alpha: 0.25)),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primaryBlue.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryBlue.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.admin_panel_settings_rounded, color: AppTheme.primaryBlue, size: 20),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Admin Doctor Management & Verification',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.textDark),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      'Manage doctor credentials, verification status, consultation slots, or remove from platform',
+                      style: TextStyle(fontSize: 11.5, color: AppTheme.textMedium),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              if (widget.onAdminEditDoctor != null)
+                ElevatedButton.icon(
+                  key: const Key('admin_edit_doctor_button'),
+                  onPressed: widget.onAdminEditDoctor,
+                  icon: const Icon(Icons.edit_note_rounded, size: 16),
+                  label: const Text('Edit Profile & Verification', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryBlue,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              OutlinedButton.icon(
+                key: const Key('admin_configure_slots_button'),
+                onPressed: () async {
+                  await DoctorSlotManagementDialog.show(context, initialDoctor: doc);
+                  if (mounted) {
+                    await _initializeAvailability();
+                  }
+                },
+                icon: const Icon(Icons.edit_calendar_rounded, size: 16),
+                label: const Text('Manage Availability Slots', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.primaryBlue,
+                  side: const BorderSide(color: AppTheme.primaryBlue),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+              if (widget.onAdminAssignDoctor != null)
+                OutlinedButton.icon(
+                  key: const Key('admin_assign_doctor_button'),
+                  onPressed: widget.onAdminAssignDoctor,
+                  icon: const Icon(Icons.recommend_rounded, size: 16),
+                  label: const Text('Suggest Doctor', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _successGreen,
+                    side: const BorderSide(color: _successGreen),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              if (widget.onAdminDeleteDoctor != null)
+                OutlinedButton.icon(
+                  key: const Key('admin_delete_doctor_button'),
+                  onPressed: widget.onAdminDeleteDoctor,
+                  icon: const Icon(Icons.delete_outline_rounded, size: 16),
+                  label: const Text('Remove Doctor', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red.shade700,
+                    side: BorderSide(color: Colors.red.shade300),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildClinicManagementCard(DoctorModel doc) {
+    final isAvailable = doc.status.toLowerCase() == 'available';
+
+    return Container(
+      key: const Key('clinic_doctor_management_card'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFF0D9488).withValues(alpha: 0.25)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0D9488).withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.medical_services_rounded, color: Color(0xFF0D9488), size: 20),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Clinic Doctor Management',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.textDark),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      'Manage doctor details, configure availability slots, toggle status, or remove from clinic',
+                      style: TextStyle(fontSize: 11.5, color: AppTheme.textMedium),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              if (widget.onAdminEditDoctor != null)
+                ElevatedButton.icon(
+                  key: const Key('clinic_edit_doctor_button'),
+                  onPressed: widget.onAdminEditDoctor,
+                  icon: const Icon(Icons.edit_note_rounded, size: 16),
+                  label: const Text('Edit Doctor Details', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0D9488),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              OutlinedButton.icon(
+                key: const Key('clinic_configure_slots_button'),
+                onPressed: () async {
+                  await DoctorSlotManagementDialog.show(context, initialDoctor: doc);
+                  if (mounted) {
+                    await _initializeAvailability();
+                  }
+                },
+                icon: const Icon(Icons.edit_calendar_rounded, size: 16),
+                label: const Text('Update Availability', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF0D9488),
+                  side: const BorderSide(color: Color(0xFF0D9488)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+              OutlinedButton.icon(
+                key: const Key('clinic_toggle_doctor_status_button'),
+                onPressed: () async {
+                  final newStatus = isAvailable ? 'Inactive' : 'Available';
+                  await _patientService.updateDoctorProfessionalProfile(
+                    doctorId: doc.id,
+                    status: newStatus,
+                  );
+                  if (mounted) {
+                    setState(() {});
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Doctor status updated to $newStatus')),
+                    );
+                  }
+                },
+                icon: Icon(isAvailable ? Icons.pause_circle_outline_rounded : Icons.play_circle_outline_rounded, size: 16),
+                label: Text(
+                  isAvailable ? 'Deactivate Doctor' : 'Activate Doctor',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: isAvailable ? Colors.orange.shade800 : _successGreen,
+                  side: BorderSide(color: isAvailable ? Colors.orange.shade400 : _successGreen),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+              if (widget.onClinicRemoveDoctor != null)
+                OutlinedButton.icon(
+                  key: const Key('clinic_remove_doctor_button'),
+                  onPressed: widget.onClinicRemoveDoctor,
+                  icon: const Icon(Icons.person_remove_rounded, size: 16),
+                  label: const Text('Remove from Clinic', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red.shade700,
+                    side: BorderSide(color: Colors.red.shade300),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+            ],
+          ),
         ],
       ),
     );
@@ -1404,115 +1708,117 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
               }).toList(),
             ),
 
-          const SizedBox(height: 20),
+          if (!widget.isAdminView && !widget.isClinicView) ...[
+            const SizedBox(height: 20),
 
-          // Step 3: Consultation Reason & Notes
-          const Text(
-            'Consultation Reason',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w800,
-              color: AppTheme.textDark,
-            ),
-          ),
-          const SizedBox(height: 8),
-          DropdownButtonFormField<String>(
-            initialValue: _selectedTreatment,
-            decoration: InputDecoration(
-              filled: true,
-              fillColor: const Color(0xFFF8FAFC),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.grey.shade300),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.grey.shade300),
+            // Step 3: Consultation Reason & Notes (Patient only)
+            const Text(
+              'Consultation Reason',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: AppTheme.textDark,
               ),
             ),
-            items: _treatmentOptions
-                .map(
-                  (item) => DropdownMenuItem<String>(
-                    value: item,
-                    child: Text(
-                      item,
-                      style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                )
-                .toList(),
-            onChanged: (val) {
-              if (val != null) {
-                setState(() => _selectedTreatment = val);
-              }
-            },
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _symptomsController,
-            maxLines: 2,
-            decoration: InputDecoration(
-              hintText: 'Optional: Describe dental symptoms or notes for the doctor...',
-              hintStyle: const TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
-              filled: true,
-              fillColor: const Color(0xFFF8FAFC),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.grey.shade300),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.grey.shade300),
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 20),
-
-          // Book Appointment Action Button
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: ElevatedButton.icon(
-              key: const Key('book_appointment_button'),
-              onPressed: (_isBooking || isBlocked || _selectedTimeSlot == null)
-                  ? null
-                  : _handleBookAppointment,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primaryBlue,
-                foregroundColor: Colors.white,
-                disabledBackgroundColor: Colors.grey.shade300,
-                disabledForegroundColor: Colors.grey.shade600,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                elevation: 0,
-              ),
-              icon: _isBooking
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.calendar_today_rounded, size: 18),
-              label: Text(
-                _isBooking
-                    ? 'Booking Appointment...'
-                    : (_selectedTimeSlot != null
-                        ? 'Book Appointment ($_selectedTimeSlot)'
-                        : 'Book Appointment'),
-                style: const TextStyle(
-                  fontSize: 14.5,
-                  fontWeight: FontWeight.w800,
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              initialValue: _selectedTreatment,
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: const Color(0xFFF8FAFC),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
                 ),
-                overflow: TextOverflow.ellipsis,
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+              ),
+              items: _treatmentOptions
+                  .map(
+                    (item) => DropdownMenuItem<String>(
+                      value: item,
+                      child: Text(
+                        item,
+                        style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (val) {
+                if (val != null) {
+                  setState(() => _selectedTreatment = val);
+                }
+              },
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _symptomsController,
+              maxLines: 2,
+              decoration: InputDecoration(
+                hintText: 'Optional: Describe symptoms or notes for the doctor...',
+                hintStyle: const TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
+                filled: true,
+                fillColor: const Color(0xFFF8FAFC),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
               ),
             ),
-          ),
+
+            const SizedBox(height: 20),
+
+            // Book Appointment Action Button (Patient only)
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton.icon(
+                key: const Key('book_appointment_button'),
+                onPressed: (_isBooking || isBlocked || _selectedTimeSlot == null)
+                    ? null
+                    : _handleBookAppointment,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryBlue,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: Colors.grey.shade300,
+                  disabledForegroundColor: Colors.grey.shade600,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  elevation: 0,
+                ),
+                icon: _isBooking
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.calendar_today_rounded, size: 18),
+                label: Text(
+                  _isBooking
+                      ? 'Booking Appointment...'
+                      : (_selectedTimeSlot != null
+                          ? 'Book Appointment ($_selectedTimeSlot)'
+                          : 'Book Appointment'),
+                  style: const TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w800,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

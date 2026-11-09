@@ -6,7 +6,11 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:dentaguru/main.dart';
 import 'package:dentaguru/features/auth/presentation/screens/auth_screen.dart';
 import 'package:dentaguru/features/clinic/presentation/screens/clinic_dashboard.dart';
+import 'package:dentaguru/features/admin/presentation/screens/admin_dashboard.dart';
+import 'package:dentaguru/features/patient/presentation/screens/find_doctors_screen.dart';
 import 'package:dentaguru/core/services/api_service.dart';
+import 'package:dentaguru/core/services/patient_problem_service.dart';
+import 'package:dentaguru/core/models/medical_specialty_model.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -133,5 +137,110 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Add Attached Doctor'), findsOneWidget);
+  });
+
+  test('Multi-Specialty Platform supports all 16 core medical specialties and backward-compatible dental matching', () {
+    final defaultNames = MedicalSpecialtyModel.defaultSpecialties.map((s) => s.name).toList();
+    const expectedSpecialties = [
+      'General Medicine',
+      'Cardiology',
+      'Dermatology',
+      'Neurology',
+      'Orthopedics',
+      'Pediatrics',
+      'Gynecology',
+      'ENT',
+      'Ophthalmology',
+      'Oncology',
+      'Urology',
+      'Psychiatry',
+      'Gastroenterology',
+      'Pulmonology',
+      'Endocrinology',
+      'Dentistry',
+    ];
+    for (final spec in expectedSpecialties) {
+      expect(defaultNames, contains(spec));
+    }
+
+    // Backward-compatible dental matching
+    expect(MedicalSpecialtyModel.matchesSpecialtyFilter('General Dentistry', 'Dentistry'), isTrue);
+    expect(MedicalSpecialtyModel.matchesSpecialtyFilter('Orthodontics', 'Dentistry'), isTrue);
+    expect(MedicalSpecialtyModel.matchesSpecialtyFilter('Cardiology', 'Dentistry'), isFalse);
+    expect(MedicalSpecialtyModel.matchesSpecialtyFilter('Cardiology', 'Cardiology'), isTrue);
+
+    // Default qualifications
+    expect(MedicalSpecialtyModel.getDefaultQualificationForSpecialty('Cardiology'), equals('MBBS, MD, DM (Cardiology)'));
+    expect(MedicalSpecialtyModel.getDefaultQualificationForSpecialty('General Dentistry'), equals('BDS, MDS'));
+  });
+
+  testWidgets('FindDoctorsScreen displays multi-specialty filter chips and City/Pincode filters', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1280, 1800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: MaterialApp(
+          home: FindDoctorsScreen(initialSpecialty: 'Cardiology'),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Find Doctors'), findsOneWidget);
+    expect(find.byKey(const ValueKey('find_doctors_search_input')), findsOneWidget);
+    expect(find.byKey(const ValueKey('filter_city_input')), findsOneWidget);
+    expect(find.byKey(const ValueKey('filter_pincode_input')), findsOneWidget);
+    expect(find.text('Cardiology'), findsWidgets);
+    expect(find.text('Dentistry'), findsWidgets);
+  });
+
+  test('PatientProblemService supports dynamic Admin specialty creation, toggle, and analytics breakdown', () async {
+    final service = PatientProblemService();
+    final initialCount = service.specialties.length;
+    expect(initialCount, greaterThanOrEqualTo(16));
+
+    final added = await service.addMedicalSpecialty(
+      name: 'Nephrology',
+      department: 'Renal Sciences',
+      description: 'Kidney care and dialysis management',
+      defaultQualifications: 'MBBS, MD, DM',
+    );
+    expect(added.name, equals('Nephrology'));
+    expect(service.specialties.any((s) => s.name == 'Nephrology'), isTrue);
+
+    await service.toggleMedicalSpecialtyStatus(added.id, false);
+    final updated = service.specialties.firstWhere((s) => s.id == added.id);
+    expect(updated.isActive, isFalse);
+
+    final breakdown = service.getSpecialtyAnalyticsBreakdown();
+    expect(breakdown.any((row) => row['name'] == 'Cardiology'), isTrue);
+    expect(breakdown.any((row) => row['name'] == 'Dentistry'), isTrue);
+  });
+
+  testWidgets('AdminDashboardScreen Specialties tab renders all specialty cards without TypeError', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: MaterialApp(
+          home: AdminDashboardScreen(),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // Tap the mobile "Specialties" nav pill
+    await tester.ensureVisible(find.text('Specialties'));
+    await tester.tap(find.text('Specialties'));
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('+ Add Specialty'), findsOneWidget);
+    expect(find.text('General Medicine'), findsOneWidget);
+    expect(find.text('Cardiology'), findsOneWidget);
   });
 }

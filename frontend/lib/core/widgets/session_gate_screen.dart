@@ -124,23 +124,31 @@ class _SessionGateScreenState extends State<SessionGateScreen> with SingleTicker
                       );
                     },
                     child: Container(
-                      padding: const EdgeInsets.all(20),
+                      width: 104,
+                      height: 104,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: Colors.white.withValues(alpha: 0.05),
+                        color: Colors.white,
                         border: Border.all(
-                          color: const Color(0xFF0052CC).withValues(alpha: 0.3),
-                          width: 2,
+                          color: const Color(0xFF0052CC).withValues(alpha: 0.35),
+                          width: 2.5,
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF0052CC).withValues(alpha: 0.3),
-                            blurRadius: 30,
-                            spreadRadius: 2,
+                            color: const Color(0xFF0052CC).withValues(alpha: 0.4),
+                            blurRadius: 32,
+                            spreadRadius: 4,
                           ),
                         ],
                       ),
-                      child: const DentaGuruToothIcon(size: 72),
+                      child: ClipOval(
+                        child: Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: DentaGuruToothIcon(size: 68, fallbackColor: const Color(0xFF0052CC)),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 24),
@@ -155,7 +163,7 @@ class _SessionGateScreenState extends State<SessionGateScreen> with SingleTicker
                   ),
                   const SizedBox(height: 6),
                   const Text(
-                    'Dental Healthcare Platform',
+                    'Multi-Specialty Healthcare Platform',
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w500,

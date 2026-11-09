@@ -45,6 +45,12 @@ final GoRouter appRouter = GoRouter(
     }
 
     final expectedRoute = session.targetRoute;
+    final userRole = session.role.trim().toLowerCase();
+    // Allow Admins & Sub-Admins to navigate and inspect Clinic, Doctor, and Patient dashboards
+    if (userRole.contains('admin') &&
+        (path == '/clinic' || path == '/dentist' || path == '/patient')) {
+      return null;
+    }
     if (path != expectedRoute) {
       return expectedRoute;
     }

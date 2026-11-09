@@ -15,6 +15,7 @@ import '../../../patient/presentation/widgets/refer_patient_flow_dialog.dart';
 import '../../../patient/presentation/widgets/referred_patients_sheet.dart';
 import '../../../../core/widgets/map_location_picker_dialog.dart';
 import '../../../../core/widgets/need_help_card.dart';
+import '../../../../core/models/medical_specialty_model.dart';
 import '../../../../core/models/prescription_template_model.dart';
 import '../../../admin/presentation/widgets/doctor_slot_management_dialog.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -165,17 +166,38 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         name: authUser.userMetadata?['name'] ?? 'Doctor',
         email: authUser.email ?? '',
         phone: '',
-        specialty: 'General Dentistry',
-        qualification: 'BDS, MDS',
+        specialty: 'General Medicine',
+        qualification: 'MBBS, MD',
         experienceYears: 5,
         rating: 5.0,
         reviewCount: 0,
-        clinicName: 'Dental Practice',
+        clinicName: 'GS HEALTH Care Center',
         status: 'Available',
         nextAvailableSlots: ['Today, 2:00 PM'],
         consultationFee: '\$75',
       ) : null
     );
+    final specialtyOptions = <String>{
+      ..._patientService.activeSpecialtyNames,
+      'General Dentistry',
+      'Orthodontics',
+      'Endodontics',
+      'Periodontics',
+      'Pediatric Dentistry',
+      'Oral & Maxillofacial Surgery',
+      'Prosthodontics',
+      if (currentDoc != null && currentDoc.specialty.trim().isNotEmpty) currentDoc.specialty.trim(),
+    }.toList();
+    String selectedSpec = (currentDoc != null && currentDoc.specialty.trim().isNotEmpty)
+        ? currentDoc.specialty.trim()
+        : specialtyOptions.first;
+    final qualCtrl = TextEditingController(
+      text: (currentDoc != null && currentDoc.qualification.trim().isNotEmpty)
+          ? currentDoc.qualification.trim()
+          : MedicalSpecialtyModel.getDefaultQualificationForSpecialty(selectedSpec),
+    );
+    final expCtrl = TextEditingController(text: '${currentDoc?.experienceYears ?? 5}');
+    final clinicCtrl = TextEditingController(text: currentDoc?.clinicName ?? '');
     final feeCtrl = TextEditingController(text: currentDoc?.consultationFee ?? '\$75');
     final slotCtrl = TextEditingController(
       text: (currentDoc?.nextAvailableSlots.isNotEmpty == true) ? currentDoc!.nextAvailableSlots.first : 'Today, 2:00 PM',
@@ -184,73 +206,169 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     showDialog(
       context: context,
       builder: (dialogCtx) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Row(
-            children: [
-              Icon(Icons.edit_calendar_rounded, color: AppTheme.primaryBlue, size: 22),
-              SizedBox(width: 8),
-              Text('Update My Fee & Time Slots', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: feeCtrl,
-                style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                cursorColor: AppTheme.primaryBlue,
-                decoration: InputDecoration(
-                  labelText: 'My Consultation Fee',
-                  hintText: 'e.g. \$85',
-                  prefixIcon: const Icon(Icons.payments_outlined),
-                  filled: true,
-                  fillColor: const Color(0xFFF8FAFC),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: slotCtrl,
-                style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                cursorColor: AppTheme.primaryBlue,
-                decoration: InputDecoration(
-                  labelText: 'Next Available Time Slot',
-                  hintText: 'e.g. Today, 4:00 PM',
-                  prefixIcon: const Icon(Icons.access_time_rounded),
-                  filled: true,
-                  fillColor: const Color(0xFFF8FAFC),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(dialogCtx).pop(), child: const Text('Cancel')),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.check_circle_rounded, size: 16),
-              label: const Text('Save & Publish', style: TextStyle(fontWeight: FontWeight.bold)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primaryBlue,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () {
-                final docId = currentDoc?.id ?? (authUser?.id ?? '');
-                _patientService.updateDoctorFeeAndSlots(
-                  doctorId: docId,
-                  consultationFee: feeCtrl.text.trim(),
-                  availableSlot: slotCtrl.text.trim(),
-                );
-                Navigator.of(dialogCtx).pop();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('🎉 Your fee is now ${feeCtrl.text.trim()} & slot updated to ${slotCtrl.text.trim()}!'),
-                    backgroundColor: const Color(0xFF10B981),
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: const Row(
+                children: [
+                  Icon(Icons.edit_calendar_rounded, color: AppTheme.primaryBlue, size: 22),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Professional Profile, Specialty & Slots',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15.5),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                );
-              },
-            ),
-          ],
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<String>(
+                      initialValue: specialtyOptions.contains(selectedSpec) ? selectedSpec : specialtyOptions.first,
+                      isExpanded: true,
+                      dropdownColor: Colors.white,
+                      decoration: InputDecoration(
+                        labelText: 'Medical Specialty',
+                        prefixIcon: const Icon(Icons.medical_services_outlined),
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      items: specialtyOptions
+                          .map((s) => DropdownMenuItem(
+                                value: s,
+                                child: Text(s, style: const TextStyle(fontSize: 13), overflow: TextOverflow.ellipsis),
+                              ))
+                          .toList(),
+                      onChanged: (val) {
+                        if (val != null) {
+                          setModalState(() {
+                            selectedSpec = val;
+                            qualCtrl.text = MedicalSpecialtyModel.getDefaultQualificationForSpecialty(val);
+                          });
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: TextField(
+                            controller: qualCtrl,
+                            style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                            decoration: InputDecoration(
+                              labelText: 'Qualifications',
+                              hintText: 'MBBS, MD / BDS, MDS',
+                              filled: true,
+                              fillColor: const Color(0xFFF8FAFC),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 2,
+                          child: TextField(
+                            controller: expCtrl,
+                            keyboardType: TextInputType.number,
+                            style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                            decoration: InputDecoration(
+                              labelText: 'Exp (Yrs)',
+                              hintText: '5',
+                              filled: true,
+                              fillColor: const Color(0xFFF8FAFC),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: clinicCtrl,
+                      style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                      decoration: InputDecoration(
+                        labelText: 'Associated Clinic / Hospital',
+                        prefixIcon: const Icon(Icons.domain_rounded),
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: feeCtrl,
+                      style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                      cursorColor: AppTheme.primaryBlue,
+                      decoration: InputDecoration(
+                        labelText: 'My Consultation Fee',
+                        hintText: 'e.g. \$85',
+                        prefixIcon: const Icon(Icons.payments_outlined),
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: slotCtrl,
+                      style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                      cursorColor: AppTheme.primaryBlue,
+                      decoration: InputDecoration(
+                        labelText: 'Next Available Time Slot',
+                        hintText: 'e.g. Today, 4:00 PM',
+                        prefixIcon: const Icon(Icons.access_time_rounded),
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.of(dialogCtx).pop(), child: const Text('Cancel')),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.check_circle_rounded, size: 16),
+                  label: const Text('Save & Publish', style: TextStyle(fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryBlue,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () async {
+                    final docId = currentDoc?.id ?? (authUser?.id ?? '');
+                    _patientService.updateDoctorFeeAndSlots(
+                      doctorId: docId,
+                      consultationFee: feeCtrl.text.trim(),
+                      availableSlot: slotCtrl.text.trim(),
+                    );
+                    await _patientService.updateDoctorProfessionalProfile(
+                      doctorId: docId,
+                      specialty: selectedSpec,
+                      qualification: qualCtrl.text.trim(),
+                      experienceYears: int.tryParse(expCtrl.text.trim()) ?? 5,
+                      clinicName: clinicCtrl.text.trim(),
+                      consultationFee: feeCtrl.text.trim(),
+                    );
+                    if (dialogCtx.mounted) Navigator.of(dialogCtx).pop();
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('🎉 Profile updated ($selectedSpec • ${qualCtrl.text.trim()}) & fee set to ${feeCtrl.text.trim()}!'),
+                          backgroundColor: const Color(0xFF10B981),
+                        ),
+                      );
+                    }
+                  },
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -3248,7 +3366,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                     isExpanded: true,
                                     dropdownColor: Colors.white,
                                     decoration: InputDecoration(
-                                      labelText: 'Dental Specialty',
+                                      labelText: 'Medical Specialty',
                                       labelStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
                                       prefixIcon: const Icon(Icons.medical_services_outlined, size: 18, color: AppTheme.primaryBlue),
                                       filled: true,
@@ -3257,7 +3375,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                       enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
                                       focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppTheme.primaryBlue, width: 1.8)),
                                     ),
-                                    items: [
+                                    items: <String>{
+                                      ..._patientService.activeSpecialtyNames,
                                       'General Dentistry',
                                       'Orthodontics',
                                       'Endodontics',
@@ -3267,9 +3386,14 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                       'Oral & Maxillofacial Surgery',
                                       'Cosmetic Dentistry',
                                       'Implantology',
-                                    ].map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 12, color: AppTheme.textDark), overflow: TextOverflow.ellipsis))).toList(),
+                                    }.map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 12, color: AppTheme.textDark), overflow: TextOverflow.ellipsis))).toList(),
                                     onChanged: (val) {
-                                      if (val != null) setModalState(() => selectedSpecialty = val);
+                                      if (val != null) {
+                                        setModalState(() {
+                                          selectedSpecialty = val;
+                                          qualCtrl.text = MedicalSpecialtyModel.getDefaultQualificationForSpecialty(val);
+                                        });
+                                      }
                                     },
                                   ),
                                 ),

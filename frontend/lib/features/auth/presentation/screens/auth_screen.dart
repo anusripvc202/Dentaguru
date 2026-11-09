@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/models/medical_specialty_model.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/services/patient_problem_service.dart';
@@ -65,10 +66,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   String? _selectedGender;
   String? _selectedBloodGroup;
 
-  // Role-Specific Fields - Dentist
+  // Role-Specific Fields - Dentist / Doctor
   final _licenseNoController = TextEditingController();
   final _clinicNameController = TextEditingController();
   final _experienceController = TextEditingController(text: '5');
+  final _qualificationController = TextEditingController(text: 'MBBS, MD');
   final _clinicAddressController = TextEditingController();
   String? _selectedSpecialty;
 
@@ -180,6 +182,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     _licenseNoController.dispose();
     _clinicNameController.dispose();
     _experienceController.dispose();
+    _qualificationController.dispose();
     _clinicAddressController.dispose();
     _adminEmployeeIdController.dispose();
     _adminDeptController.dispose();
@@ -344,16 +347,28 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               ? userData['name'].toString().trim()
               : (userData['email'] != null ? userData['email'].toString() : identifier);
           final docId = (userData['id'] ?? Supabase.instance.client.auth.currentUser?.id ?? '').toString();
-          
+          final returnedSpec = (userData['specialty'] ?? userData['speciality'] ?? '').toString().trim();
+          final effectiveSpec = returnedSpec.isNotEmpty
+              ? returnedSpec
+              : (PatientProblemService().currentDoctor?.specialty.isNotEmpty == true
+                  ? PatientProblemService().currentDoctor!.specialty
+                  : 'General Dentistry');
+          final returnedQual = (userData['qualification'] ?? userData['qualifications'] ?? '').toString().trim();
+          final effectiveQual = returnedQual.isNotEmpty
+              ? returnedQual
+              : MedicalSpecialtyModel.getDefaultQualificationForSpecialty(effectiveSpec);
+          final returnedExp = int.tryParse((userData['experienceYears'] ?? userData['experience_years'] ?? '').toString()) ?? 5;
+
           PatientProblemService().registerDoctor(
             id: docId,
             name: docName,
             email: userData['email'] ?? (identifier.contains('@') ? identifier : ''),
             phone: userPhone,
-            licenseNumber: 'DEN-LIC-REGISTERED',
-            specialty: 'General Dentistry',
+            licenseNumber: (userData['licenseNumber'] ?? userData['license_number'] ?? 'MED-LIC-REGISTERED').toString(),
+            specialty: effectiveSpec,
+            qualification: effectiveQual,
             clinicName: userData['clinicName'] ?? '',
-            experienceYears: 5,
+            experienceYears: returnedExp,
             photoBytes: photoBytes,
           );
           await SessionService().saveSession(
@@ -366,7 +381,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             metadata: {
               ...userData,
               'clinicName': userData['clinicName'] ?? '',
-              'specialty': 'General Dentistry',
+              'specialty': effectiveSpec,
+              'qualification': effectiveQual,
             },
           );
           if (!mounted) return;
@@ -588,7 +604,15 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         gender: _selectedGender,
         bloodGroup: _selectedBloodGroup,
         emergencyContact: _emergencyContactController.text.trim(),
-        specialty: _selectedRole == UserRole.dentist ? _selectedSpecialty : null,
+        specialty: _selectedRole == UserRole.dentist ? (_selectedSpecialty ?? 'General Medicine') : null,
+        qualification: _selectedRole == UserRole.dentist
+            ? (_qualificationController.text.trim().isNotEmpty
+                ? _qualificationController.text.trim()
+                : MedicalSpecialtyModel.getDefaultQualificationForSpecialty(_selectedSpecialty ?? 'General Medicine'))
+            : null,
+        experienceYears: _selectedRole == UserRole.dentist
+            ? (int.tryParse(_experienceController.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 5)
+            : null,
         licenseNumber: _selectedRole == UserRole.dentist ? _licenseNoController.text.trim() : null,
         clinicName: _selectedRole == UserRole.dentist ? _clinicNameController.text.trim() : null,
         clinicAddress: _selectedRole == UserRole.dentist && clinicAddress.isNotEmpty ? clinicAddress : null,
@@ -651,6 +675,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           );
         } else if (_selectedRole == UserRole.dentist) {
           final exp = int.tryParse(_experienceController.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 5;
+          final effectiveSpec = _selectedSpecialty ?? 'General Medicine';
+          final effectiveQual = _qualificationController.text.trim().isNotEmpty
+              ? _qualificationController.text.trim()
+              : MedicalSpecialtyModel.getDefaultQualificationForSpecialty(effectiveSpec);
           final docId = (res['user']?['id'] ?? Supabase.instance.client.auth.currentUser?.id ?? '').toString();
           PatientProblemService().registerDoctor(
             id: docId,
@@ -658,14 +686,14 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             email: email,
             phone: phone,
             licenseNumber: _licenseNoController.text.trim(),
-            specialty: _selectedSpecialty ?? 'General Dentistry',
+            specialty: effectiveSpec,
             clinicName: _clinicNameController.text.trim(),
             clinicAddress: clinicAddress.isNotEmpty ? clinicAddress : location,
             city: city,
             pincode: pincode,
             latitude: _selectedLatitude,
             longitude: _selectedLongitude,
-            qualification: 'BDS, MDS',
+            qualification: effectiveQual,
             experienceYears: exp,
             photoBytes: _pickedImageBytes,
             languages: selectedLangs,
@@ -679,7 +707,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             name: name,
             metadata: {
               'licenseNumber': _licenseNoController.text.trim(),
-              'specialty': _selectedSpecialty ?? 'General Dentistry',
+              'specialty': effectiveSpec,
+              'qualification': effectiveQual,
               'clinicName': _clinicNameController.text.trim(),
               'clinicAddress': clinicAddress.isNotEmpty ? clinicAddress : location,
               'city': city,
@@ -1779,7 +1808,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter your name' : null,
               decoration: _buildInputDecoration(
                 label: _selectedRole == UserRole.dentist
-                    ? 'Practice Full Name & Title'
+                    ? "Doctor's Full Name"
                     : _selectedRole == UserRole.admin
                         ? 'Administrator / Sub-Admin Full Name'
                         : 'Patient Full Name',
@@ -2181,6 +2210,16 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         );
 
       case UserRole.dentist:
+        final specialtyOptions = <String>{
+          ...PatientProblemService().activeSpecialtyNames,
+          'General Dentistry',
+          'Orthodontics',
+          'Endodontics',
+          'Periodontics',
+          'Pediatric Dentistry',
+          'Oral & Maxillofacial Surgery',
+          'Prosthodontics',
+        }.toList();
         return Column(
           key: const ValueKey('dentist_fields'),
           children: [
@@ -2189,8 +2228,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
               validator: (val) => null,
               decoration: _buildInputDecoration(
-                label: 'Dental Council License Number',
-                hint: 'e.g. DEN-LIC-88490 (Optional)',
+                label: 'Medical / Dental Council License Number',
+                hint: 'e.g. MCI-LIC-88490 or DEN-LIC-88490 (Optional)',
                 isRequired: false,
                 icon: Icons.badge_outlined,
               ),
@@ -2198,26 +2237,20 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             const SizedBox(height: 12),
 
             DropdownButtonFormField<String>(
-              initialValue: _selectedSpecialty,
+              initialValue: _selectedSpecialty != null && specialtyOptions.contains(_selectedSpecialty)
+                  ? _selectedSpecialty
+                  : null,
               isExpanded: true,
               dropdownColor: Colors.white,
               validator: (val) => null,
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
               decoration: _buildInputDecoration(
-                label: 'Select Specialty',
+                label: 'Select Medical Specialty',
                 hint: '',
                 isRequired: false,
                 icon: Icons.medical_services_outlined,
               ),
-              items: [
-                'General Dentistry',
-                'Orthodontics',
-                'Endodontics',
-                'Periodontics',
-                'Pediatric Dentistry',
-                'Oral & Maxillofacial Surgery',
-                'Prosthodontics',
-              ].map((sp) {
+              items: specialtyOptions.map((sp) {
                 return DropdownMenuItem(
                   value: sp,
                   child: Text(
@@ -2228,7 +2261,26 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   ),
                 );
               }).toList(),
-              onChanged: (val) => setState(() => _selectedSpecialty = val ?? 'General Dentistry'),
+              onChanged: (val) {
+                setState(() {
+                  _selectedSpecialty = val ?? 'General Medicine';
+                  _qualificationController.text =
+                      MedicalSpecialtyModel.getDefaultQualificationForSpecialty(_selectedSpecialty!);
+                });
+              },
+            ),
+            const SizedBox(height: 12),
+
+            TextFormField(
+              controller: _qualificationController,
+              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+              validator: (val) => null,
+              decoration: _buildInputDecoration(
+                label: 'Professional Qualifications',
+                hint: 'e.g. MBBS, MD or BDS, MDS',
+                isRequired: false,
+                icon: Icons.school_outlined,
+              ),
             ),
             const SizedBox(height: 12),
 
@@ -2237,8 +2289,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
               validator: (val) => null,
               decoration: _buildInputDecoration(
-                label: 'Primary Clinic Name',
-                hint: 'e.g. Metro Dental Care Practice (Optional)',
+                label: 'Primary Clinic / Hospital Name',
+                hint: 'e.g. GS HEALTH Multi-Specialty Center (Optional)',
                 isRequired: false,
                 icon: Icons.domain_rounded,
               ),

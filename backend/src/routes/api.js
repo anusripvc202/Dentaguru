@@ -12,6 +12,7 @@ const problemRequests = require('../controllers/problemRequestController');
 const verification = require('../controllers/verificationController');
 const referrals = require('../controllers/referralController');
 const availability = require('../controllers/availabilityController');
+const specialties = require('../controllers/specialtyController');
 
 // Middlewares
 const { authenticateJWT, optionalAuth, requireRole, requireMainAdmin, requirePermission, requireChatAccess } = require('../middleware/auth');
@@ -82,14 +83,26 @@ router.delete('/appointments/:id', optionalAuth, appointments.cancelAppointment)
 router.patch('/appointments/:id/complete', optionalAuth, appointments.completeConsultation);
 
 // ─────────────────────────────────────────────
-// 5. CLINIC PROFILE ENDPOINTS
+// 5. CLINIC & DOCTOR PROFILE ENDPOINTS
 // ─────────────────────────────────────────────
 router.post('/clinics', optionalAuth, clinics.registerClinicProfile);
 router.get('/clinics', optionalAuth, clinics.getClinics);
+router.put('/clinics/:id', optionalAuth, clinics.updateClinicDepartments);
+router.patch('/clinics/:id/departments', optionalAuth, clinics.updateClinicDepartments);
 router.get('/clinics/:clinicId/dentists', optionalAuth, clinics.getClinicDentists);
+router.get('/clinics/:clinicId/doctors', optionalAuth, clinics.getClinicDentists);
+router.post('/clinics/:clinicId/doctors/associate', optionalAuth, clinics.associateClinicDoctor);
+router.delete('/clinics/:clinicId/doctors/:doctorId', optionalAuth, clinics.removeDoctorFromClinic);
 router.get('/dentists', optionalAuth, clinics.getAllDentists);
+router.get('/doctors', optionalAuth, clinics.getAllDentists);
+router.put('/dentists/:id/profile', optionalAuth, clinics.updateDoctorProfile);
+router.patch('/dentists/:id/profile', optionalAuth, clinics.updateDoctorProfile);
+router.put('/doctors/:id/profile', optionalAuth, clinics.updateDoctorProfile);
+router.patch('/doctors/:id/profile', optionalAuth, clinics.updateDoctorProfile);
 router.delete('/dentists/:id', optionalAuth, clinics.deleteDentist);
+router.delete('/doctors/:id', optionalAuth, clinics.deleteDentist);
 router.delete('/admin/dentists/:id', optionalAuth, clinics.deleteDentist);
+router.delete('/admin/doctors/:id', optionalAuth, clinics.deleteDentist);
 
 // Patient Saved Doctors (My Doctors) Endpoints
 router.get('/patient/my-doctors', optionalAuth, clinics.getPatientDoctors);
@@ -153,6 +166,23 @@ router.post('/doctor-availability', optionalAuth, availability.saveDoctorAvailab
 router.post('/doctor-availability/generate-slots', optionalAuth, availability.generateSlots);
 router.post('/doctor-availability/block-date', optionalAuth, availability.blockDoctorDate);
 router.delete('/doctor-availability', optionalAuth, availability.deleteDoctorAvailability);
+
+// ─────────────────────────────────────────────
+// 11. MEDICAL SPECIALTIES & MULTI-SPECIALTY REPORTING
+// ─────────────────────────────────────────────
+router.get('/specialties', optionalAuth, specialties.getSpecialties);
+router.get('/admin/specialties', optionalAuth, specialties.getSpecialties);
+router.post('/specialties', optionalAuth, specialties.createSpecialty);
+router.post('/admin/specialties', optionalAuth, specialties.createSpecialty);
+router.put('/specialties/:id', optionalAuth, specialties.updateSpecialty);
+router.patch('/specialties/:id', optionalAuth, specialties.updateSpecialty);
+router.put('/admin/specialties/:id', optionalAuth, specialties.updateSpecialty);
+router.patch('/admin/specialties/:id', optionalAuth, specialties.updateSpecialty);
+router.patch('/specialties/:id/status', optionalAuth, specialties.toggleSpecialtyStatus);
+router.patch('/admin/specialties/:id/status', optionalAuth, specialties.toggleSpecialtyStatus);
+router.delete('/specialties/:id', optionalAuth, specialties.deleteSpecialty);
+router.delete('/admin/specialties/:id', optionalAuth, specialties.deleteSpecialty);
+router.get('/admin/reports/specialties', optionalAuth, specialties.getSpecialtyAnalyticsReport);
 
 module.exports = router;
 

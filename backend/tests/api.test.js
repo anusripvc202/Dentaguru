@@ -6,6 +6,7 @@
 const assert = require('assert');
 const { User, Clinic, Dentist, Appointment, MedicalRecord, ChatMessage, AuditLog, DoctorAvailability } = require('../src/models/Schemas');
 const availabilityController = require('../src/controllers/availabilityController');
+const clinicController = require('../src/controllers/clinicController');
 const app = require('../src/app');
 
 console.log('--- STARTING DENTA GURU CORE COMPONENT TESTS ---');
@@ -100,6 +101,65 @@ try {
         assert.ok(fetchResult && fetchResult.success, 'Availability retrieval succeeded.');
         assert.strictEqual(fetchResult.availability.availableSlots.length, 4, 'Four slots available.');
         console.log('✓ SUCCESS: Doctor availability slot retrieval verified.');
+
+        // Test non-existent doctor association returns 404
+        const mockNonExistentReq = {
+            params: { clinicId: 'clinic-test-101' },
+            body: { doctorId: 'non-existent-doc-id' }
+        };
+        let notFoundStatus = null;
+        const mockNotFoundRes = {
+            status: (code) => ({
+                json: (data) => { notFoundStatus = code; return data; }
+            })
+        };
+        await clinicController.associateClinicDoctor(mockNonExistentReq, mockNotFoundRes);
+        assert.strictEqual(notFoundStatus, 404, 'Non-existent doctor returns 404.');
+        console.log('✓ SUCCESS: Non-existent doctor correctly returns 404 Not Found.');
+
+        // Test Clinic Doctor Association (No Duplicate Account Creation) with existing doctor
+        const dentistsInDb = await Dentist.find({});
+        if (dentistsInDb && dentistsInDb.length > 0) {
+            const sampleDoc = dentistsInDb[0];
+            const originalClinicId = sampleDoc.clinic_id;
+
+            const mockAssociateReq = {
+                params: { clinicId: 'clinic-test-101' },
+                body: {
+                    doctorId: sampleDoc.id,
+                    specialty: sampleDoc.speciality || 'General Medicine'
+                }
+            };
+            let associateResult = null;
+            const mockAssociateRes = {
+                status: (code) => ({
+                    json: (data) => { associateResult = { code, ...data }; return associateResult; }
+                }),
+                json: (data) => { associateResult = { code: 200, ...data }; return associateResult; }
+            };
+            await clinicController.associateClinicDoctor(mockAssociateReq, mockAssociateRes);
+            assert.ok(associateResult && associateResult.success, 'Doctor association succeeded.');
+            assert.strictEqual(associateResult.associated, true, 'Association flag set to true without duplicate creation.');
+            console.log('✓ SUCCESS: Clinic doctor association verified without duplicate account creation.');
+
+            // Test Clinic Doctor Removal (Preserves Global Doctor Account)
+            const mockRemoveReq = {
+                params: { clinicId: 'clinic-test-101', doctorId: sampleDoc.id }
+            };
+            let removeResult = null;
+            const mockRemoveRes = {
+                status: (code) => ({
+                    json: (data) => { removeResult = { code, ...data }; return removeResult; }
+                }),
+                json: (data) => { removeResult = { code: 200, ...data }; return removeResult; }
+            };
+            await clinicController.removeDoctorFromClinic(mockRemoveReq, mockRemoveRes);
+            assert.ok(removeResult && removeResult.success, 'Doctor removal succeeded.');
+            console.log('✓ SUCCESS: Clinic doctor removed from clinic directory while preserving doctor account.');
+
+            // Restore original clinic_id to preserve DB integrity (Rule 1 & Rule 2)
+            await Dentist.findByIdAndUpdate(sampleDoc.id, { clinic_id: originalClinicId });
+        }
 
     } catch (err) {
         console.error('✗ ERROR: Availability test failed:', err);

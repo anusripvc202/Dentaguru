@@ -8,6 +8,7 @@ import 'package:dentaguru/core/services/patient_problem_service.dart';
 import 'package:dentaguru/features/patient/presentation/screens/patient_dashboard.dart';
 import 'package:dentaguru/features/patient/presentation/screens/find_doctors_screen.dart';
 import 'package:dentaguru/features/patient/presentation/screens/doctor_profile_screen.dart';
+import 'package:dentaguru/features/admin/presentation/screens/admin_dashboard.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -24,7 +25,7 @@ void main() {
     await service.clearAllData();
   });
 
-  group('GS HEALTH — Find Doctors Navigation & Doctor Profile Pages Tests', () {
+  group('GS HEALTH — Unified Doctor Listing, Specialty Dropdown & Doctor Profile Pages Tests', () {
     final testDoctor = DoctorModel(
       id: 'doc-fav-001',
       userId: 'usr-fav-001',
@@ -46,8 +47,29 @@ void main() {
       consultationFee: '₹500',
     );
 
+    final cardiologyDoctor = DoctorModel(
+      id: 'doc-cardio-002',
+      userId: 'usr-cardio-002',
+      name: 'Dr. Rahul Sharma',
+      specialty: 'Cardiology',
+      qualification: 'MBBS, MD, DM (Cardiology)',
+      experienceYears: 12,
+      rating: 4.9,
+      reviewCount: 88,
+      clinicName: 'GS HEALTH Heart Care Center',
+      phone: '9876543210',
+      email: 'rahul@gshealth.com',
+      status: 'Available',
+      city: 'Hyderabad',
+      pincode: '500018',
+      clinicAddress: 'Banjara Hills, Road No 12',
+      bio: 'Senior Interventional Cardiologist.',
+      nextAvailableSlots: const ['09:00 AM', '02:00 PM'],
+      consultationFee: '₹800',
+    );
+
     testWidgets(
-      '1. Patient Dashboard does NOT display doctor list inline and clicking Find Doctors opens separate FindDoctorsScreen',
+      '1. Patient Dashboard does NOT display doctor list inline and clicking Find Doctors opens separate FindDoctorsScreen with compact single-line rows',
       (tester) async {
         tester.view.physicalSize = const Size(800, 1200);
         tester.view.devicePixelRatio = 1.0;
@@ -68,7 +90,6 @@ void main() {
         // Verify doctor list is NOT rendered inline below Patient Dashboard
         expect(find.byType(FindDoctorsScreen), findsNothing);
         expect(find.text('Dental Specialists & Doctors'), findsNothing);
-        expect(find.text('View Profile'), findsNothing);
 
         // Tap "Find Doctors" quick action on Patient Dashboard
         expect(find.text('Find Doctors'), findsOneWidget);
@@ -78,13 +99,20 @@ void main() {
 
         // Verify navigation to separate FindDoctorsScreen
         expect(find.byType(FindDoctorsScreen), findsOneWidget);
-        expect(find.text('Discover Dental Specialists'), findsOneWidget);
+        expect(find.text('Discover Healthcare Specialists'), findsOneWidget);
+
+        // Verify compact single-line row contains ONLY Doctor Profile Image, Doctor Full Name, and right-arrow indicator
+        expect(find.byKey(Key('doctor_card_${testDoctor.id}')), findsOneWidget);
+        expect(find.byKey(Key('doctor_image_${testDoctor.id}')), findsOneWidget);
+        expect(find.byKey(Key('doctor_name_${testDoctor.id}')), findsOneWidget);
+        expect(find.byKey(Key('view_profile_button_${testDoctor.id}')), findsOneWidget);
         expect(find.text('Dr. Sheshu Kumar'), findsOneWidget);
-        expect(find.text('Periodontics'), findsWidgets);
-        expect(find.text('BDS, MDS'), findsOneWidget);
-        expect(find.text('5+ yrs exp'), findsOneWidget);
-        expect(find.textContaining('Kakaji Dental Clinic'), findsOneWidget);
-        expect(find.text('View Profile'), findsOneWidget);
+
+        // Verify qualifications, fees, experience, clinic details are NOT displayed in the listing
+        expect(find.text('BDS, MDS'), findsNothing);
+        expect(find.text('5+ yrs exp'), findsNothing);
+        expect(find.textContaining('Kakaji Dental Clinic'), findsNothing);
+        expect(find.text('₹500'), findsNothing);
       },
     );
 
@@ -134,7 +162,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 500));
         expect(find.byType(FindDoctorsScreen), findsOneWidget);
 
-        // Step 2: Select Doctor (via View Profile button) -> Doctor Details Page
+        // Step 2: Select Doctor (via right-arrow indicator) -> Doctor Details Page
         await tester.tap(find.byKey(Key('view_profile_button_${testDoctor.id}')));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 500));
@@ -240,7 +268,7 @@ void main() {
     );
 
     testWidgets(
-      '4. Add and Remove Favourite Doctor on FindDoctorsScreen updates count and persists to storage',
+      '4. Add and Remove Favourite Doctor on DoctorProfileScreen updates count on FindDoctorsScreen and persists to storage',
       (tester) async {
         tester.view.physicalSize = const Size(800, 1200);
         tester.view.devicePixelRatio = 1.0;
@@ -261,12 +289,16 @@ void main() {
         expect(find.text('All Doctors (1)'), findsOneWidget);
         expect(find.text('My Favourite Doctors (0)'), findsOneWidget);
 
-        // Click "Add Favourite Doctor"
+        // Open DoctorProfileScreen
+        await tester.tap(find.byKey(Key('doctor_card_${testDoctor.id}')));
+        await tester.pumpAndSettle(const Duration(milliseconds: 300));
+        expect(find.byType(DoctorProfileScreen), findsOneWidget);
+
+        // Click "Add Favourite Doctor" on DoctorProfileScreen
         await tester.tap(find.text('Add Favourite Doctor'));
         await tester.pump(const Duration(milliseconds: 300));
 
         expect(find.text('Added to Favourites'), findsOneWidget);
-        expect(find.text('My Favourite Doctors (1)'), findsOneWidget);
 
         // Verify stored in SharedPreferences
         await tester.runAsync(() async {
@@ -280,8 +312,117 @@ void main() {
         // Remove from favourites
         await tester.tap(find.text('Added to Favourites'));
         await tester.pump(const Duration(milliseconds: 300));
-        expect(find.text('My Favourite Doctors (0)'), findsOneWidget);
         expect(find.text('Add Favourite Doctor'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      '5. ALL Button Specialty Dropdown opens dynamic specialty menu and navigates to separate Specialty-Based Doctors Listing Page',
+      (tester) async {
+        tester.view.physicalSize = const Size(900, 1200);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() => tester.view.resetPhysicalSize());
+
+        final service = PatientProblemService();
+        service.addTestDoctor(testDoctor); // Periodontics (Dentistry)
+        service.addTestDoctor(cardiologyDoctor); // Cardiology
+
+        await tester.pumpWidget(
+          const ProviderScope(
+            child: MaterialApp(
+              home: FindDoctorsScreen(),
+            ),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 300));
+
+        // Initially both doctors are listed under All Specialties
+        expect(find.text('Dr. Sheshu Kumar'), findsOneWidget);
+        expect(find.text('Dr. Rahul Sharma'), findsOneWidget);
+
+        // Click the ALL Specialty Dropdown button
+        final allDropdownBtn = find.byKey(const Key('all_specialties_dropdown_button'));
+        expect(allDropdownBtn, findsOneWidget);
+        await tester.tap(allDropdownBtn);
+        await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+        // Verify dynamic specialty categories appear in the dropdown menu
+        expect(find.text('All Specialties'), findsOneWidget);
+        expect(find.byKey(const Key('specialty_dropdown_item_Cardiology')), findsOneWidget);
+        expect(find.byKey(const Key('specialty_dropdown_item_Dentistry')), findsOneWidget);
+
+        // Select "Cardiology" -> Navigates to separate "Cardiology Doctors" page
+        await tester.tap(find.byKey(const Key('specialty_dropdown_item_Cardiology')));
+        await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+        // Verify separate Cardiology Doctors page shows ONLY Cardiology doctors in compact single-line format
+        expect(find.text('Cardiology Doctors'), findsWidgets);
+        expect(find.text('Dr. Rahul Sharma'), findsOneWidget);
+        expect(find.text('Dr. Sheshu Kumar'), findsNothing);
+
+        // Back button returns to main FindDoctorsScreen showing both doctors
+        await tester.tap(find.byKey(const Key('back_to_patient_dashboard_button')));
+        await tester.pumpAndSettle(const Duration(milliseconds: 300));
+        expect(find.text('Dr. Sheshu Kumar'), findsOneWidget);
+        expect(find.text('Dr. Rahul Sharma'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      '6. Admin Dashboard Doctors Listing uses compact single-line rows, + Create Doctor button, ALL dropdown, and Admin Doctor Profile Page',
+      (tester) async {
+        tester.view.physicalSize = const Size(430, 932);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() => tester.view.resetPhysicalSize());
+
+        final service = PatientProblemService();
+        service.addTestDoctor(testDoctor);
+        service.addTestDoctor(cardiologyDoctor);
+
+        await tester.pumpWidget(
+          const ProviderScope(
+            child: MaterialApp(
+              home: AdminDashboardScreen(),
+            ),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 300));
+
+        // Navigate to "Doctors" tab in Admin Dashboard
+        await tester.ensureVisible(find.text('Doctors'));
+        await tester.tap(find.text('Doctors'));
+        await tester.pump(const Duration(milliseconds: 400));
+
+        // Verify "+ Create Doctor" button and ALL Specialty Dropdown button
+        expect(find.byKey(const Key('admin_create_doctor_button')), findsOneWidget);
+        expect(find.text('+ Create Doctor'), findsOneWidget);
+        expect(find.byKey(const Key('admin_all_specialties_dropdown_button')), findsOneWidget);
+
+        // Verify compact single-line rows for doctors (no fees/qualifications inline)
+        expect(find.byKey(Key('admin_doctor_card_${testDoctor.id}')), findsOneWidget);
+        expect(find.byKey(Key('admin_doctor_image_${testDoctor.id}')), findsOneWidget);
+        expect(find.byKey(Key('admin_doctor_name_${testDoctor.id}')), findsOneWidget);
+        expect(find.text('Dr. Sheshu Kumar'), findsOneWidget);
+        expect(find.text('Dr. Rahul Sharma'), findsOneWidget);
+        expect(find.text('MBBS, MD, DM (Cardiology)'), findsNothing);
+
+        // Tap doctor row -> navigates to separate DoctorProfileScreen in Admin mode
+        await tester.ensureVisible(find.byKey(Key('admin_doctor_card_${cardiologyDoctor.id}')));
+        await tester.tap(find.byKey(Key('admin_doctor_card_${cardiologyDoctor.id}')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
+
+        expect(find.byType(DoctorProfileScreen), findsOneWidget);
+        expect(find.text('Dr. Rahul Sharma'), findsOneWidget);
+        expect(find.text('MBBS, MD, DM (Cardiology)'), findsWidgets);
+        expect(find.text('GS HEALTH Heart Care Center'), findsOneWidget);
+
+        // Verify Admin Doctor Management & Verification card is displayed (and Patient Book Appointment button is hidden)
+        expect(find.byKey(const Key('admin_doctor_management_card')), findsOneWidget);
+        expect(find.byKey(const Key('admin_edit_doctor_button')), findsOneWidget);
+        expect(find.byKey(const Key('admin_configure_slots_button')), findsOneWidget);
+        expect(find.byKey(const Key('admin_delete_doctor_button')), findsOneWidget);
+        expect(find.byKey(const Key('book_appointment_button')), findsNothing);
       },
     );
   });

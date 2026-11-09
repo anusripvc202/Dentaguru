@@ -11,8 +11,12 @@ import '../../../../core/services/api_service.dart';
 import '../../../../core/services/session_service.dart';
 import '../../../../core/constants/permissions.dart';
 import '../../../../core/models/referral_model.dart';
+import '../../../../core/models/medical_specialty_model.dart';
 import 'patient_details_screen.dart';
 import '../widgets/doctor_slot_management_dialog.dart';
+import '../../../patient/presentation/screens/find_doctors_screen.dart';
+import '../../../patient/presentation/screens/doctor_profile_screen.dart';
+import '../../../clinic/presentation/screens/clinic_dashboard.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -159,8 +163,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   doc.pincode.contains(searchTrim) ||
                   doc.state.toLowerCase().contains(searchTrim) ||
                   doc.clinicAddress.toLowerCase().contains(searchTrim);
-              final matchesSpecialty = selectedSpecialtyFilter == 'All' ||
-                  doc.specialty.toLowerCase().contains(selectedSpecialtyFilter.toLowerCase());
+              final matchesSpecialty = MedicalSpecialtyModel.matchesSpecialtyFilter(doc.specialty, selectedSpecialtyFilter);
               final matchesAvailability = selectedAvailabilityFilter == 'All' ||
                   doc.status.toLowerCase() == selectedAvailabilityFilter.toLowerCase();
               final matchesState = stateFilterController.text.trim().isEmpty ||
@@ -182,8 +185,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               // 2. FALLBACK: No doctor found in searched City/Pincode. Show nearest available doctors!
               isShowingNearestFallback = true;
               filteredDoctors = sourceDoctors.where((doc) {
-                final matchesSpecialty = selectedSpecialtyFilter == 'All' ||
-                    doc.specialty.toLowerCase().contains(selectedSpecialtyFilter.toLowerCase());
+                final matchesSpecialty = MedicalSpecialtyModel.matchesSpecialtyFilter(doc.specialty, selectedSpecialtyFilter);
                 final matchesAvailability = selectedAvailabilityFilter == 'All' ||
                     doc.status.toLowerCase() == selectedAvailabilityFilter.toLowerCase();
                 return matchesSpecialty && matchesAvailability;
@@ -636,7 +638,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               child: Row(
                                 children: [
                                   // Specialty Chips
-                                  ...['All', 'Orthodontics', 'Endodontics', 'General', 'Surgery', 'Periodontics'].map((spec) {
+                                  ...<String>{
+                                    'All',
+                                    ..._problemService.activeSpecialtyNames,
+                                    'Orthodontics',
+                                    'Endodontics',
+                                    'Periodontics',
+                                  }.map((spec) {
                                     final isSel = selectedSpecialtyFilter == spec;
                                     return Padding(
                                       padding: const EdgeInsets.only(right: 4),
@@ -1441,10 +1449,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               ),
                               _buildMobileNavPill(3, 'Patients', Icons.people_outline_rounded),
                               _buildMobileNavPill(1, 'Clinics', Icons.local_hospital_outlined),
-                              _buildMobileNavPill(2, 'Dentists', Icons.medical_services_outlined),
+                              _buildMobileNavPill(12, 'Specialties', Icons.category_outlined),
+                              _buildMobileNavPill(2, 'Doctors', Icons.medical_services_outlined),
                               _buildMobileNavPill(4, 'Appointments', Icons.calendar_month_outlined),
                               _buildMobileNavPill(10, 'Chats', Icons.forum_outlined),
                               _buildMobileNavPill(5, 'Revenue', Icons.account_balance_wallet_outlined),
+                              _buildMobileNavPill(6, 'Reports', Icons.bar_chart_rounded),
                               _buildMobileNavPill(9, 'Sub-Admins', Icons.supervisor_account_outlined),
                             ],
                           ),
@@ -1552,7 +1562,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
       case 1:
         return 'Clinics Directory';
       case 2:
-        return 'Dentists & Specialists';
+        return 'Doctors & Specialists Directory';
       case 3:
         return 'Patients Directory';
       case 4:
@@ -1560,7 +1570,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
       case 5:
         return 'Revenue & Financials';
       case 6:
-        return 'Reports & Analytics';
+        return 'Reports & Specialty Analytics';
       case 7:
         return 'Patient Reviews';
       case 8:
@@ -1571,6 +1581,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
         return 'Patient-Doctor Chats';
       case 11:
         return 'Referral Management & Growth';
+      case 12:
+        return 'Medical Specialties Management';
       default:
         return 'Admin Dashboard';
     }
@@ -1617,8 +1629,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 categoryIcon: Icons.local_hospital_rounded,
                 initiallyExpanded: true,
                 children: [
+                  _buildSubNavItem(12, Icons.category_rounded, 'Medical Specialties', badgeCount: _problemService.activeSpecialties.length),
                   _buildSubNavItem(1, Icons.domain_rounded, 'Clinics Directory'),
-                  _buildSubNavItem(2, Icons.medical_services_rounded, 'Dentists & Specialists'),
+                  _buildSubNavItem(2, Icons.medical_services_rounded, 'Doctors & Specialists'),
                 ],
               ),
               const SizedBox(height: 8),
@@ -1999,6 +2012,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
         return _buildPatientDoctorChatsPanel();
       case 11:
         return _buildReferralManagementPanel();
+      case 12:
+        return _buildMedicalSpecialtiesPanel();
       default:
         return _buildDashboardPanel();
     }
@@ -3865,54 +3880,71 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Flexible(
-                          child: Text(
-                            '🏥 Partner Clinics Directory',
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF0D9488).withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            '${clinics.length} Active',
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0D9488)),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    const Text(
-                      'Manage registered dental practices, addresses & specialists',
-                      style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+              Row(
+                children: [
+                  const Flexible(
+                    child: Text(
+                      '🏥 Partner Clinics Directory',
+                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: AppTheme.textDark),
                       overflow: TextOverflow.ellipsis,
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '${clinics.length} Active',
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0D9488)),
+                    ),
+                  ),
+                ],
               ),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.add_location_alt_rounded, size: 16, color: Colors.white),
-                label: const Text('+ Register New Clinic', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0D9488),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                onPressed: () => _showRegisterClinicModal(context),
+              const SizedBox(height: 3),
+              const Text(
+                'Manage registered medical practices, addresses & specialists',
+                style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.dashboard_customize_rounded, size: 15, color: Color(0xFF0D9488)),
+                    label: const Text('Open Clinic Dashboard', style: TextStyle(color: Color(0xFF0D9488), fontWeight: FontWeight.bold, fontSize: 11.5)),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Color(0xFF0D9488)),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const ClinicDashboardScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.add_location_alt_rounded, size: 15, color: Colors.white),
+                    label: const Text('+ Register New Clinic', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11.5)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF0D9488),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: () => _showRegisterClinicModal(context),
+                  ),
+                ],
               ),
             ],
           ),
@@ -4095,23 +4127,60 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                       Text(' (${clinic.reviewsCount} reviews)', style: const TextStyle(fontSize: 11, color: Colors.grey)),
                                     ],
                                   ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF0D9488).withValues(alpha: 0.1),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: const Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text(
-                                          'Full Details',
-                                          style: TextStyle(fontSize: 11, color: Color(0xFF0D9488), fontWeight: FontWeight.bold),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      InkWell(
+                                        onTap: () {
+                                          Navigator.of(context).push(
+                                            MaterialPageRoute(
+                                              builder: (_) => ClinicDashboardScreen(
+                                                clinicName: clinic.clinicName,
+                                                initialTab: 1,
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF0D9488).withValues(alpha: 0.12),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: const Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(Icons.person_add_alt_1_rounded, size: 12, color: Color(0xFF0D9488)),
+                                              SizedBox(width: 4),
+                                              Text(
+                                                '+ Add Doctor',
+                                                style: TextStyle(fontSize: 10.5, color: Color(0xFF0D9488), fontWeight: FontWeight.bold),
+                                              ),
+                                            ],
+                                          ),
                                         ),
-                                        SizedBox(width: 3),
-                                        Icon(Icons.arrow_forward_rounded, size: 12, color: Color(0xFF0D9488)),
-                                      ],
-                                    ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: const Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              'Full Details',
+                                              style: TextStyle(fontSize: 11, color: Color(0xFF0D9488), fontWeight: FontWeight.bold),
+                                            ),
+                                            SizedBox(width: 3),
+                                            Icon(Icons.arrow_forward_rounded, size: 12, color: Color(0xFF0D9488)),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ],
                               ),
@@ -4350,9 +4419,44 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(
-                              '👨‍⚕️ Registered Specialists (${associatedDoctors.length})',
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                            Flexible(
+                              child: Text(
+                                '👨‍⚕️ Registered Specialists (${associatedDoctors.length})',
+                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            InkWell(
+                              onTap: () {
+                                Navigator.of(dialogCtx).pop();
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => ClinicDashboardScreen(
+                                      clinicName: clinic.clinicName,
+                                      initialTab: 1,
+                                    ),
+                                  ),
+                                );
+                              },
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF0D9488),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.person_add_alt_1_rounded, size: 13, color: Colors.white),
+                                    SizedBox(width: 4),
+                                    Text(
+                                      '+ Add Doctor',
+                                      style: TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
                           ],
                         ),
@@ -4421,13 +4525,55 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                         ],
                                       ),
                                     ),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFF10B981).withValues(alpha: 0.1),
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: const Text('ACTIVE', style: TextStyle(color: Color(0xFF10B981), fontSize: 9.5, fontWeight: FontWeight.bold)),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                                            borderRadius: BorderRadius.circular(6),
+                                          ),
+                                          child: const Text('ACTIVE', style: TextStyle(color: Color(0xFF10B981), fontSize: 9.5, fontWeight: FontWeight.bold)),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        IconButton(
+                                          icon: const Icon(Icons.person_remove_outlined, size: 18, color: Colors.redAccent),
+                                          tooltip: 'Remove Doctor from Clinic',
+                                          padding: EdgeInsets.zero,
+                                          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                          onPressed: () async {
+                                            final confirm = await showDialog<bool>(
+                                              context: dialogCtx,
+                                              builder: (c) => AlertDialog(
+                                                title: const Text('Remove Doctor from Clinic?'),
+                                                content: Text('Disassociate Dr. ${doc.name} from ${clinic.clinicName}?\n\nThe doctor\'s global account and medical records will be preserved.'),
+                                                actions: [
+                                                  TextButton(onPressed: () => Navigator.of(c).pop(false), child: const Text('Cancel')),
+                                                  ElevatedButton(
+                                                    style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+                                                    onPressed: () => Navigator.of(c).pop(true),
+                                                    child: const Text('Remove'),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                            if (confirm == true) {
+                                              await _problemService.removeDoctorFromClinic(doctorId: doc.id, clinicName: clinic.clinicName);
+                                              Navigator.of(dialogCtx).pop();
+                                              if (context.mounted) {
+                                                setState(() {});
+                                                ScaffoldMessenger.of(context).showSnackBar(
+                                                  SnackBar(
+                                                    content: Text('Dr. ${doc.name} was removed from ${clinic.clinicName}. Global account preserved.'),
+                                                    backgroundColor: Colors.orange.shade800,
+                                                  ),
+                                                );
+                                              }
+                                            }
+                                          },
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),
@@ -4445,8 +4591,28 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
                 // Modal Footer Actions
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.of(dialogCtx).pop();
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => ClinicDashboardScreen(
+                              clinicName: clinic.clinicName,
+                              initialTab: 1,
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.dashboard_customize_rounded, size: 16, color: Color(0xFF0D9488)),
+                      label: const Text('Open Clinic Workspace', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: Color(0xFF0D9488))),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Color(0xFF0D9488)),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
                     ElevatedButton(
                       onPressed: () => Navigator.of(dialogCtx).pop(),
                       style: ElevatedButton.styleFrom(
@@ -4763,7 +4929,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Create New Dentist Account',
+                                'Create New Doctor Account',
                                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark),
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -4854,15 +5020,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   flex: 3,
                                   child: DropdownButtonFormField<String>(
                                     initialValue: selectedSpecialty,
+                                    isExpanded: true,
                                     decoration: InputDecoration(
-                                      labelText: 'Specialization',
+                                      labelText: 'Medical Specialty',
                                       prefixIcon: const Icon(Icons.medical_services_outlined, size: 16),
                                       filled: true,
                                       fillColor: const Color(0xFFF8FAFC),
                                       contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
                                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                                     ),
-                                    items: [
+                                    items: <String>{
+                                      ..._problemService.activeSpecialtyNames,
                                       'General Dentistry',
                                       'Orthodontics',
                                       'Endodontics',
@@ -4870,9 +5038,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                       'Pediatric Dentistry',
                                       'Oral & Maxillofacial Surgery',
                                       'Cosmetic Dentistry',
-                                    ].map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 11)))).toList(),
+                                    }.map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 11), overflow: TextOverflow.ellipsis))).toList(),
                                     onChanged: (val) {
-                                      if (val != null) setModalState(() => selectedSpecialty = val);
+                                      if (val != null) {
+                                        setModalState(() {
+                                          selectedSpecialty = val;
+                                          final currentQual = qualCtrl.text.trim();
+                                          if (currentQual.isEmpty || currentQual == 'BDS, MDS' || currentQual == 'MBBS, MD') {
+                                            qualCtrl.text = MedicalSpecialtyModel.getDefaultQualificationForSpecialty(val);
+                                          }
+                                        });
+                                      }
                                     },
                                   ),
                                 ),
@@ -4885,7 +5061,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     cursorColor: AppTheme.primaryBlue,
                                     decoration: InputDecoration(
                                       labelText: 'Qualification',
-                                      hintText: 'BDS, MDS',
+                                      hintText: 'MBBS, MD / BDS',
                                       prefixIcon: const Icon(Icons.school_outlined, size: 16),
                                       filled: true,
                                       fillColor: const Color(0xFFF8FAFC),
@@ -5092,7 +5268,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                           : const Icon(Icons.check_circle_rounded, size: 16),
                       label: Text(
-                        isSubmitting ? 'Creating Dentist Account...' : 'Create Dentist Account',
+                        isSubmitting ? 'Creating Doctor Account...' : 'Create Doctor Account',
                         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                       ),
                       style: ElevatedButton.styleFrom(
@@ -5124,10 +5300,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 name: name,
                                 email: email,
                                 phone: phone,
-                                licenseNumber: licenseCtrl.text.isNotEmpty ? licenseCtrl.text : 'DEN-LIC-REG',
+                                licenseNumber: licenseCtrl.text.isNotEmpty ? licenseCtrl.text : 'MED-LIC-REG',
                                 specialty: selectedSpecialty,
-                                qualification: qualCtrl.text.isNotEmpty ? qualCtrl.text : 'BDS, MDS',
-                                clinicName: clinicCtrl.text.isNotEmpty ? clinicCtrl.text : 'Dental Practice',
+                                qualification: qualCtrl.text.isNotEmpty
+                                    ? qualCtrl.text
+                                    : MedicalSpecialtyModel.getDefaultQualificationForSpecialty(selectedSpecialty),
+                                clinicName: clinicCtrl.text.isNotEmpty ? clinicCtrl.text : 'GS HEALTH Medical Center',
                                 experienceYears: expYears,
                                 consultationFee: feeCtrl.text.isNotEmpty ? feeCtrl.text : '\$75',
                                 state: stateCtrl.text,
@@ -5140,7 +5318,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               Navigator.of(dialogContext).pop();
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  content: Text('🎉 Registered ${doctor.name} successfully! Dentist can now sign in using Mobile OTP.'),
+                                  content: Text('🎉 Registered ${doctor.name} successfully! Doctor can now sign in using Mobile OTP.'),
                                   backgroundColor: const Color(0xFF10B981),
                                   duration: const Duration(seconds: 4),
                                 ),
@@ -5160,70 +5338,163 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   void _showEditDoctorFeeAndSlotsDialog(BuildContext context, DoctorModel doc) {
     final feeCtrl = TextEditingController(text: doc.consultationFee);
     final slotCtrl = TextEditingController(text: doc.nextAvailableSlots.isNotEmpty ? doc.nextAvailableSlots.first : 'Today, 2:00 PM');
+    final qualCtrl = TextEditingController(text: doc.qualification);
+    final clinicCtrl = TextEditingController(text: doc.clinicName);
+    final specOptions = <String>{
+      ..._problemService.activeSpecialtyNames,
+      'General Dentistry',
+      'Orthodontics',
+      'Endodontics',
+      'Periodontics',
+      doc.specialty,
+    }.where((s) => s.isNotEmpty).toList();
+    String selectedSpecialty = specOptions.contains(doc.specialty) ? doc.specialty : specOptions.first;
+    String selectedVerification = doc.status == 'Suspended' ? 'SUSPENDED' : 'VERIFIED';
 
     showDialog(
       context: context,
       builder: (dialogCtx) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Text('Edit Fee & Slots • ${doc.name}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: feeCtrl,
-                style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                cursorColor: AppTheme.primaryBlue,
-                decoration: InputDecoration(
-                  labelText: 'Standard Consultation Fee',
-                  hintText: 'e.g. \$85',
-                  prefixIcon: const Icon(Icons.payments_outlined),
-                  filled: true,
-                  fillColor: const Color(0xFFF8FAFC),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: Text('Manage Profile, Verification & Slots • ${doc.name}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedSpecialty,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        labelText: 'Medical Specialty',
+                        prefixIcon: const Icon(Icons.medical_services_outlined),
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      items: specOptions
+                          .map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis)))
+                          .toList(),
+                      onChanged: (v) {
+                        if (v != null) setModalState(() => selectedSpecialty = v);
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: qualCtrl,
+                      style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                      cursorColor: AppTheme.primaryBlue,
+                      decoration: InputDecoration(
+                        labelText: 'Qualifications',
+                        hintText: 'MBBS, MD / BDS, MDS',
+                        prefixIcon: const Icon(Icons.school_outlined),
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: clinicCtrl,
+                      style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                      cursorColor: AppTheme.primaryBlue,
+                      decoration: InputDecoration(
+                        labelText: 'Associated Clinic / Hospital',
+                        prefixIcon: const Icon(Icons.local_hospital_outlined),
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedVerification,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        labelText: 'Doctor Verification Status',
+                        prefixIcon: const Icon(Icons.verified_user_outlined),
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'VERIFIED', child: Text('Verified & Approved', style: TextStyle(fontSize: 12))),
+                        DropdownMenuItem(value: 'PENDING_VERIFICATION', child: Text('Pending Verification', style: TextStyle(fontSize: 12))),
+                        DropdownMenuItem(value: 'SUSPENDED', child: Text('Suspended', style: TextStyle(fontSize: 12))),
+                      ],
+                      onChanged: (v) {
+                        if (v != null) setModalState(() => selectedVerification = v);
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: feeCtrl,
+                      style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                      cursorColor: AppTheme.primaryBlue,
+                      decoration: InputDecoration(
+                        labelText: 'Standard Consultation Fee',
+                        hintText: 'e.g. \$85',
+                        prefixIcon: const Icon(Icons.payments_outlined),
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: slotCtrl,
+                      style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                      cursorColor: AppTheme.primaryBlue,
+                      decoration: InputDecoration(
+                        labelText: 'Next Available Time Slot',
+                        hintText: 'e.g. Today, 3:30 PM',
+                        prefixIcon: const Icon(Icons.access_time_rounded),
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: slotCtrl,
-                style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                cursorColor: AppTheme.primaryBlue,
-                decoration: InputDecoration(
-                  labelText: 'Next Available Time Slot',
-                  hintText: 'e.g. Today, 3:30 PM',
-                  prefixIcon: const Icon(Icons.access_time_rounded),
-                  filled: true,
-                  fillColor: const Color(0xFFF8FAFC),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(dialogCtx).pop(), child: const Text('Cancel')),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.save_rounded, size: 16),
-              label: const Text('Update Fee & Slot', style: TextStyle(fontWeight: FontWeight.bold)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primaryBlue,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () {
-                _problemService.updateDoctorFeeAndSlots(
-                  doctorId: doc.id,
-                  consultationFee: feeCtrl.text.trim(),
-                  availableSlot: slotCtrl.text.trim(),
-                );
-                Navigator.of(dialogCtx).pop();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('⚡ Updated ${doc.name}\'s fee to ${feeCtrl.text.trim()} & slot to ${slotCtrl.text.trim()}!'),
-                    backgroundColor: const Color(0xFF10B981),
+              actions: [
+                TextButton(onPressed: () => Navigator.of(dialogCtx).pop(), child: const Text('Cancel')),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.save_rounded, size: 16),
+                  label: const Text('Save Changes', style: TextStyle(fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryBlue,
+                    foregroundColor: Colors.white,
                   ),
-                );
-              },
-            ),
-          ],
+                  onPressed: () async {
+                    await _problemService.updateDoctorProfessionalProfile(
+                      doctorId: doc.id,
+                      specialty: selectedSpecialty,
+                      qualification: qualCtrl.text.trim(),
+                      clinicName: clinicCtrl.text.trim(),
+                      consultationFee: feeCtrl.text.trim(),
+                      verificationStatus: selectedVerification,
+                    );
+                    _problemService.updateDoctorFeeAndSlots(
+                      doctorId: doc.id,
+                      consultationFee: feeCtrl.text.trim(),
+                      availableSlot: slotCtrl.text.trim(),
+                    );
+                    if (dialogCtx.mounted) Navigator.of(dialogCtx).pop();
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('⚡ Updated ${doc.name} (${selectedSpecialty}) profile, verification & slots!'),
+                          backgroundColor: const Color(0xFF10B981),
+                        ),
+                      );
+                    }
+                  },
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -5267,12 +5538,90 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   }
 
   // ==========================================
-  // PANEL 2: MASTER DENTISTS DIRECTORY (ALL DOCTORS)
+  // PANEL 2: MASTER DOCTORS & SPECIALISTS DIRECTORY (ALL SPECIALTIES)
   // ==========================================
+  String _adminDoctorSpecialtyFilter = 'All';
+
+  void _openAdminSpecialtyDoctorsPage(
+    String specialty,
+    PatientConsultationRequest? pendingRequest,
+  ) {
+    final clean = specialty.trim();
+    if (clean.isEmpty || clean.toLowerCase() == 'all' || clean.toLowerCase() == 'all specialties') {
+      setState(() => _adminDoctorSpecialtyFilter = 'All');
+      return;
+    }
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => FindDoctorsScreen(
+          initialSpecialty: clean,
+          isSpecialtyPage: true,
+          isAdminView: true,
+          onAdminCreateDoctor: () => _showRegisterDoctorModal(context),
+          onAdminEditDoctor: (ctx, doc) => _showEditDoctorFeeAndSlotsDialog(ctx, doc),
+          onAdminDeleteDoctor: (ctx, doc) => _confirmRemoveDoctor(ctx, doc),
+          onAdminAssignDoctor: pendingRequest != null
+              ? (ctx, doc) => _showAssignDoctorDialog(ctx, pendingRequest, preSelectedDoctor: doc)
+              : null,
+        ),
+      ),
+    );
+  }
+
+  void _openAdminDoctorProfilePage(
+    DoctorModel doc,
+    PatientConsultationRequest? pendingRequest,
+  ) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (routeCtx) => DoctorProfileScreen(
+          doctor: doc,
+          isAdminView: true,
+          onAdminEditDoctor: () {
+            final current = _problemService.allDoctors
+                    .where((d) => d.id == doc.id)
+                    .firstOrNull ??
+                doc;
+            _showEditDoctorFeeAndSlotsDialog(routeCtx, current);
+          },
+          onAdminDeleteDoctor: () {
+            final current = _problemService.allDoctors
+                    .where((d) => d.id == doc.id)
+                    .firstOrNull ??
+                doc;
+            _confirmRemoveDoctor(routeCtx, current);
+          },
+          onAdminAssignDoctor: pendingRequest != null
+              ? () {
+                  final current = _problemService.allDoctors
+                          .where((d) => d.id == doc.id)
+                          .firstOrNull ??
+                      doc;
+                  _showAssignDoctorDialog(
+                    routeCtx,
+                    pendingRequest,
+                    preSelectedDoctor: current,
+                  );
+                }
+              : null,
+        ),
+      ),
+    );
+  }
+
   Widget _buildDentistsPanel() {
-    final doctors = _problemService.allDoctors;
+    final allDoctors = _problemService.allDoctors;
+    final doctors = allDoctors.where((doc) {
+      return MedicalSpecialtyModel.matchesSpecialtyFilter(doc.specialty, _adminDoctorSpecialtyFilter);
+    }).toList();
     final requests = _problemService.requests;
-    final PatientConsultationRequest? pendingRequest = requests.where((r) => r.status == 'Pending Admin Review').firstOrNull ?? requests.firstOrNull;
+    final PatientConsultationRequest? pendingRequest =
+        requests.where((r) => r.status == 'Pending Admin Review').firstOrNull ?? requests.firstOrNull;
+    final activeSpecs = _problemService.activeSpecialties;
+    final filterOptions = <String>{
+      ...activeSpecs.map((s) => s.name),
+    }.toList();
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -5314,12 +5663,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '👨‍⚕️ Master Dentists Directory & Specialist Assignment',
+                        '👨‍⚕️ Master Doctors Directory, Verification & Specialist Assignment',
                         style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
                       ),
                       SizedBox(height: 3),
                       Text(
-                        'All verified dental specialists registered on GS HEALTH • Match patient problems directly',
+                        'All multi-specialty medical & dental specialists registered on GS HEALTH • Tap any doctor to view profile & availability',
                         style: TextStyle(color: Colors.white70, fontSize: 11),
                       ),
                     ],
@@ -5333,14 +5682,140 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
           // Statistics Header
           Row(
             children: [
-              _buildMiniStatCard('Total Dentists', '${doctors.length}', Icons.badge_rounded, AppTheme.primaryBlue),
+              _buildMiniStatCard('Total Doctors', '${allDoctors.length}', Icons.badge_rounded, AppTheme.primaryBlue),
               const SizedBox(width: 12),
-              _buildMiniStatCard('Available Now', '${doctors.where((d) => d.status == 'Available').length}', Icons.check_circle_rounded, const Color(0xFF10B981)),
+              _buildMiniStatCard('Available Now', '${allDoctors.where((d) => d.status == 'Available').length}', Icons.check_circle_rounded, const Color(0xFF10B981)),
               const SizedBox(width: 12),
-              _buildMiniStatCard('Avg Rating', '4.85 ⭐', Icons.star_rounded, const Color(0xFFF59E0B)),
+              _buildMiniStatCard('Specialties', '${activeSpecs.length}', Icons.category_rounded, const Color(0xFFF59E0B)),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
+
+          // ALL Specialty Dropdown + Quick Specialty Chips Strip
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                PopupMenuButton<String>(
+                  key: const Key('admin_all_specialties_dropdown_button'),
+                  tooltip: 'Select Medical Specialty',
+                  offset: const Offset(0, 44),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  color: Colors.white,
+                  onSelected: (value) => _openAdminSpecialtyDoctorsPage(value, pendingRequest),
+                  itemBuilder: (context) => [
+                    PopupMenuItem<String>(
+                      value: 'All',
+                      child: Row(
+                        children: [
+                          Icon(
+                            _adminDoctorSpecialtyFilter == 'All'
+                                ? Icons.check_circle_rounded
+                                : Icons.medical_services_outlined,
+                            size: 16,
+                            color: _adminDoctorSpecialtyFilter == 'All'
+                                ? AppTheme.primaryBlue
+                                : AppTheme.textMedium,
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            'All Specialties',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: _adminDoctorSpecialtyFilter == 'All'
+                                  ? FontWeight.bold
+                                  : FontWeight.w500,
+                              color: AppTheme.textDark,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuDivider(),
+                    ...activeSpecs.map(
+                      (spec) => PopupMenuItem<String>(
+                        key: Key('admin_specialty_dropdown_item_${spec.name}'),
+                        value: spec.name,
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.local_hospital_outlined,
+                              size: 16,
+                              color: AppTheme.primaryBlue,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                spec.name,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: AppTheme.textDark,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            const Icon(
+                              Icons.arrow_forward_ios_rounded,
+                              size: 12,
+                              color: AppTheme.textMuted,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                    margin: const EdgeInsets.only(right: 8),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryBlue,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.check_rounded, size: 15, color: Colors.white),
+                        SizedBox(width: 6),
+                        Text(
+                          'All',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        SizedBox(width: 4),
+                        Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: Colors.white),
+                      ],
+                    ),
+                  ),
+                ),
+                ...filterOptions.map((spec) {
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ActionChip(
+                      key: Key('admin_specialty_chip_$spec'),
+                      label: Text(
+                        spec,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.textDark,
+                        ),
+                      ),
+                      backgroundColor: Colors.white,
+                      side: const BorderSide(color: Color(0xFFCBD5E1)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      onPressed: () => _openAdminSpecialtyDoctorsPage(spec, pendingRequest),
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
 
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -5354,8 +5829,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               ),
               const SizedBox(width: 8),
               ElevatedButton.icon(
+                key: const Key('admin_create_doctor_button'),
                 icon: const Icon(Icons.person_add_rounded, size: 16),
-                label: const Text('+ Create Dentist', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                label: const Text('+ Create Doctor', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primaryBlue,
                   foregroundColor: Colors.white,
@@ -5368,7 +5844,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
           ),
           const SizedBox(height: 12),
 
-          // Grid of Doctors
+          // Compact Single-Line List of Doctors
           if (doctors.isEmpty)
             Container(
               width: double.infinity,
@@ -5378,234 +5854,129 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(color: const Color(0xFFE2E8F0)),
               ),
-              child: Column(
+              child: const Column(
                 children: [
-                  const Icon(Icons.medical_services_outlined, size: 42, color: AppTheme.textMuted),
-                  const SizedBox(height: 10),
-                  const Text('No Doctors Registered Yet', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark)),
-                  const SizedBox(height: 4),
-                  const Text('Click "+ Register Doctor" above to onboard a dentist into the platform.',
+                  Icon(Icons.medical_services_outlined, size: 42, color: AppTheme.textMuted),
+                  SizedBox(height: 10),
+                  Text('No Doctors Registered Yet', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark)),
+                  SizedBox(height: 4),
+                  Text('Click "+ Create Doctor" above to onboard a doctor into the platform.',
                       textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
                 ],
               ),
             )
           else
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final crossCount = constraints.maxWidth > 750 ? 2 : 1;
-
-                return GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: doctors.length,
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: crossCount,
-                    crossAxisSpacing: 14,
-                    mainAxisSpacing: 14,
-                    mainAxisExtent: 310,
-                  ),
-                itemBuilder: (context, index) {
-                  final doc = doctors[index];
-                  final isAvailable = doc.status == 'Available';
-
-                  return Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.02),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 22,
-                              backgroundColor: AppTheme.primaryBlue.withValues(alpha: 0.12),
-                              child: Text(
-                                doc.name.replaceAll('Dr.', '').trim().split(' ').where((s) => s.isNotEmpty).lastOrNull?[0].toUpperCase() ?? 'D',
-                                style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryBlue, fontSize: 16),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    doc.name,
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  Text(
-                                    doc.specialty,
-                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.primaryBlue),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  Text(
-                                    '${doc.qualification} • ${doc.experienceYears} yrs exp',
-                                    style: const TextStyle(fontSize: 10, color: AppTheme.textMuted),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: isAvailable ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Text(
-                                    doc.status,
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                      color: isAvailable ? const Color(0xFF16A34A) : const Color(0xFFD97706),
-                                    ),
-                                  ),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 18),
-                                  tooltip: 'Remove Doctor from Platform',
-                                  onPressed: () => _confirmRemoveDoctor(context, doc),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                        const Divider(height: 14, color: Color(0xFFF1F5F9)),
-
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text('🏥 ${doc.clinicName}', style: const TextStyle(fontSize: 11, color: AppTheme.textMedium, fontWeight: FontWeight.w500)),
-                            Text('Fee: ${doc.consultationFee}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF1F5F9),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                'Lic: ${doc.licenseNumber}',
-                                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            const Icon(Icons.star_rounded, size: 14, color: Color(0xFFF59E0B)),
-                            const SizedBox(width: 3),
-                            Text('${doc.rating}', style: const TextStyle(fontSize: 11, color: AppTheme.textDark, fontWeight: FontWeight.w600)),
-                            const Spacer(),
-                            Text('Slots: ${doc.nextAvailableSlots.isNotEmpty ? doc.nextAvailableSlots.first : "Available Today"}', style: const TextStyle(fontSize: 10, color: Color(0xFF10B981), fontWeight: FontWeight.w600)),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        Wrap(
-                          spacing: 4,
-                          runSpacing: 4,
-                          children: doc.procedureFees.entries.take(4).map((entry) {
-                            return Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: AppTheme.primaryBlue.withValues(alpha: 0.07),
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: AppTheme.primaryBlue.withValues(alpha: 0.2)),
-                              ),
-                              child: Text(
-                                '${entry.key}: ${entry.value}',
-                                style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              margin: const EdgeInsets.only(right: 6),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFEFF6FF),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text('City: ${doc.city.isNotEmpty ? doc.city : "Not provided"}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue)),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFFEF3C7),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text('PIN: ${doc.pincode.isNotEmpty ? doc.pincode : "Not provided"}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFD97706))),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Mobile: ${doc.phone.isNotEmpty ? doc.phone : "Not provided"} • Languages: ${doc.languages.isNotEmpty ? doc.languages.join(", ") : "English"} • Email: ${doc.email.isNotEmpty ? doc.email : "Not provided"}',
-                          style: const TextStyle(fontSize: 10, color: AppTheme.textMuted),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const Spacer(),
-
-                        Row(
-                          children: [
-                            Expanded(
-                              flex: 2,
-                              child: OutlinedButton.icon(
-                                icon: const Icon(Icons.edit_calendar_rounded, size: 14),
-                                label: const Text('Edit Fee & Slot', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-                                style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(vertical: 10),
-                                  side: const BorderSide(color: AppTheme.primaryBlue, width: 1.2),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                ),
-                                onPressed: () => _showEditDoctorFeeAndSlotsDialog(context, doc),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              flex: 3,
-                              child: ElevatedButton.icon(
-                                icon: const Icon(Icons.recommend_rounded, size: 14),
-                                label: const Text('Suggest Doctor', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: AppTheme.primaryBlue,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 10),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                ),
-                                onPressed: pendingRequest != null
-                                    ? () => _showAssignDoctorDialog(context, pendingRequest, preSelectedDoctor: doc)
-                                    : null,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              );
-            },
-          ),
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: doctors.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (context, index) {
+                final doc = doctors[index];
+                return _buildAdminCompactDoctorRow(doc, pendingRequest);
+              },
+            ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildAdminCompactDoctorRow(
+    DoctorModel doc,
+    PatientConsultationRequest? pendingRequest,
+  ) {
+    final rawInitial = doc.name
+        .replaceAll(RegExp(r'^Dr\.?\s*', caseSensitive: false), '')
+        .trim();
+    final initial = rawInitial.isNotEmpty ? rawInitial[0].toUpperCase() : 'D';
+    final displayName = doc.name.trim().toLowerCase().startsWith('dr')
+        ? doc.name.trim()
+        : 'Dr. ${doc.name.trim()}';
+
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        key: Key('admin_doctor_card_${doc.id}'),
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => _openAdminDoctorProfilePage(doc, pendingRequest),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.025),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              GestureDetector(
+                key: Key('admin_doctor_image_${doc.id}'),
+                onTap: () => _openAdminDoctorProfilePage(doc, pendingRequest),
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: [
+                        AppTheme.primaryBlue,
+                        AppTheme.primaryBlue.withValues(alpha: 0.78),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    initial,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 17,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: GestureDetector(
+                  key: Key('admin_doctor_name_${doc.id}'),
+                  onTap: () => _openAdminDoctorProfilePage(doc, pendingRequest),
+                  child: Text(
+                    displayName,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                      color: AppTheme.textDark,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                key: Key('admin_view_profile_button_${doc.id}'),
+                tooltip: 'View Doctor Profile',
+                onPressed: () => _openAdminDoctorProfilePage(doc, pendingRequest),
+                icon: const Icon(
+                  Icons.arrow_forward_rounded,
+                  size: 20,
+                  color: AppTheme.primaryBlue,
+                ),
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -8216,9 +8587,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   }
 
   // ==========================================
-  // PANEL 3: REVENUE OVERVIEW & PAYMENTS
+  // PANEL 3: REVENUE OVERVIEW, PAYMENTS & SPECIALTY ANALYTICS
   // ==========================================
   Widget _buildRevenuePanel() {
+    final specialtyStats = _problemService.getSpecialtyAnalyticsBreakdown();
+
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.all(16),
@@ -8226,7 +8599,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Revenue & Financial Analytics',
+            'Revenue, Financial & Specialty Analytics',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark),
           ),
           const SizedBox(height: 16),
@@ -8251,8 +8624,465 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               );
             },
           ),
+          const SizedBox(height: 20),
+          // Specialty-Based Reporting Card
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Specialty-Based Healthcare Reporting',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            'Real-time breakdown of registered specialists, consultations, and confirmed appointments by medical specialty',
+                            style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: () => setState(() => _selectedNavIndex = 12),
+                      icon: const Icon(Icons.category_rounded, size: 15, color: AppTheme.primaryBlue),
+                      label: const Text('Manage Specialties', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: DataTable(
+                    headingRowHeight: 40,
+                    dataRowMinHeight: 42,
+                    dataRowMaxHeight: 48,
+                    columns: const [
+                      DataColumn(label: Text('Medical Specialty', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                      DataColumn(label: Text('Department', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                      DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                      DataColumn(label: Text('Total Doctors', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                      DataColumn(label: Text('Available', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                      DataColumn(label: Text('Consultations', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                      DataColumn(label: Text('Confirmed Appts', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                    ],
+                    rows: specialtyStats.map((row) {
+                      final isActive = row['isActive'] == true;
+                      return DataRow(
+                        cells: [
+                          DataCell(Text('${row['name']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textDark))),
+                          DataCell(Text('${row['department']}', style: const TextStyle(fontSize: 11.5, color: AppTheme.textMedium))),
+                          DataCell(
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: isActive ? const Color(0xFFDCFCE7) : const Color(0xFFF1F5F9),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                isActive ? 'Active' : 'Inactive',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: isActive ? const Color(0xFF16A34A) : AppTheme.textMuted,
+                                ),
+                              ),
+                            ),
+                          ),
+                          DataCell(Text('${row['totalDoctors']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.primaryBlue))),
+                          DataCell(Text('${row['verifiedDoctors']}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: Color(0xFF10B981)))),
+                          DataCell(Text('${row['consultations']}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+                          DataCell(Text('${row['appointments']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF8B5CF6)))),
+                        ],
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
+    );
+  }
+
+  // ==========================================
+  // PANEL 12: MEDICAL SPECIALTIES MANAGEMENT (DYNAMIC ADMIN CONTROL)
+  // ==========================================
+  Widget _buildMedicalSpecialtiesPanel() {
+    final specialties = _problemService.specialties;
+    final activeCount = specialties.where((s) => s.isActive).length;
+    final breakdown = _problemService.getSpecialtyAnalyticsBreakdown();
+
+    return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Top Banner
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryBlue.withValues(alpha: 0.25),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(Icons.category_rounded, color: Colors.white, size: 28),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Multi-Specialty Healthcare Configuration',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '$activeCount Active of ${specialties.length} Medical Specialties • Add, edit, activate or deactivate specialties dynamically without code changes',
+                        style: const TextStyle(color: Colors.white70, fontSize: 11.5),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                ElevatedButton.icon(
+                  onPressed: () => _showAddOrEditSpecialtyModal(context),
+                  icon: const Icon(Icons.add_circle_outline_rounded, size: 16),
+                  label: const Text('+ Add Specialty', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryBlue,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final crossCount = constraints.maxWidth > 850 ? 2 : 1;
+              return GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: specialties.length,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: crossCount,
+                  crossAxisSpacing: 14,
+                  mainAxisSpacing: 14,
+                  mainAxisExtent: 188,
+                ),
+                itemBuilder: (context, index) {
+                  final spec = specialties[index];
+                  Map<String, dynamic>? matchedStats;
+                  for (final b in breakdown) {
+                    if (b['code'] == spec.code || b['name'] == spec.name) {
+                      matchedStats = b;
+                      break;
+                    }
+                  }
+                  final docCount = matchedStats?['totalDoctors'] ?? 0;
+
+                  return Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: spec.isActive ? AppTheme.primaryBlue.withValues(alpha: 0.25) : const Color(0xFFE2E8F0),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.02),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: spec.isActive
+                                    ? AppTheme.primaryBlue.withValues(alpha: 0.1)
+                                    : const Color(0xFFF1F5F9),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Icon(
+                                spec.iconData,
+                                color: spec.isActive ? AppTheme.primaryBlue : AppTheme.textMuted,
+                                size: 22,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    spec.name,
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5, color: AppTheme.textDark),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  Text(
+                                    '${spec.department} • Default: ${spec.defaultQualifications}',
+                                    style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Edit Specialty',
+                              icon: const Icon(Icons.edit_outlined, size: 18, color: AppTheme.primaryBlue),
+                              onPressed: () => _showAddOrEditSpecialtyModal(context, existing: spec),
+                            ),
+                            Switch.adaptive(
+                              value: spec.isActive,
+                              activeTrackColor: const Color(0xFF10B981),
+                              onChanged: (val) async {
+                                await _problemService.toggleMedicalSpecialtyStatus(spec.id, val);
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        val
+                                            ? '✅ Activated ${spec.name} across GS HEALTH.'
+                                            : '⏸️ Deactivated ${spec.name}.',
+                                      ),
+                                      backgroundColor: val ? const Color(0xFF10B981) : const Color(0xFF64748B),
+                                      duration: const Duration(seconds: 2),
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          spec.description.isNotEmpty
+                              ? spec.description
+                              : 'Specialized clinical care and consultations for ${spec.name}.',
+                          style: const TextStyle(fontSize: 11.5, color: AppTheme.textMedium),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const Spacer(),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFEFF6FF),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                '$docCount Registered Specialist${docCount == 1 ? "" : "s"}',
+                                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
+                              ),
+                            ),
+                            Flexible(
+                              child: Text(
+                                'Consultations: ${spec.consultationTypes.take(2).join(", ")}',
+                                style: const TextStyle(fontSize: 10.5, color: AppTheme.textMuted),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAddOrEditSpecialtyModal(BuildContext context, {MedicalSpecialtyModel? existing}) {
+    final nameCtrl = TextEditingController(text: existing?.name ?? '');
+    final deptCtrl = TextEditingController(text: existing?.department ?? '');
+    final descCtrl = TextEditingController(text: existing?.description ?? '');
+    final qualCtrl = TextEditingController(
+      text: existing != null ? existing.defaultQualifications : 'MBBS, MD',
+    );
+    final consultCtrl = TextEditingController(
+      text: existing != null
+          ? existing.consultationTypes.join(', ')
+          : 'Initial Consultation, Specialist Evaluation, Follow-up Visit',
+    );
+    bool isActive = existing?.isActive ?? true;
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: Text(
+                existing == null ? 'Add Medical Specialty' : 'Edit ${existing.name}',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: nameCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Specialty Name *',
+                        hintText: 'e.g. Nephrology',
+                        prefixIcon: Icon(Icons.medical_services_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: deptCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Clinical Department',
+                        hintText: 'e.g. Renal Sciences',
+                        prefixIcon: Icon(Icons.domain_rounded),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: descCtrl,
+                      maxLines: 2,
+                      decoration: const InputDecoration(
+                        labelText: 'Description',
+                        hintText: 'Brief clinical scope of this medical specialty',
+                        prefixIcon: Icon(Icons.description_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: qualCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Default Qualifications (comma-separated)',
+                        hintText: 'MBBS, MD, DM',
+                        prefixIcon: Icon(Icons.school_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: consultCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Consultation Types (comma-separated)',
+                        hintText: 'Specialist Consultation, Follow-up Visit',
+                        prefixIcon: Icon(Icons.assignment_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Active on Platform', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                      subtitle: const Text('Show in Patient Find Doctors & Doctor Registration', style: TextStyle(fontSize: 11)),
+                      value: isActive,
+                      onChanged: (v) => setModalState(() => isActive = v),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogCtx).pop(),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.check_circle_outline_rounded, size: 16),
+                  label: Text(existing == null ? 'Add Specialty' : 'Save Changes'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryBlue,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () async {
+                    final name = nameCtrl.text.trim();
+                    if (name.isEmpty) return;
+                    final quals = qualCtrl.text.trim();
+                    final consults = consultCtrl.text
+                        .split(',')
+                        .map((s) => s.trim())
+                        .where((s) => s.isNotEmpty)
+                        .toList();
+
+                    if (existing == null) {
+                      await _problemService.addMedicalSpecialty(
+                        name: name,
+                        department: deptCtrl.text.trim().isNotEmpty ? deptCtrl.text.trim() : name,
+                        description: descCtrl.text.trim(),
+                        defaultQualifications: quals.isNotEmpty ? quals : 'MBBS, MD',
+                        consultationTypes: consults,
+                      );
+                    } else {
+                      await _problemService.updateMedicalSpecialty(
+                        existing.id,
+                        name: name,
+                        department: deptCtrl.text.trim().isNotEmpty ? deptCtrl.text.trim() : name,
+                        description: descCtrl.text.trim(),
+                        isActive: isActive,
+                        defaultQualifications: quals.isNotEmpty ? quals : existing.defaultQualifications,
+                        consultationTypes: consults.isNotEmpty ? consults : existing.consultationTypes,
+                      );
+                    }
+                    if (dialogCtx.mounted) Navigator.of(dialogCtx).pop();
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(existing == null ? '✅ Added $name specialty!' : '✅ Updated $name specialty!'),
+                          backgroundColor: const Color(0xFF10B981),
+                        ),
+                      );
+                    }
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 

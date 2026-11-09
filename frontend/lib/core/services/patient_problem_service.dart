@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'api_service.dart';
 import '../models/referral_model.dart';
 import '../models/doctor_availability.dart';
+import '../models/medical_specialty_model.dart';
 
 /// Model representing a Doctor/Dentist registered in DentaGuru platform
 class DoctorModel {
@@ -140,12 +141,17 @@ class DoctorModel {
       parsedLanguages = ['English'];
     }
 
+    final parsedSpecialty = (json['specialty'] ?? json['speciality'] ?? '').toString();
+    final parsedQual = (json['qualification'] ?? json['qualifications'] ?? '').toString().trim();
+
     return DoctorModel(
       id: (json['id'] ?? json['_id'] ?? '').toString(),
       userId: (json['userId'] ?? json['user_id'] ?? (json['users'] != null ? json['users']['id'] : '') ?? '').toString(),
       name: json['name'] ?? '',
-      specialty: json['specialty'] ?? json['speciality'] ?? '',
-      qualification: json['qualification'] ?? json['qualifications'] ?? 'BDS, MDS',
+      specialty: parsedSpecialty,
+      qualification: parsedQual.isNotEmpty
+          ? parsedQual
+          : MedicalSpecialtyModel.getDefaultQualificationForSpecialty(parsedSpecialty),
       experienceYears: json['experienceYears'] ?? json['experience_years'] ?? 5,
       rating: (json['rating'] ?? 5.0).toDouble(),
       reviewCount: json['reviewCount'] ?? json['reviews_count'] ?? 0,
@@ -1201,7 +1207,31 @@ class PatientProblemService extends ChangeNotifier {
         } catch (_) {}
       }
 
-      // 6. Sync live patients, appointments, clinics, doctors, records, and requests directly from Supabase DB API
+      // 6. Sync live patients, appointments, clinics, doctors, records, specialties, and requests directly from Supabase DB API
+      final savedSpecsJson = prefs.getString('dentaguru_medical_specialties');
+      if (savedSpecsJson != null && savedSpecsJson.isNotEmpty) {
+        try {
+          final List decoded = jsonDecode(savedSpecsJson);
+          final parsed = decoded
+              .whereType<Map>()
+              .map((m) => MedicalSpecialtyModel.fromJson(Map<String, dynamic>.from(m)))
+              .toList();
+          if (parsed.isNotEmpty) {
+            _specialties = parsed;
+          }
+        } catch (_) {}
+      }
+
+      final savedDeptsJson = prefs.getString('dentaguru_clinic_departments');
+      if (savedDeptsJson != null && savedDeptsJson.isNotEmpty) {
+        try {
+          final List decoded = jsonDecode(savedDeptsJson);
+          _clinicDepartments
+            ..clear()
+            ..addAll(decoded.map((e) => e.toString()));
+        } catch (_) {}
+      }
+
       syncAllDataFromApi();
 
       notifyListeners();
@@ -1278,6 +1308,7 @@ class PatientProblemService extends ChangeNotifier {
   Future<void> syncAllDataFromApi() async {
     try {
       await Future.wait([
+        syncSpecialtiesFromApi(),
         syncPatientsFromApi(),
         syncClinicsFromApi(),
         syncDoctorsFromApi(),
@@ -2668,6 +2699,8 @@ class PatientProblemService extends ChangeNotifier {
       await prefs.setString('dentaguru_all_doctors', jsonEncode(_allDoctors.map((d) => d.toJson()).toList()));
       await prefs.setString('dentaguru_all_patients', jsonEncode(_allPatients.map((p) => p.toJson()).toList()));
       await prefs.setString('dentaguru_medical_records', jsonEncode(_medicalRecords));
+      await prefs.setString('dentaguru_medical_specialties', jsonEncode(_specialties.map((s) => s.toJson()).toList()));
+      await prefs.setString('dentaguru_clinic_departments', jsonEncode(_clinicDepartments));
 
       // Persist My Doctors isolated per Patient
       final pId = currentPatient.id.isNotEmpty ? currentPatient.id : (_safeAuthUserId ?? '');
@@ -4363,6 +4396,462 @@ class PatientProblemService extends ChangeNotifier {
         _availabilityCache[cacheKey] = existing.copyWith(isBlocked: true, blockedReason: reason, availableSlots: []);
       }
       notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  // =========================================================================
+  // MULTI-SPECIALTY HEALTHCARE PLATFORM MANAGEMENT (Specialties, Profiles, Departments)
+  // =========================================================================
+
+  List<MedicalSpecialtyModel> _specialties = List.from(MedicalSpecialtyModel.defaultSpecialties);
+
+  /// All registered medical specialties (active and inactive)
+  List<MedicalSpecialtyModel> get specialties => List.unmodifiable(_specialties);
+
+  /// Active medical specialties available for Patient discovery and Doctor registration
+  List<MedicalSpecialtyModel> get activeSpecialties =>
+      List.unmodifiable(_specialties.where((s) => s.isActive).toList());
+
+  /// Active medical specialty names
+  List<String> get activeSpecialtyNames =>
+      _specialties.where((s) => s.isActive).map((s) => s.name).toList();
+
+  /// Clinic multi-specialty departments enabled for the clinic workspace
+  final List<String> _clinicDepartments = [
+    'General Medicine',
+    'Cardiology',
+    'Dermatology',
+    'Neurology',
+    'Orthopedics',
+    'Pediatrics',
+    'Gynecology',
+    'ENT',
+    'Ophthalmology',
+    'Dentistry',
+  ];
+
+  List<String> get clinicDepartments => List.unmodifiable(_clinicDepartments);
+
+  Future<void> syncSpecialtiesFromApi() async {
+    try {
+      final rows = await ApiService().fetchMedicalSpecialties(activeOnly: false);
+      if (rows.isNotEmpty) {
+        final fetched = rows
+            .map((r) => MedicalSpecialtyModel.fromJson(r))
+            .where((s) => s.name.isNotEmpty)
+            .toList();
+        if (fetched.isNotEmpty) {
+          // Merge with any default specialties not yet in DB so all 16 core specialties remain available
+          final byCode = <String, MedicalSpecialtyModel>{};
+          for (final def in MedicalSpecialtyModel.defaultSpecialties) {
+            byCode[def.code.toUpperCase()] = def;
+          }
+          for (final item in fetched) {
+            final key = item.code.isNotEmpty
+                ? item.code.toUpperCase()
+                : item.name.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]+'), '_');
+            byCode[key] = item;
+          }
+          final merged = byCode.values.toList()
+            ..sort((a, b) => a.displayOrder.compareTo(b.displayOrder));
+          _specialties = merged;
+          _saveToStorage();
+          notifyListeners();
+        }
+      }
+    } catch (e) {
+      debugPrint('Sync specialties notice: $e');
+    }
+  }
+
+  Future<MedicalSpecialtyModel> addMedicalSpecialty({
+    required String name,
+    String? code,
+    String? department,
+    String? description,
+    String? defaultQualifications,
+    List<String>? consultationTypes,
+    List<String>? subSpecialties,
+    String icon = 'medical_services',
+  }) async {
+    final cleanName = name.trim();
+    final cleanCode = (code != null && code.trim().isNotEmpty)
+        ? code.trim().toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]+'), '_')
+        : cleanName.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]+'), '_');
+    final newSpec = MedicalSpecialtyModel(
+      id: 'spec-${cleanCode.toLowerCase()}',
+      code: cleanCode,
+      name: cleanName,
+      department: (department != null && department.trim().isNotEmpty)
+          ? department.trim()
+          : '$cleanName Department',
+      description: (description != null && description.trim().isNotEmpty)
+          ? description.trim()
+          : 'Specialized consultations, diagnostics, and clinical care in $cleanName.',
+      iconName: icon,
+      defaultQualifications: (defaultQualifications != null && defaultQualifications.trim().isNotEmpty)
+          ? defaultQualifications.trim()
+          : 'MBBS, MD',
+      consultationTypes: (consultationTypes != null && consultationTypes.isNotEmpty)
+          ? consultationTypes
+          : ['General Consultation', 'Specialist Evaluation', 'Follow-up Visit'],
+      subSpecialties: subSpecialties ?? const [],
+      isActive: true,
+      displayOrder: _specialties.length + 1,
+    );
+
+    final existingIdx = _specialties.indexWhere(
+      (s) => s.code.toLowerCase() == cleanCode.toLowerCase() || s.name.toLowerCase() == cleanName.toLowerCase(),
+    );
+    if (existingIdx != -1) {
+      _specialties[existingIdx] = newSpec;
+    } else {
+      _specialties.add(newSpec);
+    }
+    _saveToStorage();
+    notifyListeners();
+
+    await ApiService().createMedicalSpecialty(newSpec.toJson());
+    return newSpec;
+  }
+
+  Future<void> updateMedicalSpecialty(
+    String idOrCode, {
+    String? name,
+    String? department,
+    String? description,
+    String? defaultQualifications,
+    List<String>? consultationTypes,
+    List<String>? subSpecialties,
+    bool? isActive,
+  }) async {
+    final idx = _specialties.indexWhere(
+      (s) => s.id == idOrCode || s.code.toLowerCase() == idOrCode.toLowerCase() || s.name.toLowerCase() == idOrCode.toLowerCase(),
+    );
+    if (idx == -1) return;
+
+    final updated = _specialties[idx].copyWith(
+      name: name,
+      department: department,
+      description: description,
+      defaultQualifications: defaultQualifications,
+      consultationTypes: consultationTypes,
+      subSpecialties: subSpecialties,
+      isActive: isActive,
+    );
+    _specialties[idx] = updated;
+    _saveToStorage();
+    notifyListeners();
+
+    await ApiService().updateMedicalSpecialty(updated.id, updated.toJson());
+  }
+
+  Future<void> toggleMedicalSpecialtyStatus(String idOrCode, bool isActive) async {
+    final idx = _specialties.indexWhere(
+      (s) => s.id == idOrCode || s.code.toLowerCase() == idOrCode.toLowerCase() || s.name.toLowerCase() == idOrCode.toLowerCase(),
+    );
+    if (idx == -1) return;
+    _specialties[idx] = _specialties[idx].copyWith(isActive: isActive);
+    _saveToStorage();
+    notifyListeners();
+    await ApiService().toggleMedicalSpecialtyStatus(_specialties[idx].id, isActive);
+  }
+
+  Future<void> addClinicDepartment(String departmentName, {String? clinicId}) async {
+    final clean = departmentName.trim();
+    if (clean.isEmpty) return;
+    if (!_clinicDepartments.any((d) => d.toLowerCase() == clean.toLowerCase())) {
+      _clinicDepartments.add(clean);
+      _saveToStorage();
+      notifyListeners();
+      if (clinicId != null && clinicId.isNotEmpty) {
+        await ApiService().updateClinicDepartmentsApi(clinicId, _clinicDepartments);
+      }
+    }
+  }
+
+  Future<void> removeClinicDepartment(String departmentName, {String? clinicId}) async {
+    _clinicDepartments.removeWhere((d) => d.toLowerCase() == departmentName.trim().toLowerCase());
+    _saveToStorage();
+    notifyListeners();
+    if (clinicId != null && clinicId.isNotEmpty) {
+      await ApiService().updateClinicDepartmentsApi(clinicId, _clinicDepartments);
+    }
+  }
+
+  Future<void> updateDoctorProfessionalProfile({
+    required String doctorId,
+    String? name,
+    String? specialty,
+    String? qualification,
+    int? experienceYears,
+    String? clinicName,
+    String? consultationFee,
+    String? licenseNumber,
+    String? status,
+    String? verificationStatus,
+    String? bio,
+    String? city,
+    String? pincode,
+  }) async {
+    int idx = _allDoctors.indexWhere((d) => d.id == doctorId || (d.userId.isNotEmpty && d.userId == doctorId));
+    DoctorModel? baseDoc = idx != -1 ? _allDoctors[idx] : currentDoctor;
+    if (baseDoc == null) return;
+
+    final updatedDoc = DoctorModel(
+      id: baseDoc.id,
+      userId: baseDoc.userId,
+      name: name ?? baseDoc.name,
+      specialty: specialty ?? baseDoc.specialty,
+      qualification: qualification ?? baseDoc.qualification,
+      experienceYears: experienceYears ?? baseDoc.experienceYears,
+      rating: baseDoc.rating,
+      reviewCount: baseDoc.reviewCount,
+      clinicName: clinicName ?? baseDoc.clinicName,
+      phone: baseDoc.phone,
+      email: baseDoc.email,
+      status: status ?? baseDoc.status,
+      verificationStatus: verificationStatus ?? baseDoc.verificationStatus,
+      nextAvailableSlots: baseDoc.nextAvailableSlots,
+      consultationFee: consultationFee ?? baseDoc.consultationFee,
+      licenseNumber: licenseNumber ?? baseDoc.licenseNumber,
+      photoBytes: baseDoc.photoBytes,
+      clinicAddress: baseDoc.clinicAddress,
+      pincode: pincode ?? baseDoc.pincode,
+      city: city ?? baseDoc.city,
+      state: baseDoc.state,
+      bio: bio ?? baseDoc.bio,
+      languages: baseDoc.languages,
+      latitude: baseDoc.latitude,
+      longitude: baseDoc.longitude,
+      procedureFees: baseDoc.procedureFees,
+    );
+
+    if (idx != -1) {
+      _allDoctors[idx] = updatedDoc;
+    } else {
+      _allDoctors.insert(0, updatedDoc);
+    }
+
+    if (currentDoctor != null &&
+        (currentDoctor!.id == doctorId ||
+            currentDoctor!.userId == doctorId ||
+            currentDoctor!.email.toLowerCase() == updatedDoc.email.toLowerCase())) {
+      currentDoctor = updatedDoc;
+    }
+
+    _saveToStorage();
+    notifyListeners();
+
+    await ApiService().updateDoctorProfileApi(doctorId, {
+      if (name != null) 'name': name,
+      if (specialty != null) 'specialty': specialty,
+      if (qualification != null) 'qualification': qualification,
+      if (experienceYears != null) 'experienceYears': experienceYears,
+      if (clinicName != null) 'clinicName': clinicName,
+      if (consultationFee != null) 'consultationFee': consultationFee,
+      if (licenseNumber != null) 'licenseNumber': licenseNumber,
+      if (status != null) 'status': status,
+      if (verificationStatus != null) 'verificationStatus': verificationStatus,
+      if (bio != null) 'bio': bio,
+      if (city != null) 'city': city,
+      if (pincode != null) 'pincode': pincode,
+    });
+  }
+
+  /// Compute specialty-based analytics report across all active & registered specialties
+  List<Map<String, dynamic>> getSpecialtyAnalyticsBreakdown() {
+    return _specialties.map<Map<String, dynamic>>((spec) {
+      final matchingDocs = _allDoctors
+          .where((d) => MedicalSpecialtyModel.matchesSpecialtyFilter(d.specialty, spec.name, specialties: _specialties))
+          .toList();
+      final verifiedDocs = matchingDocs.where((d) => d.verificationStatus.toUpperCase() == 'VERIFIED').length;
+      final docIds = matchingDocs.map((d) => d.id).toSet();
+      final docNames = matchingDocs.map((d) => d.name.toLowerCase()).toSet();
+
+      final matchingRequests = _requests.where((r) {
+        if (r.assignedDoctorSpecialty != null &&
+            MedicalSpecialtyModel.matchesSpecialtyFilter(r.assignedDoctorSpecialty!, spec.name, specialties: _specialties)) {
+          return true;
+        }
+        if (r.assignedDoctorId != null && docIds.contains(r.assignedDoctorId)) return true;
+        if (r.assignedDoctorName != null && docNames.contains(r.assignedDoctorName!.toLowerCase())) return true;
+        return MedicalSpecialtyModel.matchesSpecialtyFilter(r.problemCategory, spec.name, specialties: _specialties);
+      }).toList();
+
+      final confirmedAppointments = matchingRequests
+          .where((r) => r.status.toUpperCase() == 'CONFIRMED' || r.confirmedTimeSlot != null)
+          .length;
+
+      return <String, dynamic>{
+        'id': spec.id,
+        'code': spec.code,
+        'name': spec.name,
+        'department': spec.department,
+        'defaultQualifications': spec.defaultQualifications,
+        'isActive': spec.isActive,
+        'totalDoctors': matchingDocs.length,
+        'verifiedDoctors': verifiedDocs,
+        'consultations': matchingRequests.length,
+        'totalConsultations': matchingRequests.length,
+        'appointments': confirmedAppointments,
+        'confirmedAppointments': confirmedAppointments,
+      };
+    }).toList();
+  }
+
+  // =========================================================================
+  // CLINIC DOCTORS & MULTI-SPECIALTY CLINIC MANAGEMENT
+  // =========================================================================
+
+  /// Retrieve all doctors attached or associated with a specific clinic
+  List<DoctorModel> getClinicDoctors(String clinicName) {
+    final clean = clinicName.trim().toLowerCase();
+    if (clean.isEmpty) return _allDoctors;
+    final matches = _allDoctors.where((d) {
+      final docClinic = d.clinicName.trim().toLowerCase();
+      if (docClinic == clean) return true;
+      if (docClinic.isNotEmpty && (clean.contains(docClinic) || docClinic.contains(clean))) return true;
+      return false;
+    }).toList();
+
+    // Fallback if demo clinic has no specific matches so the UI remains fully functional
+    if (matches.isEmpty && (clean.contains('gs health') || clean.contains('partner clinic') || clean.contains('default'))) {
+      return _allDoctors;
+    }
+    return matches;
+  }
+
+  /// Check if a doctor already exists in GS HEALTH by phone, email, or license
+  DoctorModel? findExistingDoctor({String? phone, String? email, String? licenseNumber}) {
+    final cleanPhone = (phone ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+    final cleanEmail = (email ?? '').trim().toLowerCase();
+    final cleanLicense = (licenseNumber ?? '').trim().toLowerCase();
+
+    for (final doc in _allDoctors) {
+      if (cleanEmail.isNotEmpty && doc.email.trim().toLowerCase() == cleanEmail) {
+        return doc;
+      }
+      final docPhone = doc.phone.replaceAll(RegExp(r'[^0-9]'), '');
+      if (cleanPhone.length >= 10 && docPhone.length >= 10 && docPhone.endsWith(cleanPhone.substring(cleanPhone.length - 10))) {
+        return doc;
+      }
+      if (cleanLicense.isNotEmpty && doc.licenseNumber.trim().toLowerCase() == cleanLicense) {
+        return doc;
+      }
+    }
+    return null;
+  }
+
+  /// Associate an existing doctor with a clinic without creating a duplicate account
+  Future<bool> associateDoctorWithClinic({
+    required String doctorId,
+    required String clinicName,
+    String? specialty,
+    String? consultationFee,
+    List<String>? availableDays,
+    List<String>? availableSlots,
+  }) async {
+    final idx = _allDoctors.indexWhere((d) => d.id == doctorId || d.userId == doctorId);
+    if (idx != -1) {
+      final base = _allDoctors[idx];
+      final updatedSlots = (availableSlots != null && availableSlots.isNotEmpty)
+          ? availableSlots
+          : base.nextAvailableSlots;
+      final updated = DoctorModel(
+        id: base.id,
+        userId: base.userId,
+        name: base.name,
+        specialty: (specialty != null && specialty.trim().isNotEmpty) ? specialty.trim() : base.specialty,
+        qualification: base.qualification,
+        experienceYears: base.experienceYears,
+        rating: base.rating,
+        reviewCount: base.reviewCount,
+        clinicName: clinicName.trim(),
+        phone: base.phone,
+        email: base.email,
+        status: 'Available',
+        verificationStatus: base.verificationStatus,
+        nextAvailableSlots: updatedSlots,
+        consultationFee: (consultationFee != null && consultationFee.trim().isNotEmpty)
+            ? consultationFee.trim()
+            : base.consultationFee,
+        licenseNumber: base.licenseNumber,
+        photoBytes: base.photoBytes,
+        clinicAddress: base.clinicAddress,
+        city: base.city,
+        pincode: base.pincode,
+        state: base.state,
+        bio: base.bio,
+        languages: base.languages,
+        latitude: base.latitude,
+        longitude: base.longitude,
+        procedureFees: base.procedureFees,
+      );
+      _allDoctors[idx] = updated;
+      _saveToStorage();
+      notifyListeners();
+
+      await ApiService().associateClinicDoctorApi(
+        clinicId: 'default',
+        doctorId: doctorId,
+        clinicName: clinicName,
+        specialty: specialty,
+        consultationFee: consultationFee,
+        availableDays: availableDays,
+        availableSlots: availableSlots,
+      );
+      return true;
+    }
+    return false;
+  }
+
+  /// Remove a doctor from a clinic without deleting their global account or patient records
+  Future<bool> removeDoctorFromClinic({
+    required String doctorId,
+    required String clinicName,
+  }) async {
+    final idx = _allDoctors.indexWhere((d) => d.id == doctorId || d.userId == doctorId);
+    if (idx != -1) {
+      final base = _allDoctors[idx];
+      final updated = DoctorModel(
+        id: base.id,
+        userId: base.userId,
+        name: base.name,
+        specialty: base.specialty,
+        qualification: base.qualification,
+        experienceYears: base.experienceYears,
+        rating: base.rating,
+        reviewCount: base.reviewCount,
+        clinicName: 'Independent Practice',
+        phone: base.phone,
+        email: base.email,
+        status: base.status,
+        verificationStatus: base.verificationStatus,
+        nextAvailableSlots: base.nextAvailableSlots,
+        consultationFee: base.consultationFee,
+        licenseNumber: base.licenseNumber,
+        photoBytes: base.photoBytes,
+        clinicAddress: base.clinicAddress,
+        city: base.city,
+        pincode: base.pincode,
+        state: base.state,
+        bio: base.bio,
+        languages: base.languages,
+        latitude: base.latitude,
+        longitude: base.longitude,
+        procedureFees: base.procedureFees,
+      );
+      _allDoctors[idx] = updated;
+      _saveToStorage();
+      notifyListeners();
+
+      await ApiService().removeDoctorFromClinicApi(
+        clinicId: 'default',
+        doctorId: doctorId,
+      );
       return true;
     }
     return false;

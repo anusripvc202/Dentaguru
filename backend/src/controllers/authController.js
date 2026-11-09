@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { User, Dentist, Clinic, Referral, comparePassword } = require('../models/Schemas');
+const { User, Dentist, Clinic, Referral, comparePassword, getDefaultQualificationForSpecialty } = require('../models/Schemas');
 const admin = require('firebase-admin');
 const { sendOtpEmail } = require('../services/emailService');
 const { sendRealSmsOtp } = require('../services/smsService');
@@ -113,6 +113,14 @@ exports.register = async (req, res) => {
 
         const finalLanguages = cleanLanguages.length > 0 ? cleanLanguages : ['English'];
 
+        const isDoctorReg = normalizedRole.toLowerCase() === 'dentist' || normalizedRole.toLowerCase() === 'doctor';
+        if (isDoctorReg) {
+            effectiveAssignedRole = 'Dentist';
+        }
+        const resolvedDocSpecialty = specialty || req.body.speciality || 'General Dentistry';
+        const resolvedDocQualification = qualification || req.body.qualifications || getDefaultQualificationForSpecialty(resolvedDocSpecialty);
+        const resolvedDocExp = experienceYears ? parseInt(experienceYears, 10) : 5;
+
         let user;
         const profileMetaObj = {
             age: age || '',
@@ -124,13 +132,20 @@ exports.register = async (req, res) => {
             location: normalizedLocation,
             address: normalizedLocation,
             languages: finalLanguages,
-            referral_code: userReferralCode
+            referral_code: userReferralCode,
+            ...(isDoctorReg ? {
+                specialty: resolvedDocSpecialty,
+                qualification: resolvedDocQualification,
+                experienceYears: resolvedDocExp,
+                clinicName: clinicName || '',
+                licenseNumber: licenseNumber || ''
+            } : {})
         };
         const metaDeviceToken = fcmToken || JSON.stringify(profileMetaObj);
 
         try {
             user = await User.create({
-                name: name || (normalizedRole === 'Dentist' ? 'Dr. Specialist' : (effectiveAssignedRole === 'Sub-Admin' ? 'Sub-Admin' : 'Patient')),
+                name: name || (isDoctorReg ? 'Dr. Specialist' : (effectiveAssignedRole === 'Sub-Admin' ? 'Sub-Admin' : 'Patient')),
                 email: effectiveEmail,
                 password: effectivePassword,
                 phone: normalizedPhone,
@@ -152,7 +167,7 @@ exports.register = async (req, res) => {
         } catch (createErr) {
             // Schema fallback: if DB table lacks age/gender/blood_group/languages columns
             user = await User.create({
-                name: name || (normalizedRole === 'Dentist' ? 'Dr. Specialist' : (effectiveAssignedRole === 'Sub-Admin' ? 'Sub-Admin' : 'Patient')),
+                name: name || (isDoctorReg ? 'Dr. Specialist' : (effectiveAssignedRole === 'Sub-Admin' ? 'Sub-Admin' : 'Patient')),
                 email: effectiveEmail,
                 password: effectivePassword,
                 phone: normalizedPhone,
@@ -218,11 +233,11 @@ exports.register = async (req, res) => {
             }
         }
 
-        // If registering as a Dentist, automatically insert row into 'dentists' and 'clinics' tables
-        if (role === 'Dentist' || (role && role.toLowerCase() === 'dentist')) {
+        // If registering as a Dentist / Doctor, automatically insert row into 'dentists' and 'clinics' tables
+        if (isDoctorReg) {
             const licNum = (licenseNumber && licenseNumber.trim())
                 ? licenseNumber.trim()
-                : `DEN-LIC-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                : `MED-LIC-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
             // Duplicate License Number check
             const existingLic = await Dentist.findOne({ license_number: licNum });
@@ -241,11 +256,8 @@ exports.register = async (req, res) => {
                     if (!clinic) {
                         const defaultPricing = req.body.pricing || [
                             { service: 'General Consultation', fee: '$75' },
-                            { service: 'Tooth Decay / Cavity', fee: '$85' },
-                            { service: 'Root Canal', fee: '$180' },
-                            { service: 'Orthodontics', fee: '$200' },
-                            { service: 'Tooth Extraction', fee: '$110' },
-                            { service: 'Periodontics / Gum Care', fee: '$95' }
+                            { service: `${resolvedDocSpecialty} Evaluation`, fee: '$90' },
+                            { service: 'Follow-up Consultation', fee: '$60' }
                         ];
                         clinic = await Clinic.create({
                             user_id: user.id,
@@ -254,11 +266,17 @@ exports.register = async (req, res) => {
                             verified: true,
                             rating: 5.0,
                             reviews_count: 0,
-                            services: [specialty || 'General Dentistry', 'Root Canal', 'Orthodontics'],
+                            services: [resolvedDocSpecialty, 'General Consultation'],
                             pricing: defaultPricing
                         });
                         console.log(`✅ New Clinic record created in 'clinics' table for: ${cName}`);
                     } else {
+                        // Ensure the doctor's specialty is added to the clinic's services if not already present
+                        const currentServices = Array.isArray(clinic.services) ? [...clinic.services] : [];
+                        if (resolvedDocSpecialty && !currentServices.includes(resolvedDocSpecialty)) {
+                            currentServices.push(resolvedDocSpecialty);
+                            await Clinic.findByIdAndUpdate(clinic.id, { services: currentServices });
+                        }
                         console.log(`ℹ️ Existing Clinic record linked: ${cName}`);
                     }
                     clinicId = clinic ? clinic.id : null;
@@ -266,17 +284,17 @@ exports.register = async (req, res) => {
                     console.error('⚠️ Clinic Table Creation Warning:', cErr.message);
                 }
             } else {
-                console.log(`ℹ️ No clinic name provided for dentist ${user.name}. Leaving clinic_id as NULL.`);
+                console.log(`ℹ️ No clinic name provided for doctor ${user.name}. Leaving clinic_id as NULL.`);
             }
 
             try {
                 await Dentist.create({
                     user_id: user.id,
                     clinic_id: clinicId,
-                    speciality: specialty || req.body.speciality || 'General Dentistry',
+                    speciality: resolvedDocSpecialty,
                     license_number: licNum,
-                    experience_years: experienceYears ? parseInt(experienceYears) : 5,
-                    qualifications: qualification || 'BDS, MDS',
+                    experience_years: resolvedDocExp,
+                    qualifications: resolvedDocQualification,
                     availability_status: 'Available',
                     state: normalizedLocation,
                     city: normalizedCity,
@@ -287,9 +305,9 @@ exports.register = async (req, res) => {
                     rating: 5.0,
                     reviews_count: 0
                 });
-                console.log(`✅ Dentist record created in 'dentists' table for user: ${user.name}`);
+                console.log(`✅ Doctor record created in 'dentists' table for user: ${user.name}`);
             } catch (dErr) {
-                console.error('⚠️ Dentist Table Creation Warning:', dErr.message);
+                console.error('⚠️ Doctor Table Creation Warning:', dErr.message);
             }
         }
 
@@ -305,7 +323,7 @@ exports.register = async (req, res) => {
             await supabaseAdmin.auth.admin.updateUserById(user.id, {
                 user_metadata: {
                     name,
-                    role: role || 'Patient',
+                    role: effectiveAssignedRole,
                     phone,
                     age: age || '',
                     gender: gender || '',
@@ -315,7 +333,13 @@ exports.register = async (req, res) => {
                     pincode: pincode || '',
                     state: state || '',
                     languages: finalLanguages,
-                    referral_code: userReferralCode
+                    referral_code: userReferralCode,
+                    ...(isDoctorReg ? {
+                        specialty: resolvedDocSpecialty,
+                        qualification: resolvedDocQualification,
+                        experienceYears: resolvedDocExp,
+                        clinicName: clinicName || ''
+                    } : {})
                 }
             });
         } catch (_) {}
@@ -337,7 +361,14 @@ exports.register = async (req, res) => {
                 pincode: user.pincode || '',
                 languages: finalLanguages,
                 referralCode: userReferralCode,
-                profilePhoto: user.biometric_token
+                profilePhoto: user.biometric_token,
+                ...(isDoctorReg ? {
+                    specialty: resolvedDocSpecialty,
+                    qualification: resolvedDocQualification,
+                    experienceYears: resolvedDocExp,
+                    clinicName: clinicName || '',
+                    licenseNumber: licenseNumber || ''
+                } : {})
             },
             accessToken,
             refreshToken
@@ -476,6 +507,22 @@ exports.login = async (req, res) => {
             ? user.languages
             : (Array.isArray(tokenMeta.languages) && tokenMeta.languages.length > 0 ? tokenMeta.languages : ['English']);
 
+        let doctorExtra = {};
+        if (userRoleStr.includes('dentist') || userRoleStr.includes('doctor')) {
+            try {
+                const docRec = await Dentist.findById(user.id);
+                const resolvedSpec = docRec?.speciality || docRec?.specialty || tokenMeta.specialty || 'General Dentistry';
+                doctorExtra = {
+                    specialty: resolvedSpec,
+                    qualification: docRec?.qualifications || docRec?.qualification || tokenMeta.qualification || getDefaultQualificationForSpecialty(resolvedSpec),
+                    experienceYears: docRec?.experience_years || docRec?.experienceYears || tokenMeta.experienceYears || 5,
+                    clinicName: docRec?.clinics?.clinic_name || docRec?.clinicName || tokenMeta.clinicName || '',
+                    licenseNumber: docRec?.license_number || docRec?.licenseNumber || tokenMeta.licenseNumber || 'MED-LIC-REG',
+                    verificationStatus: docRec?.verification_status || 'VERIFIED'
+                };
+            } catch (_) {}
+        }
+
         res.json({
             success: true,
             message: 'Login successful.',
@@ -496,7 +543,8 @@ exports.login = async (req, res) => {
                 city: user.city || tokenMeta.city || '',
                 pincode: user.pincode || tokenMeta.pincode || '',
                 languages: userLanguages,
-                profilePhoto: user.biometric_token
+                profilePhoto: user.biometric_token,
+                ...doctorExtra
             }
         });
     } catch (err) {

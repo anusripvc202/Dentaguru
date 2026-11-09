@@ -358,7 +358,7 @@ const Clinic = {
             rating: clinicData.rating || 5.0,
             reviews_count: clinicData.reviews_count || clinicData.reviewsCount || 0,
             verified: clinicData.verified !== undefined ? clinicData.verified : true,
-            services: clinicData.services || ['General Dentistry', 'Gum Care', 'Root Canal'],
+            services: clinicData.services || clinicData.departments || ['General Dentistry', 'Gum Care', 'Root Canal'],
             pricing: clinicData.pricing || [],
             latitude: clinicData.latitude || clinicData.coordinates?.coordinates?.[1] || null,
             longitude: clinicData.longitude || clinicData.coordinates?.coordinates?.[0] || null
@@ -369,10 +369,76 @@ const Clinic = {
             throw error;
         }
         return data;
+    },
+
+    async findByIdAndUpdate(id, updateData) {
+        if (!id) return null;
+        try {
+            const payload = { ...updateData, updated_at: new Date().toISOString() };
+            const { data, error } = await supabaseAdmin.from('clinics').update(payload).eq('id', id).select().maybeSingle();
+            if (!error && data) return data;
+        } catch (_) {}
+        return await this.findById(id);
     }
 };
 
-// 3. DENTIST MODEL (Supabase PostgreSQL)
+const DENTAL_KEYWORDS = [
+    'dentistry',
+    'general dentistry',
+    'orthodontics',
+    'endodontics',
+    'periodontics',
+    'prosthodontics',
+    'pediatric dentistry',
+    'cosmetic dentistry',
+    'oral surgery',
+    'oral & maxillofacial surgery',
+    'maxillofacial',
+    'dental',
+    'root canal',
+    'implantology'
+];
+
+function isDentalSpecialtyText(text) {
+    if (!text) return false;
+    const lower = String(text).trim().toLowerCase();
+    return DENTAL_KEYWORDS.some(k => lower.includes(k));
+}
+
+function getDefaultQualificationForSpecialty(spec) {
+    if (!spec) return 'BDS, MDS';
+    const lower = String(spec).trim().toLowerCase();
+    if (isDentalSpecialtyText(lower)) return 'BDS, MDS';
+    if (lower.includes('cardio')) return 'MBBS, MD, DM (Cardiology)';
+    if (lower.includes('derma')) return 'MBBS, MD (Dermatology)';
+    if (lower.includes('neuro')) return 'MBBS, MD, DM (Neurology)';
+    if (lower.includes('ortho')) return 'MBBS, MS (Orthopedics)';
+    if (lower.includes('pedia')) return 'MBBS, MD (Pediatrics)';
+    if (lower.includes('gynec') || lower.includes('obstet')) return 'MBBS, MS (Obstetrics & Gynecology)';
+    if (lower === 'ent' || lower.includes('otolaryng') || lower.includes('ear')) return 'MBBS, MS (ENT)';
+    if (lower.includes('ophthal') || lower.includes('eye')) return 'MBBS, MS (Ophthalmology)';
+    if (lower.includes('onco')) return 'MBBS, MD, DM (Oncology)';
+    if (lower.includes('uro')) return 'MBBS, MS, MCh (Urology)';
+    if (lower.includes('psych')) return 'MBBS, MD (Psychiatry)';
+    if (lower.includes('gastro')) return 'MBBS, MD, DM (Gastroenterology)';
+    if (lower.includes('pulmo') || lower.includes('respir')) return 'MBBS, MD (Pulmonology)';
+    if (lower.includes('endocrin') || lower.includes('diabet')) return 'MBBS, MD, DM (Endocrinology)';
+    if (lower.includes('general medicine') || lower.includes('internal medicine') || lower.includes('physician')) return 'MBBS, MD (General Medicine)';
+    return 'MBBS, MD';
+}
+
+function matchesSpecialtyQuery(doctorSpec, filterSpec) {
+    if (!filterSpec || filterSpec.trim().toLowerCase() === 'all') return true;
+    const f = filterSpec.trim().toLowerCase();
+    const d = (doctorSpec || 'General Dentistry').toString().trim().toLowerCase();
+    if (d === f || d.includes(f) || f.includes(d)) return true;
+    if (f === 'dentistry' || f === 'dental') {
+        return isDentalSpecialtyText(d);
+    }
+    return false;
+}
+
+// 3. DENTIST / DOCTOR MODEL (Supabase PostgreSQL)
 const Dentist = {
     async findOne(query) {
         if (!query) return null;
@@ -411,7 +477,7 @@ const Dentist = {
 
     async find(query = {}) {
         try {
-            let req = supabaseAdmin.from('dentists').select('*, users(name, email, phone, state, city, pincode, latitude, longitude, device_token), clinics(clinic_name, location)');
+            let req = supabaseAdmin.from('dentists').select('*, users(name, email, phone, state, city, pincode, latitude, longitude, device_token, biometric_token), clinics(clinic_name, location)');
             // Apply direct dentists table filters
             if (query.state) {
                 req = req.ilike('state', `%${query.state}%`);
@@ -425,20 +491,28 @@ const Dentist = {
             if (query.availability_status) {
                 req = req.eq('availability_status', query.availability_status);
             }
-            if (query.speciality) {
-                req = req.ilike('speciality', `%${query.speciality}%`);
+            const rawSpec = query.speciality || query.specialty;
+            if (rawSpec && rawSpec.trim().toLowerCase() !== 'dentistry' && rawSpec.trim().toLowerCase() !== 'all') {
+                req = req.ilike('speciality', `%${rawSpec.trim()}%`);
             }
             // clinic_id filter
             if (query.clinic_id) {
                 req = req.eq('clinic_id', query.clinic_id);
             }
             const { data, error } = await req;
+            let list = [];
             if (error) {
                 console.warn('⚠️ Dentist query join failed, falling back to simple select:', error.message);
                 const simple = await supabaseAdmin.from('dentists').select('*');
-                return simple.data || [];
+                list = simple.data || [];
+            } else {
+                list = data || [];
             }
-            let list = data || [];
+
+            if (rawSpec && rawSpec.trim()) {
+                list = list.filter(d => matchesSpecialtyQuery(d.speciality || d.specialty, rawSpec));
+            }
+
             if (query.language && query.language.trim()) {
                 const langLower = query.language.trim().toLowerCase();
                 list = list.filter(d => {
@@ -476,7 +550,7 @@ const Dentist = {
                 return await this.findOne({ $or: [{ name: str }, { email: str }] });
             }
             const { data, error } = await supabaseAdmin.from('dentists')
-                .select('*, users(name, email, phone, state, city, pincode, device_token), clinics(clinic_name, location)')
+                .select('*, users(name, email, phone, state, city, pincode, device_token, biometric_token), clinics(clinic_name, location)')
                 .or(`id.eq.${str},user_id.eq.${str}`)
                 .maybeSingle();
             if (error || !data) {
@@ -493,14 +567,16 @@ const Dentist = {
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
         const validUserId = (dentistData.user_id && uuidRegex.test(dentistData.user_id.toString())) ? dentistData.user_id.toString() : null;
         const validClinicId = (dentistData.clinic_id && uuidRegex.test(dentistData.clinic_id.toString())) ? dentistData.clinic_id.toString() : null;
+        const resolvedSpec = dentistData.speciality || dentistData.specialty || 'General Dentistry';
+        const resolvedQual = dentistData.qualifications || dentistData.qualification || getDefaultQualificationForSpecialty(resolvedSpec);
 
         const payload = {
             user_id: validUserId,
             clinic_id: validClinicId,
-            speciality: dentistData.speciality || dentistData.specialty || 'General Dentistry',
+            speciality: resolvedSpec,
             license_number: dentistData.license_number || dentistData.licenseNumber || `REG-${validUserId ? validUserId.slice(0, 8) : Date.now()}`,
             experience_years: dentistData.experience_years || dentistData.experienceYears || 5,
-            qualifications: dentistData.qualifications || dentistData.qualification || 'BDS, MDS',
+            qualifications: resolvedQual,
             availability_status: dentistData.availability_status || dentistData.availabilityStatus || 'Available',
             verification_status: dentistData.verification_status || 'VERIFIED',
             rating: dentistData.rating || 5.0
@@ -517,6 +593,42 @@ const Dentist = {
             console.error('❌ Supabase Dentist Insert Error:', err.message);
             throw err;
         }
+    },
+
+    async findByIdAndUpdate(id, updateData) {
+        if (!id) return null;
+        const str = String(id).trim();
+        const payload = {};
+        if (updateData.speciality || updateData.specialty) payload.speciality = updateData.speciality || updateData.specialty;
+        if (updateData.qualifications || updateData.qualification) payload.qualifications = updateData.qualifications || updateData.qualification;
+        if (updateData.experience_years !== undefined || updateData.experienceYears !== undefined) {
+            payload.experience_years = parseInt(updateData.experience_years ?? updateData.experienceYears, 10) || 5;
+        }
+        if (updateData.license_number || updateData.licenseNumber) payload.license_number = updateData.license_number || updateData.licenseNumber;
+        if (updateData.availability_status || updateData.availabilityStatus || updateData.status) {
+            payload.availability_status = updateData.availability_status || updateData.availabilityStatus || updateData.status;
+        }
+        if (updateData.verification_status || updateData.verificationStatus) {
+            payload.verification_status = updateData.verification_status || updateData.verificationStatus;
+        }
+        if (updateData.clinic_id !== undefined) payload.clinic_id = updateData.clinic_id;
+        if (updateData.city !== undefined) payload.city = updateData.city;
+        if (updateData.pincode !== undefined) payload.pincode = updateData.pincode;
+        if (updateData.state !== undefined) payload.state = updateData.state;
+        payload.updated_at = new Date().toISOString();
+
+        try {
+            const { data, error } = await supabaseAdmin
+                .from('dentists')
+                .update(payload)
+                .or(`id.eq.${str},user_id.eq.${str}`)
+                .select()
+                .maybeSingle();
+            if (!error && data) return data;
+        } catch (e) {
+            console.warn('⚠️ Dentist.findByIdAndUpdate warning:', e.message);
+        }
+        return await this.findById(str);
     }
 };
 
@@ -1925,6 +2037,413 @@ const DoctorAvailability = {
     }
 };
 
+// 13. MEDICAL SPECIALTIES MODEL (Dynamic Multi-Specialty Healthcare Configuration)
+const DEFAULT_MEDICAL_SPECIALTIES = [
+    {
+        id: 'spec-general-medicine',
+        code: 'GEN_MED',
+        name: 'General Medicine',
+        department: 'Department of Internal & General Medicine',
+        description: 'Primary care, internal medicine, acute & chronic illnesses, fever, and preventive health checkups.',
+        icon: 'medical_services',
+        default_qualifications: 'MBBS, MD (General Medicine)',
+        consultation_types: ['General Consultation', 'Fever & Viral Infection', 'Diabetes & Blood Pressure Review', 'Preventive Health Checkup', 'Chronic Illness Follow-up'],
+        sub_specialties: ['Internal Medicine', 'Family Medicine'],
+        is_active: true,
+        display_order: 1
+    },
+    {
+        id: 'spec-cardiology',
+        code: 'CARDIO',
+        name: 'Cardiology',
+        department: 'Department of Cardiology & Vascular Sciences',
+        description: 'Diagnosis and treatment of heart conditions, hypertension, arrhythmias, and cardiovascular diseases.',
+        icon: 'MonitorHeart',
+        default_qualifications: 'MBBS, MD, DM (Cardiology)',
+        consultation_types: ['Cardiac Consultation', 'ECG & Echo Review', 'Hypertension & Lipid Management', 'Chest Pain Evaluation', 'Post-Angioplasty Follow-up'],
+        sub_specialties: ['Interventional Cardiology', 'Electrophysiology'],
+        is_active: true,
+        display_order: 2
+    },
+    {
+        id: 'spec-dermatology',
+        code: 'DERM',
+        name: 'Dermatology',
+        department: 'Department of Dermatology, Venereology & Cosmetology',
+        description: 'Skin, hair, nail disorders, acne, eczema, psoriasis, and clinical dermatological procedures.',
+        icon: 'FaceRetouchingNatural',
+        default_qualifications: 'MBBS, MD (Dermatology, Venereology & Leprosy)',
+        consultation_types: ['Skin & Acne Consultation', 'Hair Fall & Scalp Evaluation', 'Allergy & Rash Treatment', 'Eczema / Psoriasis Care', 'Cosmetic Dermatology'],
+        sub_specialties: ['Clinical Dermatology', 'Cosmetology', 'Trichology'],
+        is_active: true,
+        display_order: 3
+    },
+    {
+        id: 'spec-neurology',
+        code: 'NEURO',
+        name: 'Neurology',
+        department: 'Department of Neurology & Neurosciences',
+        description: 'Disorders of the brain, spinal cord, peripheral nerves, migraine, epilepsy, and stroke care.',
+        icon: 'Psychology',
+        default_qualifications: 'MBBS, MD, DM (Neurology)',
+        consultation_types: ['Neurological Consultation', 'Migraine & Headache Clinic', 'Epilepsy & Seizure Management', 'Stroke Recovery & Neuropathy', 'Memory & Movement Disorders'],
+        sub_specialties: ['Stroke Medicine', 'Epileptology'],
+        is_active: true,
+        display_order: 4
+    },
+    {
+        id: 'spec-orthopedics',
+        code: 'ORTHO',
+        name: 'Orthopedics',
+        department: 'Department of Orthopedics & Joint Replacement',
+        description: 'Bone, joint, ligament, spine, sports injuries, arthritis, and fracture management.',
+        icon: 'AccessibilityNew',
+        default_qualifications: 'MBBS, MS (Orthopedics)',
+        consultation_types: ['Bone & Joint Consultation', 'Back & Spine Pain Evaluation', 'Sports Injury & Ligament Care', 'Arthritis & Knee Replacement Review', 'Fracture & Trauma Follow-up'],
+        sub_specialties: ['Joint Replacement', 'Spine Surgery', 'Sports Medicine'],
+        is_active: true,
+        display_order: 5
+    },
+    {
+        id: 'spec-pediatrics',
+        code: 'PEDIA',
+        name: 'Pediatrics',
+        department: 'Department of Pediatrics & Child Health',
+        description: 'Comprehensive medical care for infants, children, and adolescents including vaccinations and growth tracking.',
+        icon: 'ChildCare',
+        default_qualifications: 'MBBS, MD (Pediatrics), DCH',
+        consultation_types: ['Child Health Consultation', 'Vaccination & Immunization', 'Growth & Nutrition Assessment', 'Pediatric Fever & Infection', 'Newborn & Infant Care'],
+        sub_specialties: ['Neonatology', 'Pediatric Critical Care'],
+        is_active: true,
+        display_order: 6
+    },
+    {
+        id: 'spec-gynecology',
+        code: 'GYNEC',
+        name: 'Gynecology',
+        department: 'Department of Obstetrics & Gynecology',
+        description: 'Women\'s reproductive health, pregnancy care, prenatal checkups, PCOS, and gynecological wellness.',
+        icon: 'PregnantWoman',
+        default_qualifications: 'MBBS, MS / DGO (Obstetrics & Gynecology)',
+        consultation_types: ['Gynecology Consultation', 'Antenatal / Pregnancy Checkup', 'PCOS & Hormonal Evaluation', 'Menstrual Health Clinic', 'Postnatal & Fertility Care'],
+        sub_specialties: ['Obstetrics', 'Fetal Medicine', 'Reproductive Medicine'],
+        is_active: true,
+        display_order: 7
+    },
+    {
+        id: 'spec-ent',
+        code: 'ENT',
+        name: 'ENT',
+        department: 'Department of Otorhinolaryngology (Ear, Nose & Throat)',
+        description: 'Ear infections, hearing loss, sinusitis, tonsillitis, throat disorders, and vertigo management.',
+        icon: 'Hearing',
+        default_qualifications: 'MBBS, MS (ENT)',
+        consultation_types: ['ENT Consultation', 'Ear Pain & Hearing Assessment', 'Sinusitis & Nasal Allergy', 'Throat & Tonsil Infection', 'Vertigo & Balance Evaluation'],
+        sub_specialties: ['Otology', 'Rhinology', 'Laryngology'],
+        is_active: true,
+        display_order: 8
+    },
+    {
+        id: 'spec-ophthalmology',
+        code: 'OPHTHAL',
+        name: 'Ophthalmology',
+        department: 'Department of Ophthalmology & Vision Sciences',
+        description: 'Comprehensive eye exams, cataract, glaucoma, retina care, and vision correction.',
+        icon: 'Visibility',
+        default_qualifications: 'MBBS, MS (Ophthalmology)',
+        consultation_types: ['Comprehensive Eye Exam', 'Cataract & Lens Consultation', 'Retina & Diabetic Eye Screening', 'Glaucoma Evaluation', 'Dry Eye & Vision Correction'],
+        sub_specialties: ['Retina', 'Cornea', 'Glaucoma'],
+        is_active: true,
+        display_order: 9
+    },
+    {
+        id: 'spec-oncology',
+        code: 'ONCO',
+        name: 'Oncology',
+        department: 'Department of Oncology & Cancer Care',
+        description: 'Medical, surgical, and radiation oncology consultations, cancer screening, and follow-up care.',
+        icon: 'Biotech',
+        default_qualifications: 'MBBS, MD, DM (Medical Oncology) / MCh',
+        consultation_types: ['Oncology Consultation', 'Cancer Screening & Prevention', 'Chemotherapy / Immunotherapy Review', 'Second Opinion & Tumor Board', 'Survivorship Follow-up'],
+        sub_specialties: ['Medical Oncology', 'Surgical Oncology', 'Radiation Oncology'],
+        is_active: true,
+        display_order: 10
+    },
+    {
+        id: 'spec-urology',
+        code: 'URO',
+        name: 'Urology',
+        department: 'Department of Urology & Renal Sciences',
+        description: 'Kidney stones, urinary tract infections, prostate health, and reconstructive urology.',
+        icon: 'WaterDrop',
+        default_qualifications: 'MBBS, MS, MCh (Urology)',
+        consultation_types: ['Urology Consultation', 'Kidney Stone Evaluation', 'Urinary Tract Infection (UTI)', 'Prostate Health Screening', 'Bladder & Renal Follow-up'],
+        sub_specialties: ['Endourology', 'Andrology', 'Uro-Oncology'],
+        is_active: true,
+        display_order: 11
+    },
+    {
+        id: 'spec-psychiatry',
+        code: 'PSYCH',
+        name: 'Psychiatry',
+        department: 'Department of Psychiatry & Behavioral Sciences',
+        description: 'Mental health consultations, anxiety, depression, stress management, sleep disorders, and counseling.',
+        icon: 'SelfImprovement',
+        default_qualifications: 'MBBS, MD (Psychiatry)',
+        consultation_types: ['Psychiatric Consultation', 'Anxiety & Stress Management', 'Depression & Mood Clinic', 'Sleep Disorder Evaluation', 'Behavioral & De-addiction Support'],
+        sub_specialties: ['Adult Psychiatry', 'Child & Adolescent Psychiatry'],
+        is_active: true,
+        display_order: 12
+    },
+    {
+        id: 'spec-gastroenterology',
+        code: 'GASTRO',
+        name: 'Gastroenterology',
+        department: 'Department of Gastroenterology & Hepatology',
+        description: 'Digestive tract, stomach, liver, pancreas, acidity, IBS, and endoscopy consultations.',
+        icon: 'MedicationLiquid',
+        default_qualifications: 'MBBS, MD, DM (Gastroenterology)',
+        consultation_types: ['Gastroenterology Consultation', 'Acidity, Reflux & Ulcer Care', 'Liver & Hepatology Evaluation', 'IBS & Digestive Disorder Clinic', 'Endoscopy / Colonoscopy Review'],
+        sub_specialties: ['Hepatology', 'Therapeutic Endoscopy'],
+        is_active: true,
+        display_order: 13
+    },
+    {
+        id: 'spec-pulmonology',
+        code: 'PULMO',
+        name: 'Pulmonology',
+        department: 'Department of Pulmonology & Respiratory Medicine',
+        description: 'Asthma, COPD, bronchitis, sleep apnea, lung infections, and allergy management.',
+        icon: 'Air',
+        default_qualifications: 'MBBS, MD (Pulmonary Medicine)',
+        consultation_types: ['Pulmonology Consultation', 'Asthma & Allergy Clinic', 'Chronic Cough & COPD Care', 'Sleep Apnea & Breathing Study', 'Post-Infection Lung Recovery'],
+        sub_specialties: ['Interventional Pulmonology', 'Sleep Medicine'],
+        is_active: true,
+        display_order: 14
+    },
+    {
+        id: 'spec-endocrinology',
+        code: 'ENDO',
+        name: 'Endocrinology',
+        department: 'Department of Endocrinology, Diabetes & Metabolism',
+        description: 'Diabetes mellitus, thyroid disorders, hormonal imbalances, osteoporosis, and metabolic care.',
+        icon: 'Bloodtype',
+        default_qualifications: 'MBBS, MD, DM (Endocrinology)',
+        consultation_types: ['Endocrinology Consultation', 'Comprehensive Diabetes Management', 'Thyroid Disorder Clinic', 'PCOS & Adrenal Hormone Review', 'Metabolic & Bone Density Care'],
+        sub_specialties: ['Diabetology', 'Thyroid & Metabolic Medicine'],
+        is_active: true,
+        display_order: 15
+    },
+    {
+        id: 'spec-dentistry',
+        code: 'DENTAL',
+        name: 'Dentistry',
+        department: 'Department of Dental Sciences & Oral Healthcare',
+        description: 'General dentistry, orthodontics, endodontics, root canal, periodontics, prosthodontics, and oral surgery.',
+        icon: 'HealthAndSafety',
+        default_qualifications: 'BDS, MDS',
+        consultation_types: ['General Consultation', 'Dental Pain / Toothache', 'Tooth Decay / Cavity', 'Root Canal Consultation', 'Orthodontics / Braces', 'Periodontics / Gum Care', 'Tooth Extraction', 'Dental Cleaning & Scaling'],
+        sub_specialties: ['General Dentistry', 'Orthodontics', 'Endodontics', 'Periodontics', 'Prosthodontics', 'Pediatric Dentistry', 'Cosmetic Dentistry', 'Oral & Maxillofacial Surgery', 'Oral Surgery'],
+        is_active: true,
+        display_order: 16
+    }
+];
+
+const _inMemorySpecialties = DEFAULT_MEDICAL_SPECIALTIES.map(s => ({
+    ...s,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+}));
+
+const MedicalSpecialty = {
+    async find(query = {}) {
+        const onlyActive = query.is_active === true || query.activeOnly === true;
+        try {
+            let req = supabaseAdmin.from('medical_specialties').select('*');
+            if (onlyActive) {
+                req = req.eq('is_active', true);
+            }
+            const { data, error } = await req.order('display_order', { ascending: true });
+            if (!error && data && data.length > 0) {
+                // Sync in-memory cache with DB rows
+                for (const row of data) {
+                    const idx = _inMemorySpecialties.findIndex(
+                        m => m.code === row.code || m.name.toLowerCase() === (row.name || '').toLowerCase() || m.id === row.id
+                    );
+                    if (idx !== -1) {
+                        _inMemorySpecialties[idx] = { ..._inMemorySpecialties[idx], ...row };
+                    } else {
+                        _inMemorySpecialties.push(row);
+                    }
+                }
+                return data;
+            }
+        } catch (_) {}
+
+        let list = [..._inMemorySpecialties];
+        if (onlyActive) {
+            list = list.filter(s => s.is_active !== false);
+        }
+        list.sort((a, b) => (a.display_order || 100) - (b.display_order || 100));
+        return list;
+    },
+
+    async findById(idOrCodeOrName) {
+        if (!idOrCodeOrName) return null;
+        const target = String(idOrCodeOrName).trim();
+        try {
+            if (isUUID(target)) {
+                const { data, error } = await supabaseAdmin.from('medical_specialties').select('*').eq('id', target).maybeSingle();
+                if (!error && data) return data;
+            } else {
+                const { data, error } = await supabaseAdmin
+                    .from('medical_specialties')
+                    .select('*')
+                    .or(`code.ilike.${target},name.ilike.${target}`)
+                    .maybeSingle();
+                if (!error && data) return data;
+            }
+        } catch (_) {}
+
+        const lower = target.toLowerCase();
+        return _inMemorySpecialties.find(
+            s => s.id === target || (s.code && s.code.toLowerCase() === lower) || (s.name && s.name.toLowerCase() === lower)
+        ) || null;
+    },
+
+    async create(specData) {
+        const name = (specData.name || '').toString().trim();
+        if (!name) throw new Error('Specialty name is required.');
+        const code = (specData.code || name.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '')).substring(0, 40);
+        const now = new Date().toISOString();
+
+        const payload = {
+            code,
+            name,
+            department: specData.department || `Department of ${name}`,
+            description: specData.description || `${name} consultations, diagnostics, and specialized care.`,
+            icon: specData.icon || 'medical_services',
+            default_qualifications: specData.default_qualifications || specData.defaultQualifications || getDefaultQualificationForSpecialty(name),
+            consultation_types: Array.isArray(specData.consultation_types || specData.consultationTypes)
+                ? (specData.consultation_types || specData.consultationTypes)
+                : ['General Consultation', `${name} Specialist Evaluation`, 'Follow-up Consultation'],
+            sub_specialties: Array.isArray(specData.sub_specialties || specData.subSpecialties)
+                ? (specData.sub_specialties || specData.subSpecialties)
+                : [],
+            is_active: specData.is_active !== undefined ? Boolean(specData.is_active) : (specData.isActive !== undefined ? Boolean(specData.isActive) : true),
+            display_order: parseInt(specData.display_order ?? specData.displayOrder, 10) || (_inMemorySpecialties.length + 1),
+            updated_at: now
+        };
+
+        try {
+            const { data, error } = await supabaseAdmin
+                .from('medical_specialties')
+                .upsert(payload, { onConflict: 'code' })
+                .select()
+                .single();
+            if (!error && data) {
+                const idx = _inMemorySpecialties.findIndex(s => s.code === data.code || s.name.toLowerCase() === data.name.toLowerCase());
+                if (idx !== -1) _inMemorySpecialties[idx] = data;
+                else _inMemorySpecialties.push(data);
+                return data;
+            }
+        } catch (_) {}
+
+        const existingIdx = _inMemorySpecialties.findIndex(
+            s => s.code.toLowerCase() === code.toLowerCase() || s.name.toLowerCase() === name.toLowerCase()
+        );
+        const fullRecord = {
+            id: existingIdx !== -1 ? _inMemorySpecialties[existingIdx].id : `spec-${code.toLowerCase()}-${Date.now()}`,
+            ...payload,
+            created_at: existingIdx !== -1 ? _inMemorySpecialties[existingIdx].created_at : now
+        };
+        if (existingIdx !== -1) {
+            _inMemorySpecialties[existingIdx] = fullRecord;
+        } else {
+            _inMemorySpecialties.push(fullRecord);
+        }
+        return fullRecord;
+    },
+
+    async findByIdAndUpdate(id, updateData) {
+        if (!id) return null;
+        const target = String(id).trim();
+        const now = new Date().toISOString();
+
+        const patch = { updated_at: now };
+        if (updateData.name !== undefined) patch.name = String(updateData.name).trim();
+        if (updateData.code !== undefined) patch.code = String(updateData.code).trim().toUpperCase();
+        if (updateData.department !== undefined) patch.department = String(updateData.department).trim();
+        if (updateData.description !== undefined) patch.description = String(updateData.description).trim();
+        if (updateData.icon !== undefined) patch.icon = String(updateData.icon).trim();
+        if (updateData.default_qualifications !== undefined || updateData.defaultQualifications !== undefined) {
+            patch.default_qualifications = String(updateData.default_qualifications ?? updateData.defaultQualifications).trim();
+        }
+        if (updateData.consultation_types !== undefined || updateData.consultationTypes !== undefined) {
+            const ct = updateData.consultation_types ?? updateData.consultationTypes;
+            patch.consultation_types = Array.isArray(ct) ? ct : String(ct).split(',').map(s => s.trim()).filter(Boolean);
+        }
+        if (updateData.sub_specialties !== undefined || updateData.subSpecialties !== undefined) {
+            const ss = updateData.sub_specialties ?? updateData.subSpecialties;
+            patch.sub_specialties = Array.isArray(ss) ? ss : String(ss).split(',').map(s => s.trim()).filter(Boolean);
+        }
+        if (updateData.is_active !== undefined || updateData.isActive !== undefined) {
+            patch.is_active = Boolean(updateData.is_active ?? updateData.isActive);
+        }
+        if (updateData.display_order !== undefined || updateData.displayOrder !== undefined) {
+            patch.display_order = parseInt(updateData.display_order ?? updateData.displayOrder, 10) || 100;
+        }
+
+        try {
+            let req = supabaseAdmin.from('medical_specialties').update(patch);
+            if (isUUID(target)) {
+                req = req.eq('id', target);
+            } else {
+                req = req.or(`code.eq.${target},name.ilike.${target}`);
+            }
+            const { data, error } = await req.select().maybeSingle();
+            if (!error && data) {
+                const idx = _inMemorySpecialties.findIndex(
+                    s => s.id === target || s.code === data.code || s.name.toLowerCase() === data.name.toLowerCase()
+                );
+                if (idx !== -1) _inMemorySpecialties[idx] = { ..._inMemorySpecialties[idx], ...data };
+                return data;
+            }
+        } catch (_) {}
+
+        const lower = target.toLowerCase();
+        const idx = _inMemorySpecialties.findIndex(
+            s => s.id === target || (s.code && s.code.toLowerCase() === lower) || (s.name && s.name.toLowerCase() === lower)
+        );
+        if (idx !== -1) {
+            _inMemorySpecialties[idx] = { ..._inMemorySpecialties[idx], ...patch };
+            return _inMemorySpecialties[idx];
+        }
+        return null;
+    },
+
+    async deleteOne(id) {
+        if (!id) return null;
+        const target = String(id).trim();
+        try {
+            if (isUUID(target)) {
+                await supabaseAdmin.from('medical_specialties').delete().eq('id', target);
+            } else {
+                await supabaseAdmin.from('medical_specialties').delete().or(`code.eq.${target},name.ilike.${target}`);
+            }
+        } catch (_) {}
+
+        const lower = target.toLowerCase();
+        const idx = _inMemorySpecialties.findIndex(
+            s => s.id === target || (s.code && s.code.toLowerCase() === lower) || (s.name && s.name.toLowerCase() === lower)
+        );
+        if (idx !== -1) {
+            return _inMemorySpecialties.splice(idx, 1)[0];
+        }
+        return { id: target };
+    }
+};
+
 module.exports = {
     User,
     SubAdminPermission,
@@ -1941,6 +2460,11 @@ module.exports = {
     Referral,
     PatientDoctor,
     DoctorAvailability,
+    MedicalSpecialty,
+    DEFAULT_MEDICAL_SPECIALTIES,
+    isDentalSpecialtyText,
+    getDefaultQualificationForSpecialty,
+    matchesSpecialtyQuery,
     resolveUserUuid,
     resolveDentistIds,
     comparePassword

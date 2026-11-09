@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:dentaguru/core/theme/app_theme.dart';
+import '../constants/gs_health_brand_assets.dart';
 
 class DentaGuruLogo extends StatelessWidget {
   final double height;
@@ -18,13 +20,29 @@ class DentaGuruLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 100% Perfect High-Resolution GS HEALTH Logo Image Asset with Transparent Background
-    final Widget logoImage = Image.asset(
-      'assets/gs_health_full_logo.png',
-      height: height,
-      fit: fit,
-      alignment: Alignment.centerLeft,
-    );
+    // Zero-Failure Guaranteed High-Resolution GS HEALTH Logo (In-Memory + Asset Fallback)
+    Widget logoImage;
+    try {
+      logoImage = Image.memory(
+        base64Decode(kGsHealthLogoBase64),
+        height: height,
+        fit: fit,
+        alignment: Alignment.centerLeft,
+        errorBuilder: (_, __, ___) => Image.asset(
+          'assets/gs_health_full_logo.png',
+          height: height,
+          fit: fit,
+          alignment: Alignment.centerLeft,
+        ),
+      );
+    } catch (_) {
+      logoImage = Image.asset(
+        'assets/gs_health_full_logo.png',
+        height: height,
+        fit: fit,
+        alignment: Alignment.centerLeft,
+      );
+    }
 
     Widget content = logoImage;
     if (darkBg) {
@@ -57,24 +75,51 @@ class DentaGuruLogo extends StatelessWidget {
   }
 }
 
-/// Standalone tooth emblem icon for animated splash, gates and headers
+/// Standalone emblem icon for animated splash, gates and headers
 class DentaGuruToothIcon extends StatelessWidget {
   final double size;
+  final Color? fallbackColor;
 
-  const DentaGuruToothIcon({super.key, this.size = 48.0});
+  const DentaGuruToothIcon({super.key, this.size = 48.0, this.fallbackColor});
 
   @override
   Widget build(BuildContext context) {
+    try {
+      return Image.memory(
+        base64Decode(kGsHealthAppIconBase64),
+        width: size,
+        height: size,
+        fit: BoxFit.contain,
+        errorBuilder: (context, error, stackTrace) => _buildFallback(context),
+      );
+    } catch (_) {
+      return _buildFallback(context);
+    }
+  }
+
+  Widget _buildFallback(BuildContext context) {
     return Image.asset(
-      'assets/gs_health_full_logo.png',
+      'assets/app_icon.png',
       width: size,
       height: size,
       fit: BoxFit.contain,
       errorBuilder: (context, error, stackTrace) {
-        return Icon(
-          Icons.medical_services_rounded,
-          size: size,
-          color: AppTheme.primaryBlue,
+        return Image.asset(
+          'assets/dentaguru_tooth_icon.png',
+          width: size,
+          height: size,
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => Image.asset(
+            'assets/gs_health_full_logo.png',
+            width: size,
+            height: size,
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) => Icon(
+              Icons.medical_services_rounded,
+              size: size,
+              color: fallbackColor ?? const Color(0xFF0D9488),
+            ),
+          ),
         );
       },
     );

@@ -335,6 +335,84 @@ CREATE TABLE IF NOT EXISTS public.doctor_availability (
 CREATE INDEX IF NOT EXISTS idx_doctor_availability_dentist_date ON public.doctor_availability(dentist_id, date);
 ALTER TABLE public.doctor_availability ENABLE ROW LEVEL SECURITY;
 
+-- 13. MEDICAL SPECIALTIES TABLE (Multi-Specialty Healthcare Platform)
+CREATE TABLE IF NOT EXISTS public.medical_specialties (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code VARCHAR(100) UNIQUE NOT NULL,
+    name VARCHAR(255) UNIQUE NOT NULL,
+    department VARCHAR(255) DEFAULT '',
+    description TEXT DEFAULT '',
+    icon VARCHAR(100) DEFAULT 'medical_services',
+    default_qualifications VARCHAR(255) DEFAULT 'MBBS, MD',
+    consultation_types TEXT[] DEFAULT '{}',
+    sub_specialties TEXT[] DEFAULT '{}',
+    is_active BOOLEAN DEFAULT true,
+    display_order INTEGER DEFAULT 100,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_medical_specialties_active ON public.medical_specialties(is_active, display_order);
+ALTER TABLE public.medical_specialties ENABLE ROW LEVEL SECURITY;
+
+-- 14. DOCTOR SPECIALTIES & QUALIFICATIONS EXTENSIONS (Backward-Compatible)
+ALTER TABLE public.dentists ADD COLUMN IF NOT EXISTS specialty_id UUID REFERENCES public.medical_specialties(id) ON DELETE SET NULL;
+ALTER TABLE public.dentists ADD COLUMN IF NOT EXISTS department VARCHAR(255) DEFAULT '';
+ALTER TABLE public.dentists ADD COLUMN IF NOT EXISTS sub_specialty VARCHAR(255) DEFAULT '';
+ALTER TABLE public.dentists ADD COLUMN IF NOT EXISTS bio TEXT DEFAULT '';
+ALTER TABLE public.dentists ADD COLUMN IF NOT EXISTS consultation_fee VARCHAR(50) DEFAULT '$75';
+ALTER TABLE public.dentists ADD COLUMN IF NOT EXISTS languages TEXT[] DEFAULT '{English}';
+
+CREATE TABLE IF NOT EXISTS public.doctor_specialties (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    doctor_id UUID REFERENCES public.dentists(id) ON DELETE CASCADE,
+    specialty_id UUID REFERENCES public.medical_specialties(id) ON DELETE CASCADE,
+    specialty_name VARCHAR(255) NOT NULL,
+    is_primary BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT unique_doctor_specialty UNIQUE (doctor_id, specialty_name)
+);
+CREATE INDEX IF NOT EXISTS idx_doctor_specialties_doctor_id ON public.doctor_specialties(doctor_id);
+CREATE INDEX IF NOT EXISTS idx_doctor_specialties_specialty_name ON public.doctor_specialties(specialty_name);
+ALTER TABLE public.doctor_specialties ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS public.doctor_qualifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    doctor_id UUID REFERENCES public.dentists(id) ON DELETE CASCADE,
+    degree VARCHAR(255) NOT NULL,
+    institution VARCHAR(255) DEFAULT '',
+    completion_year INTEGER,
+    registration_council VARCHAR(255) DEFAULT '',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_doctor_qualifications_doctor_id ON public.doctor_qualifications(doctor_id);
+ALTER TABLE public.doctor_qualifications ENABLE ROW LEVEL SECURITY;
+
+-- 15. MULTI-SPECIALTY CLINIC DEPARTMENTS EXTENSIONS (Backward-Compatible)
+ALTER TABLE public.clinics ADD COLUMN IF NOT EXISTS departments TEXT[] DEFAULT '{Dentistry}';
+ALTER TABLE public.clinics ADD COLUMN IF NOT EXISTS city VARCHAR(100) DEFAULT '';
+ALTER TABLE public.clinics ADD COLUMN IF NOT EXISTS pincode VARCHAR(20) DEFAULT '';
+ALTER TABLE public.clinics ADD COLUMN IF NOT EXISTS phone VARCHAR(50) DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS public.clinic_departments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    clinic_id UUID REFERENCES public.clinics(id) ON DELETE CASCADE,
+    specialty_id UUID REFERENCES public.medical_specialties(id) ON DELETE SET NULL,
+    department_name VARCHAR(255) NOT NULL,
+    head_doctor_id UUID REFERENCES public.dentists(id) ON DELETE SET NULL,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT unique_clinic_department UNIQUE (clinic_id, department_name)
+);
+CREATE INDEX IF NOT EXISTS idx_clinic_departments_clinic_id ON public.clinic_departments(clinic_id);
+ALTER TABLE public.clinic_departments ENABLE ROW LEVEL SECURITY;
+
+-- 16. MULTI-SPECIALTY EXTENSIONS FOR APPOINTMENTS, REQUESTS & RECORDS
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS specialty VARCHAR(255) DEFAULT '';
+ALTER TABLE public.appointments ADD COLUMN IF NOT EXISTS department VARCHAR(255) DEFAULT '';
+ALTER TABLE public.patient_problem_requests ADD COLUMN IF NOT EXISTS specialty VARCHAR(255) DEFAULT 'Dentistry';
+ALTER TABLE public.medical_records ADD COLUMN IF NOT EXISTS specialty VARCHAR(255) DEFAULT '';
+ALTER TABLE public.referrals ADD COLUMN IF NOT EXISTS specialty VARCHAR(255) DEFAULT '';
+
 -- Allow Service Role Access
 DO $$ 
 BEGIN
@@ -377,7 +455,41 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow All Doctor Availability') THEN
         CREATE POLICY "Allow All Doctor Availability" ON public.doctor_availability FOR ALL USING (true);
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow All Medical Specialties') THEN
+        CREATE POLICY "Allow All Medical Specialties" ON public.medical_specialties FOR ALL USING (true);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow All Doctor Specialties') THEN
+        CREATE POLICY "Allow All Doctor Specialties" ON public.doctor_specialties FOR ALL USING (true);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow All Doctor Qualifications') THEN
+        CREATE POLICY "Allow All Doctor Qualifications" ON public.doctor_qualifications FOR ALL USING (true);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow All Clinic Departments') THEN
+        CREATE POLICY "Allow All Clinic Departments" ON public.clinic_departments FOR ALL USING (true);
+    END IF;
 END $$;
+
+-- Seed 16 Core Medical Specialties (Idempotent)
+INSERT INTO public.medical_specialties (code, name, department, description, icon, default_qualifications, consultation_types, sub_specialties, is_active, display_order)
+VALUES
+    ('GEN_MED', 'General Medicine', 'Department of Internal & General Medicine', 'Primary care, internal medicine, acute & chronic illnesses, fever, and preventive health checkups.', 'medical_services', 'MBBS, MD (General Medicine)', ARRAY['General Consultation', 'Fever & Viral Infection', 'Diabetes & Blood Pressure Review', 'Preventive Health Checkup', 'Chronic Illness Follow-up'], ARRAY['Internal Medicine', 'Family Medicine'], true, 1),
+    ('CARDIO', 'Cardiology', 'Department of Cardiology & Vascular Sciences', 'Diagnosis and treatment of heart conditions, hypertension, arrhythmias, and cardiovascular diseases.', 'MonitorHeart', 'MBBS, MD, DM (Cardiology)', ARRAY['Cardiac Consultation', 'ECG & Echo Review', 'Hypertension & Lipid Management', 'Chest Pain Evaluation', 'Post-Angioplasty Follow-up'], ARRAY['Interventional Cardiology', 'Electrophysiology'], true, 2),
+    ('DERM', 'Dermatology', 'Department of Dermatology, Venereology & Cosmetology', 'Skin, hair, nail disorders, acne, eczema, psoriasis, and clinical dermatological procedures.', 'FaceRetouchingNatural', 'MBBS, MD (Dermatology, Venereology & Leprosy)', ARRAY['Skin & Acne Consultation', 'Hair Fall & Scalp Evaluation', 'Allergy & Rash Treatment', 'Eczema / Psoriasis Care', 'Cosmetic Dermatology'], ARRAY['Clinical Dermatology', 'Cosmetology', 'Trichology'], true, 3),
+    ('NEURO', 'Neurology', 'Department of Neurology & Neurosciences', 'Disorders of the brain, spinal cord, peripheral nerves, migraine, epilepsy, and stroke care.', 'Psychology', 'MBBS, MD, DM (Neurology)', ARRAY['Neurological Consultation', 'Migraine & Headache Clinic', 'Epilepsy & Seizure Management', 'Stroke Recovery & Neuropathy', 'Memory & Movement Disorders'], ARRAY['Stroke Medicine', 'Epileptology'], true, 4),
+    ('ORTHO', 'Orthopedics', 'Department of Orthopedics & Joint Replacement', 'Bone, joint, ligament, spine, sports injuries, arthritis, and fracture management.', 'AccessibilityNew', 'MBBS, MS (Orthopedics)', ARRAY['Bone & Joint Consultation', 'Back & Spine Pain Evaluation', 'Sports Injury & Ligament Care', 'Arthritis & Knee Replacement Review', 'Fracture & Trauma Follow-up'], ARRAY['Joint Replacement', 'Spine Surgery', 'Sports Medicine'], true, 5),
+    ('PEDIA', 'Pediatrics', 'Department of Pediatrics & Child Health', 'Comprehensive medical care for infants, children, and adolescents including vaccinations and growth tracking.', 'ChildCare', 'MBBS, MD (Pediatrics), DCH', ARRAY['Child Health Consultation', 'Vaccination & Immunization', 'Growth & Nutrition Assessment', 'Pediatric Fever & Infection', 'Newborn & Infant Care'], ARRAY['Neonatology', 'Pediatric Critical Care'], true, 6),
+    ('GYNEC', 'Gynecology', 'Department of Obstetrics & Gynecology', 'Women''s reproductive health, pregnancy care, prenatal checkups, PCOS, and gynecological wellness.', 'PregnantWoman', 'MBBS, MS / DGO (Obstetrics & Gynecology)', ARRAY['Gynecology Consultation', 'Antenatal / Pregnancy Checkup', 'PCOS & Hormonal Evaluation', 'Menstrual Health Clinic', 'Postnatal & Fertility Care'], ARRAY['Obstetrics', 'Fetal Medicine', 'Reproductive Medicine'], true, 7),
+    ('ENT', 'ENT', 'Department of Otorhinolaryngology (Ear, Nose & Throat)', 'Ear infections, hearing loss, sinusitis, tonsillitis, throat disorders, and vertigo management.', 'Hearing', 'MBBS, MS (ENT)', ARRAY['ENT Consultation', 'Ear Pain & Hearing Assessment', 'Sinusitis & Nasal Allergy', 'Throat & Tonsil Infection', 'Vertigo & Balance Evaluation'], ARRAY['Otology', 'Rhinology', 'Laryngology'], true, 8),
+    ('OPHTHAL', 'Ophthalmology', 'Department of Ophthalmology & Vision Sciences', 'Comprehensive eye exams, cataract, glaucoma, retina care, and vision correction.', 'Visibility', 'MBBS, MS (Ophthalmology)', ARRAY['Comprehensive Eye Exam', 'Cataract & Lens Consultation', 'Retina & Diabetic Eye Screening', 'Glaucoma Evaluation', 'Dry Eye & Vision Correction'], ARRAY['Retina', 'Cornea', 'Glaucoma'], true, 9),
+    ('ONCO', 'Oncology', 'Department of Oncology & Cancer Care', 'Medical, surgical, and radiation oncology consultations, cancer screening, and follow-up care.', 'Biotech', 'MBBS, MD, DM (Medical Oncology) / MCh', ARRAY['Oncology Consultation', 'Cancer Screening & Prevention', 'Chemotherapy / Immunotherapy Review', 'Second Opinion & Tumor Board', 'Survivorship Follow-up'], ARRAY['Medical Oncology', 'Surgical Oncology', 'Radiation Oncology'], true, 10),
+    ('URO', 'Urology', 'Department of Urology & Renal Sciences', 'Kidney stones, urinary tract infections, prostate health, and reconstructive urology.', 'WaterDrop', 'MBBS, MS, MCh (Urology)', ARRAY['Urology Consultation', 'Kidney Stone Evaluation', 'Urinary Tract Infection (UTI)', 'Prostate Health Screening', 'Bladder & Renal Follow-up'], ARRAY['Endourology', 'Andrology', 'Uro-Oncology'], true, 11),
+    ('PSYCH', 'Psychiatry', 'Department of Psychiatry & Behavioral Sciences', 'Mental health consultations, anxiety, depression, stress management, sleep disorders, and counseling.', 'SelfImprovement', 'MBBS, MD (Psychiatry)', ARRAY['Psychiatric Consultation', 'Anxiety & Stress Management', 'Depression & Mood Clinic', 'Sleep Disorder Evaluation', 'Behavioral & De-addiction Support'], ARRAY['Adult Psychiatry', 'Child & Adolescent Psychiatry'], true, 12),
+    ('GASTRO', 'Gastroenterology', 'Department of Gastroenterology & Hepatology', 'Digestive tract, stomach, liver, pancreas, acidity, IBS, and endoscopy consultations.', 'MedicationLiquid', 'MBBS, MD, DM (Gastroenterology)', ARRAY['Gastroenterology Consultation', 'Acidity, Reflux & Ulcer Care', 'Liver & Hepatology Evaluation', 'IBS & Digestive Disorder Clinic', 'Endoscopy / Colonoscopy Review'], ARRAY['Hepatology', 'Therapeutic Endoscopy'], true, 13),
+    ('PULMO', 'Pulmonology', 'Department of Pulmonology & Respiratory Medicine', 'Asthma, COPD, bronchitis, sleep apnea, lung infections, and allergy management.', 'Air', 'MBBS, MD (Pulmonary Medicine)', ARRAY['Pulmonology Consultation', 'Asthma & Allergy Clinic', 'Chronic Cough & COPD Care', 'Sleep Apnea & Breathing Study', 'Post-Infection Lung Recovery'], ARRAY['Interventional Pulmonology', 'Sleep Medicine'], true, 14),
+    ('ENDO', 'Endocrinology', 'Department of Endocrinology, Diabetes & Metabolism', 'Diabetes mellitus, thyroid disorders, hormonal imbalances, osteoporosis, and metabolic care.', 'Bloodtype', 'MBBS, MD, DM (Endocrinology)', ARRAY['Endocrinology Consultation', 'Comprehensive Diabetes Management', 'Thyroid Disorder Clinic', 'PCOS & Adrenal Hormone Review', 'Metabolic & Bone Density Care'], ARRAY['Diabetology', 'Thyroid & Metabolic Medicine'], true, 15),
+    ('DENTAL', 'Dentistry', 'Department of Dental Sciences & Oral Healthcare', 'General dentistry, orthodontics, endodontics, root canal, periodontics, prosthodontics, and oral surgery.', 'HealthAndSafety', 'BDS, MDS', ARRAY['General Consultation', 'Dental Pain / Toothache', 'Tooth Decay / Cavity', 'Root Canal Consultation', 'Orthodontics / Braces', 'Periodontics / Gum Care', 'Tooth Extraction', 'Dental Cleaning & Scaling'], ARRAY['General Dentistry', 'Orthodontics', 'Endodontics', 'Periodontics', 'Prosthodontics', 'Pediatric Dentistry', 'Cosmetic Dentistry', 'Oral & Maxillofacial Surgery', 'Oral Surgery'], true, 16)
+ON CONFLICT (code) DO NOTHING;
+
 
 
 
