@@ -489,7 +489,7 @@ class _PatientConsultationDetailsScreenState extends State<PatientConsultationDe
                                 title: 'Digital Prescription Slips',
                                 subtitle: 'Diagnosis: ${diagnosis.isNotEmpty ? diagnosis : "Dental Care"} (${medName.isNotEmpty ? medName : "Medication"})',
                                 doctorName: 'Attending Dentist',
-                                clinicName: 'DentaGuru Dental Clinic',
+                                clinicName: 'GS HEALTH Dental Clinic',
                                 items: [
                                   {
                                     'name': medName.isNotEmpty ? medName : 'Amoxicillin 500mg',

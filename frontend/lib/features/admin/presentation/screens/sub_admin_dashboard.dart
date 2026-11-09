@@ -204,7 +204,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'DentaGuru Sub-Admin',
+                'GS HEALTH Sub-Admin',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
               ),
               Text(
@@ -1239,7 +1239,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                                       rawPhone = '91$rawPhone';
                                     }
 
-                                    final waText = "🦷 *DentaGuru Referral Update*\n\nHello ${req.patientName},\nYour consultation request for *${req.problemCategory}* has been assigned to *${selectedDoctor!.name}* (${selectedDoctor!.specialty}) at *${selectedDoctor!.clinicName}*.\n\n📍 Clinic: ${selectedDoctor!.clinicAddress}\n📞 Contact: ${selectedDoctor!.phone}\n\nOur team is here to assist your smile journey!";
+                                    final waText = "🦷 *GS HEALTH Referral Update*\n\nHello ${req.patientName},\nYour consultation request for *${req.problemCategory}* has been assigned to *${selectedDoctor!.name}* (${selectedDoctor!.specialty}) at *${selectedDoctor!.clinicName}*.\n\n📍 Clinic: ${selectedDoctor!.clinicAddress}\n📞 Contact: ${selectedDoctor!.phone}\n\nOur team is here to assist your smile journey!";
                                     final waUrl = Uri.parse(rawPhone.isNotEmpty
                                         ? "https://wa.me/$rawPhone?text=${Uri.encodeComponent(waText)}"
                                         : "https://wa.me/?text=${Uri.encodeComponent(waText)}");
@@ -1289,7 +1289,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                                       rawPhone = '91$rawPhone';
                                     }
 
-                                    final smsText = "DentaGuru: Hello ${req.patientName}, your dental consultation request for ${req.problemCategory} has been assigned to ${selectedDoctor!.name} (${selectedDoctor!.specialty}) at ${selectedDoctor!.clinicName}. Phone: ${selectedDoctor!.phone}";
+                                    final smsText = "GS HEALTH: Hello ${req.patientName}, your dental consultation request for ${req.problemCategory} has been assigned to ${selectedDoctor!.name} (${selectedDoctor!.specialty}) at ${selectedDoctor!.clinicName}. Phone: ${selectedDoctor!.phone}";
                                     final smsUrl = Uri.parse(rawPhone.isNotEmpty
                                         ? "sms:$rawPhone?body=${Uri.encodeComponent(smsText)}"
                                         : "sms:?body=${Uri.encodeComponent(smsText)}");

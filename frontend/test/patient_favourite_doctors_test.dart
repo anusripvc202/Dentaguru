@@ -6,6 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:dentaguru/core/services/patient_problem_service.dart';
 import 'package:dentaguru/features/patient/presentation/screens/patient_dashboard.dart';
+import 'package:dentaguru/features/patient/presentation/screens/find_doctors_screen.dart';
+import 'package:dentaguru/features/patient/presentation/screens/doctor_profile_screen.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -22,7 +24,7 @@ void main() {
     await service.clearAllData();
   });
 
-  group('GS HEALTH — Patient Dashboard Doctor Section UI Update Tests', () {
+  group('GS HEALTH — Find Doctors Navigation & Doctor Profile Pages Tests', () {
     final testDoctor = DoctorModel(
       id: 'doc-fav-001',
       userId: 'usr-fav-001',
@@ -39,180 +41,248 @@ void main() {
       city: 'Warangal',
       pincode: '506001',
       clinicAddress: 'Kakaji colony, Hanamkonda',
+      bio: 'Senior Periodontics and Implantology specialist dedicated to minimally invasive gum care.',
       nextAvailableSlots: const ['10:00 AM', '11:30 AM'],
       consultationFee: '₹500',
     );
 
-    testWidgets('1. Connect to a Doctor card renders with updated labels and opens dialog on tap', (tester) async {
-      tester.view.physicalSize = const Size(800, 1200);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(() => tester.view.resetPhysicalSize());
+    testWidgets(
+      '1. Patient Dashboard does NOT display doctor list inline and clicking Find Doctors opens separate FindDoctorsScreen',
+      (tester) async {
+        tester.view.physicalSize = const Size(800, 1200);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() => tester.view.resetPhysicalSize());
 
-      final service = PatientProblemService();
-      service.addTestDoctor(testDoctor);
+        final service = PatientProblemService();
+        service.addTestDoctor(testDoctor);
 
-      await tester.pumpWidget(
-        const ProviderScope(
-          child: MaterialApp(
-            home: PatientDashboardScreen(),
+        await tester.pumpWidget(
+          const ProviderScope(
+            child: MaterialApp(
+              home: PatientDashboardScreen(),
+            ),
           ),
-        ),
-      );
-      await tester.pump(const Duration(milliseconds: 300));
+        );
+        await tester.pump(const Duration(milliseconds: 300));
 
-      // Verify "Connect to a Doctor" card
-      expect(find.text('Connect to a Doctor'), findsOneWidget);
-      expect(find.text('Explore doctors and connect with a specialized dentist.'), findsOneWidget);
-      expect(find.text('Book a Dentist'), findsNothing);
+        // Verify doctor list is NOT rendered inline below Patient Dashboard
+        expect(find.byType(FindDoctorsScreen), findsNothing);
+        expect(find.text('Dental Specialists & Doctors'), findsNothing);
+        expect(find.text('View Profile'), findsNothing);
 
-      // Tap on "Connect to a Doctor" card
-      await tester.tap(find.text('Connect to a Doctor'));
-      await tester.pump(const Duration(milliseconds: 300));
+        // Tap "Find Doctors" quick action on Patient Dashboard
+        expect(find.text('Find Doctors'), findsOneWidget);
+        await tester.tap(find.text('Find Doctors'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
 
-      // Verifies dialog opens with matching title
-      expect(find.text('Explore doctors and connect with a specialized dentist.'), findsWidgets);
+        // Verify navigation to separate FindDoctorsScreen
+        expect(find.byType(FindDoctorsScreen), findsOneWidget);
+        expect(find.text('Discover Dental Specialists'), findsOneWidget);
+        expect(find.text('Dr. Sheshu Kumar'), findsOneWidget);
+        expect(find.text('Periodontics'), findsWidgets);
+        expect(find.text('BDS, MDS'), findsOneWidget);
+        expect(find.text('5+ yrs exp'), findsOneWidget);
+        expect(find.textContaining('Kakaji Dental Clinic'), findsOneWidget);
+        expect(find.text('View Profile'), findsOneWidget);
+      },
+    );
 
-      // Dismiss dialog
-      Navigator.of(tester.element(find.text('Connect to a Doctor').first)).pop();
-      await tester.pump(const Duration(milliseconds: 300));
-    });
+    testWidgets(
+      '2. Full Navigation Flow: Patient Dashboard -> Find Doctors -> Select Doctor -> Doctor Details -> Select Date & Slot -> Book Appointment -> Back Navigation',
+      (tester) async {
+        tester.view.physicalSize = const Size(800, 1400);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() => tester.view.resetPhysicalSize());
 
-    testWidgets('2. My Favourite Doctors section label displays dynamic count and filters list', (tester) async {
-      tester.view.physicalSize = const Size(800, 1200);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(() => tester.view.resetPhysicalSize());
+        final service = PatientProblemService();
+        service.addTestDoctor(testDoctor);
 
-      final service = PatientProblemService();
-      service.addTestDoctor(testDoctor);
-
-      await tester.pumpWidget(
-        const ProviderScope(
-          child: MaterialApp(
-            home: PatientDashboardScreen(),
+        // Pre-book 10:00 AM today to verify booked vs available slot distinction
+        final now = DateTime.now();
+        final todayStr =
+            '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+        service.addTestRequest(
+          PatientConsultationRequest(
+            id: 'existing-appt-1',
+            patientName: 'Existing Patient',
+            patientPhone: '9000000001',
+            problemCategory: 'General Consultation',
+            problemDescription: 'Routine checkup',
+            severity: 'Low',
+            submittedAt: now,
+            status: 'Confirmed',
+            assignedDoctorId: testDoctor.id,
+            assignedDoctorName: testDoctor.name,
+            confirmedDate: todayStr,
+            confirmedTimeSlot: '10:00 AM',
           ),
-        ),
-      );
-      await tester.pump(const Duration(milliseconds: 300));
+        );
 
-      // Verify "My Favourite Doctors (0)" initially
-      expect(find.text('My Favourite Doctors (0)'), findsOneWidget);
-      expect(find.text('My Doctors (0)'), findsNothing);
-      expect(find.text('No doctors added to "My Favourite Doctors" yet'), findsOneWidget);
-
-      // Switch to All Doctors tab
-      await tester.tap(find.text('All Doctors (1)'));
-      await tester.pump(const Duration(milliseconds: 300));
-
-      // Verify doctor card in All Doctors
-      expect(find.text('Dr. Sheshu Kumar'), findsOneWidget);
-      expect(find.text('Add Favourite Doctor'), findsOneWidget);
-      expect(find.text('Add Doctor'), findsNothing);
-    });
-
-    testWidgets('3. Add Favourite Doctor action updates count, changes state to Added to Favourites, and prevents duplicates', (tester) async {
-      tester.view.physicalSize = const Size(800, 1200);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(() => tester.view.resetPhysicalSize());
-
-      final service = PatientProblemService();
-      service.addTestDoctor(testDoctor);
-
-      await tester.pumpWidget(
-        const ProviderScope(
-          child: MaterialApp(
-            home: PatientDashboardScreen(),
+        await tester.pumpWidget(
+          const ProviderScope(
+            child: MaterialApp(
+              home: PatientDashboardScreen(),
+            ),
           ),
-        ),
-      );
-      await tester.pump(const Duration(milliseconds: 300));
+        );
+        await tester.pump(const Duration(milliseconds: 300));
 
-      // Switch to All Doctors tab
-      await tester.tap(find.text('All Doctors (1)'));
-      await tester.pump(const Duration(milliseconds: 300));
+        // Step 1: Patient Dashboard -> Find Doctors
+        await tester.tap(find.text('Find Doctors'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(find.byType(FindDoctorsScreen), findsOneWidget);
 
-      // Click "Add Favourite Doctor"
-      expect(find.text('Add Favourite Doctor'), findsOneWidget);
-      await tester.ensureVisible(find.text('Add Favourite Doctor'));
-      await tester.tap(find.text('Add Favourite Doctor'));
-      await tester.pump(const Duration(milliseconds: 300));
+        // Step 2: Select Doctor (via View Profile button) -> Doctor Details Page
+        await tester.tap(find.byKey(Key('view_profile_button_${testDoctor.id}')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(find.byType(DoctorProfileScreen), findsOneWidget);
 
-      // Verify state changes to "Added to Favourites"
-      expect(find.text('Added to Favourites'), findsOneWidget);
-      expect(find.text('Add Favourite Doctor'), findsNothing);
+        // Verify Doctor Information on Doctor Details Page
+        expect(find.text('Doctor Details'), findsOneWidget);
+        expect(find.text('Dr. Sheshu Kumar'), findsOneWidget);
+        expect(find.text('Periodontics'), findsOneWidget);
+        expect(find.text('BDS, MDS'), findsWidgets);
+        expect(find.text('5+ Years'), findsOneWidget);
+        expect(
+          find.text('Senior Periodontics and Implantology specialist dedicated to minimally invasive gum care.'),
+          findsOneWidget,
+        );
+        expect(find.text('Kakaji Dental Clinic'), findsOneWidget);
+        expect(find.text('Kakaji colony, Hanamkonda'), findsOneWidget);
+        expect(find.text('Warangal, 506001'), findsOneWidget);
+        expect(find.text('8977906566'), findsOneWidget);
+        expect(find.text('sheshu@dentaguru.com'), findsOneWidget);
 
-      // Verify dynamic count updated to (1)
-      expect(find.text('My Favourite Doctors (1)'), findsOneWidget);
+        // Verify Appointment Availability slots: 10:00 AM is Booked, 11:30 AM is Available
+        expect(find.text('10:00 AM (Booked)'), findsOneWidget);
+        expect(find.text('11:30 AM'), findsOneWidget);
 
-      // Switch to My Favourite Doctors tab
-      await tester.tap(find.text('My Favourite Doctors (1)'));
-      await tester.pump(const Duration(milliseconds: 300));
+        // Clicking booked slot should NOT select it
+        await tester.tap(find.byKey(const Key('time_slot_10:00 AM')));
+        await tester.pump();
+        expect(find.text('Book Appointment (10:00 AM)'), findsNothing);
 
-      // Doctor is now displayed under My Favourite Doctors
-      expect(find.text('Dr. Sheshu Kumar'), findsOneWidget);
-      expect(find.text('Added to Favourites'), findsOneWidget);
+        // Step 3: Select Available Time Slot (11:30 AM)
+        await tester.ensureVisible(find.byKey(const Key('time_slot_11:30 AM')));
+        await tester.tap(find.byKey(const Key('time_slot_11:30 AM')));
+        await tester.pump();
+        expect(find.text('Book Appointment (11:30 AM)'), findsOneWidget);
 
-      // Attempt duplicate addition programmatically & verify Set uniqueness
-      await service.addDoctorToMyDoctors(testDoctor);
-      expect(service.myDoctors.length, equals(1));
-    });
+        // Step 4: Click Book Appointment
+        final bookBtn = find.byKey(const Key('book_appointment_button'));
+        await tester.ensureVisible(bookBtn);
+        await tester.tap(bookBtn);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
 
-    testWidgets('4. Removing a favourite doctor reverts state and decrements count', (tester) async {
-      tester.view.physicalSize = const Size(800, 1200);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(() => tester.view.resetPhysicalSize());
+        // Verify booking confirmation dialog appears
+        expect(find.text('Appointment Booked!'), findsOneWidget);
+        await tester.tap(find.text('Done'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
 
-      final service = PatientProblemService();
-      service.addTestDoctor(testDoctor);
-      await service.addDoctorToMyDoctors(testDoctor);
+        // Verify inline confirmation banner & slot now marked Booked (preventing double booking)
+        expect(find.text('Appointment Confirmed'), findsOneWidget);
+        expect(find.text('11:30 AM (Booked)'), findsOneWidget);
 
-      await tester.pumpWidget(
-        const ProviderScope(
-          child: MaterialApp(
-            home: PatientDashboardScreen(),
+        // Step 5: Back button on Doctor Details -> Find Doctors
+        await tester.tap(find.byKey(const Key('back_to_find_doctors_button')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(find.byType(FindDoctorsScreen), findsOneWidget);
+
+        // Step 6: Back button on Find Doctors -> Patient Dashboard
+        await tester.tap(find.byKey(const Key('back_to_patient_dashboard_button')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(find.byType(PatientDashboardScreen), findsOneWidget);
+        expect(find.byType(FindDoctorsScreen), findsNothing);
+      },
+    );
+
+    testWidgets(
+      '3. Clicking doctor name or doctor profile image on FindDoctorsScreen also navigates to DoctorProfileScreen',
+      (tester) async {
+        tester.view.physicalSize = const Size(800, 1200);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() => tester.view.resetPhysicalSize());
+
+        final service = PatientProblemService();
+        service.addTestDoctor(testDoctor);
+
+        await tester.pumpWidget(
+          const ProviderScope(
+            child: MaterialApp(
+              home: FindDoctorsScreen(),
+            ),
           ),
-        ),
-      );
-      await tester.pump(const Duration(milliseconds: 300));
+        );
+        await tester.pump(const Duration(milliseconds: 300));
 
-      // Verify initially in favourites
-      expect(find.text('My Favourite Doctors (1)'), findsOneWidget);
-      expect(find.text('Added to Favourites'), findsOneWidget);
+        // Tap Doctor Name -> navigates to DoctorProfileScreen
+        await tester.tap(find.byKey(Key('doctor_name_${testDoctor.id}')));
+        await tester.pumpAndSettle(const Duration(milliseconds: 300));
+        expect(find.byType(DoctorProfileScreen), findsOneWidget);
 
-      // Tap "Added to Favourites" to remove from favourites
-      await tester.ensureVisible(find.text('Added to Favourites'));
-      await tester.tap(find.text('Added to Favourites'));
-      await tester.pump(const Duration(milliseconds: 300));
+        // Navigate back to FindDoctorsScreen
+        await tester.tap(find.byKey(const Key('back_to_find_doctors_button')));
+        await tester.pumpAndSettle(const Duration(milliseconds: 300));
+        expect(find.byType(FindDoctorsScreen), findsOneWidget);
 
-      // Count decrements to 0
-      expect(find.text('My Favourite Doctors (0)'), findsOneWidget);
-      expect(find.text('No doctors added to "My Favourite Doctors" yet'), findsOneWidget);
+        // Tap Doctor Image -> navigates to DoctorProfileScreen
+        await tester.tap(find.byKey(Key('doctor_image_${testDoctor.id}')));
+        await tester.pumpAndSettle(const Duration(milliseconds: 300));
+        expect(find.byType(DoctorProfileScreen), findsOneWidget);
+      },
+    );
 
-      // Switch to All Doctors
-      await tester.tap(find.text('All Doctors (1)'));
-      await tester.pump(const Duration(milliseconds: 300));
+    testWidgets(
+      '4. Add and Remove Favourite Doctor on FindDoctorsScreen updates count and persists to storage',
+      (tester) async {
+        tester.view.physicalSize = const Size(800, 1200);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() => tester.view.resetPhysicalSize());
 
-      // Button reverted back to "Add Favourite Doctor"
-      expect(find.text('Add Favourite Doctor'), findsOneWidget);
-    });
+        final service = PatientProblemService();
+        service.addTestDoctor(testDoctor);
 
-    testWidgets('5. Favourite doctor persistence in storage across sessions', (tester) async {
-      final service = PatientProblemService();
-      service.addTestDoctor(testDoctor);
-      await service.addDoctorToMyDoctors(testDoctor);
+        await tester.pumpWidget(
+          const ProviderScope(
+            child: MaterialApp(
+              home: FindDoctorsScreen(),
+            ),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 300));
 
-      // Verify stored in memory
-      expect(service.isDoctorAdded(testDoctor.id), isTrue);
+        expect(find.text('All Doctors (1)'), findsOneWidget);
+        expect(find.text('My Favourite Doctors (0)'), findsOneWidget);
 
-      // Allow storage write to finish
-      await tester.runAsync(() async {
-        await Future.delayed(const Duration(milliseconds: 300));
-      });
+        // Click "Add Favourite Doctor"
+        await tester.tap(find.text('Add Favourite Doctor'));
+        await tester.pump(const Duration(milliseconds: 300));
 
-      // Re-read from storage
-      final prefs = await SharedPreferences.getInstance();
-      final storedJson = prefs.getString('dentaguru_my_doctor_ids') ?? '[]';
-      final List storedList = jsonDecode(storedJson);
-      expect(storedList.contains(testDoctor.id), isTrue);
-    });
+        expect(find.text('Added to Favourites'), findsOneWidget);
+        expect(find.text('My Favourite Doctors (1)'), findsOneWidget);
+
+        // Verify stored in SharedPreferences
+        await tester.runAsync(() async {
+          await Future.delayed(const Duration(milliseconds: 200));
+        });
+        final prefs = await SharedPreferences.getInstance();
+        final storedJson = prefs.getString('dentaguru_my_doctor_ids') ?? '[]';
+        final List storedList = jsonDecode(storedJson);
+        expect(storedList.contains(testDoctor.id), isTrue);
+
+        // Remove from favourites
+        await tester.tap(find.text('Added to Favourites'));
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.text('My Favourite Doctors (0)'), findsOneWidget);
+        expect(find.text('Add Favourite Doctor'), findsOneWidget);
+      },
+    );
   });
 }

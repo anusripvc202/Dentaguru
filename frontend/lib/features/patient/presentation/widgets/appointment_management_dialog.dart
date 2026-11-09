@@ -214,7 +214,7 @@ class _AppointmentManagementDialogState extends State<AppointmentManagementDialo
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF1E3A8A)),
                     ),
                     Text(
-                      req.assignedDoctorClinic ?? 'DentaGuru Clinic',
+                      req.assignedDoctorClinic ?? 'GS HEALTH Clinic',
                       style: const TextStyle(fontSize: 11.5, color: Color(0xFF2563EB)),
                     ),
                   ],

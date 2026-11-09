@@ -65,7 +65,7 @@ class NeedHelpCard extends StatelessWidget {
             const SizedBox(width: 12),
             const Expanded(
               child: Text(
-                'DentaGuru Support',
+                'GS HEALTH Support',
                 style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
               ),
             ),
@@ -149,7 +149,7 @@ class NeedHelpCard extends StatelessWidget {
   Future<void> _chatOnWhatsApp(BuildContext context) async {
     final cleanPhone = _cleanNumber(whatsappNumber);
     final msg = customMessage ??
-        'Hello DentaGuru Support Team! 👋\nI need assistance regarding dental consultations, appointments, or services.';
+        'Hello GS HEALTH Support Team! 👋\nI need assistance regarding dental consultations, appointments, or services.';
 
     final waUrl = Uri.parse('https://wa.me/$cleanPhone?text=${Uri.encodeComponent(msg)}');
     final intentUrl = Uri.parse('whatsapp://send?phone=$cleanPhone&text=${Uri.encodeComponent(msg)}');

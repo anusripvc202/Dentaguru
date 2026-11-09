@@ -116,7 +116,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('🏥 ${doctor.clinicName.isNotEmpty ? doctor.clinicName : "DentaGuru Care Clinic"}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                      Text('🏥 ${doctor.clinicName.isNotEmpty ? doctor.clinicName : "GS HEALTH Care Clinic"}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                       const SizedBox(height: 2),
                       Text('📍 ${doctor.city.isNotEmpty ? doctor.city : "Hyderabad"} • PIN: ${doctor.pincode.isNotEmpty ? doctor.pincode : "500001"}', style: const TextStyle(fontSize: 11.5)),
                       const SizedBox(height: 2),
@@ -564,7 +564,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '🏥 ${doc.clinicName.isNotEmpty ? doc.clinicName : "DentaGuru Care Clinic"}',
+                        '🏥 ${doc.clinicName.isNotEmpty ? doc.clinicName : "GS HEALTH Care Clinic"}',
                         style: const TextStyle(fontSize: 11.5, color: Color(0xFF334155), fontWeight: FontWeight.w500),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -953,7 +953,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                                 const SizedBox(width: 4),
                                 Expanded(
                                   child: Text(
-                                    '${doc.clinicName.isNotEmpty ? doc.clinicName : "DentaGuru Care Clinic"}${doc.clinicAddress.isNotEmpty ? " • ${doc.clinicAddress}" : ""}',
+                                    '${doc.clinicName.isNotEmpty ? doc.clinicName : "GS HEALTH Care Clinic"}${doc.clinicAddress.isNotEmpty ? " • ${doc.clinicAddress}" : ""}',
                                     style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
                                     overflow: TextOverflow.ellipsis,
                                   ),

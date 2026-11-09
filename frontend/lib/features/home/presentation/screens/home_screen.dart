@@ -228,7 +228,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             const SizedBox(height: 12),
 
             const Text(
-              'DentaGuru connects patients, specialized dentists, and clinic teams into one intelligent platform. Experience AI dental triage, 1-tap booking, digital prescriptions, and 3D dental tracking.',
+              'GS HEALTH connects patients, specialized dentists, and clinic teams into one intelligent platform. Experience AI dental triage, 1-tap booking, digital prescriptions, and 3D dental tracking.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: Color(0xFF94A3B8),
@@ -304,7 +304,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'About DentaGuru Application',
+                  'About GS HEALTH Application',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
@@ -316,7 +316,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
           const SizedBox(height: 6),
           const Text(
-            'Discover how DentaGuru revolutionizes oral healthcare for patients, dentists, and clinic staff.',
+            'Discover how GS HEALTH revolutionizes oral healthcare for patients, dentists, and clinic staff.',
             style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
           ),
           const SizedBox(height: 18),
@@ -443,7 +443,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           badgeText: 'AI CLINICAL TRIAGE',
           badgeColor: const Color(0xFF8B5CF6),
           title: 'AI Smart Dental Photo Screening',
-          description: 'Powered by advanced vision models, DentaGuru AI pre-screens dental photos for potential cavities, plaque, or gum inflammation before the clinic visit.',
+          description: 'Powered by advanced vision models, GS HEALTH AI pre-screens dental photos for potential cavities, plaque, or gum inflammation before the clinic visit.',
           bullets: [
             'Fast photo analysis & risk score calculation',
             'Pre-visit summary generated for attending dentist',
@@ -458,7 +458,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           badgeText: 'PLATFORM OVERVIEW',
           badgeColor: AppTheme.brandOrange,
           title: 'Comprehensive Dental Platform',
-          description: 'DentaGuru bridges the gap between patients, specialists, and dental clinic managers with real-time synchronization, cloud dental records, and AI workflow assistance.',
+          description: 'GS HEALTH bridges the gap between patients, specialists, and dental clinic managers with real-time synchronization, cloud dental records, and AI workflow assistance.',
           bullets: [
             'Unified access for Patients, Dentists, and Clinic Admins',
             'Real-time appointment scheduling & slot locking',
@@ -595,7 +595,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
           const SizedBox(height: 4),
           const Text(
-            'Tap any card to interact with smart tools built into DentaGuru',
+            'Tap any card to interact with smart tools built into GS HEALTH',
             style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
           ),
           const SizedBox(height: 14),
@@ -846,7 +846,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'How DentaGuru Works',
+                  'How GS HEALTH Works',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
@@ -1023,7 +1023,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     ),
                     const SizedBox(height: 8),
                     const Text(
-                      '"DentaGuru has streamlined our dental clinic queue management and digital prescription history. Patients love the instant booking and AI pre-screening features!"',
+                      '"GS HEALTH has streamlined our dental clinic queue management and digital prescription history. Patients love the instant booking and AI pre-screening features!"',
                       style: TextStyle(fontSize: 12, color: AppTheme.textMedium, fontStyle: FontStyle.italic, height: 1.3),
                     ),
                   ],
@@ -1054,7 +1054,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           const DentaGuruLogo(height: 46, darkBg: true),
           const SizedBox(height: 16),
           const Text(
-            'Ready to Experience DentaGuru?',
+            'Ready to Experience GS HEALTH?',
             style: TextStyle(
               color: Colors.white,
               fontSize: 20,

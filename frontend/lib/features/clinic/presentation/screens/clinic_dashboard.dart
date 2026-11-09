@@ -430,7 +430,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
     final expCtrl = TextEditingController(text: '5');
     final cityCtrl = TextEditingController();
     final pincodeCtrl = TextEditingController();
-    final clinicName = SessionService().currentSession?.name ?? 'DentaGuru Partner Clinic';
+    final clinicName = SessionService().currentSession?.name ?? 'GS HEALTH Partner Clinic';
 
     showDialog(
       context: context,

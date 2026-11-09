@@ -192,7 +192,7 @@ exports.getAdminProblemRequests = async (req, res) => {
             const dClinic = d.clinics || {};
             const docName = dUser.name ? (dUser.name.startsWith('Dr.') ? dUser.name : `Dr. ${dUser.name}`) : (r.assigned_doctor_name || '');
             const docSpecialty = d.speciality || d.specialty || r.assigned_doctor_specialty || 'General Dentistry';
-            const docClinic = dClinic.clinic_name || r.assigned_doctor_clinic || 'DentaGuru Care Center';
+            const docClinic = dClinic.clinic_name || r.assigned_doctor_clinic || 'GS HEALTH Care Center';
 
             return {
                 ...reqObj,

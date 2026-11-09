@@ -1308,7 +1308,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'DentaGuru Platform',
+                                  'GS HEALTH Platform',
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 16,
@@ -1318,7 +1318,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                                 const SizedBox(height: 2),
                                 Text(
                                   _tabController.index == 0
-                                      ? 'Create your $_roleName account on DentaGuru'
+                                      ? 'Create your $_roleName account on GS HEALTH'
                                       : 'Select your role to access $_roleName Workspace',
                                   style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                 ),
@@ -1645,7 +1645,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             },
             decoration: _buildInputDecoration(
               label: 'Registered Mobile Number or Email *',
-              hint: 'e.g. +91 98765 43210 or user@dentaguru.com',
+              hint: 'e.g. +91 98765 43210 or user@gshealth.com',
               icon: Icons.phone_android_rounded,
             ),
           ),
@@ -1942,7 +1942,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               },
               decoration: _buildInputDecoration(
                 label: 'Email Address (Optional)',
-                hint: 'user@dentaguru.com (Optional)',
+                hint: 'user@gshealth.com (Optional)',
                 isRequired: false, // optional per requirement
                 icon: Icons.email_outlined,
               ),

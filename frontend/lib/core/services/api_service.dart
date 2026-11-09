@@ -3488,7 +3488,7 @@ class ApiService {
 
             String docName = 'Specialist';
             String docSpecialty = row['required_specialist']?.toString() ?? 'General Dentistry';
-            String clinicName = 'DentaGuru Clinic';
+            String clinicName = 'GS HEALTH Clinic';
             String clinicLoc = '';
             if (row['doctor'] is Map) {
               final dMap = row['doctor'] as Map;
@@ -3609,7 +3609,7 @@ class ApiService {
               'doctorId': payload['doctorId'] ?? '',
               'doctorName': payload['doctorName'] ?? 'Dr. Specialist',
               'doctorSpecialty': payload['requiredSpecialist'] ?? 'Specialist Consultation',
-              'doctorClinicName': payload['doctorClinicName'] ?? 'DentaGuru Partner Clinic',
+              'doctorClinicName': payload['doctorClinicName'] ?? 'GS HEALTH Partner Clinic',
               'doctorLocation': payload['doctorLocation'] ?? '',
               'assignedDoctorName': payload['doctorName'] ?? 'Dr. Specialist',
 
@@ -3887,7 +3887,7 @@ class ApiService {
         'doctor_name': cleanDocName,
         'doctorName': cleanDocName,
         'doctorSpecialty': requiredSpecialist.trim(),
-        'doctorClinicName': doctorClinicName ?? 'DentaGuru Partner Clinic',
+        'doctorClinicName': doctorClinicName ?? 'GS HEALTH Partner Clinic',
         'doctorLocation': doctorLocation ?? referredPatientLocation.trim(),
         'doctorCity': doctorCity ?? referredPatientCity.trim(),
         'doctorPincode': doctorPincode ?? referredPatientPincode.trim(),
@@ -4528,18 +4528,35 @@ class ApiService {
           : null;
 
       if (cleanDate != null) {
+        final idsToMatch = <String>{dentistId};
+        try {
+          final dRow = await client
+              .from('dentists')
+              .select('id, user_id')
+              .or('id.eq.$dentistId,user_id.eq.$dentistId')
+              .limit(1)
+              .maybeSingle();
+          if (dRow != null) {
+            if (dRow['id'] != null) idsToMatch.add(dRow['id'].toString());
+            if (dRow['user_id'] != null) idsToMatch.add(dRow['user_id'].toString());
+          }
+        } catch (_) {}
+
+        final idFilter = idsToMatch.map((id) => 'dentist_id.eq.$id').join(',');
+
         final record = await client
             .from('doctor_availability')
             .select('*')
-            .eq('dentist_id', dentistId)
+            .or(idFilter)
             .eq('date', cleanDate)
+            .limit(1)
             .maybeSingle();
 
         // Cross-reference appointments for booked slots
         final appts = await client
             .from('appointments')
             .select('date, appointment_date, time_slot, status')
-            .eq('dentist_id', dentistId)
+            .or(idFilter)
             .catchError((_) => []);
 
         final bookedSlots = <String>[];
@@ -4566,6 +4583,7 @@ class ApiService {
 
         return {
           'success': true,
+          'hasCustomRecord': record != null,
           'availability': {
             'dentistId': dentistId,
             'date': cleanDate,
@@ -4581,10 +4599,25 @@ class ApiService {
           }
         };
       } else {
+        final idsToMatch = <String>{dentistId};
+        try {
+          final dRow = await client
+              .from('dentists')
+              .select('id, user_id')
+              .or('id.eq.$dentistId,user_id.eq.$dentistId')
+              .limit(1)
+              .maybeSingle();
+          if (dRow != null) {
+            if (dRow['id'] != null) idsToMatch.add(dRow['id'].toString());
+            if (dRow['user_id'] != null) idsToMatch.add(dRow['user_id'].toString());
+          }
+        } catch (_) {}
+        final idFilter = idsToMatch.map((id) => 'dentist_id.eq.$id').join(',');
         final records = await client
             .from('doctor_availability')
             .select('*')
-            .eq('dentist_id', dentistId);
+            .or(idFilter)
+            .order('date', ascending: true);
         return {'success': true, 'availabilities': records};
       }
     } catch (e) {

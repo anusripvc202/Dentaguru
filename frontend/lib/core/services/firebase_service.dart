@@ -29,8 +29,8 @@ final FlutterLocalNotificationsPlugin _localNotificationsPlugin =
 
 const AndroidNotificationChannel _channel = AndroidNotificationChannel(
   'dentaguru_high_importance', // channel id
-  'DentaGuru Notifications',   // channel name
-  description: 'Appointment alerts and DentaGuru updates',
+  'GS HEALTH Notifications',   // channel name
+  description: 'Appointment alerts and GS HEALTH updates',
   importance: Importance.high,
 );
 
@@ -321,7 +321,7 @@ class FirebaseService {
           channelDescription: _channel.description,
           importance: Importance.max,
           priority: Priority.high,
-          ticker: 'DentaGuru Notification',
+          ticker: 'GS HEALTH Notification',
           color: const Color(0xFF0B41CD),
           icon: android?.smallIcon ?? '@mipmap/ic_launcher',
           channelShowBadge: true,

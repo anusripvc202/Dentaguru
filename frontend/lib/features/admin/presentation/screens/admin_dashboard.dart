@@ -218,7 +218,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 : '123 Healthcare Blvd, Medical Hub, Suite 400';
             final doctorPhone = selectedDoctor?.phone ?? '+1 202 555 0100';
             final caseFee = selectedDoctor?.getFeeForCategory(req.problemCategory) ?? '\$75';
-            final waText = "🏥 *DentaGuru Clinical Recommendation*\n\n"
+            final waText = "🏥 *GS HEALTH Clinical Recommendation*\n\n"
                 "Dear *${req.patientName}*,\n\n"
                 "Our Clinical Admin team has reviewed your reported symptoms:\n"
                 "📌 *Issue*: ${req.problemCategory} (${req.severity} Severity)\n\n"
@@ -229,7 +229,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 "📍 *Address*: $clinicAddr\n"
                 "📞 *Doctor Contact*: $doctorPhone\n\n"
                 "💬 *Admin Guidance*: ${adminNotesController.text.trim().isEmpty ? 'Recommended for specialized clinical evaluation and care.' : adminNotesController.text.trim()}\n\n"
-                "Please open your DentaGuru App to confirm your consultation slot.";
+                "Please open your GS HEALTH App to confirm your consultation slot.";
 
             return Dialog(
               insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
@@ -1349,7 +1349,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                   const Text(
-                                    'DentaGuru Clinical Admin Portal',
+                                    'GS HEALTH Clinical Admin Portal',
                                     style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                     overflow: TextOverflow.ellipsis,
                                   ),
@@ -1874,7 +1874,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            '${doc.specialty} • ${doc.clinicName.isNotEmpty ? doc.clinicName : "DentaGuru Clinic"}',
+                            '${doc.specialty} • ${doc.clinicName.isNotEmpty ? doc.clinicName : "GS HEALTH Clinic"}',
                             style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -3281,7 +3281,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               cursorColor: AppTheme.primaryBlue,
                               decoration: InputDecoration(
                                 labelText: 'Email Address (Optional)',
-                                hintText: 'subadmin@dentaguru.com (Optional)',
+                                hintText: 'subadmin@gshealth.com (Optional)',
                                 prefixIcon: const Icon(Icons.email_outlined, size: 18),
                                 filled: true,
                                 fillColor: const Color(0xFFF8FAFC),
@@ -4837,7 +4837,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               cursorColor: AppTheme.primaryBlue,
                               decoration: InputDecoration(
                                 labelText: 'Email Address (Optional)',
-                                hintText: 'e.g. jane@dentaguru.com (Optional)',
+                                hintText: 'e.g. jane@gshealth.com (Optional)',
                                 prefixIcon: const Icon(Icons.email_outlined, size: 16),
                                 filled: true,
                                 fillColor: const Color(0xFFF8FAFC),
@@ -5319,7 +5319,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                       ),
                       SizedBox(height: 3),
                       Text(
-                        'All verified dental specialists registered on DentaGuru • Match patient problems directly',
+                        'All verified dental specialists registered on GS HEALTH • Match patient problems directly',
                         style: TextStyle(color: Colors.white70, fontSize: 11),
                       ),
                     ],
@@ -7664,7 +7664,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 ],
                               ),
                               Text(
-                                ref.doctorClinicName.isNotEmpty ? ref.doctorClinicName : 'DentaGuru Partner Clinic',
+                                ref.doctorClinicName.isNotEmpty ? ref.doctorClinicName : 'GS HEALTH Partner Clinic',
                                 style: const TextStyle(fontSize: 10.5, color: AppTheme.textMedium),
                               ),
                             ],
@@ -7880,7 +7880,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   items: [
                     {'label': 'Doctor Name', 'value': ref.doctorName},
                     {'label': 'Specialty', 'value': ref.doctorSpecialty.isNotEmpty ? ref.doctorSpecialty : ref.requiredSpecialist},
-                    {'label': 'Clinic Name', 'value': ref.doctorClinicName.isNotEmpty ? ref.doctorClinicName : 'DentaGuru Partner Clinic'},
+                    {'label': 'Clinic Name', 'value': ref.doctorClinicName.isNotEmpty ? ref.doctorClinicName : 'GS HEALTH Partner Clinic'},
                     if (ref.doctorLocation.isNotEmpty)
                       {'label': 'Clinic Address', 'value': ref.doctorLocation},
                   ],

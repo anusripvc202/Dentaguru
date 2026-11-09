@@ -78,7 +78,7 @@ const populateReferralData = async (ref) => {
         ? rawDocName
         : `Dr. ${rawDocName}`;
     const docSpecialty = doctor?.speciality || doctor?.specialty || ref.required_specialist || 'Specialist Consultation';
-    const clinicName = ref.doctor_clinic_name || ref.doctorClinicName || clinic?.clinic_name || doctor?.clinics?.clinic_name || doctor?.clinic_name || 'DentaGuru Partner Clinic';
+    const clinicName = ref.doctor_clinic_name || ref.doctorClinicName || clinic?.clinic_name || doctor?.clinics?.clinic_name || doctor?.clinic_name || 'GS HEALTH Partner Clinic';
 
     let referrerName = referrer?.name || 'Patient Referrer';
     if (referrer && (referrer.role === 'Dentist' || referrer.role === 'dentist')) {
@@ -295,7 +295,7 @@ exports.createReferral = async (req, res) => {
         const formattedDoctorName = (doctorName.toLowerCase().startsWith('dr.') || doctorName.toLowerCase().startsWith('dr '))
             ? doctorName
             : `Dr. ${doctorName}`;
-        const doctorClinic = incomingClinicName || clinic?.clinic_name || doctor?.clinics?.clinic_name || doctor?.clinic_name || 'DentaGuru Partner Clinic';
+        const doctorClinic = incomingClinicName || clinic?.clinic_name || doctor?.clinics?.clinic_name || doctor?.clinic_name || 'GS HEALTH Partner Clinic';
         const doctorSpecialty = doctor?.speciality || doctor?.specialty || requiredSpecialist;
         const doctorLocation = incomingLocation || doctor?.clinic_address || doctor?.clinics?.location || clinic?.address || clinic?.location || '';
         const doctorCity = incomingCity || doctor?.city || clinic?.city || '';
@@ -763,7 +763,7 @@ exports.checkPatientExists = async (req, res) => {
         return res.status(200).json({
             success: true,
             exists: false,
-            message: 'Patient does not currently have a registered DentaGuru account.'
+            message: 'Patient does not currently have a registered GS HEALTH account.'
         });
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });

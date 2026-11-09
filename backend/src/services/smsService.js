@@ -72,7 +72,7 @@ const sendRealSmsOtp = async (phone, otpCode) => {
             const postData = new URLSearchParams({
                 To: formattedPhone,
                 From: twilioFromNumber,
-                Body: `Your DentaGuru Security OTP Verification Code is ${otpCode}. Valid for 10 minutes.`,
+                Body: `Your GS HEALTH Security OTP Verification Code is ${otpCode}. Valid for 10 minutes.`,
             }).toString();
 
             const options = {

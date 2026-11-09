@@ -79,7 +79,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
         ? doc.specialty
         : (ref.requiredSpecialist.isNotEmpty ? ref.requiredSpecialist : (doc?.specialty ?? 'Dental Specialist'));
     final qual = (doc?.qualification.isNotEmpty == true && doc!.qualification != 'BDS, MDS') ? ' (${doc.qualification})' : '';
-    final clinic = (doc?.clinicName.isNotEmpty == true && doc!.clinicName != 'DentaGuru Partner Clinic')
+    final clinic = (doc?.clinicName.isNotEmpty == true && doc!.clinicName != 'GS HEALTH Partner Clinic' && doc.clinicName != 'DentaGuru Partner Clinic')
         ? doc.clinicName
         : (ref.doctorClinicName.isNotEmpty ? ref.doctorClinicName : (doc?.clinicName.isNotEmpty == true ? doc!.clinicName : ''));
 
@@ -96,7 +96,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
       mapUrl = 'https://maps.google.com/?q=${doc.latitude},${doc.longitude}';
     } else {
       final mapQueryParts = [
-        if (clinic.isNotEmpty && clinic != 'DentaGuru Partner Clinic') clinic,
+        if (clinic.isNotEmpty && clinic != 'GS HEALTH Partner Clinic' && clinic != 'DentaGuru Partner Clinic') clinic,
         if (doc?.clinicAddress.isNotEmpty == true) doc!.clinicAddress else if (ref.doctorLocation.isNotEmpty) ref.doctorLocation,
         if (doc?.city.isNotEmpty == true) doc!.city else if (ref.doctorCity.isNotEmpty) ref.doctorCity,
         if (doc?.pincode.isNotEmpty == true) doc!.pincode else if (ref.doctorPincode.isNotEmpty) ref.doctorPincode,
@@ -113,7 +113,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
     final buffer = StringBuffer();
     buffer.writeln('Hi ${ref.referredPatientName},');
     buffer.writeln();
-    buffer.writeln('I have referred you to *$docName*$qual on DentaGuru for your dental care.');
+    buffer.writeln('I have referred you to *$docName*$qual on GS HEALTH for your dental care.');
     buffer.writeln();
     buffer.writeln('👨‍⚕️ *Doctor & Clinic Details:*');
     buffer.writeln('• *Doctor:* $docName');
@@ -727,7 +727,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
               Expanded(
                 child: Text(
                   [
-                    ref.doctorClinicName.isNotEmpty ? ref.doctorClinicName : 'DentaGuru Partner Clinic',
+                    ref.doctorClinicName.isNotEmpty ? ref.doctorClinicName : 'GS HEALTH Partner Clinic',
                     if (ref.doctorLocation.isNotEmpty || ref.doctorCity.isNotEmpty || ref.doctorPincode.isNotEmpty)
                       [
                         if (ref.doctorLocation.isNotEmpty) ref.doctorLocation,

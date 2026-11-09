@@ -18,7 +18,7 @@ class DentaGuruLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 100% Perfect High-Resolution DentaGuru Logo Image Asset with Transparent Background
+    // 100% Perfect High-Resolution GS HEALTH Logo Image Asset with Transparent Background
     final Widget logoImage = Image.asset(
       'assets/gs_health_full_logo.png',
       height: height,
@@ -66,7 +66,7 @@ class DentaGuruToothIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Image.asset(
-      'assets/dentaguru_tooth_icon_transparent.png',
+      'assets/gs_health_full_logo.png',
       width: size,
       height: size,
       fit: BoxFit.contain,

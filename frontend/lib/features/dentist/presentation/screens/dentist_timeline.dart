@@ -676,7 +676,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                               'title': 'Digital Prescription Slips',
                               'subtitle': 'Diagnosis: ${diagnosis.isNotEmpty ? diagnosis : "Dental Care"} (${medName.isNotEmpty ? medName : "Medication"})',
                               'doctorName': _patientService.currentDoctor?.name ?? 'Attending Dentist',
-                              'clinicName': _patientService.currentDoctor?.clinicName ?? 'DentaGuru Dental Clinic',
+                              'clinicName': _patientService.currentDoctor?.clinicName ?? 'GS HEALTH Dental Clinic',
                               'date': DateTime.now().toString().split(' ').first,
                               'items': [
                                 {
@@ -698,7 +698,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                               title: 'Digital Prescription Slips',
                               subtitle: 'Diagnosis: ${diagnosis.isNotEmpty ? diagnosis : "Dental Care"} (${medName.isNotEmpty ? medName : "Medication"})',
                               doctorName: _patientService.currentDoctor?.name ?? 'Attending Dentist',
-                              clinicName: _patientService.currentDoctor?.clinicName ?? 'DentaGuru Dental Clinic',
+                              clinicName: _patientService.currentDoctor?.clinicName ?? 'GS HEALTH Dental Clinic',
                               items: [
                                 {
                                   'name': medName.isNotEmpty ? medName : 'Amoxicillin 500mg',
@@ -3171,7 +3171,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                 overflow: TextOverflow.ellipsis,
                               ),
                               Text(
-                                'Register colleague practitioner into DentaGuru network',
+                                'Register colleague practitioner into GS HEALTH network',
                                 style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -3573,7 +3573,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                         phone: phone,
                                         licenseNumber: licenseCtrl.text.trim(),
                                         specialty: selectedSpecialty,
-                                        clinicName: clinicCtrl.text.trim().isNotEmpty ? clinicCtrl.text.trim() : 'DentaGuru Partner Dental Clinic',
+                                        clinicName: clinicCtrl.text.trim().isNotEmpty ? clinicCtrl.text.trim() : 'GS HEALTH Partner Dental Clinic',
                                         experienceYears: cleanExp,
                                         qualification: qualCtrl.text.trim().isNotEmpty ? qualCtrl.text.trim() : 'BDS, MDS',
                                         consultationFee: cleanFee,
@@ -3611,7 +3611,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                         Navigator.of(dialogContext).pop();
                                         ScaffoldMessenger.of(context).showSnackBar(
                                           SnackBar(
-                                            content: Text('✅ $formattedDocName added to DentaGuru network!'),
+                                            content: Text('✅ $formattedDocName added to GS HEALTH network!'),
                                             backgroundColor: const Color(0xFF10B981),
                                             behavior: SnackBarBehavior.floating,
                                             duration: const Duration(seconds: 3),

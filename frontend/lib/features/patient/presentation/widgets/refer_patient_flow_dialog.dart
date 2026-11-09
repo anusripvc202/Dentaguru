@@ -562,7 +562,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                               child: Text(
                                 _matchedPatientName != null
                                     ? 'Registered patient: $_matchedPatientName (Will link directly)'
-                                    : 'Existing DentaGuru patient (Will link directly)',
+                                    : 'Existing GS HEALTH patient (Will link directly)',
                                 style: const TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.w600),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -1317,7 +1317,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                                             const SizedBox(width: 4),
                                             Expanded(
                                               child: Text(
-                                                doc.clinicName.isNotEmpty ? doc.clinicName : 'DentaGuru Partner Clinic',
+                                                doc.clinicName.isNotEmpty ? doc.clinicName : 'GS HEALTH Partner Clinic',
                                                 style: TextStyle(fontSize: 12, color: isDark ? Colors.white70 : Colors.black87),
                                                 maxLines: 1,
                                                 overflow: TextOverflow.ellipsis,
@@ -1669,7 +1669,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                             child: Text(
                               _matchedPatientName != null
                                   ? 'Registered patient: $_matchedPatientName (Will link directly)'
-                                  : 'Existing DentaGuru patient (Will link directly)',
+                                  : 'Existing GS HEALTH patient (Will link directly)',
                               style: const TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.w600),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -1966,7 +1966,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                       {'label': 'Specialty', 'value': _selectedDoctor!.specialty},
                       if (_selectedDoctor!.phone.isNotEmpty)
                         {'label': 'Contact Number', 'value': _selectedDoctor!.phone.startsWith('+91') ? _selectedDoctor!.phone : '+91 ${_selectedDoctor!.phone}'},
-                      {'label': 'Clinic', 'value': _selectedDoctor!.clinicName.isNotEmpty ? _selectedDoctor!.clinicName : 'DentaGuru Partner Clinic'},
+                      {'label': 'Clinic', 'value': _selectedDoctor!.clinicName.isNotEmpty ? _selectedDoctor!.clinicName : 'GS HEALTH Partner Clinic'},
                       {'label': 'City & Pincode', 'value': '${_selectedDoctor!.city.isNotEmpty ? _selectedDoctor!.city : "City"} • ${_selectedDoctor!.pincode}'},
                     ],
                   ),
@@ -2202,7 +2202,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                       {'label': 'Specialty', 'value': _selectedDoctor!.specialty},
                       if (_selectedDoctor!.phone.isNotEmpty)
                         {'label': 'Contact Number', 'value': _selectedDoctor!.phone.startsWith('+91') ? _selectedDoctor!.phone : '+91 ${_selectedDoctor!.phone}'},
-                      {'label': 'Clinic', 'value': _selectedDoctor!.clinicName.isNotEmpty ? _selectedDoctor!.clinicName : 'DentaGuru Partner Clinic'},
+                      {'label': 'Clinic', 'value': _selectedDoctor!.clinicName.isNotEmpty ? _selectedDoctor!.clinicName : 'GS HEALTH Partner Clinic'},
                       {'label': 'City & Pincode', 'value': '${_selectedDoctor!.city.isNotEmpty ? _selectedDoctor!.city : "City"} • ${_selectedDoctor!.pincode}'},
                     ],
                   ),
@@ -2485,7 +2485,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                     ? doc.specialty
                     : (ref?.requiredSpecialist.isNotEmpty == true ? ref!.requiredSpecialist : (doc?.specialty ?? _requiredSpecialist));
                 final qual = (doc?.qualification.isNotEmpty == true && doc!.qualification != 'BDS, MDS') ? ' (${doc.qualification})' : '';
-                final clinic = (doc?.clinicName.isNotEmpty == true && doc!.clinicName != 'DentaGuru Partner Clinic')
+                final clinic = (doc?.clinicName.isNotEmpty == true && doc!.clinicName != 'GS HEALTH Partner Clinic' && doc.clinicName != 'DentaGuru Partner Clinic')
                     ? doc.clinicName
                     : (ref?.doctorClinicName.isNotEmpty == true ? ref!.doctorClinicName : (doc?.clinicName ?? ''));
                 
@@ -2503,7 +2503,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                   mapUrl = 'https://maps.google.com/?q=${doc.latitude},${doc.longitude}';
                 } else {
                   final mapQueryParts = [
-                    if (clinic.isNotEmpty && clinic != 'DentaGuru Partner Clinic') clinic,
+                    if (clinic.isNotEmpty && clinic != 'GS HEALTH Partner Clinic' && clinic != 'DentaGuru Partner Clinic') clinic,
                     if (doc?.clinicAddress.isNotEmpty == true) doc!.clinicAddress else if (ref?.doctorLocation.isNotEmpty == true) ref!.doctorLocation,
                     if (doc?.city.isNotEmpty == true) doc!.city else if (ref?.doctorCity.isNotEmpty == true) ref!.doctorCity,
                     if (doc?.pincode.isNotEmpty == true) doc!.pincode else if (ref?.doctorPincode.isNotEmpty == true) ref!.doctorPincode,
@@ -2525,9 +2525,9 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                 buffer.writeln('Hi $patientName,');
                 buffer.writeln();
                 if (widget.isDentistMode && referringDocName != null) {
-                  buffer.writeln('This is $referringDocName from DentaGuru. I have referred you to *$docName*$qual for specialized dental care.');
+                  buffer.writeln('This is $referringDocName from GS HEALTH. I have referred you to *$docName*$qual for specialized dental care.');
                 } else {
-                  buffer.writeln('I have referred you to *$docName*$qual on DentaGuru for your dental care.');
+                  buffer.writeln('I have referred you to *$docName*$qual on GS HEALTH for your dental care.');
                 }
                 buffer.writeln();
                 buffer.writeln('👨‍⚕️ *Doctor & Clinic Details:*');

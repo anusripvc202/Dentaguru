@@ -313,7 +313,7 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
                                           overflow: TextOverflow.ellipsis,
                                         ),
                                         Text(
-                                          '${_selectedDoctor!.specialty} • ${_selectedDoctor!.clinicName.isNotEmpty ? _selectedDoctor!.clinicName : "DentaGuru"}',
+                                          '${_selectedDoctor!.specialty} • ${_selectedDoctor!.clinicName.isNotEmpty ? _selectedDoctor!.clinicName : "GS HEALTH"}',
                                           style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                           overflow: TextOverflow.ellipsis,
                                         ),

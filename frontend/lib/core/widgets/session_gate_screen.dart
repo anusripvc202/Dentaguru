@@ -145,7 +145,7 @@ class _SessionGateScreenState extends State<SessionGateScreen> with SingleTicker
                   ),
                   const SizedBox(height: 24),
                   const Text(
-                    'DentaGuru',
+                    'GS HEALTH',
                     style: TextStyle(
                       fontSize: 28,
                       fontWeight: FontWeight.w900,

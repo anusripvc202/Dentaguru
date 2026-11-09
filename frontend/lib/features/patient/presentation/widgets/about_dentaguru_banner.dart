@@ -25,14 +25,14 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
 
   final List<Map<String, dynamic>> _slides = [
     {
-      'badge': '✨ What is DentaGuru?',
+      'badge': '✨ What is GS HEALTH?',
       'title': 'Your Smart Digital Dental Healthcare Platform',
       'description':
-          'DentaGuru connects you with accredited dental clinics and specialists. Report symptoms, get instant e-prescriptions, and manage your oral health with complete peace of mind.',
+          'GS HEALTH connects you with accredited dental clinics and specialists. Report symptoms, get instant e-prescriptions, and manage your oral health with complete peace of mind.',
       'chips': ['🏥 Verified Clinics', '⚡ Fast Diagnosis', '🛡️ Safe Care'],
       'gradient': [const Color(0xFF0F172A), const Color(0xFF0052CC)],
       'icon': Icons.health_and_safety_rounded,
-      'ctaText': 'How DentaGuru Works',
+      'ctaText': 'How GS HEALTH Works',
       'ctaIcon': Icons.info_outline_rounded,
       'type': 'how_it_works',
     },
@@ -165,7 +165,7 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 const Text(
-                                  'About DentaGuru',
+                                  'About GS HEALTH',
                                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
                                 ),
                                 const SizedBox(height: 3),
@@ -183,7 +183,7 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
 
                     // Intro Paragraph
                     const Text(
-                      'DentaGuru is designed to simplify oral healthcare for patients. We bridge the gap between patients, verified dental clinics, and specialized practitioners — providing quick symptom diagnosis, transparent treatment tracking, and certified e-prescriptions.',
+                      'GS HEALTH is designed to simplify oral healthcare for patients. We bridge the gap between patients, verified dental clinics, and specialized practitioners — providing quick symptom diagnosis, transparent treatment tracking, and certified e-prescriptions.',
                       style: TextStyle(fontSize: 13, height: 1.5, color: Color(0xFF334155), fontWeight: FontWeight.w400),
                     ),
                     const SizedBox(height: 20),
@@ -225,7 +225,7 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
 
                     // Section: Key Patient Benefits
                     const Text(
-                      'Why Patients Trust DentaGuru',
+                      'Why Patients Trust GS HEALTH',
                       style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textDark),
                     ),
                     const SizedBox(height: 12),
@@ -248,7 +248,7 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
                     _buildBenefitItem(
                       icon: Icons.card_giftcard_rounded,
                       title: 'Patient Referral Program',
-                      description: 'Invite family and friends to DentaGuru and unlock special wellness rewards and dental care coins.',
+                      description: 'Invite family and friends to GS HEALTH and unlock special wellness rewards and dental care coins.',
                     ),
                     const SizedBox(height: 24),
 
@@ -392,7 +392,7 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
                 ),
                 const SizedBox(width: 8),
                 const Text(
-                  'About DentaGuru',
+                  'About GS HEALTH',
                   style: TextStyle(
                     fontSize: 14.5,
                     fontWeight: FontWeight.bold,

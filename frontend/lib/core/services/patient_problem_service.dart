@@ -30,6 +30,7 @@ class DoctorModel {
   final String pincode;
   final String city;
   final String state;
+  final String bio;
   final List<String> languages;
   final double? latitude;
   final double? longitude;
@@ -57,6 +58,7 @@ class DoctorModel {
     this.pincode = '',
     this.city = '',
     this.state = '',
+    this.bio = '',
     this.languages = const ['English'],
     this.latitude,
     this.longitude,
@@ -105,6 +107,7 @@ class DoctorModel {
         'pincode': pincode,
         'city': city,
         'state': state,
+        'bio': bio,
         'languages': languages,
         'latitude': latitude,
         'longitude': longitude,
@@ -159,6 +162,7 @@ class DoctorModel {
       pincode: json['pincode'] ?? json['postal_code'] ?? (json['users'] != null ? (json['users']['pincode'] ?? '') : '') ?? '',
       city: json['city'] ?? (json['users'] != null ? (json['users']['city'] ?? '') : '') ?? '',
       state: json['state'] ?? (json['users'] != null ? (json['users']['state'] ?? '') : '') ?? '',
+      bio: (json['bio'] ?? json['about'] ?? json['description'] ?? (json['users'] is Map ? (json['users']['bio'] ?? '') : '') ?? '').toString(),
       languages: parsedLanguages,
       latitude: (json['latitude'] ?? json['lat'] ?? (json['users'] != null ? json['users']['latitude'] : null)) != null
           ? double.tryParse((json['latitude'] ?? json['lat'] ?? json['users']['latitude']).toString())
@@ -596,7 +600,7 @@ class ClinicModel {
     }
     return ClinicModel(
       id: (json['id'] ?? json['_id'] ?? '').toString(),
-      clinicName: (json['clinic_name'] ?? json['clinicName'] ?? 'DentaGuru Care Center').toString(),
+      clinicName: (json['clinic_name'] ?? json['clinicName'] ?? 'GS HEALTH Care Center').toString(),
       location: (json['location'] ?? '123 Healthcare Blvd').toString(),
       rating: (json['rating'] ?? 5.0).toDouble(),
       reviewsCount: json['reviews_count'] ?? json['reviewsCount'] ?? 0,
@@ -2098,11 +2102,12 @@ class PatientProblemService extends ChangeNotifier {
           }
           final formattedName = rawName.startsWith('Dr.') ? rawName : 'Dr. $rawName';
           final email = (userObj['email'] ?? dMap['email'] ?? '').toString();
-          final phone = (userObj['phone'] ?? dMap['phone'] ?? '+1 202 555 0100').toString();
+          final phone = (userObj['phone'] ?? dMap['phone'] ?? '').toString();
           final specialty = (dMap['speciality'] ?? dMap['specialty'] ?? 'General Dentistry').toString();
           final licNum = (dMap['license_number'] ?? dMap['licenseNumber'] ?? 'DEN-LIC-REG').toString();
           final cName = (clinicObj['clinic_name'] ?? clinicObj['name'] ?? dMap['clinicName'] ?? '').toString();
           final cLoc = (clinicObj['location'] ?? dMap['location'] ?? '').toString();
+          final docBio = (dMap['bio'] ?? dMap['about'] ?? dMap['description'] ?? userObj['bio'] ?? '').toString();
 
           final doctorState = (dMap['state'] ?? userObj['state'] ?? '').toString();
           final doctorCity = (dMap['city'] ?? userObj['city'] ?? '').toString();
@@ -2142,27 +2147,33 @@ class PatientProblemService extends ChangeNotifier {
             } catch (_) {}
           }
 
+          final rawSlots = dMap['slots'] ?? dMap['available_slots'] ?? dMap['nextAvailableSlots'];
+          final List<String> parsedSlots = rawSlots is List
+              ? rawSlots.map((s) => s.toString().trim()).where((s) => s.isNotEmpty).toList()
+              : <String>[];
+
           _allDoctors.add(DoctorModel(
             id: id.isNotEmpty ? id : 'DOC-${100 + _allDoctors.length + 1}',
             userId: doctorUserId,
             name: formattedName,
             specialty: specialty,
-            qualification: dMap['qualifications'] ?? dMap['qualification'] ?? 'BDS, MDS',
-            experienceYears: dMap['experience_years'] ?? dMap['experienceYears'] ?? 5,
+            qualification: (dMap['qualifications'] ?? dMap['qualification'] ?? 'BDS, MDS').toString(),
+            experienceYears: int.tryParse((dMap['experience_years'] ?? dMap['experienceYears'] ?? '5').toString()) ?? 5,
             rating: (dMap['rating'] ?? 5.0).toDouble(),
             reviewCount: dMap['reviews_count'] ?? 1,
             clinicName: cName,
             clinicAddress: cLoc,
             phone: phone,
             email: email,
-            status: dMap['availability_status'] ?? 'Available',
-            nextAvailableSlots: ['Today, 2:00 PM', 'Tomorrow, 10:00 AM'],
-            consultationFee: '\$75',
+            status: (dMap['availability_status'] ?? 'Available').toString(),
+            nextAvailableSlots: parsedSlots,
+            consultationFee: (dMap['consultation_fee'] ?? dMap['consultationFee'] ?? '₹500').toString(),
             licenseNumber: licNum,
             photoBytes: docPhotoBytes,
             state: doctorState,
             city: doctorCity,
             pincode: doctorPincode,
+            bio: docBio,
             languages: doctorLangs,
             latitude: lat,
             longitude: lng,
@@ -2463,23 +2474,148 @@ class PatientProblemService extends ChangeNotifier {
     required String treatment,
     String symptoms = '',
   }) async {
+    final cleanDate = date.contains('T') ? date.split('T').first : date.trim();
+    final cleanSlot = timeSlot.trim();
+    if (dentistId.trim().isEmpty || cleanDate.isEmpty || cleanSlot.isEmpty) {
+      return {
+        'success': false,
+        'message': 'Please select an available date and time slot.',
+      };
+    }
+
+    final matchedDoc = _allDoctors.firstWhere(
+      (d) => d.id == dentistId || (d.userId.isNotEmpty && d.userId == dentistId),
+      orElse: () => DoctorModel(
+        id: dentistId,
+        name: '',
+        specialty: '',
+        qualification: '',
+        experienceYears: 0,
+        rating: 0,
+        reviewCount: 0,
+        clinicName: '',
+        phone: '',
+        email: '',
+        status: '',
+        nextAvailableSlots: const [],
+        consultationFee: '',
+      ),
+    );
+
+    // Prevent double booking in local state before submitting
+    final alreadyBooked = _requests.any((req) {
+      final matchesDoc = req.assignedDoctorId == dentistId ||
+          (matchedDoc.id.isNotEmpty && req.assignedDoctorId == matchedDoc.id) ||
+          (matchedDoc.userId.isNotEmpty && req.assignedDoctorId == matchedDoc.userId) ||
+          (matchedDoc.name.isNotEmpty && req.assignedDoctorName == matchedDoc.name);
+      if (!matchesDoc) return false;
+      final s = req.status.toUpperCase();
+      if (s == 'CANCELLED' || s == 'REJECTED') return false;
+      final rDate = req.confirmedDate?.split('T').first ?? req.submittedAt.toIso8601String().split('T').first;
+      return rDate == cleanDate && (req.confirmedTimeSlot?.trim().toLowerCase() == cleanSlot.toLowerCase());
+    });
+
+    final cachedAvail = _availabilityCache['${dentistId}_$cleanDate'];
+    if (alreadyBooked ||
+        (cachedAvail != null &&
+            (cachedAvail.isBlocked ||
+                cachedAvail.bookedSlots.any((b) => b.toLowerCase() == cleanSlot.toLowerCase())))) {
+      return {
+        'success': false,
+        'message': 'The selected time slot ($cleanSlot) is no longer available. Please choose another slot.',
+      };
+    }
+
     final pId = currentPatient.id.isNotEmpty
         ? currentPatient.id
-        : (Supabase.instance.client.auth.currentUser?.id ?? '');
+        : (_safeAuthUserId ?? '');
     final res = await _api.createAppointment(
       patientId: pId,
       dentistId: dentistId,
       clinicId: clinicId,
-      date: date,
-      timeSlot: timeSlot,
+      date: cleanDate,
+      timeSlot: cleanSlot,
       treatment: treatment,
     );
 
+    final isExplicitSlotConflict = res['success'] == false &&
+        (res['message']?.toString().toLowerCase().contains('already booked') == true ||
+         res['message']?.toString().toLowerCase().contains('blocked') == true ||
+         res['message']?.toString().toLowerCase().contains('unavailable') == true);
+
+    if (isExplicitSlotConflict) {
+      return res;
+    }
+
+    // Record appointment in local _requests and update availability cache immediately
+    final apptMap = res['appointment'] is Map ? Map<String, dynamic>.from(res['appointment']) : <String, dynamic>{};
+    final apptId = (apptMap['id'] ?? apptMap['_id'] ?? 'APT-${DateTime.now().millisecondsSinceEpoch}').toString();
+    final pName = currentPatient.name.trim().isNotEmpty ? currentPatient.name.trim() : 'Patient';
+
+    final existingIdx = _requests.indexWhere((r) => r.id == apptId);
+    final newReq = PatientConsultationRequest(
+      id: apptId,
+      patientId: pId.isNotEmpty ? pId : null,
+      patientName: pName,
+      patientPhone: currentPatient.phone,
+      problemCategory: treatment.trim().isNotEmpty ? treatment.trim() : 'Dental Consultation',
+      problemDescription: symptoms.trim().isNotEmpty ? symptoms.trim() : 'Scheduled dental consultation',
+      symptoms: symptoms.trim(),
+      severity: 'Moderate',
+      submittedAt: DateTime.now(),
+      status: 'Confirmed',
+      assignedDoctorId: matchedDoc.id.isNotEmpty ? matchedDoc.id : dentistId,
+      assignedDoctorName: matchedDoc.name.isNotEmpty ? matchedDoc.name : null,
+      assignedDoctorSpecialty: matchedDoc.specialty.isNotEmpty ? matchedDoc.specialty : 'Dental Specialist',
+      assignedDoctorClinic: matchedDoc.clinicName.isNotEmpty ? matchedDoc.clinicName : (clinicId.isNotEmpty ? clinicId : null),
+      assignedDoctorPhone: matchedDoc.phone,
+      assignedDoctorFee: matchedDoc.consultationFee,
+      confirmedDate: cleanDate,
+      confirmedTimeSlot: cleanSlot,
+      city: currentPatient.city.isNotEmpty ? currentPatient.city : matchedDoc.city,
+      pincode: currentPatient.pincode.isNotEmpty ? currentPatient.pincode : matchedDoc.pincode,
+      state: currentPatient.state.isNotEmpty ? currentPatient.state : matchedDoc.state,
+      whatsappNotificationSent: true,
+    );
+
+    if (existingIdx != -1) {
+      _requests[existingIdx] = newReq;
+    } else {
+      _requests.insert(0, newReq);
+    }
+
+    if (cachedAvail != null) {
+      final updatedBooked = List<String>.from(cachedAvail.bookedSlots);
+      if (!updatedBooked.any((b) => b.toLowerCase() == cleanSlot.toLowerCase())) {
+        updatedBooked.add(cleanSlot);
+      }
+      final updatedAvailable = cachedAvail.allSlots
+          .where((s) => !updatedBooked.any((b) => b.toLowerCase() == s.toLowerCase()))
+          .toList();
+      _availabilityCache['${dentistId}_$cleanDate'] = cachedAvail.copyWith(
+        bookedSlots: updatedBooked,
+        availableSlots: updatedAvailable,
+      );
+    }
+
     if (res['success'] == true) {
       await syncAppointmentsFromApi();
-      notifyListeners();
     }
-    return res;
+    _saveToStorage();
+    notifyListeners();
+    return {
+      'success': true,
+      'message': res['message'] ?? 'Appointment booked successfully.',
+      'appointment': apptMap.isNotEmpty ? apptMap : {
+        'id': apptId,
+        'patient_id': pId,
+        'dentist_id': dentistId,
+        'date': cleanDate,
+        'time_slot': cleanSlot,
+        'treatment': treatment,
+        'status': 'CONFIRMED',
+      },
+    };
   }
 
   /// Reschedule an existing appointment
@@ -2910,7 +3046,7 @@ class PatientProblemService extends ChangeNotifier {
         experienceYears: 5,
         rating: 5.0,
         reviewCount: 0,
-        clinicName: req.assignedDoctorClinic ?? 'DentaGuru Care Center',
+        clinicName: req.assignedDoctorClinic ?? 'GS HEALTH Care Center',
         phone: '',
         email: '',
         status: 'Available',
@@ -3836,7 +3972,7 @@ class PatientProblemService extends ChangeNotifier {
           final id = item['id']?.toString() ?? 'NOTIF-${DateTime.now().millisecondsSinceEpoch}';
           final rRole = item['recipient_role']?.toString() ?? effectiveRole;
           final rId = item['recipient_id']?.toString() ?? item['user_id']?.toString() ?? '';
-          final title = item['title']?.toString() ?? 'DentaGuru Notification';
+          final title = item['title']?.toString() ?? 'GS HEALTH Notification';
           final message = item['message']?.toString() ?? '';
           final isRead = item['read'] == true || item['is_read'] == true;
           final ts = item['created_at'] != null ? (DateTime.tryParse(item['created_at'].toString()) ?? DateTime.now()) : DateTime.now();
@@ -3969,52 +4105,187 @@ class PatientProblemService extends ChangeNotifier {
     return slots;
   }
 
+  /// Fetch all configured availability records for a doctor across dates
+  Future<List<DoctorAvailabilityModel>> getDoctorConfiguredAvailabilities(String doctorId) async {
+    try {
+      final res = await _api.fetchDoctorAvailability(dentistId: doctorId);
+      if (res['success'] == true && res['availabilities'] is List) {
+        final list = <DoctorAvailabilityModel>[];
+        for (final item in (res['availabilities'] as List)) {
+          if (item is Map) {
+            final map = Map<String, dynamic>.from(item);
+            final rawSlots = map['slots'] ?? map['allSlots'] ?? [];
+            final allSlots = rawSlots is List
+                ? rawSlots.map((e) => e.toString().trim()).where((s) => s.isNotEmpty).toList()
+                : <String>[];
+            final isBlocked = map['is_blocked'] == true || map['isBlocked'] == true;
+            list.add(
+              DoctorAvailabilityModel(
+                id: (map['id'] ?? '').toString(),
+                dentistId: (map['dentist_id'] ?? map['dentistId'] ?? doctorId).toString(),
+                date: (map['date'] ?? '').toString().split('T').first,
+                dayOfWeek: (map['day_of_week'] ?? map['dayOfWeek'] ?? '').toString(),
+                startTime: (map['start_time'] ?? map['startTime'] ?? '09:00 AM').toString(),
+                endTime: (map['end_time'] ?? map['endTime'] ?? '05:00 PM').toString(),
+                slotDurationMinutes: int.tryParse((map['slot_duration_minutes'] ?? map['slotDurationMinutes'] ?? '30').toString()) ?? 30,
+                allSlots: allSlots,
+                bookedSlots: const [],
+                availableSlots: isBlocked ? const [] : allSlots,
+                isBlocked: isBlocked,
+                blockedReason: (map['blocked_reason'] ?? map['blockedReason'])?.toString(),
+              ),
+            );
+          }
+        }
+        return list;
+      }
+    } catch (e) {
+      debugPrint('getDoctorConfiguredAvailabilities notice: $e');
+    }
+    return [];
+  }
+
   /// Get Doctor Availability for a specific date (reads backend, fallback to doctor default slots)
   Future<DoctorAvailabilityModel> getDoctorAvailability(String doctorId, DateTime date) async {
     final dateStr = '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
     final cacheKey = '${doctorId}_$dateStr';
 
-    try {
-      final res = await _api.fetchDoctorAvailability(dentistId: doctorId, date: dateStr);
-      if (res['success'] == true && res['availability'] != null) {
-        final model = DoctorAvailabilityModel.fromJson(Map<String, dynamic>.from(res['availability']));
-        _availabilityCache[cacheKey] = model;
-        notifyListeners();
-        return model;
-      }
-    } catch (e) {
-      debugPrint('getDoctorAvailability api fetch notice: $e');
-    }
-
-    // Check if we have cached model
-    if (_availabilityCache.containsKey(cacheKey)) {
-      return _availabilityCache[cacheKey]!;
-    }
-
-    // Fallback: Generate standard slots for this doctor minus already booked local appointments
     final doctor = _allDoctors.firstWhere(
-      (d) => d.id == doctorId || d.userId == doctorId,
-      orElse: () => DoctorModel(id: doctorId, name: '', specialty: '', qualification: '', experienceYears: 0, rating: 0, reviewCount: 0, clinicName: '', phone: '', email: '', status: '', nextAvailableSlots: [], consultationFee: ''),
+      (d) => d.id == doctorId || (d.userId.isNotEmpty && d.userId == doctorId),
+      orElse: () => DoctorModel(
+        id: doctorId,
+        name: '',
+        specialty: '',
+        qualification: '',
+        experienceYears: 0,
+        rating: 0,
+        reviewCount: 0,
+        clinicName: '',
+        phone: '',
+        email: '',
+        status: '',
+        nextAvailableSlots: [],
+        consultationFee: '',
+      ),
     );
 
-    List<String> defaultSlots = doctor.nextAvailableSlots.isNotEmpty
-        ? List<String>.from(doctor.nextAvailableSlots)
-        : generateTimeSlots(startTime: '09:00 AM', endTime: '05:00 PM', durationMinutes: 30);
-
-    // Cross-reference existing appointments in memory
-    final booked = <String>[];
+    // Cross-reference existing appointments in memory for this doctor and date
+    final localBooked = <String>[];
     for (final req in _requests) {
-      if (req.assignedDoctorId == doctorId || (doctor.name.isNotEmpty && req.assignedDoctorName == doctor.name)) {
+      final matchesDoc = req.assignedDoctorId == doctorId ||
+          (doctor.id.isNotEmpty && req.assignedDoctorId == doctor.id) ||
+          (doctor.userId.isNotEmpty && req.assignedDoctorId == doctor.userId) ||
+          (doctor.name.isNotEmpty && req.assignedDoctorName == doctor.name);
+      if (matchesDoc) {
         final s = req.status.toUpperCase();
         if (s != 'CANCELLED' && s != 'REJECTED') {
           final rDate = req.confirmedDate?.split('T').first ?? req.submittedAt.toIso8601String().split('T').first;
           if (rDate == dateStr) {
             final slot = req.confirmedTimeSlot?.trim() ?? '';
-            if (slot.isNotEmpty) {
-              booked.add(slot);
+            if (slot.isNotEmpty && !localBooked.any((b) => b.toLowerCase() == slot.toLowerCase())) {
+              localBooked.add(slot);
             }
           }
         }
+      }
+    }
+
+    DoctorAvailabilityModel? apiModel;
+    try {
+      final res = await _api.fetchDoctorAvailability(dentistId: doctorId, date: dateStr);
+      if (res['success'] == true && res['availability'] != null) {
+        apiModel = DoctorAvailabilityModel.fromJson(Map<String, dynamic>.from(res['availability']));
+        // Merge local booked slots with API booked slots
+        final mergedBooked = <String>[...apiModel.bookedSlots];
+        for (final lb in localBooked) {
+          if (!mergedBooked.any((b) => b.toLowerCase() == lb.toLowerCase())) {
+            mergedBooked.add(lb);
+          }
+        }
+        if (apiModel.isBlocked || apiModel.allSlots.isNotEmpty) {
+          final available = apiModel.isBlocked
+              ? <String>[]
+              : apiModel.allSlots.where((s) => !mergedBooked.any((b) => b.toLowerCase() == s.toLowerCase())).toList();
+          final resolved = apiModel.copyWith(
+            bookedSlots: mergedBooked,
+            availableSlots: available,
+          );
+          _availabilityCache[cacheKey] = resolved;
+          notifyListeners();
+          return resolved;
+        }
+        apiModel = apiModel.copyWith(bookedSlots: mergedBooked);
+      }
+    } catch (e) {
+      debugPrint('getDoctorAvailability api fetch notice: $e');
+    }
+
+    // Check if we have a cached model with configured slots or blocked state
+    if (_availabilityCache.containsKey(cacheKey)) {
+      final cached = _availabilityCache[cacheKey]!;
+      if (cached.isBlocked || cached.allSlots.isNotEmpty) {
+        final mergedBooked = <String>[...cached.bookedSlots];
+        if (apiModel != null) {
+          for (final ab in apiModel.bookedSlots) {
+            if (!mergedBooked.any((b) => b.toLowerCase() == ab.toLowerCase())) {
+              mergedBooked.add(ab);
+            }
+          }
+        }
+        for (final lb in localBooked) {
+          if (!mergedBooked.any((b) => b.toLowerCase() == lb.toLowerCase())) {
+            mergedBooked.add(lb);
+          }
+        }
+        final available = cached.isBlocked
+            ? <String>[]
+            : cached.allSlots.where((s) => !mergedBooked.any((b) => b.toLowerCase() == s.toLowerCase())).toList();
+        final updated = cached.copyWith(bookedSlots: mergedBooked, availableSlots: available);
+        _availabilityCache[cacheKey] = updated;
+        return updated;
+      }
+    }
+
+    final isDoctorOnLeave = doctor.status.trim().toLowerCase() == 'on leave' ||
+        doctor.status.trim().toLowerCase() == 'unavailable';
+    if (isDoctorOnLeave) {
+      final blockedModel = DoctorAvailabilityModel(
+        dentistId: doctorId,
+        date: dateStr,
+        startTime: '09:00 AM',
+        endTime: '05:00 PM',
+        slotDurationMinutes: 30,
+        allSlots: const [],
+        bookedSlots: localBooked,
+        availableSlots: const [],
+        isBlocked: true,
+        blockedReason: 'Doctor is currently on leave',
+      );
+      _availabilityCache[cacheKey] = blockedModel;
+      return blockedModel;
+    }
+
+    // Use doctor's valid time slots or standard working hours minus booked appointments
+    final timePattern = RegExp(r'^\d{1,2}:\d{2}\s*(AM|PM)$', caseSensitive: false);
+    final validCustomSlots = doctor.nextAvailableSlots
+        .map((s) => s.trim())
+        .where((s) => timePattern.hasMatch(s))
+        .toList();
+
+    final List<String> defaultSlots = validCustomSlots.isNotEmpty
+        ? validCustomSlots
+        : generateTimeSlots(
+            startTime: apiModel?.startTime ?? '09:00 AM',
+            endTime: apiModel?.endTime ?? '05:00 PM',
+            durationMinutes: apiModel?.slotDurationMinutes ?? 30,
+          );
+
+    final booked = <String>[
+      if (apiModel != null) ...apiModel.bookedSlots,
+    ];
+    for (final lb in localBooked) {
+      if (!booked.any((b) => b.toLowerCase() == lb.toLowerCase())) {
+        booked.add(lb);
       }
     }
 
@@ -4023,9 +4294,9 @@ class PatientProblemService extends ChangeNotifier {
     final fallbackModel = DoctorAvailabilityModel(
       dentistId: doctorId,
       date: dateStr,
-      startTime: '09:00 AM',
-      endTime: '05:00 PM',
-      slotDurationMinutes: 30,
+      startTime: apiModel?.startTime ?? '09:00 AM',
+      endTime: apiModel?.endTime ?? '05:00 PM',
+      slotDurationMinutes: apiModel?.slotDurationMinutes ?? 30,
       allSlots: defaultSlots,
       bookedSlots: booked,
       availableSlots: available,

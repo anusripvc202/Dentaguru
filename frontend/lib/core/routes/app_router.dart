@@ -4,6 +4,7 @@ import '../services/session_service.dart';
 import '../widgets/session_gate_screen.dart';
 import '../../features/home/presentation/screens/home_screen.dart';
 import '../../features/patient/presentation/screens/patient_dashboard.dart';
+import '../../features/patient/presentation/screens/find_doctors_screen.dart';
 import '../../features/dentist/presentation/screens/dentist_timeline.dart';
 import '../../features/clinic/presentation/screens/clinic_dashboard.dart';
 import '../../features/admin/presentation/screens/admin_dashboard.dart';
@@ -88,6 +89,10 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: '/patient',
       builder: (context, state) => const PatientDashboardScreen(),
+    ),
+    GoRoute(
+      path: '/patient/find-doctors',
+      builder: (context, state) => const FindDoctorsScreen(),
     ),
     GoRoute(
       path: '/dentist',

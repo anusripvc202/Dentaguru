@@ -30,7 +30,7 @@ class DentaGuruApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp.router(
-      title: 'DentaGuru Dental Healthcare Platform',
+      title: 'GS HEALTH | Dental Healthcare Platform',
       debugShowCheckedModeBanner: false,
 
       // Themes configurations

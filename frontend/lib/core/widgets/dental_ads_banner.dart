@@ -34,12 +34,12 @@ class DentalAd {
 
 const List<DentalAd> _patientAds = [
   DentalAd(
-    brand: 'DentaGuru',
+    brand: 'GS HEALTH',
     tagline: 'Comprehensive Dental Care Platform',
     description: 'Instant AI dental triage, certified specialist consultations, clinic appointments & digital e-prescriptions.',
     badgeLabel: 'Featured Platform',
     website: 'https://dentaguru.in',
-    ctaText: 'Explore DentaGuru',
+    ctaText: 'Explore GS HEALTH',
     gradientColors: [Color(0xFF0F172A), Color(0xFF2563EB)],
     icon: Icons.health_and_safety_rounded,
     emoji: '🦷',
@@ -105,12 +105,12 @@ const List<DentalAd> _patientAds = [
 
 const List<DentalAd> _dentistAds = [
   DentalAd(
-    brand: 'DentaGuru Pro',
+    brand: 'GS HEALTH Pro',
     tagline: 'Next-Gen Dental Practice Platform',
     description: 'Streamline specialist referrals, digital case sheets, revenue analytics, and instant multi-clinic consultations.',
     badgeLabel: 'Featured Platform',
     website: 'https://dentaguru.in',
-    ctaText: 'Explore DentaGuru Pro',
+    ctaText: 'Explore GS HEALTH Pro',
     gradientColors: [Color(0xFF0F172A), Color(0xFF2563EB)],
     icon: Icons.medical_services_rounded,
     emoji: '🦷',
@@ -226,7 +226,7 @@ class _DentalAdsBannerState extends State<DentalAdsBanner> {
   }
 
   Future<void> _handleAdTap(DentalAd ad) async {
-    if (ad.isDentaGuru || ad.brand.toLowerCase().contains('dentaguru')) {
+    if (ad.isDentaGuru || ad.brand.toLowerCase().contains('gs health') || ad.brand.toLowerCase().contains('dentaguru')) {
       _showDentaGuruModal(context, isDentist: widget.isDentist);
     } else if (ad.isGsCourse || ad.brand.toLowerCase().contains('course')) {
       _showGsCoursesModal(context);
@@ -863,7 +863,7 @@ class _DentaGuruPlatformSheet extends StatelessWidget {
                         children: [
                           Flexible(
                             child: Text(
-                              isDentist ? 'DentaGuru Pro' : 'DentaGuru Platform',
+                              isDentist ? 'GS HEALTH Pro' : 'GS HEALTH Platform',
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 18,
@@ -963,7 +963,7 @@ class _DentaGuruPlatformSheet extends StatelessWidget {
                   onPressed: () => Navigator.pop(context),
                   icon: const Icon(Icons.check_circle_rounded, size: 18),
                   label: const Text(
-                    'Return to DentaGuru Dashboard',
+                    'Return to GS HEALTH Dashboard',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                   ),
                   style: ElevatedButton.styleFrom(
@@ -1528,14 +1528,14 @@ class _GsCoursesSheet extends StatelessWidget {
         'Immediate Load Occlusion',
         'DCI Recognized Mastership Certificate',
       ],
-      'whatsappMsg': 'Hi GS Implants Academy, I would like to register for the 3-Day Comprehensive Cortico-Basal Masterclass on DentaGuru.',
+      'whatsappMsg': 'Hi GS Implants Academy, I would like to register for the 3-Day Comprehensive Cortico-Basal Masterclass on GS HEALTH.',
     },
     {
       'title': 'Full-Arch Immediate Loading & Prosthetic Mastership',
       'subtitle': 'From Intraoral Digital Scan to Final Hybrid Zirconia',
       'desc': 'Advanced prosthodontic protocols for immediate restoration: multi-unit abutment selection, digital impression workflow, passivity verification, and long-term occlusal equilibrium.',
       'dates': 'December 05 – 07, 2026 (Intensive Mastership)',
-      'venue': 'DentaGuru Training Academy, Mumbai & Delhi Centers',
+      'venue': 'GS HEALTH Training Academy, Mumbai & Delhi Centers',
       'mentor': 'Senior Prosthodontists & Implant Specialists',
       'badge': 'Advanced Prosthetics',
       'color': Color(0xFF2563EB),
@@ -1548,7 +1548,7 @@ class _GsCoursesSheet extends StatelessWidget {
         'Zirconia & Titanium Frameworks',
         'Complication Prevention & Care',
       ],
-      'whatsappMsg': 'Hi GS Implants Academy, I would like to register for the Full-Arch Immediate Loading & Prosthetic Mastership on DentaGuru.',
+      'whatsappMsg': 'Hi GS Implants Academy, I would like to register for the Full-Arch Immediate Loading & Prosthetic Mastership on GS HEALTH.',
     },
     {
       'title': 'Weekend Hands-On Typodont Surgical Workshop',
@@ -1568,7 +1568,7 @@ class _GsCoursesSheet extends StatelessWidget {
         'Soft Tissue Flap Design & Suturing',
         'Clinical Case Discussion',
       ],
-      'whatsappMsg': 'Hi GS Implants Academy, I am interested in the Weekend Hands-On Typodont Surgical Workshop on DentaGuru.',
+      'whatsappMsg': 'Hi GS Implants Academy, I am interested in the Weekend Hands-On Typodont Surgical Workshop on GS HEALTH.',
     },
   ];
 
@@ -1682,7 +1682,7 @@ class _GsCoursesSheet extends StatelessWidget {
                 Expanded(
                   child: InkWell(
                     onTap: () {
-                      final waUrl = Uri.parse('https://wa.me/919550686566?text=${Uri.encodeComponent('Hi GS Implants Academy, I would like to request the full upcoming clinical course schedule and registration details on DentaGuru.')}');
+                      final waUrl = Uri.parse('https://wa.me/919550686566?text=${Uri.encodeComponent('Hi GS Implants Academy, I would like to request the full upcoming clinical course schedule and registration details on GS HEALTH.')}');
                       onLaunchUrl(waUrl.toString());
                     },
                     borderRadius: BorderRadius.circular(10),

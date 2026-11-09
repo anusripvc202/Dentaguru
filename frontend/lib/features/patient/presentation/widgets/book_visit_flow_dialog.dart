@@ -526,7 +526,7 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
                           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: Color(0xFF1E3A8A)),
                         ),
                         Text(
-                          '${_selectedDoctor!.specialty} • ${_selectedDoctor!.clinicName.isNotEmpty ? _selectedDoctor!.clinicName : "DentaGuru Clinic"}',
+                          '${_selectedDoctor!.specialty} • ${_selectedDoctor!.clinicName.isNotEmpty ? _selectedDoctor!.clinicName : "GS HEALTH Clinic"}',
                           style: const TextStyle(fontSize: 11, color: Color(0xFF2563EB)),
                         ),
                       ],
@@ -942,7 +942,7 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
                 _buildSummaryRow(
                   icon: Icons.local_hospital_rounded,
                   label: 'Clinic',
-                  value: _selectedDoctor?.clinicName.isNotEmpty == true ? _selectedDoctor!.clinicName : 'DentaGuru Clinic',
+                  value: _selectedDoctor?.clinicName.isNotEmpty == true ? _selectedDoctor!.clinicName : 'GS HEALTH Clinic',
                   subValue: _selectedDoctor?.clinicAddress,
                 ),
                 const Divider(height: 18, color: Color(0xFFF1F5F9)),

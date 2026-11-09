@@ -1788,29 +1788,47 @@ const DoctorAvailability = {
         const date = query.date;
         if (!dentistId || !date) return null;
 
+        let idsToMatch = [dentistId];
         try {
-            const { data, error } = await supabaseAdmin
+            const { dentistTableId, userTableId } = await resolveDentistIds(dentistId);
+            idsToMatch = [...new Set([dentistId, dentistTableId, userTableId].filter(Boolean))];
+        } catch (_) {}
+
+        try {
+            let req = supabaseAdmin
                 .from('doctor_availability')
                 .select('*')
-                .eq('dentist_id', dentistId)
-                .eq('date', date)
-                .maybeSingle();
+                .eq('date', date);
+            if (idsToMatch.length === 1) {
+                req = req.eq('dentist_id', idsToMatch[0]);
+            } else {
+                req = req.in('dentist_id', idsToMatch);
+            }
+            const { data, error } = await req.limit(1).maybeSingle();
             if (!error && data) return data;
         } catch (e) {
             console.warn('⚠️ DoctorAvailability.findOne Supabase notice:', e.message);
         }
 
         return _inMemoryAvailability.find(a => 
-            (a.dentist_id === dentistId || a.dentistId === dentistId) && 
+            (idsToMatch.includes(a.dentist_id) || idsToMatch.includes(a.dentistId)) && 
             a.date === date
         ) || null;
     },
 
     async find(query = {}) {
         const dentistId = query.dentist_id || query.dentistId;
+        let idsToMatch = dentistId ? [dentistId] : [];
+        if (dentistId) {
+            try {
+                const { dentistTableId, userTableId } = await resolveDentistIds(dentistId);
+                idsToMatch = [...new Set([dentistId, dentistTableId, userTableId].filter(Boolean))];
+            } catch (_) {}
+        }
         try {
             let req = supabaseAdmin.from('doctor_availability').select('*');
-            if (dentistId) req = req.eq('dentist_id', dentistId);
+            if (idsToMatch.length === 1) req = req.eq('dentist_id', idsToMatch[0]);
+            else if (idsToMatch.length > 1) req = req.in('dentist_id', idsToMatch);
             if (query.date) req = req.eq('date', query.date);
             const { data, error } = await req.order('date', { ascending: true });
             if (!error && data && data.length > 0) return data;
@@ -1819,7 +1837,7 @@ const DoctorAvailability = {
         }
 
         return _inMemoryAvailability.filter(a => {
-            if (dentistId && a.dentist_id !== dentistId && a.dentistId !== dentistId) return false;
+            if (idsToMatch.length > 0 && !idsToMatch.includes(a.dentist_id) && !idsToMatch.includes(a.dentistId)) return false;
             if (query.date && a.date !== query.date) return false;
             return true;
         });
