@@ -4638,9 +4638,13 @@ class ApiService {
     required String dentistId,
     required String date,
     required List<String> slots,
+    List<String>? dates,
     String startTime = '09:00 AM',
     String endTime = '05:00 PM',
     int slotDurationMinutes = 30,
+    String? breakStartTime,
+    String? breakEndTime,
+    List<String>? workingDays,
     bool isBlocked = false,
     String? blockedReason,
     String dayOfWeek = '',
@@ -4649,10 +4653,14 @@ class ApiService {
     final payload = {
       'dentistId': dentistId,
       'date': cleanDate,
+      if (dates != null && dates.isNotEmpty) 'dates': dates,
       'dayOfWeek': dayOfWeek,
       'startTime': startTime,
       'endTime': endTime,
       'slotDurationMinutes': slotDurationMinutes,
+      if (breakStartTime != null) 'breakStartTime': breakStartTime,
+      if (breakEndTime != null) 'breakEndTime': breakEndTime,
+      if (workingDays != null) 'workingDays': workingDays,
       'slots': slots,
       'isBlocked': isBlocked,
       if (blockedReason != null) 'blockedReason': blockedReason,
@@ -4680,20 +4688,24 @@ class ApiService {
     // 2. Direct Supabase Fallback
     try {
       final client = Supabase.instance.client;
-      final res = await client.from('doctor_availability').upsert({
-        'dentist_id': dentistId,
-        'date': cleanDate,
-        'day_of_week': dayOfWeek,
-        'start_time': startTime,
-        'end_time': endTime,
-        'slot_duration_minutes': slotDurationMinutes,
-        'slots': slots,
-        'is_blocked': isBlocked,
-        'blocked_reason': blockedReason,
-        'updated_at': DateTime.now().toIso8601String(),
-      }, onConflict: 'dentist_id,date').select().single();
+      final targetDates = (dates != null && dates.isNotEmpty) ? dates : [cleanDate];
+      dynamic lastRes;
+      for (final d in targetDates) {
+        lastRes = await client.from('doctor_availability').upsert({
+          'dentist_id': dentistId,
+          'date': d.contains('T') ? d.split('T').first : d,
+          'day_of_week': dayOfWeek,
+          'start_time': startTime,
+          'end_time': endTime,
+          'slot_duration_minutes': slotDurationMinutes,
+          'slots': slots,
+          'is_blocked': isBlocked,
+          'blocked_reason': blockedReason,
+          'updated_at': DateTime.now().toIso8601String(),
+        }, onConflict: 'dentist_id,date').select().single();
+      }
 
-      return {'success': true, 'message': 'Availability saved successfully.', 'availability': res};
+      return {'success': true, 'message': 'Availability saved successfully.', 'availability': lastRes};
     } catch (e) {
       debugPrint('Supabase direct saveDoctorAvailability notice: $e');
       return {'success': false, 'message': 'Failed to save doctor availability: $e'};

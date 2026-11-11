@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:dentaguru/core/models/doctor_availability.dart';
 import 'package:dentaguru/core/services/patient_problem_service.dart';
 import 'package:dentaguru/features/admin/presentation/widgets/doctor_slot_management_dialog.dart';
 import 'package:dentaguru/features/patient/presentation/widgets/book_visit_flow_dialog.dart';
+import 'package:dentaguru/features/dentist/presentation/screens/dentist_timeline.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -80,8 +82,22 @@ void main() {
       expect(slots, ['10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM']);
     });
 
-    testWidgets('3. DoctorSlotManagementDialog allows admin to configure and generate slots', (tester) async {
-      tester.view.physicalSize = const Size(800, 1200);
+    test('2b. PatientProblemService generates slots strictly excluding lunch/break hours', () {
+      final service = PatientProblemService();
+      final slots = service.generateTimeSlots(
+        startTime: '11:00 AM',
+        endTime: '03:00 PM',
+        durationMinutes: 60,
+        breakStartTime: '01:00 PM',
+        breakEndTime: '02:00 PM',
+      );
+
+      expect(slots, ['11:00 AM', '12:00 PM', '02:00 PM']);
+      expect(slots.contains('01:00 PM'), isFalse);
+    });
+
+    testWidgets('3. DoctorSlotManagementDialog allows admin to configure and generate slots with working days & breaks', (tester) async {
+      tester.view.physicalSize = const Size(800, 1400);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() => tester.view.resetPhysicalSize());
 
@@ -101,10 +117,16 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       expect(find.text('Doctor Slot Management'), findsOneWidget);
-      expect(find.text('Auto-Generate Slots from Hours'), findsOneWidget);
+      expect(find.text('Configured Working Days'), findsOneWidget);
+      expect(find.text('Include Break / Lunch Hours'), findsOneWidget);
+
+      final autoGenBtn = find.text('Auto-Generate Slots from Hours');
+      expect(autoGenBtn, findsOneWidget);
+      await tester.ensureVisible(autoGenBtn);
+      await tester.pumpAndSettle();
 
       // Tap Auto-Generate
-      await tester.tap(find.text('Auto-Generate Slots from Hours'));
+      await tester.tap(autoGenBtn);
       await tester.pump(const Duration(milliseconds: 300));
 
       expect(find.text('Publish Doctor Schedule'), findsOneWidget);
@@ -148,6 +170,31 @@ void main() {
 
       // Should move to Step 3 (Reason & Symptoms)
       expect(find.text('Dental Issue / Consultation Reason'), findsOneWidget);
+    });
+
+    testWidgets('5. DentistTimelineScreen renders dedicated Manage Availability section with action buttons', (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      final service = PatientProblemService();
+      service.addTestDoctor(testDoctor);
+      service.currentDoctor = testDoctor;
+
+      await tester.pumpWidget(
+        const ProviderScope(
+          child: MaterialApp(
+            home: DentistTimelineScreen(),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      // Verify the dedicated Manage Availability section heading exists
+      expect(find.text('Manage Availability & Consultation Slots'), findsOneWidget);
+      expect(find.byKey(const Key('doctor_manage_availability_btn')), findsOneWidget);
+      expect(find.byKey(const Key('doctor_block_holiday_btn')), findsOneWidget);
     });
   });
 }

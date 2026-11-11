@@ -1812,7 +1812,11 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               const NeedHelpCard(),
               const SizedBox(height: 24),
 
-              // 5. Daily Consultation Timeline Queue & Availability Slot Management
+              // 5. Doctor Availability Management Section
+              _buildManageAvailabilitySection(),
+              const SizedBox(height: 24),
+
+              // 6. Daily Consultation Timeline Queue & Availability Slot Management
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -1888,6 +1892,188 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildManageAvailabilitySection() {
+    final currentDoc = _patientService.currentDoctor ??
+        (_patientService.allDoctors.isNotEmpty ? _patientService.allDoctors.first : null);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryBlue.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.event_available_rounded, color: AppTheme.primaryBlue, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Text(
+                      'Manage Availability & Consultation Slots',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Configure working days, hours, lunch breaks & publish booking slots',
+                      style: TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          const Divider(height: 1, color: Color(0xFFF1F5F9)),
+          const SizedBox(height: 14),
+
+          // Working Days & Hours Info Row
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _buildAvailabilityInfoPill(
+                icon: Icons.calendar_today_rounded,
+                label: 'Working Days',
+                value: 'Mon - Fri',
+              ),
+              _buildAvailabilityInfoPill(
+                icon: Icons.schedule_rounded,
+                label: 'Hours',
+                value: '09:00 AM - 05:00 PM',
+              ),
+              _buildAvailabilityInfoPill(
+                icon: Icons.coffee_rounded,
+                label: 'Lunch Break',
+                value: '01:00 PM - 02:00 PM',
+              ),
+              _buildAvailabilityInfoPill(
+                icon: Icons.timer_outlined,
+                label: 'Slot Duration',
+                value: '30 mins',
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Action Toolbar
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              ElevatedButton.icon(
+                key: const Key('doctor_manage_availability_btn'),
+                onPressed: () {
+                  DoctorSlotManagementDialog.show(
+                    context,
+                    initialDoctor: currentDoc,
+                    isDoctorSelfManage: true,
+                  );
+                },
+                icon: const Icon(Icons.edit_calendar_rounded, size: 16, color: Colors.white),
+                label: const Text(
+                  'Configure Working Days & Slots',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryBlue,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+              OutlinedButton.icon(
+                key: const Key('doctor_block_holiday_btn'),
+                onPressed: () {
+                  DoctorSlotManagementDialog.show(
+                    context,
+                    initialDoctor: currentDoc,
+                    isDoctorSelfManage: true,
+                  );
+                },
+                icon: const Icon(Icons.block_rounded, size: 16, color: Color(0xFFDC2626)),
+                label: const Text(
+                  'Block Date / Mark Holiday',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFDC2626)),
+                ),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: Color(0xFFFCA5A5)),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: const [
+              Icon(Icons.sync_rounded, size: 13, color: Color(0xFF10B981)),
+              SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  'Schedule changes sync instantly to Patient Dashboards & Profile booking slots',
+                  style: TextStyle(fontSize: 10.5, color: Color(0xFF10B981), fontWeight: FontWeight.w600),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAvailabilityInfoPill({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: AppTheme.primaryBlue),
+          const SizedBox(width: 6),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(label, style: const TextStyle(fontSize: 9.5, color: AppTheme.textMuted)),
+              Text(value, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
+            ],
+          ),
+        ],
       ),
     );
   }

@@ -41,6 +41,12 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
   String _endTime = '05:00 PM';
   int _slotDuration = 30;
 
+  bool _hasBreak = true;
+  String _breakStartTime = '01:00 PM';
+  String _breakEndTime = '02:00 PM';
+  List<String> _selectedWorkingDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+  bool _applyBatchWorkingDays = false;
+
   bool _isBlocked = false;
   final TextEditingController _blockedReasonController = TextEditingController();
   final TextEditingController _customSlotController = TextEditingController();
@@ -50,6 +56,8 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
   bool _isLoading = false;
   bool _isSaving = false;
   String? _statusMessage;
+
+  final List<String> _allWeekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
   final List<String> _startTimes = [
     '08:00 AM',
@@ -69,6 +77,22 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
     '07:00 PM',
     '08:00 PM',
     '09:00 PM',
+  ];
+
+  final List<String> _breakStartTimes = [
+    '12:00 PM',
+    '12:30 PM',
+    '01:00 PM',
+    '01:30 PM',
+    '02:00 PM',
+  ];
+
+  final List<String> _breakEndTimes = [
+    '01:00 PM',
+    '01:30 PM',
+    '02:00 PM',
+    '02:30 PM',
+    '03:00 PM',
   ];
 
   @override
@@ -105,6 +129,12 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
           _startTime = _startTimes.contains(avail.startTime) ? avail.startTime : '09:00 AM';
           _endTime = _endTimes.contains(avail.endTime) ? avail.endTime : '05:00 PM';
           _slotDuration = avail.slotDurationMinutes;
+          if (avail.breakStartTime != null && _breakStartTimes.contains(avail.breakStartTime)) {
+            _breakStartTime = avail.breakStartTime!;
+          }
+          if (avail.breakEndTime != null && _breakEndTimes.contains(avail.breakEndTime)) {
+            _breakEndTime = avail.breakEndTime!;
+          }
           _slots = List<String>.from(avail.allSlots);
           _bookedSlots = List<String>.from(avail.bookedSlots);
           if (_slots.isEmpty && !_isBlocked) {
@@ -112,6 +142,8 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
               startTime: _startTime,
               endTime: _endTime,
               durationMinutes: _slotDuration,
+              breakStartTime: _hasBreak ? _breakStartTime : null,
+              breakEndTime: _hasBreak ? _breakEndTime : null,
             );
           }
           _isLoading = false;
@@ -132,6 +164,8 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
       startTime: _startTime,
       endTime: _endTime,
       durationMinutes: _slotDuration,
+      breakStartTime: _hasBreak ? _breakStartTime : null,
+      breakEndTime: _hasBreak ? _breakEndTime : null,
     );
     setState(() {
       _slots = generated;
@@ -156,13 +190,39 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
       _statusMessage = null;
     });
 
+    List<DateTime>? batchDates;
+    if (_applyBatchWorkingDays) {
+      final dayMap = {
+        'Mon': DateTime.monday,
+        'Tue': DateTime.tuesday,
+        'Wed': DateTime.wednesday,
+        'Thu': DateTime.thursday,
+        'Fri': DateTime.friday,
+        'Sat': DateTime.saturday,
+        'Sun': DateTime.sunday,
+      };
+      final selectedInts = _selectedWorkingDays.map((d) => dayMap[d]).whereType<int>().toSet();
+      batchDates = [];
+      final now = DateTime.now();
+      for (int i = 0; i < 14; i++) {
+        final d = DateTime(now.year, now.month, now.day).add(Duration(days: i));
+        if (selectedInts.contains(d.weekday)) {
+          batchDates.add(d);
+        }
+      }
+    }
+
     final success = await _service.publishDoctorAvailability(
       doctorId: _selectedDoctor!.id,
       date: _selectedDate,
+      batchDates: batchDates,
       slots: _slots,
       startTime: _startTime,
       endTime: _endTime,
       slotDurationMinutes: _slotDuration,
+      breakStartTime: _hasBreak ? _breakStartTime : null,
+      breakEndTime: _hasBreak ? _breakEndTime : null,
+      workingDays: _selectedWorkingDays,
       isBlocked: _isBlocked,
       blockedReason: _isBlocked ? _blockedReasonController.text.trim() : null,
     );
@@ -171,7 +231,9 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
       setState(() {
         _isSaving = false;
         _statusMessage = success
-            ? '✓ Doctor schedule published successfully!'
+            ? (_applyBatchWorkingDays && batchDates != null
+                ? '✓ Schedule published successfully for ${batchDates.length} working days!'
+                : '✓ Doctor schedule published successfully!')
             : '⚠️ Could not save schedule. Please try again.';
       });
 
@@ -326,7 +388,38 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
                             const SizedBox(height: 16),
                           ],
 
-                          // 2. Date Selection
+                          // 2. Working Days Selection
+                          const Text('Configured Working Days', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark)),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: _allWeekDays.map((day) {
+                              final isSelected = _selectedWorkingDays.contains(day);
+                              return FilterChip(
+                                label: Text(day, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: isSelected ? Colors.white : AppTheme.textDark)),
+                                selected: isSelected,
+                                selectedColor: AppTheme.primaryBlue,
+                                backgroundColor: const Color(0xFFF1F5F9),
+                                checkmarkColor: Colors.white,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                onSelected: (selected) {
+                                  setState(() {
+                                    if (selected) {
+                                      _selectedWorkingDays.add(day);
+                                    } else {
+                                      if (_selectedWorkingDays.length > 1) {
+                                        _selectedWorkingDays.remove(day);
+                                      }
+                                    }
+                                  });
+                                },
+                              );
+                            }).toList(),
+                          ),
+                          const SizedBox(height: 16),
+
+                          // 3. Date Selection
                           const Text('Consultation Date', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark)),
                           const SizedBox(height: 6),
                           InkWell(
@@ -367,7 +460,7 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
                           ),
                           const SizedBox(height: 16),
 
-                          // 3. Date Block Toggle
+                          // 4. Date Block Toggle
                           Container(
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
@@ -425,7 +518,7 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
                           const SizedBox(height: 16),
 
                           if (!_isBlocked) ...[
-                            // 4. Hours & Slot Duration
+                            // 5. Hours & Slot Duration
                             Row(
                               children: [
                                 Expanded(
@@ -499,6 +592,117 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
                                   ),
                                 ),
                               ],
+                            ),
+                            const SizedBox(height: 12),
+
+                            // 6. Break Times Configuration (Excludes Break Period from Slots)
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF8FAFC),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: const Color(0xFFE2E8F0)),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Icon(Icons.coffee_rounded, size: 18, color: _hasBreak ? AppTheme.primaryBlue : AppTheme.textMuted),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            'Include Break / Lunch Hours',
+                                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: _hasBreak ? AppTheme.textDark : AppTheme.textMuted),
+                                          ),
+                                        ],
+                                      ),
+                                      Switch(
+                                        value: _hasBreak,
+                                        activeColor: AppTheme.primaryBlue,
+                                        onChanged: (val) {
+                                          setState(() => _hasBreak = val);
+                                          _generateSlots();
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                  if (_hasBreak) ...[
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: DropdownButtonFormField<String>(
+                                            value: _breakStartTime,
+                                            decoration: InputDecoration(
+                                              labelText: 'Break Start',
+                                              filled: true,
+                                              fillColor: Colors.white,
+                                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                            ),
+                                            items: _breakStartTimes.map((t) => DropdownMenuItem(value: t, child: Text(t, style: const TextStyle(fontSize: 12)))).toList(),
+                                            onChanged: (val) {
+                                              setState(() => _breakStartTime = val ?? _breakStartTime);
+                                              _generateSlots();
+                                            },
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: DropdownButtonFormField<String>(
+                                            value: _breakEndTime,
+                                            decoration: InputDecoration(
+                                              labelText: 'Break End',
+                                              filled: true,
+                                              fillColor: Colors.white,
+                                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                            ),
+                                            items: _breakEndTimes.map((t) => DropdownMenuItem(value: t, child: Text(t, style: const TextStyle(fontSize: 12)))).toList(),
+                                            onChanged: (val) {
+                                              setState(() => _breakEndTime = val ?? _breakEndTime);
+                                              _generateSlots();
+                                            },
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+
+                            // 7. Batch Schedule Across Next 14 Days Checkbox
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: _applyBatchWorkingDays ? const Color(0xFFEFF6FF) : const Color(0xFFF8FAFC),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: _applyBatchWorkingDays ? const Color(0xFFBFDBFE) : const Color(0xFFE2E8F0)),
+                              ),
+                              child: Row(
+                                children: [
+                                  Checkbox(
+                                    value: _applyBatchWorkingDays,
+                                    activeColor: AppTheme.primaryBlue,
+                                    onChanged: (val) => setState(() => _applyBatchWorkingDays = val ?? false),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: const [
+                                        Text('Apply schedule to selected working days for next 14 days', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                        Text('Synchronizes recurring hours across upcoming weeks', style: TextStyle(fontSize: 10.5, color: AppTheme.textMuted)),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                             const SizedBox(height: 12),
 

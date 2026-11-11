@@ -184,14 +184,10 @@ void main() {
         expect(find.text('8977906566'), findsOneWidget);
         expect(find.text('sheshu@dentaguru.com'), findsOneWidget);
 
-        // Verify Appointment Availability slots: 10:00 AM is Booked, 11:30 AM is Available
-        expect(find.text('10:00 AM (Booked)'), findsOneWidget);
+        // Verify Appointment Availability slots: ONLY published unbooked slots are displayed (10:00 AM is booked, so hidden)
+        expect(find.byKey(const Key('time_slot_10:00 AM')), findsNothing);
+        expect(find.text('10:00 AM (Booked)'), findsNothing);
         expect(find.text('11:30 AM'), findsOneWidget);
-
-        // Clicking booked slot should NOT select it
-        await tester.tap(find.byKey(const Key('time_slot_10:00 AM')));
-        await tester.pump();
-        expect(find.text('Book Appointment (10:00 AM)'), findsNothing);
 
         // Step 3: Select Available Time Slot (11:30 AM)
         await tester.ensureVisible(find.byKey(const Key('time_slot_11:30 AM')));
@@ -212,9 +208,9 @@ void main() {
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 500));
 
-        // Verify inline confirmation banner & slot now marked Booked (preventing double booking)
+        // Verify inline confirmation banner & slot immediately removed from available slots (preventing double booking)
         expect(find.text('Appointment Confirmed'), findsOneWidget);
-        expect(find.text('11:30 AM (Booked)'), findsOneWidget);
+        expect(find.byKey(const Key('time_slot_11:30 AM')), findsNothing);
 
         // Step 5: Back button on Doctor Details -> Find Doctors
         await tester.tap(find.byKey(const Key('back_to_find_doctors_button')));

@@ -123,32 +123,10 @@ class _SessionGateScreenState extends State<SessionGateScreen> with SingleTicker
                         ),
                       );
                     },
-                    child: Container(
-                      width: 104,
-                      height: 104,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.white,
-                        border: Border.all(
-                          color: const Color(0xFF0052CC).withValues(alpha: 0.35),
-                          width: 2.5,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFF0052CC).withValues(alpha: 0.4),
-                            blurRadius: 32,
-                            spreadRadius: 4,
-                          ),
-                        ],
-                      ),
-                      child: ClipOval(
-                        child: Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: DentaGuruToothIcon(size: 68, fallbackColor: const Color(0xFF0052CC)),
-                          ),
-                        ),
-                      ),
+                    child: const DentaGuruToothIcon(
+                      size: 112,
+                      darkBg: true,
+                      fallbackColor: Colors.white,
                     ),
                   ),
                   const SizedBox(height: 24),

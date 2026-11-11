@@ -4097,11 +4097,13 @@ class PatientProblemService extends ChangeNotifier {
     return _availabilityCache['${doctorId}_$dateStr'];
   }
 
-  /// Helper: Generate time slots given start, end, and duration
+  /// Helper: Generate time slots given start, end, duration and break period
   List<String> generateTimeSlots({
     String startTime = '09:00 AM',
     String endTime = '05:00 PM',
     int durationMinutes = 30,
+    String? breakStartTime,
+    String? breakEndTime,
   }) {
     int timeToMinutes(String timeStr) {
       final parts = timeStr.trim().split(' ');
@@ -4129,10 +4131,23 @@ class PatientProblemService extends ChangeNotifier {
     final duration = durationMinutes < 15 ? 30 : durationMinutes;
     if (start >= end) return [];
 
+    final hasBreak = breakStartTime != null && breakEndTime != null && breakStartTime.trim().isNotEmpty && breakEndTime.trim().isNotEmpty;
+    final breakStart = hasBreak ? timeToMinutes(breakStartTime) : -1;
+    final breakEnd = hasBreak ? timeToMinutes(breakEndTime) : -1;
+
     final slots = <String>[];
     int current = start;
     while (current + duration <= end) {
-      slots.add(minutesToTime(current));
+      final slotEnd = current + duration;
+      final overlapsBreak = hasBreak && (
+          (current >= breakStart && current < breakEnd) ||
+          (slotEnd > breakStart && slotEnd <= breakEnd) ||
+          (current <= breakStart && slotEnd >= breakEnd)
+      );
+
+      if (!overlapsBreak) {
+        slots.add(minutesToTime(current));
+      }
       current += duration;
     }
     return slots;
@@ -4340,35 +4355,53 @@ class PatientProblemService extends ChangeNotifier {
     return fallbackModel;
   }
 
-  /// Admin or Doctor publishes/saves availability slots
+  /// Admin, Clinic Admin or Doctor publishes/saves availability slots
   Future<bool> publishDoctorAvailability({
     required String doctorId,
     required DateTime date,
     required List<String> slots,
+    List<DateTime>? batchDates,
     String startTime = '09:00 AM',
     String endTime = '05:00 PM',
     int slotDurationMinutes = 30,
+    String? breakStartTime,
+    String? breakEndTime,
+    List<String>? workingDays,
     bool isBlocked = false,
     String? blockedReason,
     String dayOfWeek = '',
   }) async {
     final dateStr = '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    final formattedBatchDates = batchDates?.map((d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}'
+    ).toList();
 
     final res = await _api.saveDoctorAvailability(
       dentistId: doctorId,
       date: dateStr,
+      dates: formattedBatchDates,
       slots: slots,
       startTime: startTime,
       endTime: endTime,
       slotDurationMinutes: slotDurationMinutes,
+      breakStartTime: breakStartTime,
+      breakEndTime: breakEndTime,
+      workingDays: workingDays,
       isBlocked: isBlocked,
       blockedReason: blockedReason,
       dayOfWeek: dayOfWeek,
     );
 
     if (res['success'] == true) {
-      // Refresh cached model
+      // Invalidate and refresh cached model for primary date and batch dates
+      _availabilityCache.remove('${doctorId}_$dateStr');
       await getDoctorAvailability(doctorId, date);
+      if (batchDates != null) {
+        for (final bDate in batchDates) {
+          final bDateStr = '${bDate.year.toString().padLeft(4, '0')}-${bDate.month.toString().padLeft(2, '0')}-${bDate.day.toString().padLeft(2, '0')}';
+          _availabilityCache.remove('${doctorId}_$bDateStr');
+        }
+      }
       notifyListeners();
       return true;
     }

@@ -9,6 +9,15 @@ exports.bookAppointment = async (req, res) => {
         const requestedDateStr = date ? new Date(date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
         const normalizedSlot = (timeSlot || 'Today, 2:30 PM').trim();
 
+        // 🛡️ Prevent past-date bookings
+        const todayStr = new Date().toISOString().split('T')[0];
+        if (requestedDateStr < todayStr) {
+            return res.status(400).json({
+                success: false,
+                message: 'Cannot book appointments for past dates. Please select today or a future date.'
+            });
+        }
+
         // 🛡️ Verify doctor availability publication and block status
         if (dentistId) {
             try {
@@ -267,8 +276,38 @@ exports.rescheduleAppointment = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Appointment not found.' });
         }
 
-        // 🛡️ Prevent slot conflict on reschedule
+        // Role Authorization Guard: User must be admin, patient owner, assigned doctor, or associated clinic
+        if (req.user) {
+            const role = (req.user.role || '').toLowerCase();
+            const isSystemAdmin = role === 'admin' || role === 'super_admin' || role === 'sub-admin' || role === 'subadmin';
+            const isOwnerPatient = String(appointment.patient_id) === String(req.user.id);
+            const isAssignedDoctor = String(appointment.dentist_id) === String(req.user.id);
+            let isClinicAdmin = false;
+            if (role === 'clinic' || role === 'clinic_admin') {
+                try {
+                    const clinic = await Clinic.findOne({ user_id: req.user.id }) || await Clinic.findOne({ id: req.user.id });
+                    if (clinic && String(appointment.clinic_id) === String(clinic.id)) isClinicAdmin = true;
+                } catch (_) {}
+            }
+            if (!isSystemAdmin && !isOwnerPatient && !isAssignedDoctor && !isClinicAdmin) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Access Denied: You are not authorized to reschedule this appointment.'
+                });
+            }
+        }
+
+        // 🛡️ Prevent past-date rescheduling
         const newDateStr = date ? new Date(date).toISOString().split('T')[0] : (appointment.date ? new Date(appointment.date).toISOString().split('T')[0] : '');
+        const todayStr = new Date().toISOString().split('T')[0];
+        if (newDateStr && newDateStr < todayStr) {
+            return res.status(400).json({
+                success: false,
+                message: 'Cannot reschedule appointments to past dates. Please select today or a future date.'
+            });
+        }
+
+        // 🛡️ Prevent slot conflict on reschedule
         const newSlot = (timeSlot || appointment.time_slot || '').trim();
         if (appointment.dentist_id && newSlot) {
             const existingDentistAppts = await Appointment.find({ dentistId: appointment.dentist_id });
@@ -318,13 +357,34 @@ exports.rescheduleAppointment = async (req, res) => {
     }
 };
 
-// 6. CANCEL APPOINTMENT [-> CANCELLED]
+// 6. CANCEL APPOINTMENT [-> CANCELLED: RELEASES SLOT IMMEDIATELY]
 exports.cancelAppointment = async (req, res) => {
     const { id } = req.params;
     try {
         const appointment = await Appointment.findById(id);
         if (!appointment) {
             return res.status(404).json({ success: false, message: 'Appointment not found.' });
+        }
+
+        // Role Authorization Guard: User must be admin, patient owner, assigned doctor, or associated clinic
+        if (req.user) {
+            const role = (req.user.role || '').toLowerCase();
+            const isSystemAdmin = role === 'admin' || role === 'super_admin' || role === 'sub-admin' || role === 'subadmin';
+            const isOwnerPatient = String(appointment.patient_id) === String(req.user.id);
+            const isAssignedDoctor = String(appointment.dentist_id) === String(req.user.id);
+            let isClinicAdmin = false;
+            if (role === 'clinic' || role === 'clinic_admin') {
+                try {
+                    const clinic = await Clinic.findOne({ user_id: req.user.id }) || await Clinic.findOne({ id: req.user.id });
+                    if (clinic && String(appointment.clinic_id) === String(clinic.id)) isClinicAdmin = true;
+                } catch (_) {}
+            }
+            if (!isSystemAdmin && !isOwnerPatient && !isAssignedDoctor && !isClinicAdmin) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Access Denied: You are not authorized to cancel this appointment.'
+                });
+            }
         }
 
         const updated = await Appointment.findByIdAndUpdate(id, { status: 'CANCELLED' });
@@ -339,7 +399,7 @@ exports.cancelAppointment = async (req, res) => {
             );
         }
 
-        res.json({ success: true, message: 'Appointment cancelled successfully.', appointment: updated });
+        res.json({ success: true, message: 'Appointment cancelled successfully. Slot has been released.', appointment: updated });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to cancel appointment.' });
     }

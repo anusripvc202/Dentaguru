@@ -59,7 +59,9 @@ flutter:
   assets:
     - assets/
     - assets/app_icon.png
+    - assets/app_icon_dark.png
     - assets/gs_health_full_logo.png
+    - assets/gs_health_full_logo_dark.png
     - assets/dentaguru_logo.png
     - assets/dentaguru_tooth_icon.png
     - assets/dentaguru_tooth_icon_transparent.png

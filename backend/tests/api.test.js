@@ -6,6 +6,7 @@
 const assert = require('assert');
 const { User, Clinic, Dentist, Appointment, MedicalRecord, ChatMessage, AuditLog, DoctorAvailability } = require('../src/models/Schemas');
 const availabilityController = require('../src/controllers/availabilityController');
+const appointmentController = require('../src/controllers/appointmentController');
 const clinicController = require('../src/controllers/clinicController');
 const app = require('../src/app');
 
@@ -46,6 +47,27 @@ try {
         assert.deepStrictEqual(genSlotsResult.slots, ['09:00 AM', '09:30 AM', '10:00 AM', '10:30 AM'], 'Generated non-overlapping 30min slots correctly.');
         console.log('✓ SUCCESS: Doctor availability slot generation logic verified.');
 
+        // Test Slot Generation Helper WITH Break Time (e.g. Lunch Break 01:00 PM to 02:00 PM)
+        const mockReqGenBreak = {
+            body: {
+                startTime: '11:00 AM',
+                endTime: '03:00 PM',
+                durationMinutes: 60,
+                breakStartTime: '01:00 PM',
+                breakEndTime: '02:00 PM'
+            }
+        };
+        let genBreakSlotsResult = null;
+        const mockResGenBreak = {
+            status: (code) => ({
+                json: (data) => { genBreakSlotsResult = data; return data; }
+            })
+        };
+        await availabilityController.generateSlots(mockReqGenBreak, mockResGenBreak);
+        assert.ok(genBreakSlotsResult && genBreakSlotsResult.success, 'Break slot generation succeeded.');
+        assert.deepStrictEqual(genBreakSlotsResult.slots, ['11:00 AM', '12:00 PM', '02:00 PM'], 'Break time 01:00 PM to 02:00 PM correctly excluded.');
+        console.log('✓ SUCCESS: Slot generation strictly excludes break times and prevents overlaps.');
+
         // Test Patient Authorization Denial (403 Forbidden)
         const mockReqPatient = {
             user: { id: 'patient-123', role: 'Patient' },
@@ -65,12 +87,19 @@ try {
         assert.strictEqual(patientAuthStatus, 403, 'Patient cannot save doctor availability (403 Forbidden).');
         console.log('✓ SUCCESS: Patient role rejected with 403 when modifying doctor slots.');
 
+        // Retrieve an active dentist and patient from Supabase for live DB testing
+        const dentistsInDb = await Dentist.find({});
+        const testDoctorId = (dentistsInDb && dentistsInDb.length > 0) ? dentistsInDb[0].id : 'doc-test-1';
+        const usersInDb = await User.find({});
+        const testPatientId = (usersInDb && usersInDb.length > 0) ? usersInDb[0].id : 'a0000000-0000-0000-0000-000000000001';
+        const testDate = '2026-12-05';
+
         // Test Admin Doctor Availability Save
         const mockReqAdmin = {
             user: { id: 'admin-123', role: 'Admin' },
             body: {
-                dentistId: 'doc-test-1',
-                date: '2026-11-15',
+                dentistId: testDoctorId,
+                date: testDate,
                 startTime: '10:00 AM',
                 endTime: '12:00 PM',
                 slotDurationMinutes: 30,
@@ -89,7 +118,7 @@ try {
 
         // Test Doctor Availability Fetch
         const mockReqFetch = {
-            query: { dentistId: 'doc-test-1', date: '2026-11-15' }
+            query: { dentistId: testDoctorId, date: testDate }
         };
         let fetchResult = null;
         const mockResFetch = {
@@ -101,6 +130,102 @@ try {
         assert.ok(fetchResult && fetchResult.success, 'Availability retrieval succeeded.');
         assert.strictEqual(fetchResult.availability.availableSlots.length, 4, 'Four slots available.');
         console.log('✓ SUCCESS: Doctor availability slot retrieval verified.');
+
+        // Test Past-Date Booking Prevention (400 Bad Request)
+        let pastDateStatus = 0;
+        const mockPastReq = {
+            user: { id: 'patient-test-past', role: 'Patient' },
+            body: {
+                dentistId: testDoctorId,
+                date: '2020-01-01',
+                timeSlot: '10:00 AM',
+                treatment: 'Consultation'
+            }
+        };
+        const mockPastRes = {
+            status: (code) => {
+                pastDateStatus = code;
+                return { json: (d) => d };
+            }
+        };
+        await appointmentController.bookAppointment(mockPastReq, mockPastRes);
+        assert.strictEqual(pastDateStatus, 400, 'Past date booking rejected with 400.');
+        console.log('✓ SUCCESS: Past-date appointment bookings blocked with 400 Bad Request.');
+
+        // Test Appointment Booking & Immediate Slot Status Update
+        let bookResult = null;
+        let bookStatus = 0;
+        const mockBookReq = {
+            user: { id: testPatientId, role: 'Patient' },
+            body: {
+                dentistId: testDoctorId,
+                patientId: testPatientId,
+                date: testDate,
+                timeSlot: '10:00 AM',
+                treatment: 'Routine Checkup'
+            }
+        };
+        const mockBookRes = {
+            status: (code) => {
+                bookStatus = code;
+                return { json: (data) => { bookResult = data; return data; } };
+            }
+        };
+        await appointmentController.bookAppointment(mockBookReq, mockBookRes);
+        assert.strictEqual(bookStatus, 201, 'Booking created successfully with status 201.');
+        const bookedApptId = bookResult.appointment.id;
+        console.log('✓ SUCCESS: Appointment booked successfully and saved in database.');
+
+        // Test Concurrent / Double Booking Prevention (409 Conflict)
+        let doubleBookStatus = 0;
+        const mockDoubleReq = {
+            user: { id: 'b0000000-0000-0000-0000-000000000002', role: 'Patient' },
+            body: {
+                dentistId: testDoctorId,
+                date: testDate,
+                timeSlot: '10:00 AM',
+                treatment: 'Second Booking Attempt'
+            }
+        };
+        const mockDoubleRes = {
+            status: (code) => {
+                doubleBookStatus = code;
+                return { json: (d) => d };
+            }
+        };
+        await appointmentController.bookAppointment(mockDoubleReq, mockDoubleRes);
+        assert.strictEqual(doubleBookStatus, 409, 'Double booking rejected with 409 Conflict.');
+        console.log('✓ SUCCESS: Duplicate/overlapping slot booking prevented with 409 Conflict.');
+
+        // Verify that booked slot is immediately excluded from available slots
+        await availabilityController.getDoctorAvailability(mockReqFetch, mockResFetch);
+        assert.strictEqual(fetchResult.availability.availableSlots.length, 3, 'Available slots decreased from 4 to 3.');
+        assert.ok(!fetchResult.availability.availableSlots.includes('10:00 AM'), '10:00 AM is no longer in available slots.');
+        assert.ok(fetchResult.availability.bookedSlots.includes('10:00 AM'), '10:00 AM is in booked slots.');
+        console.log('✓ SUCCESS: Booked slot removed from doctor availability immediately.');
+
+        // Test Cancellation and Immediate Slot Release
+        const mockCancelReq = {
+            params: { id: bookedApptId },
+            user: { id: testPatientId, role: 'Patient' }
+        };
+        const mockCancelRes = {
+            status: (code) => ({ json: (d) => d }),
+            json: (d) => d
+        };
+        await appointmentController.cancelAppointment(mockCancelReq, mockCancelRes);
+
+        // Verify slot is released back to available slots
+        await availabilityController.getDoctorAvailability(mockReqFetch, mockResFetch);
+        assert.strictEqual(fetchResult.availability.availableSlots.length, 4, 'Available slots restored to 4 after cancellation.');
+        assert.ok(fetchResult.availability.availableSlots.includes('10:00 AM'), '10:00 AM slot is available again.');
+        console.log('✓ SUCCESS: Cancelled appointment releases slot immediately.');
+
+        // Cleanup test appointment and availability from Supabase (Rule 1 & Rule 2)
+        try {
+            await Appointment.deleteOne({ id: bookedApptId });
+            await DoctorAvailability.deleteOne({ dentist_id: testDoctorId, date: testDate });
+        } catch (_) {}
 
         // Test non-existent doctor association returns 404
         const mockNonExistentReq = {
@@ -118,7 +243,6 @@ try {
         console.log('✓ SUCCESS: Non-existent doctor correctly returns 404 Not Found.');
 
         // Test Clinic Doctor Association (No Duplicate Account Creation) with existing doctor
-        const dentistsInDb = await Dentist.find({});
         if (dentistsInDb && dentistsInDb.length > 0) {
             const sampleDoc = dentistsInDb[0];
             const originalClinicId = sampleDoc.clinic_id;

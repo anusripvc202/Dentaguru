@@ -1353,7 +1353,6 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
   Widget _buildAppointmentAvailabilitySection(DoctorModel doc) {
     final avail = _currentAvailability;
     final allSlots = avail?.allSlots ?? const <String>[];
-    final bookedSlots = avail?.bookedSlots ?? const <String>[];
     final availableSlots = avail?.availableSlots ?? const <String>[];
     final isBlocked = avail?.isBlocked ?? false;
 
@@ -1639,38 +1638,67 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                 ],
               ),
             )
+          else if (availableSlots.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade50,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.orange.shade200),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.event_busy_rounded, color: Colors.orange.shade800, size: 22),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'All Slots Fully Booked',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.textDark,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'All published slots for this date have been booked. Please pick another date.',
+                          style: TextStyle(fontSize: 11.5, color: Colors.black54),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            )
           else
             Wrap(
               spacing: 10,
               runSpacing: 10,
-              children: allSlots.map((slot) {
-                final isSlotBooked = bookedSlots.any((b) => b.toLowerCase() == slot.toLowerCase());
+              children: availableSlots.map((slot) {
                 final isSlotSelected = _selectedTimeSlot == slot;
 
                 return InkWell(
                   key: Key('time_slot_$slot'),
                   borderRadius: BorderRadius.circular(12),
-                  onTap: isSlotBooked
-                      ? null
-                      : () {
-                          setState(() {
-                            _selectedTimeSlot = slot;
-                          });
-                        },
+                  onTap: () {
+                    setState(() {
+                      _selectedTimeSlot = slot;
+                    });
+                  },
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 150),
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                     decoration: BoxDecoration(
-                      color: isSlotBooked
-                          ? Colors.grey.shade100
-                          : (isSlotSelected ? AppTheme.primaryBlue : Colors.white),
+                      color: isSlotSelected ? AppTheme.primaryBlue : Colors.white,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: isSlotBooked
-                            ? Colors.grey.shade300
-                            : (isSlotSelected
-                                ? AppTheme.primaryBlue
-                                : AppTheme.primaryBlue.withValues(alpha: 0.35)),
+                        color: isSlotSelected
+                            ? AppTheme.primaryBlue
+                            : AppTheme.primaryBlue.withValues(alpha: 0.35),
                         width: isSlotSelected ? 1.5 : 1,
                       ),
                     ),
@@ -1678,25 +1706,18 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
-                          isSlotBooked
-                              ? Icons.lock_clock_rounded
-                              : (isSlotSelected ? Icons.check_circle_rounded : Icons.access_time_rounded),
+                          isSlotSelected ? Icons.check_circle_rounded : Icons.access_time_rounded,
                           size: 15,
-                          color: isSlotBooked
-                              ? Colors.grey.shade500
-                              : (isSlotSelected ? Colors.white : AppTheme.primaryBlue),
+                          color: isSlotSelected ? Colors.white : AppTheme.primaryBlue,
                         ),
                         const SizedBox(width: 6),
                         Flexible(
                           child: Text(
-                            isSlotBooked ? '$slot (Booked)' : slot,
+                            slot,
                             style: TextStyle(
                               fontSize: 12.5,
                               fontWeight: FontWeight.w700,
-                              color: isSlotBooked
-                                  ? Colors.grey.shade500
-                                  : (isSlotSelected ? Colors.white : AppTheme.textDark),
-                              decoration: isSlotBooked ? TextDecoration.lineThrough : null,
+                              color: isSlotSelected ? Colors.white : AppTheme.textDark,
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),

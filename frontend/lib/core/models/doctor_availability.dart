@@ -6,6 +6,9 @@ class DoctorAvailabilityModel {
   final String startTime;
   final String endTime;
   final int slotDurationMinutes;
+  final String? breakStartTime;
+  final String? breakEndTime;
+  final List<String> workingDays;
   final List<String> allSlots;
   final List<String> bookedSlots;
   final List<String> availableSlots;
@@ -20,6 +23,9 @@ class DoctorAvailabilityModel {
     this.startTime = '09:00 AM',
     this.endTime = '05:00 PM',
     this.slotDurationMinutes = 30,
+    this.breakStartTime,
+    this.breakEndTime,
+    this.workingDays = const ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
     this.allSlots = const [],
     this.bookedSlots = const [],
     this.availableSlots = const [],
@@ -43,6 +49,11 @@ class DoctorAvailabilityModel {
       startTime: json['startTime']?.toString() ?? json['start_time']?.toString() ?? '09:00 AM',
       endTime: json['endTime']?.toString() ?? json['end_time']?.toString() ?? '05:00 PM',
       slotDurationMinutes: int.tryParse(json['slotDurationMinutes']?.toString() ?? json['slot_duration_minutes']?.toString() ?? '30') ?? 30,
+      breakStartTime: json['breakStartTime']?.toString() ?? json['break_start_time']?.toString() ?? json['break_start']?.toString(),
+      breakEndTime: json['breakEndTime']?.toString() ?? json['break_end_time']?.toString() ?? json['break_end']?.toString(),
+      workingDays: parseStringList(json['workingDays'] ?? json['working_days']).isNotEmpty
+          ? parseStringList(json['workingDays'] ?? json['working_days'])
+          : const ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
       allSlots: parseStringList(json['allSlots'] ?? json['slots']),
       bookedSlots: parseStringList(json['bookedSlots']),
       availableSlots: parseStringList(json['availableSlots'] ?? json['slots']),
@@ -60,6 +71,9 @@ class DoctorAvailabilityModel {
       'startTime': startTime,
       'endTime': endTime,
       'slotDurationMinutes': slotDurationMinutes,
+      if (breakStartTime != null) 'breakStartTime': breakStartTime,
+      if (breakEndTime != null) 'breakEndTime': breakEndTime,
+      'workingDays': workingDays,
       'slots': allSlots,
       'allSlots': allSlots,
       'bookedSlots': bookedSlots,
@@ -77,6 +91,9 @@ class DoctorAvailabilityModel {
     String? startTime,
     String? endTime,
     int? slotDurationMinutes,
+    String? breakStartTime,
+    String? breakEndTime,
+    List<String>? workingDays,
     List<String>? allSlots,
     List<String>? bookedSlots,
     List<String>? availableSlots,
@@ -91,6 +108,9 @@ class DoctorAvailabilityModel {
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
       slotDurationMinutes: slotDurationMinutes ?? this.slotDurationMinutes,
+      breakStartTime: breakStartTime ?? this.breakStartTime,
+      breakEndTime: breakEndTime ?? this.breakEndTime,
+      workingDays: workingDays ?? this.workingDays,
       allSlots: allSlots ?? this.allSlots,
       bookedSlots: bookedSlots ?? this.bookedSlots,
       availableSlots: availableSlots ?? this.availableSlots,

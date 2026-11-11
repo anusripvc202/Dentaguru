@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:dentaguru/core/theme/app_theme.dart';
 import '../constants/gs_health_brand_assets.dart';
 
 class DentaGuruLogo extends StatelessWidget {
@@ -20,16 +19,24 @@ class DentaGuruLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Zero-Failure Guaranteed High-Resolution GS HEALTH Logo (In-Memory + Asset Fallback)
+    final bool useDarkSurface =
+        darkBg || Theme.of(context).brightness == Brightness.dark;
+    final String base64Asset =
+        useDarkSurface ? kGsHealthLogoDarkBgBase64 : kGsHealthLogoBase64;
+    final String assetPath = useDarkSurface
+        ? 'assets/gs_health_full_logo_dark.png'
+        : 'assets/gs_health_full_logo.png';
+
+    // Zero-Failure High-Resolution Transparent GS HEALTH Logo (In-Memory + Asset Fallback)
     Widget logoImage;
     try {
       logoImage = Image.memory(
-        base64Decode(kGsHealthLogoBase64),
+        base64Decode(base64Asset),
         height: height,
         fit: fit,
         alignment: Alignment.centerLeft,
         errorBuilder: (_, __, ___) => Image.asset(
-          'assets/gs_health_full_logo.png',
+          assetPath,
           height: height,
           fit: fit,
           alignment: Alignment.centerLeft,
@@ -37,40 +44,24 @@ class DentaGuruLogo extends StatelessWidget {
       );
     } catch (_) {
       logoImage = Image.asset(
-        'assets/gs_health_full_logo.png',
+        assetPath,
         height: height,
         fit: fit,
         alignment: Alignment.centerLeft,
       );
     }
 
-    Widget content = logoImage;
-    if (darkBg) {
-      content = Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.15),
-              blurRadius: 10,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: onTap ?? () {
+          try {
+            context.go('/auth');
+          } catch (_) {}
+        },
         child: logoImage,
-      );
-    }
-
-    return InkWell(
-      onTap: onTap ?? () {
-        try {
-          context.go('/auth');
-        } catch (_) {}
-      },
-      borderRadius: BorderRadius.circular(8),
-      child: content,
+      ),
     );
   }
 }
@@ -79,38 +70,54 @@ class DentaGuruLogo extends StatelessWidget {
 class DentaGuruToothIcon extends StatelessWidget {
   final double size;
   final Color? fallbackColor;
+  final bool darkBg;
 
-  const DentaGuruToothIcon({super.key, this.size = 48.0, this.fallbackColor});
+  const DentaGuruToothIcon({
+    super.key,
+    this.size = 48.0,
+    this.fallbackColor,
+    this.darkBg = false,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final bool useDarkSurface =
+        darkBg || Theme.of(context).brightness == Brightness.dark;
+    final String base64Asset =
+        useDarkSurface ? kGsHealthAppIconDarkBgBase64 : kGsHealthAppIconBase64;
+
     try {
       return Image.memory(
-        base64Decode(kGsHealthAppIconBase64),
+        base64Decode(base64Asset),
         width: size,
         height: size,
         fit: BoxFit.contain,
-        errorBuilder: (context, error, stackTrace) => _buildFallback(context),
+        errorBuilder: (context, error, stackTrace) =>
+            _buildFallback(context, useDarkSurface),
       );
     } catch (_) {
-      return _buildFallback(context);
+      return _buildFallback(context, useDarkSurface);
     }
   }
 
-  Widget _buildFallback(BuildContext context) {
+  Widget _buildFallback(BuildContext context, bool useDarkSurface) {
+    final String primaryAsset =
+        useDarkSurface ? 'assets/app_icon_dark.png' : 'assets/app_icon.png';
     return Image.asset(
-      'assets/app_icon.png',
+      primaryAsset,
       width: size,
       height: size,
       fit: BoxFit.contain,
       errorBuilder: (context, error, stackTrace) {
         return Image.asset(
-          'assets/dentaguru_tooth_icon.png',
+          'assets/dentaguru_tooth_icon_transparent.png',
           width: size,
           height: size,
           fit: BoxFit.contain,
           errorBuilder: (_, __, ___) => Image.asset(
-            'assets/gs_health_full_logo.png',
+            useDarkSurface
+                ? 'assets/gs_health_full_logo_dark.png'
+                : 'assets/gs_health_full_logo.png',
             width: size,
             height: size,
             fit: BoxFit.contain,
