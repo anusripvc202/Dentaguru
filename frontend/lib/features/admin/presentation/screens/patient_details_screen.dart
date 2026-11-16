@@ -830,8 +830,8 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                   'Assignment Date',
                   _formatDateTime(req!.submittedAt),
                 ),
-              if (req?.adminNotes != null && req!.adminNotes!.trim().isNotEmpty)
-                _buildDetailRow(Icons.notes_rounded, 'Admin Guidance', req.adminNotes!.trim()),
+              if (req?.cleanAdminGuidance != null && req!.cleanAdminGuidance!.trim().isNotEmpty)
+                _buildDetailRow(Icons.notes_rounded, 'Admin Guidance', req.cleanAdminGuidance!.trim()),
             ],
           ] else ...[
             Container(

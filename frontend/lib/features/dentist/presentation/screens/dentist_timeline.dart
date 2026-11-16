@@ -18,8 +18,11 @@ import '../../../admin/presentation/widgets/doctor_slot_management_dialog.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'doctor_patient_record_screen.dart';
 
+typedef DentistTimeline = DentistTimelineScreen;
+
 class DentistTimelineScreen extends StatefulWidget {
-  const DentistTimelineScreen({super.key});
+  final int initialTabIndex;
+  const DentistTimelineScreen({super.key, this.initialTabIndex = 0});
 
   @override
   State<DentistTimelineScreen> createState() => _DentistTimelineScreenState();
@@ -69,6 +72,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   @override
   void initState() {
     super.initState();
+    _currentIndex = widget.initialTabIndex;
     _patientService.addListener(_onServiceUpdate);
     _patientService.setDentistMode(true);
     _patientService.syncAllDataFromApi();
@@ -2346,10 +2350,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
             style: const TextStyle(fontSize: 12, color: AppTheme.textMedium, height: 1.35),
           ),
 
-          if (req.adminNotes != null && req.adminNotes!.trim().isNotEmpty) ...[
+          if (req.cleanAdminGuidance != null && req.cleanAdminGuidance!.trim().isNotEmpty) ...[
             const SizedBox(height: 6),
             Text(
-              'Admin Note: ${req.adminNotes}',
+              '${req.isReferral ? "Referral Note" : "Admin Note"}: ${req.cleanAdminGuidance!.trim()}',
               style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: AppTheme.textMuted),
             ),
           ],
@@ -2534,13 +2538,6 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
             };
           }
         }
-
-        final authorizedSharedRecords = sharedMap.values.toList()
-          ..sort((a, b) {
-            final aDate = (a['uploadedAt'] ?? a['date'] ?? '').toString();
-            final bDate = (b['uploadedAt'] ?? b['date'] ?? '').toString();
-            return bDate.compareTo(aDate);
-          });
 
         final combinedPatients = uniquePatientMap.values.toList();
         final filteredPatients = combinedPatients.where((p) {
@@ -3418,17 +3415,32 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         req.status.toLowerCase().contains('accept');
     final isAccepting = _acceptingRequestIds.contains(req.id);
 
-    final headline = (req.symptoms.trim().isNotEmpty &&
-            req.symptoms.trim() != req.problemDescription.trim())
-        ? req.symptoms.trim()
-        : (req.problemCategory.trim().isNotEmpty
-            ? req.problemCategory.trim()
-            : req.problemDescription.trim());
+    final bool isAssignedToDoctor = (doc != null && doc.id.isNotEmpty && req.assignedDoctorId == doc.id) ||
+        (doc != null &&
+            req.assignedDoctorName != null &&
+            req.assignedDoctorName!.toLowerCase().contains(doc.name.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase()));
 
-    final rawPhone = req.patientPhone.trim();
-    final formattedPhone = rawPhone.isEmpty || rawPhone == 'Not Provided'
-        ? '+919000000200'
-        : (rawPhone.startsWith('+') ? rawPhone : '+91$rawPhone');
+    final bool isAuthorized = isAssignedToDoctor ||
+        isAccepted ||
+        (doc != null && (doc.verified || doc.verificationStatus == 'VERIFIED'));
+
+    final isReferral = req.isReferral;
+    final headline = isReferral
+        ? (req.problemCategory.trim().isNotEmpty
+            ? req.problemCategory.trim()
+            : 'Patient Referral')
+        : ((req.symptoms.trim().isNotEmpty && req.symptoms.trim() != req.problemDescription.trim())
+            ? req.symptoms.trim()
+            : (req.problemCategory.trim().isNotEmpty
+                ? req.problemCategory.trim()
+                : req.problemDescription.trim()));
+
+    final displayReason = isReferral
+        ? 'Referral Reason: ${req.cleanReferralReason}'
+        : req.problemDescription;
+
+    final formattedPhone = req.getFormattedPatientPhone(isAuthorized: isAuthorized);
+    final patientNameClean = req.patientName.trim().isNotEmpty ? req.patientName.trim() : 'Patient';
 
     final suggestedSpecialty = (req.assignedDoctorSpecialty != null && req.assignedDoctorSpecialty!.trim().isNotEmpty)
         ? req.assignedDoctorSpecialty!.trim()
@@ -3494,6 +3506,34 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                   ],
                 ),
               ),
+              if (isReferral)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF3E8FF),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.share_outlined,
+                        size: 12,
+                        color: Color(0xFF7E22CE),
+                      ),
+                      SizedBox(width: 4),
+                      Text(
+                        'PATIENT REFERRAL',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF7E22CE),
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
                 decoration: BoxDecoration(
@@ -3526,9 +3566,9 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
           ),
           const SizedBox(height: 6),
 
-          // English Symptom Description
+          // English Symptom Description / Referral Reason
           Text(
-            req.problemDescription,
+            displayReason,
             style: const TextStyle(
               fontSize: 14.5,
               color: Color(0xFF64748B),
@@ -3542,7 +3582,9 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
           // Metadata Rows
           _buildRequestMetaRow(
             Icons.person_outline_rounded,
-            '${req.patientName} · $formattedPhone',
+            formattedPhone != 'Phone not provided'
+                ? '$patientNameClean · $formattedPhone'
+                : patientNameClean,
           ),
           const SizedBox(height: 6),
           _buildRequestMetaRow(
@@ -3560,41 +3602,61 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
             formattedDate,
           ),
 
-          // ADMIN GUIDANCE Box
-          if (req.adminNotes != null && req.adminNotes!.trim().isNotEmpty) ...[
-            const SizedBox(height: 14),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFC),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'ADMIN GUIDANCE',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF64748B),
-                      letterSpacing: 0.6,
-                    ),
+          // Admin Guidance / Referral Instructions Box (Sanitized, No Raw JSON or IDs)
+          Builder(
+            builder: (context) {
+              final cleanGuidance = req.cleanAdminGuidance;
+              if (cleanGuidance == null || cleanGuidance.trim().isEmpty) {
+                return const SizedBox.shrink();
+              }
+              return Padding(
+                padding: const EdgeInsets.only(top: 14),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    req.adminNotes!.trim(),
-                    style: const TextStyle(
-                      fontSize: 14.5,
-                      fontWeight: FontWeight.w500,
-                      color: Color(0xFF0F172A),
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.info_outline_rounded,
+                            size: 13,
+                            color: Color(0xFF64748B),
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            isReferral ? 'REFERRAL INSTRUCTIONS' : 'ADMIN GUIDANCE',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF64748B),
+                              letterSpacing: 0.6,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        cleanGuidance.trim(),
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF0F172A),
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ),
-          ],
+                ),
+              );
+            },
+          ),
 
           const SizedBox(height: 14),
 

@@ -73,6 +73,8 @@ class DoctorModel {
           'Periodontics / Gum Care': '\$95',
         };
 
+  bool get verified => verificationStatus.trim().toUpperCase() == 'VERIFIED';
+
   String getFeeForCategory(String category) {
     if (procedureFees.containsKey(category)) {
       return procedureFees[category]!;
@@ -476,6 +478,175 @@ class PatientConsultationRequest {
       if (doc.clinicName.isNotEmpty) return doc.clinicName;
     }
     return '';
+  }
+
+  /// Whether this request represents a patient referral
+  bool get isReferral {
+    final descLower = problemDescription.toLowerCase();
+    if (descLower.startsWith('referral for ') ||
+        descLower.contains('referral for ') ||
+        descLower.startsWith('referral:')) {
+      return true;
+    }
+    if (adminNotes != null && adminNotes!.contains('REFERRAL_PAYLOAD:')) {
+      return true;
+    }
+    return false;
+  }
+
+  /// Extracts the clean clinical referral reason without raw JSON or wrapper text
+  String get cleanReferralReason {
+    // If adminNotes contains REFERRAL_PAYLOAD, check for clinical_complaint
+    if (adminNotes != null && adminNotes!.contains('REFERRAL_PAYLOAD:')) {
+      try {
+        final jsonStr = adminNotes!.split('REFERRAL_PAYLOAD:').last.trim();
+        final decoded = jsonDecode(jsonStr);
+        if (decoded is Map && decoded['clinical_complaint'] != null) {
+          final complaint = decoded['clinical_complaint'].toString().trim();
+          if (complaint.isNotEmpty) return complaint;
+        }
+      } catch (_) {}
+    }
+    // If problemDescription is formatted e.g. "Referral for suchi (9087654387): pain"
+    if (problemDescription.contains(':')) {
+      final afterColon = problemDescription.split(':').sublist(1).join(':').trim();
+      if (afterColon.isNotEmpty) {
+        return afterColon;
+      }
+    }
+    if (problemDescription.toLowerCase().startsWith('referral for ')) {
+      return problemDescription;
+    }
+    return problemDescription.isNotEmpty ? problemDescription : 'General consultation';
+  }
+
+  /// Sanitizes admin guidance or referral notes.
+  /// Strictly removes raw JSON, internal payloads (REFERRAL_PAYLOAD:), and database IDs.
+  /// Returns meaningful human instructions if present, or null.
+  static String? sanitizeAdminGuidance(String? notes) {
+    if (notes == null || notes.trim().isEmpty) return null;
+    final text = notes.trim();
+
+    // 1. If text contains REFERRAL_PAYLOAD:
+    if (text.contains('REFERRAL_PAYLOAD:')) {
+      final parts = text.split('REFERRAL_PAYLOAD:');
+      final beforeText = parts.first.trim();
+      final jsonStr = parts.last.trim();
+
+      String? extractedInstruction;
+      try {
+        final decoded = jsonDecode(jsonStr);
+        if (decoded is Map) {
+          final possibleKeys = [
+            'instructions',
+            'instruction',
+            'referral_instructions',
+            'admin_notes',
+            'adminNotes',
+            'admin_guidance',
+            'adminGuidance',
+            'notes',
+            'clinical_notes',
+            'guidance',
+            'special_instructions',
+          ];
+          for (final k in possibleKeys) {
+            final val = decoded[k]?.toString().trim();
+            if (val != null &&
+                val.isNotEmpty &&
+                !val.startsWith('{') &&
+                !val.startsWith('[') &&
+                !val.contains('REFERRAL_PAYLOAD:') &&
+                !val.contains('referrer_id') &&
+                !val.contains('referred_patient_id') &&
+                !val.contains('referred_user_id')) {
+              extractedInstruction = val;
+              break;
+            }
+          }
+        }
+      } catch (_) {}
+
+      if (beforeText.isNotEmpty &&
+          !beforeText.startsWith('{') &&
+          !beforeText.contains('REFERRAL_PAYLOAD:') &&
+          !beforeText.contains('referrer_id')) {
+        return extractedInstruction != null ? '$beforeText • $extractedInstruction' : beforeText;
+      }
+      return extractedInstruction;
+    }
+
+    // 2. If text is a raw serialized JSON object
+    if (text.startsWith('{') && text.endsWith('}')) {
+      try {
+        final decoded = jsonDecode(text);
+        if (decoded is Map) {
+          final possibleKeys = [
+            'instructions',
+            'instruction',
+            'referral_instructions',
+            'admin_notes',
+            'adminNotes',
+            'admin_guidance',
+            'adminGuidance',
+            'notes',
+            'clinical_notes',
+            'guidance',
+            'special_instructions',
+          ];
+          for (final k in possibleKeys) {
+            final val = decoded[k]?.toString().trim();
+            if (val != null &&
+                val.isNotEmpty &&
+                !val.startsWith('{') &&
+                !val.startsWith('[') &&
+                !val.contains('referrer_id') &&
+                !val.contains('referred_patient_id') &&
+                !val.contains('referred_user_id')) {
+              return val;
+            }
+          }
+          return null; // Suppress pure JSON without human instructions
+        }
+      } catch (_) {
+        return null;
+      }
+    }
+
+    // 3. If text contains technical database IDs or serialization markers, suppress it
+    if (text.contains('referrer_id') ||
+        text.contains('referred_user_id') ||
+        text.contains('referred_patient_id') ||
+        text.contains('"id":') ||
+        text.startsWith('{"')) {
+      return null;
+    }
+
+    // 4. Return clean human-readable text
+    return text;
+  }
+
+  /// Clean admin guidance getter
+  String? get cleanAdminGuidance => sanitizeAdminGuidance(adminNotes);
+
+  /// Returns patient phone with strict authorization check and zero dummy fallback
+  String getFormattedPatientPhone({required bool isAuthorized}) {
+    final raw = patientPhone.trim();
+    if (raw.isEmpty || raw == 'Not Provided' || raw == 'null') {
+      return 'Phone not provided';
+    }
+
+    final digits = raw.replaceAll(RegExp(r'\D'), '');
+    final cleanPhone = digits.length >= 10 ? digits.substring(digits.length - 10) : digits;
+
+    if (!isAuthorized) {
+      if (cleanPhone.length >= 4) {
+        return '+91 ••••• ••${cleanPhone.substring(cleanPhone.length - 3)}';
+      }
+      return 'Authorized Doctors Only';
+    }
+
+    return cleanPhone.length == 10 ? '+91 $cleanPhone' : (raw.startsWith('+') ? raw : '+91 $raw');
   }
 
   Map<String, dynamic> toJson() => {
@@ -2500,7 +2671,7 @@ class PatientProblemService extends ChangeNotifier {
             problemCategory: r.problemCategory.isNotEmpty ? r.problemCategory : existing.problemCategory,
             problemDescription: (r.problemDescription.isNotEmpty && r.problemDescription != 'Scheduled dental consultation') ? r.problemDescription : existing.problemDescription,
             symptoms: r.symptoms.isNotEmpty ? r.symptoms : existing.symptoms,
-            preferredLocation: (r.preferredLocation != null && r.preferredLocation!.isNotEmpty) ? r.preferredLocation : existing.preferredLocation,
+            preferredLocation: r.preferredLocation.isNotEmpty ? r.preferredLocation : existing.preferredLocation,
             severity: r.severity.isNotEmpty ? r.severity : existing.severity,
             submittedAt: r.submittedAt,
             status: (isConfirmed || r.status.isNotEmpty) ? r.status : existing.status,
@@ -2594,7 +2765,7 @@ class PatientProblemService extends ChangeNotifier {
         } else if (rawStatusUpper == 'DENTIST_ASSIGNED' ||
             rawStatusUpper == 'DENTIST_SUGGESTED' ||
             rawStatusUpper == 'PENDING_DENTIST_CONFIRMATION' ||
-            (assignedDocName != null && assignedDocName.isNotEmpty)) {
+            assignedDocName.isNotEmpty) {
           normalizedStatus = 'Doctor Assigned';
         } else if (rawStatusUpper == 'ADMIN_REVIEWED' || rawStatusUpper == 'ADMIN_REVIEW') {
           normalizedStatus = 'Admin Review';
@@ -3084,7 +3255,7 @@ class PatientProblemService extends ChangeNotifier {
             problemCategory: r.problemCategory.isNotEmpty ? r.problemCategory : existing.problemCategory,
             problemDescription: (r.problemDescription.isNotEmpty && r.problemDescription != 'Scheduled dental consultation') ? r.problemDescription : existing.problemDescription,
             symptoms: r.symptoms.isNotEmpty ? r.symptoms : existing.symptoms,
-            preferredLocation: (r.preferredLocation != null && r.preferredLocation!.isNotEmpty) ? r.preferredLocation : existing.preferredLocation,
+            preferredLocation: r.preferredLocation.isNotEmpty ? r.preferredLocation : existing.preferredLocation,
             severity: r.severity.isNotEmpty ? r.severity : existing.severity,
             submittedAt: r.submittedAt,
             status: (isConfirmed || r.status.isNotEmpty) ? r.status : existing.status,

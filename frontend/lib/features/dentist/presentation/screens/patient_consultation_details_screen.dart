@@ -624,8 +624,15 @@ class _PatientConsultationDetailsScreenState extends State<PatientConsultationDe
                   const Divider(height: 20),
                   _buildDetailRow(Icons.category_rounded, 'Category', widget.category),
                   _buildDetailRow(Icons.description_rounded, 'Symptoms', widget.symptoms),
-                  if (widget.adminNotes != null && widget.adminNotes!.isNotEmpty)
-                    _buildDetailRow(Icons.note_alt_rounded, 'Admin Note', widget.adminNotes!),
+                  Builder(
+                    builder: (context) {
+                      final cleanNote = PatientConsultationRequest.sanitizeAdminGuidance(widget.adminNotes);
+                      if (cleanNote != null && cleanNote.trim().isNotEmpty) {
+                        return _buildDetailRow(Icons.note_alt_rounded, 'Admin Note', cleanNote.trim());
+                      }
+                      return const SizedBox.shrink();
+                    },
+                  ),
                   if (widget.location.isNotEmpty)
                     _buildDetailRow(Icons.location_on_rounded, 'Location', widget.location),
                 ],
