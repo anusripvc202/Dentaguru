@@ -4,11 +4,17 @@ import 'package:google_fonts/google_fonts.dart';
 class AppTheme {
   AppTheme._();
 
-  // Brand Colors matching DentaGuru design mockup & logo
-  static const Color primaryBlue = Color(0xFF102747);
-  static const Color primaryBlueDark = Color(0xFF0B46A4);
-  static const Color brandOrange = Color(0xFFF47B20);
-  static const Color brandOrangeLight = Color(0xFFFF9500);
+  // GS HEALTH 2-Color Dominant Brand System
+  // Color 1: GS Deep Navy Blue (extracted from 'G' and 'HEALTH' in logo)
+  static const Color gsNavy = Color(0xFF012A58);
+  // Color 2: GS Vibrant Crimson/Coral Red (extracted from 'S' and leaf emblem in logo)
+  static const Color gsRed = Color(0xFFFE3434);
+
+  // Brand Colors matching GS HEALTH design system
+  static const Color primaryBlue = gsNavy;
+  static const Color primaryBlueDark = Color(0xFF001B3B);
+  static const Color brandOrange = gsRed;
+  static const Color brandOrangeLight = Color(0xFFFF5252);
 
   // Soft Tint & Background Colors
   static const Color softBlueBg = Color(0xFFF4F7FC);
@@ -90,7 +96,7 @@ class AppTheme {
         style: ElevatedButton.styleFrom(
           elevation: 2,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+          textStyle: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, fontSize: 14),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
@@ -153,7 +159,7 @@ class AppTheme {
         style: ElevatedButton.styleFrom(
           elevation: 2,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+          textStyle: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, fontSize: 14),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(

@@ -433,13 +433,65 @@ const requireChatAccess = async (req, res, next) => {
     });
 };
 
+// Middleware: Strict District-Level Access Control (Section 5)
+// - Main Admin: full access to all districts
+// - Sub-Admin: restricted to assigned districts only
+// - Injects req.assignedDistricts and req.isAuthorizedDistrict(districtId, districtName)
+const enforceDistrictAccess = async (req, res, next) => {
+    if (!req.user) {
+        return res.status(401).json({ success: false, message: 'Authentication required.' });
+    }
+
+    const roleLower = (req.user.role || '').toLowerCase();
+    const isMainAdmin = roleLower === 'admin' || roleLower === 'primaryadmin' || roleLower === 'primary_admin' || roleLower === 'superadmin' || roleLower === 'super_admin';
+
+    if (isMainAdmin) {
+        req.assignedDistricts = [];
+        req.isAuthorizedDistrict = () => true;
+        return next();
+    }
+
+    const isSubAdmin = roleLower === 'sub-admin' || roleLower === 'subadmin' || roleLower === 'sub_admin';
+    if (!isSubAdmin) {
+        return res.status(403).json({ success: false, message: 'Unauthorized role.' });
+    }
+
+    const { SubAdminDistrict } = require('../models/Schemas');
+    const assignedDistricts = await SubAdminDistrict.getDistrictsForSubAdmin(req.user.id);
+    req.assignedDistricts = assignedDistricts;
+
+    const authIds = new Set(assignedDistricts.map(d => d.id));
+    const authNames = new Set(assignedDistricts.map(d => d.name.toLowerCase()));
+
+    req.isAuthorizedDistrict = (dId, dName) => {
+        if (dId && authIds.has(dId)) return true;
+        if (dName && authNames.has(dName.toLowerCase())) return true;
+        return false;
+    };
+
+    // If request specifies a districtId or district, verify authorization
+    const targetDistrictId = req.query?.districtId || req.body?.districtId;
+    const targetDistrictName = req.query?.district || req.body?.district;
+    if (targetDistrictId || targetDistrictName) {
+        if (!req.isAuthorizedDistrict(targetDistrictId, targetDistrictName)) {
+            return res.status(403).json({
+                success: false,
+                message: `Access Denied: You do not have authorization to access district '${targetDistrictName || targetDistrictId}'.`
+            });
+        }
+    }
+
+    next();
+};
+
 module.exports = {
     authenticateJWT,
     optionalAuth,
     requireRole,
     requireMainAdmin,
     requirePermission,
-    requireChatAccess
+    requireChatAccess,
+    enforceDistrictAccess
 };
 
 

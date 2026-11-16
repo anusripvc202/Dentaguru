@@ -5,8 +5,11 @@ import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/models/medical_specialty_model.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/session_service.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../admin/presentation/widgets/doctor_slot_management_dialog.dart';
 import '../../../patient/presentation/screens/doctor_profile_screen.dart';
+import '../../../patient/presentation/widgets/referred_patients_sheet.dart';
+import '../widgets/gs_health_clinic_views.dart';
 import 'package:go_router/go_router.dart';
 
 class ClinicDashboardScreen extends StatefulWidget {
@@ -24,6 +27,8 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
   String _selectedDoctorDepartmentFilter = 'All';
   String _searchDoctorQuery = '';
   String _selectedAppointmentDoctor = 'All';
+  String _selectedBookingStatusFilter = 'All';
+  final Set<String> _processingBookingIds = {};
   final PatientProblemService _problemService = PatientProblemService();
 
   String get _currentClinicName {
@@ -46,23 +51,114 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
     if (allClinics.isNotEmpty) {
       return allClinics.first.clinicName;
     }
-    return 'GS HEALTH Partner Clinic';
+    final authName = _problemService.authenticatedClinicName.trim();
+    if (authName.isNotEmpty) {
+      return authName;
+    }
+    return '';
+  }
+
+  String get _scopedClinicName {
+    if (_selectedClinicOverride != null && _selectedClinicOverride!.trim().isNotEmpty) {
+      return _selectedClinicOverride!.trim();
+    }
+    if (widget.clinicName != null && widget.clinicName!.trim().isNotEmpty) {
+      return widget.clinicName!.trim();
+    }
+    if (_problemService.authenticatedClinicName.trim().isNotEmpty) {
+      return _problemService.authenticatedClinicName.trim();
+    }
+    final session = SessionService().currentSession;
+    if (session != null && session.role.toLowerCase().contains('clinic')) {
+      final metaClinic = session.metadata['clinicName'] ?? session.metadata['clinic_name'];
+      if (metaClinic != null && metaClinic.toString().trim().isNotEmpty) {
+        return metaClinic.toString().trim();
+      }
+      final sessionName = (session.name ?? '').trim();
+      if (sessionName.isNotEmpty && sessionName.toLowerCase() != 'clinic') {
+        return sessionName;
+      }
+    }
+    return _problemService.resolveClinic()?.clinicName.trim() ?? '';
+  }
+
+  ClinicModel? get _resolvedClinic =>
+      _problemService.resolveClinic(explicitClinicName: _scopedClinicName);
+
+  String get _displayClinicName {
+    final resolved = _resolvedClinic;
+    if (resolved != null && resolved.clinicName.trim().isNotEmpty) {
+      return resolved.clinicName.trim();
+    }
+    return _scopedClinicName.trim();
   }
 
   List<DoctorModel> get _clinicDoctors {
-    return _problemService.getClinicDoctors(_currentClinicName);
+    final scoped = _displayClinicName;
+    if (scoped.isEmpty) {
+      return _problemService.allDoctors
+          .where((d) =>
+              d.clinicName.trim().isNotEmpty &&
+              d.clinicName.trim().toLowerCase() != 'independent practice')
+          .toList();
+    }
+    return _problemService.getClinicDoctors(scoped);
+  }
+
+  List<PatientConsultationRequest> get _clinicBookings {
+    final scoped = _displayClinicName;
+    if (scoped.isNotEmpty) {
+      return _problemService.clinicBookingsFor(
+        clinicId: _resolvedClinic?.id,
+        clinicName: scoped,
+      );
+    }
+    final docs = _clinicDoctors;
+    if (docs.isEmpty) return const [];
+    final docIds = <String>{
+      for (final d in docs) ...[
+        if (d.id.isNotEmpty) d.id,
+        if (d.userId.isNotEmpty) d.userId,
+      ]
+    };
+    final docNames = <String>{
+      for (final d in docs)
+        if (d.name.isNotEmpty) d.name.replaceAll('Dr.', '').trim().toLowerCase(),
+    };
+    final Map<String, PatientConsultationRequest> merged = {};
+    for (final r in _problemService.requests) {
+      merged[r.id] = r;
+    }
+    for (final r in _problemService.dentistAssignedRequests) {
+      merged.putIfAbsent(r.id, () => r);
+    }
+    return merged.values.where((r) {
+      final docId = (r.assignedDoctorId ?? r.preferredDoctorId ?? '').trim();
+      final docName = (r.assignedDoctorName ?? r.preferredDoctorName ?? '')
+          .replaceAll('Dr.', '')
+          .trim()
+          .toLowerCase();
+      if (docId.isNotEmpty && docIds.contains(docId)) return true;
+      if (docName.isNotEmpty &&
+          docNames.any((n) => docName == n || docName.contains(n) || n.contains(docName))) {
+        return true;
+      }
+      return false;
+    }).toList();
   }
 
   @override
   void initState() {
     super.initState();
-    _currentIndex = widget.initialTab.clamp(0, 4);
+    _currentIndex = widget.initialTab >= 1 ? 1 : 0;
     if (widget.clinicName != null && widget.clinicName!.trim().isNotEmpty) {
       _selectedClinicOverride = widget.clinicName!.trim();
     }
     _problemService.addListener(_onServiceUpdate);
     _loadSavedProcedurePrices();
     _problemService.syncAllDataFromApi();
+    _problemService.syncAdminReferralsFromApi();
+    _problemService.syncNotificationsFromApi(role: 'Clinic');
   }
 
   Future<void> _loadSavedProcedurePrices() async {
@@ -101,6 +197,463 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return _buildGsHealthClinicScaffold(context);
+  }
+
+  Widget _buildGsHealthClinicScaffold(BuildContext context) {
+    final theme = Theme.of(context);
+    final clinic = _resolvedClinic;
+    final clinicName = _displayClinicName;
+    final clinicId = clinic?.id ?? _problemService.authenticatedClinicId;
+    final clinicLocation = (clinic?.location.trim().isNotEmpty == true)
+        ? clinic!.location.trim()
+        : _problemService.authenticatedClinicLocation.trim();
+    final coverUrl = _problemService.clinicCoverUrlFor(
+      clinicId,
+      clinicName,
+      fallbackUrl: clinic?.coverImageUrl ?? '',
+    );
+    final coverBytes = _problemService.clinicCoverBytesFor(clinicId, clinicName);
+    final isFeatured = _problemService.isClinicFeaturedFor(
+      clinicId,
+      clinicName,
+      modelValue: clinic?.isFeatured ?? false,
+    );
+    final featuredPlan = _problemService.clinicFeaturedPlanFor(
+      clinicId,
+      clinicName,
+      modelValue: clinic?.featuredPlan ?? '',
+    );
+
+    final attachedDoctors = _clinicDoctors;
+    final bookings = _clinicBookings;
+    final overlappingIds = _computeOverlappingBookingIds(bookings);
+    final now = DateTime.now();
+
+    int visitsTodayCount = 0;
+    int awaitingCount = 0;
+    int completedCount = 0;
+    for (final b in bookings) {
+      final cat = GsHealthClinicBookingsView.normalizeCategory(b.status);
+      if (cat == 'Pending') awaitingCount++;
+      if (cat == 'Completed') completedCount++;
+      if (cat != 'Cancelled') {
+        final rawDate = (b.confirmedDate ?? '').trim();
+        if (rawDate.isNotEmpty) {
+          final parsed = DateTime.tryParse(rawDate);
+          if (parsed != null &&
+              parsed.year == now.year &&
+              parsed.month == now.month &&
+              parsed.day == now.day) {
+            visitsTodayCount++;
+          }
+        }
+      }
+    }
+
+    final referrals = _problemService.clinicReferralsFor(clinicName: clinicName);
+    final notifications = _problemService.appNotifications
+        .where((n) =>
+            n.recipientRole.toLowerCase() == 'clinic' ||
+            (clinicId.isNotEmpty && n.recipientId == clinicId) ||
+            (clinicName.isNotEmpty &&
+                n.recipientId.toLowerCase() == clinicName.toLowerCase()))
+        .toList();
+    final unreadCount = notifications.where((n) => !n.isRead).length;
+
+    Future<void> refreshAll() async {
+      await Future.wait([
+        _problemService.syncClinicsFromApi(),
+        _problemService.syncDoctorsFromApi(),
+        _problemService.syncAppointmentsFromApi(),
+        _problemService.syncProblemRequestsFromApi(),
+        _problemService.syncAdminReferralsFromApi(),
+        _problemService.syncNotificationsFromApi(role: 'Clinic'),
+      ]);
+    }
+
+    void openNotifications() {
+      showClinicNotificationsSheet(
+        context: context,
+        notifications: notifications,
+        onMarkRead: (id) {
+          _problemService.markNotificationRead(id);
+          setState(() {});
+        },
+      );
+    }
+
+    void openEditDetails() {
+      showEditClinicDetailsSheet(
+        context: context,
+        clinicId: clinicId,
+        initialName: clinicName,
+        initialLocation: clinicLocation,
+        initialCoverUrl: coverUrl,
+        onOpenDepartments: () => _openDepartmentsSheet(context, theme),
+        onOpenProcedureRates: () => _openProcedureRatesSheet(context, theme),
+        onSave: ({
+          required String name,
+          required String location,
+          required String coverUrl,
+        }) async {
+          await _problemService.updateClinicDetails(
+            clinicId: clinicId,
+            clinicName: name,
+            location: location,
+            previousClinicName: clinicName,
+            coverImageUrl: coverUrl,
+          );
+          if (SessionService().currentSession?.role.toLowerCase().contains('clinic') == true) {
+            await SessionService().updateSessionUser(
+              name: name,
+              additionalMetadata: {
+                'clinicName': name,
+                'clinic_name': name,
+                'location': location,
+              },
+            );
+          }
+          if (!mounted) return;
+          setState(() => _selectedClinicOverride = name);
+          ScaffoldMessenger.of(this.context).showSnackBar(
+            const SnackBar(
+              content: Text('Clinic details saved.'),
+              backgroundColor: AppTheme.gsNavy,
+            ),
+          );
+        },
+      );
+    }
+
+    void openFeaturedPlan() {
+      showFeaturedClinicPlanSheet(
+        context: context,
+        currentIsFeatured: isFeatured,
+        currentPlan: featuredPlan,
+        onUpdatePlan: (featured, plan) async {
+          await _problemService.updateClinicDetails(
+            clinicId: clinicId,
+            clinicName: clinicName.isNotEmpty ? clinicName : 'Clinic Workspace',
+            location: clinicLocation,
+            previousClinicName: clinicName,
+            isFeatured: featured,
+            featuredPlan: plan,
+          );
+          if (mounted) {
+            ScaffoldMessenger.of(this.context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  featured
+                      ? 'Featured clinic plan active ($plan).'
+                      : 'Featured clinic plan paused.',
+                ),
+                backgroundColor: AppTheme.gsNavy,
+              ),
+            );
+          }
+        },
+      );
+    }
+
+    void openProfile() {
+      final session = SessionService().currentSession;
+      final phone = (clinic?.phone.trim().isNotEmpty == true)
+          ? clinic!.phone.trim()
+          : _problemService.authenticatedClinicPhone.trim().isNotEmpty
+              ? _problemService.authenticatedClinicPhone.trim()
+              : (session?.phone ?? '');
+      final email = _problemService.authenticatedClinicEmail.trim().isNotEmpty
+          ? _problemService.authenticatedClinicEmail.trim()
+          : (session?.email ?? '');
+      showClinicProfileSheet(
+        context: context,
+        clinicName: clinicName,
+        location: clinicLocation,
+        phone: phone,
+        email: email,
+        doctorCount: attachedDoctors.length,
+        bookingsCount: bookings.length,
+        onEditDetails: openEditDetails,
+        onOpenDepartments: () => _openDepartmentsSheet(context, theme),
+        onOpenProcedureRates: () => _openProcedureRatesSheet(context, theme),
+        onOpenFeaturedPlan: openFeaturedPlan,
+        onSignOut: () async {
+          await _problemService.clearClinicSession();
+          await SessionService().clearSession();
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Signed out from Clinic dashboard.'),
+                backgroundColor: AppTheme.gsNavy,
+              ),
+            );
+            context.go('/');
+          }
+        },
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF7F9FC),
+      body: SafeArea(
+        bottom: false,
+        child: IndexedStack(
+          index: _currentIndex,
+          children: [
+            GsHealthClinicOverview(
+              clinicName: clinicName,
+              clinicLocation: clinicLocation,
+              coverImageUrl: coverUrl,
+              coverImageBytes: coverBytes,
+              isFeatured: isFeatured,
+              featuredPlan: featuredPlan,
+              unreadNotifications: unreadCount,
+              referralsCount: referrals.length,
+              visitsTodayCount: visitsTodayCount,
+              awaitingConfirmationCount: awaitingCount,
+              completedVisitsCount: completedCount,
+              attachedDoctors: attachedDoctors,
+              onNotifications: openNotifications,
+              onProfile: openProfile,
+              onEditDetails: openEditDetails,
+              onOpenFeaturedPlan: openFeaturedPlan,
+              onOpenReferrals: () => showClinicReferralsSheet(
+                context: context,
+                clinicName: clinicName,
+                referrals: referrals,
+                onOpenReferralDirectory: () => ReferredPatientsSheet.show(context),
+              ),
+              onOpenAdvertise: () => showAdvertiseOnGsHealthSheet(
+                context: context,
+                clinicName: clinicName,
+                onSubmit: ({
+                  required String headline,
+                  required String audience,
+                  required String notes,
+                }) async {
+                  await _problemService.submitClinicAdRequest(
+                    clinicName: clinicName,
+                    headline: headline,
+                    targetAudience: audience,
+                    notes: notes,
+                  );
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Sponsored banner request submitted to GS HEALTH.'),
+                        backgroundColor: AppTheme.gsNavy,
+                      ),
+                    );
+                  }
+                },
+              ),
+              onTapBookingsStat: (filter) {
+                setState(() {
+                  _selectedBookingStatusFilter = filter;
+                  _currentIndex = 1;
+                });
+              },
+              onAddDoctor: () => _showAddDoctorDialog(context),
+              onRefresh: refreshAll,
+              onToggleDoctorStatus: _toggleClinicDoctorStatus,
+              onViewDoctorProfile: _openClinicDoctorProfile,
+              onEditDoctor: (doc) => _showEditClinicDoctorDialog(context, doc),
+              onManageDoctorSlots: (doc) =>
+                  DoctorSlotManagementDialog.show(context, initialDoctor: doc),
+              onRemoveDoctor: (doc) => _confirmRemoveDoctorFromClinic(context, doc),
+            ),
+            GsHealthClinicBookingsView(
+              allBookings: bookings,
+              selectedFilter: _selectedBookingStatusFilter,
+              processingBookingIds: _processingBookingIds,
+              overlappingBookingIds: overlappingIds,
+              onSelectFilter: (filter) =>
+                  setState(() => _selectedBookingStatusFilter = filter),
+              onConfirmBooking: _handleConfirmBooking,
+              onCancelBooking: _handleCancelBookingWithDialog,
+              onRefresh: refreshAll,
+            ),
+          ],
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
+          ),
+          child: BottomNavigationBar(
+            currentIndex: _currentIndex,
+            type: BottomNavigationBarType.fixed,
+            backgroundColor: Colors.white,
+            elevation: 0,
+            selectedItemColor: AppTheme.gsNavy,
+            unselectedItemColor: AppTheme.textMuted,
+            selectedLabelStyle: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
+            unselectedLabelStyle: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+            onTap: (index) => setState(() => _currentIndex = index),
+            items: const [
+              BottomNavigationBarItem(
+                icon: Icon(Icons.apartment_outlined),
+                activeIcon: Icon(Icons.apartment_rounded, color: AppTheme.gsNavy),
+                label: 'Overview',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.calendar_today_outlined),
+                activeIcon: Icon(Icons.calendar_today_rounded, color: AppTheme.gsRed),
+                label: 'Bookings',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Set<String> _computeOverlappingBookingIds(
+    List<PatientConsultationRequest> bookings,
+  ) {
+    final slotCounts = <String, int>{};
+    String keyFor(PatientConsultationRequest b) {
+      final slot = (b.confirmedTimeSlot ?? '').trim().toLowerCase();
+      if (slot.isEmpty) return '';
+      final doc = (b.assignedDoctorId ??
+              b.assignedDoctorName ??
+              b.preferredDoctorName ??
+              '')
+          .trim()
+          .toLowerCase();
+      final date = (b.confirmedDate ?? '').trim().toLowerCase();
+      return '$doc|$date|$slot';
+    }
+
+    for (final b in bookings) {
+      final cat = GsHealthClinicBookingsView.normalizeCategory(b.status);
+      if (cat == 'Cancelled') continue;
+      final k = keyFor(b);
+      if (k.isEmpty) continue;
+      slotCounts[k] = (slotCounts[k] ?? 0) + 1;
+    }
+
+    final overlaps = <String>{};
+    for (final b in bookings) {
+      final cat = GsHealthClinicBookingsView.normalizeCategory(b.status);
+      if (cat == 'Cancelled') continue;
+      final k = keyFor(b);
+      if (k.isNotEmpty && (slotCounts[k] ?? 0) > 1) {
+        overlaps.add(b.id);
+      }
+    }
+    return overlaps;
+  }
+
+  Future<void> _toggleClinicDoctorStatus(DoctorModel doc) async {
+    final isActive = doc.status.toLowerCase() != 'offline' &&
+        doc.status.toLowerCase() != 'inactive';
+    final nextStatus = isActive ? 'Inactive' : 'Available';
+    await _problemService.updateDoctorProfessionalProfile(
+      doctorId: doc.id,
+      status: nextStatus,
+    );
+    if (mounted) {
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${doc.name} is now ${isActive ? 'Inactive' : 'Active'}.'),
+          backgroundColor: AppTheme.gsNavy,
+        ),
+      );
+    }
+  }
+
+  Future<void> _handleConfirmBooking(PatientConsultationRequest booking) async {
+    if (_processingBookingIds.contains(booking.id)) return;
+    setState(() => _processingBookingIds.add(booking.id));
+    try {
+      await _problemService.confirmBookingByClinic(booking.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Booking confirmed for ${booking.patientName}.'),
+            backgroundColor: AppTheme.gsNavy,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _processingBookingIds.remove(booking.id));
+      }
+    }
+  }
+
+  Future<void> _handleCancelBookingWithDialog(
+    PatientConsultationRequest booking,
+  ) async {
+    if (_processingBookingIds.contains(booking.id)) return;
+    final reason = await showCancelClinicBookingDialog(
+      context,
+      patientName: booking.patientName,
+    );
+    if (reason == null || !mounted) return;
+
+    setState(() => _processingBookingIds.add(booking.id));
+    try {
+      await _problemService.cancelBookingByClinic(booking.id, reason: reason);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Booking cancelled for ${booking.patientName}.'),
+            backgroundColor: AppTheme.gsRed,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _processingBookingIds.remove(booking.id));
+      }
+    }
+  }
+
+  void _openDepartmentsSheet(BuildContext context, ThemeData theme) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => SizedBox(
+        height: MediaQuery.of(context).size.height * 0.78,
+        child: _buildDepartmentsTab(theme),
+      ),
+    );
+  }
+
+  void _openProcedureRatesSheet(BuildContext context, ThemeData theme) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => SizedBox(
+        height: MediaQuery.of(context).size.height * 0.78,
+        child: _buildServicesTab(theme),
+      ),
+    );
+  }
+
+  // ignore: unused_element
+  Widget _legacyUnusedClinicScaffold(BuildContext context) {
     final theme = Theme.of(context);
 
     final allClinics = _problemService.allClinics;
@@ -1602,7 +2155,9 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                               onPressed: () async {
                                 await _problemService.associateDoctorWithClinic(
                                   doctorId: detectedExistingDoctor!.id,
-                                  clinicName: _currentClinicName,
+                                  clinicName: _displayClinicName.isNotEmpty
+                                      ? _displayClinicName
+                                      : 'GS HEALTH Partner Clinic',
                                   specialty: selectedSpecialty,
                                   consultationFee: feeCtrl.text.trim().isNotEmpty ? feeCtrl.text.trim() : detectedExistingDoctor!.consultationFee,
                                   availableDays: selectedDays,
@@ -1612,8 +2167,8 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                                 setState(() {});
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
-                                    content: Text('🎉 Doctor ${detectedExistingDoctor!.name} associated with $_currentClinicName without creating a duplicate account!'),
-                                    backgroundColor: const Color(0xFF10B981),
+                                    content: Text('Doctor ${detectedExistingDoctor!.name} associated with $_currentClinicName.'),
+                                    backgroundColor: AppTheme.gsNavy,
                                   ),
                                 );
                               },
@@ -1621,7 +2176,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                           ] else ...[
                             ElevatedButton(
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF0D9488),
+                                backgroundColor: AppTheme.gsNavy,
                                 padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                               ),
@@ -1633,14 +2188,14 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                                 final pincode = pincodeCtrl.text.trim();
                                 if (name.isEmpty) {
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('⚠️ Full Name is mandatory.')),
+                                    const SnackBar(content: Text('Full Name is mandatory.')),
                                   );
                                   return;
                                 }
                                 final cleanPhone = phone.replaceAll(RegExp(r'[^0-9]'), '');
                                 if (cleanPhone.length < 10) {
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('⚠️ Enter a valid 10-digit Contact Number.')),
+                                    const SnackBar(content: Text('Enter a valid 10-digit Contact Number.')),
                                   );
                                   return;
                                 }
@@ -1649,6 +2204,10 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                                     ? qualCtrl.text.trim()
                                     : MedicalSpecialtyModel.getDefaultQualificationForSpecialty(selectedSpecialty);
 
+                                final targetClinic = _displayClinicName.isNotEmpty
+                                    ? _displayClinicName
+                                    : 'GS HEALTH Partner Clinic';
+
                                 final newDoc = _problemService.registerDoctor(
                                   name: name,
                                   phone: phone,
@@ -1656,7 +2215,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                                   licenseNumber: license.isNotEmpty ? license : 'MED-LIC-REG',
                                   specialty: selectedSpecialty,
                                   qualification: qual,
-                                  clinicName: _currentClinicName,
+                                  clinicName: targetClinic,
                                   experienceYears: expYears,
                                   consultationFee: feeCtrl.text.trim().isNotEmpty ? feeCtrl.text.trim() : '₹500',
                                   city: city,
@@ -1677,8 +2236,8 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                                 setState(() {});
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
-                                    content: Text('🎉 Doctor $name added and associated with $_currentClinicName!'),
-                                    backgroundColor: const Color(0xFF10B981),
+                                    content: Text('Doctor $name added and associated with $targetClinic.'),
+                                    backgroundColor: AppTheme.gsNavy,
                                   ),
                                 );
                               },

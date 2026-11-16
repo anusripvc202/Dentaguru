@@ -84,8 +84,8 @@ void main() {
         );
         await tester.pump();
 
-        // Switch to Doctors tab
-        await tester.tap(find.text('Doctors'));
+        // Scroll to Attached doctors section on Overview
+        await tester.ensureVisible(find.byKey(const Key('clinic_add_doctor_button')));
         await tester.pumpAndSettle();
 
         // Verify + Add Doctor button
@@ -127,8 +127,8 @@ void main() {
         );
         await tester.pump();
 
-        // Switch to Doctors tab
-        await tester.tap(find.text('Doctors'));
+        // Scroll to Attached doctors section on Overview
+        await tester.ensureVisible(find.byKey(Key('clinic_doctor_card_${cardiologyDoctor.id}')));
         await tester.pumpAndSettle();
 
         // Verify doctor card elements
@@ -162,8 +162,8 @@ void main() {
         );
         await tester.pump();
 
-        // Switch to Doctors tab
-        await tester.tap(find.text('Doctors'));
+        // Scroll to doctor's View Profile button on Overview
+        await tester.ensureVisible(find.byKey(Key('clinic_view_profile_${cardiologyDoctor.id}')));
         await tester.pumpAndSettle();
 
         // Tap View Profile button
@@ -202,8 +202,8 @@ void main() {
         );
         await tester.pump();
 
-        // Switch to Doctors tab
-        await tester.tap(find.text('Doctors'));
+        // Scroll to Add Doctor button on Overview
+        await tester.ensureVisible(find.byKey(const Key('clinic_add_doctor_button')));
         await tester.pumpAndSettle();
 
         // Open Add Doctor dialog
@@ -247,8 +247,8 @@ void main() {
         );
         await tester.pump();
 
-        // Switch to Doctors tab
-        await tester.tap(find.text('Doctors'));
+        // Scroll to Toggle status button on Overview
+        await tester.ensureVisible(find.byKey(Key('clinic_status_toggle_${cardiologyDoctor.id}')));
         await tester.pumpAndSettle();
 
         // Toggle status: Active -> Inactive
@@ -340,8 +340,8 @@ void main() {
         );
         await tester.pump();
 
-        // Switch to Appointments tab
-        await tester.tap(find.text('Appointments'));
+        // Switch to Bookings tab
+        await tester.tap(find.text('Bookings'));
         await tester.pumpAndSettle();
 
         // Verify Appointments are displayed

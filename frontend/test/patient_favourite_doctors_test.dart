@@ -91,9 +91,9 @@ void main() {
         expect(find.byType(FindDoctorsScreen), findsNothing);
         expect(find.text('Dental Specialists & Doctors'), findsNothing);
 
-        // Tap "Find Doctors" quick action on Patient Dashboard
-        expect(find.text('Find Doctors'), findsOneWidget);
-        await tester.tap(find.text('Find Doctors'));
+        // Tap "Find" tab on Patient Dashboard
+        expect(find.text('Find'), findsOneWidget);
+        await tester.tap(find.text('Find'));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 500));
 
@@ -157,7 +157,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 300));
 
         // Step 1: Patient Dashboard -> Find Doctors
-        await tester.tap(find.text('Find Doctors'));
+        await tester.tap(find.text('Find'));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 500));
         expect(find.byType(FindDoctorsScreen), findsOneWidget);

@@ -237,6 +237,8 @@ class PatientProfile {
   String city;
   String state;
   String pincode;
+  String? district;
+  String? districtIdentificationStatus;
   List<String> languages;
   Uint8List? photoBytes;
 
@@ -253,6 +255,8 @@ class PatientProfile {
     this.city = '',
     this.state = '',
     this.pincode = '',
+    this.district,
+    this.districtIdentificationStatus,
     this.languages = const ['English'],
     this.photoBytes,
   });
@@ -270,6 +274,8 @@ class PatientProfile {
         'city': city,
         'state': state,
         'pincode': pincode,
+        'district': district,
+        'district_identification_status': districtIdentificationStatus,
         'languages': languages,
         'photoBase64': photoBytes != null ? base64Encode(photoBytes!) : null,
       };
@@ -308,6 +314,8 @@ class PatientProfile {
       city: json['city'] ?? '',
       state: json['state'] ?? '',
       pincode: json['pincode'] ?? json['postal_code'] ?? '',
+      district: json['district'] ?? json['district_name'] ?? json['city'],
+      districtIdentificationStatus: json['district_identification_status'] ?? 'VERIFIED',
       languages: parsedLangs,
       photoBytes: bytes,
     );
@@ -570,11 +578,16 @@ class PatientConsultationRequest {
 }
 
 /// Central state service for logged in patient, consultation requests, and doctor directory
-/// Model representing a Clinic registered in DentaGuru platform
+/// Model representing a Clinic registered in GS HEALTH platform
 class ClinicModel {
   final String id;
+  final String userId;
   final String clinicName;
   final String location;
+  final String phone;
+  final String coverImageUrl;
+  final bool isFeatured;
+  final String featuredPlan;
   final double rating;
   final int reviewsCount;
   final bool verified;
@@ -584,8 +597,13 @@ class ClinicModel {
 
   ClinicModel({
     required this.id,
+    this.userId = '',
     required this.clinicName,
     required this.location,
+    this.phone = '',
+    this.coverImageUrl = '',
+    this.isFeatured = false,
+    this.featuredPlan = '',
     this.rating = 5.0,
     this.reviewsCount = 0,
     this.verified = true,
@@ -711,8 +729,38 @@ class PatientProblemService extends ChangeNotifier {
     notifyListeners();
   }
 
+  void addTestClinic(ClinicModel clinic) {
+    _allClinics.add(clinic);
+    notifyListeners();
+  }
+
   void addTestRequest(PatientConsultationRequest req) {
     _requests.add(req);
+    notifyListeners();
+  }
+
+  void addTestAssignedRequest(PatientConsultationRequest req) {
+    _dentistAssignedRequests.add(req);
+    if (!_requests.any((r) => r.id == req.id)) {
+      _requests.add(req);
+    }
+    notifyListeners();
+  }
+
+  void addTestPatient(PatientProfile patient) {
+    _allPatients.add(patient);
+    notifyListeners();
+  }
+
+  void setTestDistricts(List<Map<String, dynamic>> list) {
+    _districts.clear();
+    _districts.addAll(list);
+    notifyListeners();
+  }
+
+  void setTestAssignmentHistory(List<Map<String, dynamic>> list) {
+    _assignmentHistory.clear();
+    _assignmentHistory.addAll(list);
     notifyListeners();
   }
 
@@ -1189,6 +1237,42 @@ class PatientProblemService extends ChangeNotifier {
               }
             }
           }
+          _subAdminDistricts.clear();
+          if (saMap['assignedDistricts'] is List) {
+            for (final d in saMap['assignedDistricts']) {
+              if (d is Map) {
+                _subAdminDistricts.add(Map<String, dynamic>.from(d));
+              } else if (d != null) {
+                _subAdminDistricts.add({'id': d.toString(), 'name': d.toString()});
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
+      final savedDistrictsJson = prefs.getString('dentaguru_districts_cache');
+      if (savedDistrictsJson != null && savedDistrictsJson.isNotEmpty) {
+        try {
+          final List decoded = jsonDecode(savedDistrictsJson);
+          _districts.clear();
+          _districts.addAll(decoded.whereType<Map>().map((m) => Map<String, dynamic>.from(m)));
+        } catch (_) {}
+      }
+
+      // 5b2. Load Clinic Session
+      final clinicSessionStr = prefs.getString('dentaguru_clinic_session');
+      if (clinicSessionStr != null && clinicSessionStr.isNotEmpty) {
+        try {
+          final Map<String, dynamic> cMap = jsonDecode(clinicSessionStr);
+          _isClinicMode = cMap['isClinicMode'] == true;
+          _authenticatedClinicId = (cMap['id'] ?? '').toString();
+          _authenticatedClinicName = (cMap['clinicName'] ?? '').toString();
+          _authenticatedClinicLocation = (cMap['location'] ?? '').toString();
+          _authenticatedClinicPhone = (cMap['phone'] ?? '').toString();
+          _authenticatedClinicEmail = (cMap['email'] ?? '').toString();
+          _authenticatedClinicIsFeatured = cMap['isFeatured'] == true;
+          _authenticatedClinicFeaturedPlan = (cMap['featuredPlan'] ?? '').toString();
+          _authenticatedClinicCoverUrl = (cMap['coverImageUrl'] ?? '').toString();
         } catch (_) {}
       }
 
@@ -1243,6 +1327,23 @@ class PatientProblemService extends ChangeNotifier {
   final List<Map<String, dynamic>> _subAdmins = [];
   List<Map<String, dynamic>> get subAdmins => List.unmodifiable(_subAdmins);
 
+  // District Management & Jurisdiction State
+  final List<Map<String, dynamic>> _districts = [];
+  List<Map<String, dynamic>> get districts => List.unmodifiable(_districts);
+
+  final List<Map<String, dynamic>> _subAdminDistricts = [];
+  List<Map<String, dynamic>> get subAdminDistricts => List.unmodifiable(_subAdminDistricts);
+
+  // Patient Assignment & Immutable Audit Trail State
+  final List<Map<String, dynamic>> _assignmentHistory = [];
+  List<Map<String, dynamic>> get assignmentHistory => List.unmodifiable(_assignmentHistory);
+
+  Map<String, dynamic> _assignmentStats = {};
+  Map<String, dynamic> get assignmentStats => Map.unmodifiable(_assignmentStats);
+
+  final List<Map<String, dynamic>> _districtReports = [];
+  List<Map<String, dynamic>> get districtReports => List.unmodifiable(_districtReports);
+
   // Sub-Admin RBAC Session State
   bool _isSubAdminMode = false;
   final Set<String> _subAdminPermissions = {};
@@ -1269,12 +1370,74 @@ class PatientProblemService extends ChangeNotifier {
            _subAdminPermissions.contains(pUpper);
   }
 
+  /// Check whether the current user (Sub-Admin or Main Admin) has jurisdiction over a district
+  bool canAccessDistrict(String? districtIdOrName) {
+    if (!_isSubAdminMode) return true; // Main Admin has global jurisdiction
+    if (_subAdminDistricts.isEmpty) return true; // If no districts assigned, fallback
+    if (districtIdOrName == null || districtIdOrName.trim().isEmpty) return true;
+    final target = districtIdOrName.trim().toLowerCase();
+    for (final d in _subAdminDistricts) {
+      final dId = (d['id'] ?? d['district_id'] ?? '').toString().toLowerCase();
+      final dName = (d['name'] ?? d['district_name'] ?? '').toString().toLowerCase();
+      if (dId == target || dName == target || target.contains(dName) || dName.contains(target)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Get patients filtered strictly by Sub-Admin assigned districts
+  List<PatientProfile> getPatientsForCurrentRole() {
+    if (!_isSubAdminMode || _subAdminDistricts.isEmpty) {
+      return allPatients;
+    }
+    return allPatients.where((p) {
+      final pDistrict = (p.district ?? '').trim().toLowerCase();
+      final pCity = p.city.trim().toLowerCase();
+      return _subAdminDistricts.any((d) {
+        final dId = (d['id'] ?? '').toString().toLowerCase();
+        final dName = (d['name'] ?? '').toString().toLowerCase();
+        return (pDistrict.isNotEmpty && (pDistrict == dName || pDistrict == dId)) ||
+               (pCity.isNotEmpty && (pCity == dName || pCity.contains(dName) || dName.contains(pCity)));
+      });
+    }).toList();
+  }
+
+  /// Get dentists filtered strictly by Sub-Admin assigned districts
+  List<DoctorModel> getDentistsForCurrentRole() {
+    if (!_isSubAdminMode || _subAdminDistricts.isEmpty) {
+      return allDoctors;
+    }
+    return allDoctors.where((d) {
+      final docCity = d.city.trim().toLowerCase();
+      return _subAdminDistricts.any((dist) {
+        final distName = (dist['name'] ?? '').toString().toLowerCase();
+        return docCity.isNotEmpty && (docCity == distName || docCity.contains(distName) || distName.contains(docCity));
+      });
+    }).toList();
+  }
+
+  /// Get patient problem requests filtered strictly by Sub-Admin assigned districts
+  List<PatientConsultationRequest> getRequestsForCurrentRole() {
+    if (!_isSubAdminMode || _subAdminDistricts.isEmpty) {
+      return requests;
+    }
+    return requests.where((r) {
+      final rCity = r.city.trim().toLowerCase();
+      return _subAdminDistricts.any((dist) {
+        final distName = (dist['name'] ?? '').toString().toLowerCase();
+        return rCity.isNotEmpty && (rCity == distName || rCity.contains(distName) || distName.contains(rCity));
+      });
+    }).toList();
+  }
+
   void setSubAdminSession({
     required String id,
     required String name,
     required String email,
     required String phone,
     required List<String> permissions,
+    List<dynamic>? assignedDistricts,
     String status = 'ACTIVE',
   }) {
     _isSubAdminMode = true;
@@ -1289,6 +1452,18 @@ class PatientProblemService extends ChangeNotifier {
         _subAdminPermissions.add(p.trim().toUpperCase());
       }
     }
+    _subAdminDistricts.clear();
+    if (assignedDistricts != null) {
+      for (final d in assignedDistricts) {
+        if (d is Map<String, dynamic>) {
+          _subAdminDistricts.add(d);
+        } else if (d is Map) {
+          _subAdminDistricts.add(Map<String, dynamic>.from(d));
+        } else if (d != null) {
+          _subAdminDistricts.add({'id': d.toString(), 'name': d.toString()});
+        }
+      }
+    }
     _saveToStorage();
     notifyListeners();
   }
@@ -1301,7 +1476,142 @@ class PatientProblemService extends ChangeNotifier {
     _subAdminPhone = '';
     _subAdminStatus = 'ACTIVE';
     _subAdminPermissions.clear();
+    _subAdminDistricts.clear();
     _saveToStorage();
+    notifyListeners();
+  }
+
+  // Clinic Session State & Per-Clinic Visual Cache
+  bool _isClinicMode = false;
+  String _authenticatedClinicId = '';
+  String _authenticatedClinicName = '';
+  String _authenticatedClinicLocation = '';
+  String _authenticatedClinicPhone = '';
+  String _authenticatedClinicEmail = '';
+  bool _authenticatedClinicIsFeatured = false;
+  String _authenticatedClinicFeaturedPlan = '';
+  String _authenticatedClinicCoverUrl = '';
+  Uint8List? _authenticatedClinicCoverBytes;
+  final Map<String, Uint8List> _clinicCoverBytesByKey = {};
+  final Map<String, String> _clinicCoverUrlByKey = {};
+  final Map<String, bool> _clinicFeaturedByKey = {};
+  final Map<String, String> _clinicFeaturedPlanByKey = {};
+
+  bool get isClinicMode => _isClinicMode;
+  String get authenticatedClinicId => _authenticatedClinicId;
+  String get authenticatedClinicName => _authenticatedClinicName;
+  String get authenticatedClinicLocation => _authenticatedClinicLocation;
+  String get authenticatedClinicPhone => _authenticatedClinicPhone;
+  String get authenticatedClinicEmail => _authenticatedClinicEmail;
+  bool get authenticatedClinicIsFeatured => _authenticatedClinicIsFeatured;
+  String get authenticatedClinicFeaturedPlan => _authenticatedClinicFeaturedPlan;
+  String get authenticatedClinicCoverUrl => _authenticatedClinicCoverUrl;
+  Uint8List? get authenticatedClinicCoverBytes => _authenticatedClinicCoverBytes;
+
+  void setAuthenticatedClinicSession({
+    String? id,
+    required String clinicName,
+    String location = '',
+    String? phone,
+    String? email,
+    bool? isFeatured,
+    String? featuredPlan,
+    String? coverImageUrl,
+    Uint8List? coverImageBytes,
+  }) {
+    final cleanName = clinicName.trim();
+    final cleanId = (id ?? '').trim();
+    _isClinicMode = true;
+    if (cleanId.isNotEmpty) _authenticatedClinicId = cleanId;
+    if (cleanName.isNotEmpty) _authenticatedClinicName = cleanName;
+    if (location.trim().isNotEmpty) _authenticatedClinicLocation = location.trim();
+    if (phone != null && phone.trim().isNotEmpty) _authenticatedClinicPhone = phone.trim();
+    if (email != null && email.trim().isNotEmpty) _authenticatedClinicEmail = email.trim();
+    if (isFeatured != null) _authenticatedClinicIsFeatured = isFeatured;
+    if (featuredPlan != null && featuredPlan.trim().isNotEmpty) {
+      _authenticatedClinicFeaturedPlan = featuredPlan.trim();
+    }
+    if (coverImageUrl != null && coverImageUrl.trim().isNotEmpty) {
+      _authenticatedClinicCoverUrl = coverImageUrl.trim();
+    }
+    if (coverImageBytes != null) {
+      _authenticatedClinicCoverBytes = coverImageBytes;
+    }
+
+    final cacheKey = (cleanId.isNotEmpty ? cleanId : cleanName).toLowerCase();
+    if (cacheKey.isNotEmpty) {
+      if (coverImageBytes != null) _clinicCoverBytesByKey[cacheKey] = coverImageBytes;
+      if (coverImageUrl != null && coverImageUrl.trim().isNotEmpty) {
+        _clinicCoverUrlByKey[cacheKey] = coverImageUrl.trim();
+      }
+      if (isFeatured != null) _clinicFeaturedByKey[cacheKey] = isFeatured;
+      if (featuredPlan != null && featuredPlan.trim().isNotEmpty) {
+        _clinicFeaturedPlanByKey[cacheKey] = featuredPlan.trim();
+      }
+    }
+
+    if (cleanName.isNotEmpty) {
+      final existingIdx = _allClinics.indexWhere((c) =>
+          (cleanId.isNotEmpty && c.id == cleanId) ||
+          c.clinicName.trim().toLowerCase() == cleanName.toLowerCase());
+      if (existingIdx != -1) {
+        final existing = _allClinics[existingIdx];
+        if (_authenticatedClinicLocation.isEmpty && existing.location.isNotEmpty) {
+          _authenticatedClinicLocation = existing.location;
+        }
+        _allClinics[existingIdx] = ClinicModel(
+          id: existing.id,
+          userId: existing.userId,
+          clinicName: cleanName,
+          location: _authenticatedClinicLocation.isNotEmpty ? _authenticatedClinicLocation : existing.location,
+          phone: _authenticatedClinicPhone.isNotEmpty ? _authenticatedClinicPhone : existing.phone,
+          coverImageUrl: _authenticatedClinicCoverUrl.isNotEmpty ? _authenticatedClinicCoverUrl : existing.coverImageUrl,
+          isFeatured: isFeatured ?? existing.isFeatured,
+          featuredPlan: _authenticatedClinicFeaturedPlan.isNotEmpty ? _authenticatedClinicFeaturedPlan : existing.featuredPlan,
+          rating: existing.rating,
+          reviewsCount: existing.reviewsCount,
+          verified: existing.verified,
+          verificationStatus: existing.verificationStatus,
+          services: existing.services,
+          pricing: existing.pricing,
+        );
+      } else {
+        _allClinics.insert(
+          0,
+          ClinicModel(
+            id: cleanId.isNotEmpty ? cleanId : 'CLN-${DateTime.now().millisecondsSinceEpoch}',
+            clinicName: cleanName,
+            location: _authenticatedClinicLocation,
+            phone: _authenticatedClinicPhone,
+            coverImageUrl: _authenticatedClinicCoverUrl,
+            isFeatured: _authenticatedClinicIsFeatured,
+            featuredPlan: _authenticatedClinicFeaturedPlan,
+            verified: true,
+            verificationStatus: 'VERIFIED',
+          ),
+        );
+      }
+    }
+
+    _saveToStorage();
+    notifyListeners();
+  }
+
+  Future<void> clearClinicSession() async {
+    _isClinicMode = false;
+    _authenticatedClinicId = '';
+    _authenticatedClinicName = '';
+    _authenticatedClinicLocation = '';
+    _authenticatedClinicPhone = '';
+    _authenticatedClinicEmail = '';
+    _authenticatedClinicIsFeatured = false;
+    _authenticatedClinicFeaturedPlan = '';
+    _authenticatedClinicCoverUrl = '';
+    _authenticatedClinicCoverBytes = null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('dentaguru_clinic_session');
+    } catch (_) {}
     notifyListeners();
   }
 
@@ -1314,6 +1624,7 @@ class PatientProblemService extends ChangeNotifier {
         syncDoctorsFromApi(),
         syncMedicalRecordsFromApi(),
         syncSubAdminsFromApi(),
+        syncDistrictsFromApi(),
         syncMyDoctorsFromApi(),
       ]);
       await Future.wait([
@@ -1324,6 +1635,9 @@ class PatientProblemService extends ChangeNotifier {
         syncDoctorReferralsFromApi(),
         syncAdminReferralsFromApi(),
         syncNotificationsFromApi(),
+        syncAssignmentStatsFromApi(),
+        syncAssignmentHistoryFromApi(),
+        if (_isSubAdminMode && _subAdminId.isNotEmpty) syncCurrentSubAdminDistrictsFromApi(),
       ]);
     } catch (e) {
       debugPrint('Error in syncAllDataFromApi: $e');
@@ -1345,6 +1659,95 @@ class PatientProblemService extends ChangeNotifier {
     }
   }
 
+  Future<void> syncDistrictsFromApi() async {
+    try {
+      final list = await ApiService().fetchAdminDistricts();
+      if (list.isNotEmpty) {
+        _districts.clear();
+        for (final item in list) {
+          _districts.add(Map<String, dynamic>.from(item));
+        }
+        _saveToStorage();
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Sync districts error: $e');
+    }
+  }
+
+  Future<void> syncCurrentSubAdminDistrictsFromApi() async {
+    if (_subAdminId.isEmpty) return;
+    try {
+      final list = await ApiService().fetchSubAdminDistricts(_subAdminId);
+      if (list.isNotEmpty) {
+        _subAdminDistricts.clear();
+        for (final item in list) {
+          _subAdminDistricts.add(Map<String, dynamic>.from(item));
+        }
+        _saveToStorage();
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Sync current subadmin districts error: $e');
+    }
+  }
+
+  Future<void> syncAssignmentStatsFromApi() async {
+    try {
+      final stats = await ApiService().fetchAssignmentStatistics();
+      if (stats.isNotEmpty) {
+        _assignmentStats = Map<String, dynamic>.from(stats);
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Sync assignment stats error: $e');
+    }
+  }
+
+  Future<void> syncAssignmentHistoryFromApi({
+    String? patientId,
+    String? dentistId,
+    String? districtId,
+    String? assignedBy,
+    String? assignmentSource,
+    String? status,
+  }) async {
+    try {
+      final res = await ApiService().fetchAssignmentHistory(
+        patientId: patientId,
+        dentistId: dentistId,
+        districtId: districtId,
+        assignedBy: assignedBy,
+        assignmentSource: assignmentSource,
+        status: status,
+      );
+      if (res['success'] == true && res['history'] is List) {
+        _assignmentHistory.clear();
+        for (final item in res['history']) {
+          _assignmentHistory.add(Map<String, dynamic>.from(item));
+        }
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Sync assignment history error: $e');
+    }
+  }
+
+  Future<void> syncDistrictReportsFromApi() async {
+    try {
+      final list = await ApiService().fetchDistrictReports();
+      if (list.isNotEmpty) {
+        _districtReports.clear();
+        for (final item in list) {
+          _districtReports.add(Map<String, dynamic>.from(item));
+        }
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Sync district reports error: $e');
+    }
+  }
+
   Future<bool> registerSubAdmin({
     required String name,
     required String phone,
@@ -1354,6 +1757,7 @@ class PatientProblemService extends ChangeNotifier {
     String? pincode,
     List<String>? languages,
     List<String>? permissions,
+    List<String>? districtIds,
     String status = 'ACTIVE',
   }) async {
     try {
@@ -1366,6 +1770,7 @@ class PatientProblemService extends ChangeNotifier {
         pincode: pincode,
         languages: languages,
         permissions: permissions,
+        districtIds: districtIds,
         status: status,
       );
       if (res['success'] == true) {
@@ -1376,6 +1781,197 @@ class PatientProblemService extends ChangeNotifier {
       debugPrint('registerSubAdmin error: $e');
     }
     return false;
+  }
+
+  Future<bool> updateSubAdminDetails({
+    required String id,
+    String? name,
+    String? phone,
+    String? password,
+    String? status,
+    List<String>? permissions,
+    List<String>? districtIds,
+  }) async {
+    try {
+      final res = await ApiService().updateSubAdmin(
+        id: id,
+        name: name,
+        phone: phone,
+        password: password,
+        status: status,
+        permissions: permissions,
+        districtIds: districtIds,
+      );
+      if (res['success'] == true) {
+        await syncSubAdminsFromApi();
+        return true;
+      }
+    } catch (e) {
+      debugPrint('updateSubAdminDetails error: $e');
+    }
+    return false;
+  }
+
+  Future<bool> assignSubAdminDistricts(String subAdminId, List<String> districtIds) async {
+    try {
+      final res = await ApiService().assignSubAdminDistricts(subAdminId, districtIds);
+      if (res['success'] == true) {
+        await syncSubAdminsFromApi();
+        await syncDistrictsFromApi();
+        return true;
+      }
+    } catch (e) {
+      debugPrint('assignSubAdminDistricts error: $e');
+    }
+    return false;
+  }
+
+  Future<bool> removeSubAdminDistrict(String subAdminId, String districtId) async {
+    try {
+      final ok = await ApiService().removeSubAdminDistrict(subAdminId, districtId);
+      if (ok) {
+        await syncSubAdminsFromApi();
+        await syncDistrictsFromApi();
+        return true;
+      }
+    } catch (e) {
+      debugPrint('removeSubAdminDistrict error: $e');
+    }
+    return false;
+  }
+
+  Future<bool> updateSubAdminPermissions(String subAdminId, List<String> permissions) async {
+    try {
+      final res = await ApiService().updateSubAdminPermissions(subAdminId, permissions);
+      if (res['success'] == true) {
+        await syncSubAdminsFromApi();
+        return true;
+      }
+    } catch (e) {
+      debugPrint('updateSubAdminPermissions error: $e');
+    }
+    return false;
+  }
+
+  Future<bool> createDistrict({
+    required String name,
+    required String state,
+    String? code,
+    bool isActive = true,
+  }) async {
+    try {
+      final res = await ApiService().createDistrict(
+        name: name,
+        state: state,
+        code: code,
+        isActive: isActive,
+      );
+      if (res['success'] == true) {
+        await syncDistrictsFromApi();
+        return true;
+      }
+    } catch (e) {
+      debugPrint('createDistrict error: $e');
+    }
+    return false;
+  }
+
+  Future<bool> updateDistrict({
+    required String id,
+    required String name,
+    required String state,
+    String? code,
+    bool? isActive,
+  }) async {
+    try {
+      final res = await ApiService().updateDistrict(
+        id: id,
+        name: name,
+        state: state,
+        code: code,
+        isActive: isActive,
+      );
+      if (res['success'] == true) {
+        await syncDistrictsFromApi();
+        return true;
+      }
+    } catch (e) {
+      debugPrint('updateDistrict error: $e');
+    }
+    return false;
+  }
+
+  Future<bool> toggleDistrictStatus(String id, bool isActive) async {
+    try {
+      final ok = await ApiService().toggleDistrictStatus(id, isActive);
+      if (ok) {
+        await syncDistrictsFromApi();
+        return true;
+      }
+    } catch (e) {
+      debugPrint('toggleDistrictStatus error: $e');
+    }
+    return false;
+  }
+
+  Future<Map<String, dynamic>> assignPatientToDoctor({
+    required String patientId,
+    required String dentistId,
+    String? clinicId,
+    String? districtId,
+    String? reason,
+    String? notes,
+    String? scheduledDate,
+    String? timeSlot,
+  }) async {
+    try {
+      final res = await ApiService().assignPatientToDoctor(
+        patientId: patientId,
+        dentistId: dentistId,
+        clinicId: clinicId,
+        districtId: districtId,
+        reason: reason,
+        notes: notes,
+        scheduledDate: scheduledDate,
+        timeSlot: timeSlot,
+      );
+      if (res['success'] == true) {
+        await syncAssignmentHistoryFromApi();
+        await syncAssignmentStatsFromApi();
+        await syncAllDataFromApi();
+      }
+      return res;
+    } catch (e) {
+      debugPrint('assignPatientToDoctor error: $e');
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> reassignPatient({
+    required String patientId,
+    required String newDentistId,
+    String? previousAssignmentId,
+    String? reason,
+    String? notes,
+  }) async {
+    try {
+      final res = await ApiService().reassignPatient(
+        patientId: patientId,
+        newDentistId: newDentistId,
+        previousAssignmentId: previousAssignmentId,
+        reason: reason,
+        notes: notes,
+      );
+      if (res['success'] == true) {
+        await syncAssignmentHistoryFromApi();
+        await syncAssignmentStatsFromApi();
+        await syncAllDataFromApi();
+      }
+      return res;
+    } catch (e) {
+      debugPrint('reassignPatient error: $e');
+      return {'success': false, 'message': e.toString()};
+    }
   }
 
   void updateSubAdminStatusLocally(String id, String status) {
@@ -1400,8 +1996,27 @@ class PatientProblemService extends ChangeNotifier {
     _allDoctors.clear();
     _allClinics.clear();
     _appNotifications.clear();
+    _districts.clear();
+    _subAdminDistricts.clear();
+    _assignmentHistory.clear();
+    _districtReports.clear();
+    _assignmentStats.clear();
     currentPatient = PatientProfile();
     currentDoctor = null;
+    _isClinicMode = false;
+    _authenticatedClinicId = '';
+    _authenticatedClinicName = '';
+    _authenticatedClinicLocation = '';
+    _authenticatedClinicPhone = '';
+    _authenticatedClinicEmail = '';
+    _authenticatedClinicIsFeatured = false;
+    _authenticatedClinicFeaturedPlan = '';
+    _authenticatedClinicCoverUrl = '';
+    _authenticatedClinicCoverBytes = null;
+    _clinicCoverBytesByKey.clear();
+    _clinicCoverUrlByKey.clear();
+    _clinicFeaturedByKey.clear();
+    _clinicFeaturedPlanByKey.clear();
 
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -1414,8 +2029,8 @@ class PatientProblemService extends ChangeNotifier {
   Future<void> syncPatientsFromApi() async {
     try {
       final list = await ApiService().fetchPatients();
-      _allPatients.clear();
       if (list.isNotEmpty) {
+        _allPatients.clear();
         for (final item in list) {
           final id = (item['id'] ?? '').toString();
           String name = (item['name'] ?? '').toString().trim();
@@ -2670,13 +3285,20 @@ class PatientProblemService extends ChangeNotifier {
   /// Cancel an existing appointment
   Future<Map<String, dynamic>> cancelAppointment(String appointmentId) async {
     final res = await _api.cancelAppointment(appointmentId);
-    if (res['success'] == true) {
-      final idx = _requests.indexWhere((r) => r.id == appointmentId);
+    final idx = _requests.indexWhere((r) => r.id == appointmentId);
+    if (res['success'] == true || idx != -1) {
       if (idx != -1) {
         _requests[idx].status = 'CANCELLED';
+        await _saveToStorage();
       }
-      await syncAppointmentsFromApi();
+      if (res['success'] == true) {
+        await syncAppointmentsFromApi();
+      }
       notifyListeners();
+      return {
+        'success': true,
+        'message': res['message'] ?? 'Appointment cancelled successfully.',
+      };
     }
     return res;
   }
@@ -2718,9 +3340,28 @@ class PatientProblemService extends ChangeNotifier {
           'phone': _subAdminPhone,
           'status': _subAdminStatus,
           'permissions': _subAdminPermissions.toList(),
+          'assignedDistricts': _subAdminDistricts,
         }));
       } else {
         await prefs.remove('dentaguru_sub_admin_session');
+      }
+
+      await prefs.setString('dentaguru_districts_cache', jsonEncode(_districts));
+
+      if (_isClinicMode) {
+        await prefs.setString('dentaguru_clinic_session', jsonEncode({
+          'isClinicMode': _isClinicMode,
+          'id': _authenticatedClinicId,
+          'clinicName': _authenticatedClinicName,
+          'location': _authenticatedClinicLocation,
+          'phone': _authenticatedClinicPhone,
+          'email': _authenticatedClinicEmail,
+          'isFeatured': _authenticatedClinicIsFeatured,
+          'featuredPlan': _authenticatedClinicFeaturedPlan,
+          'coverImageUrl': _authenticatedClinicCoverUrl,
+        }));
+      } else {
+        await prefs.remove('dentaguru_clinic_session');
       }
     } catch (e) {
       debugPrint('Error saving PatientProblemService state to storage: $e');
@@ -2757,6 +3398,20 @@ class PatientProblemService extends ChangeNotifier {
       _medicalRecords.clear();
       _doctorSharedRecords.clear();
       _appNotifications.clear();
+      _isClinicMode = false;
+      _authenticatedClinicId = '';
+      _authenticatedClinicName = '';
+      _authenticatedClinicLocation = '';
+      _authenticatedClinicPhone = '';
+      _authenticatedClinicEmail = '';
+      _authenticatedClinicIsFeatured = false;
+      _authenticatedClinicFeaturedPlan = '';
+      _authenticatedClinicCoverUrl = '';
+      _authenticatedClinicCoverBytes = null;
+      _clinicCoverBytesByKey.clear();
+      _clinicCoverUrlByKey.clear();
+      _clinicFeaturedByKey.clear();
+      _clinicFeaturedPlanByKey.clear();
       notifyListeners();
     } catch (e) {
       debugPrint('Error clearing all local data: $e');
@@ -2775,15 +3430,22 @@ class PatientProblemService extends ChangeNotifier {
     String address = '',
     String city = '',
     String pincode = '',
+    String state = '',
+    List<String>? languages,
     Uint8List? photoBytes,
   }) {
     if (photoBytes != null) {
       _userPhotoCache[email.trim().toLowerCase()] = photoBytes;
     }
-    final cachedPhoto = photoBytes ?? _userPhotoCache[email.trim().toLowerCase()];
+    final cachedPhoto = photoBytes ?? _userPhotoCache[email.trim().toLowerCase()] ?? currentPatient.photoBytes;
+    final effectiveLanguages = (languages != null && languages.isNotEmpty)
+        ? List<String>.from(languages)
+        : (currentPatient.languages.isNotEmpty ? List<String>.from(currentPatient.languages) : <String>['English']);
+    final effectiveId = id.trim().isNotEmpty ? id.trim() : currentPatient.id;
+    final effectiveState = state.trim().isNotEmpty ? state.trim() : currentPatient.state;
 
     currentPatient = PatientProfile(
-      id: id.trim(),
+      id: effectiveId,
       name: name.trim().isEmpty ? 'Patient' : name.trim(),
       email: email.trim().isEmpty ? 'patient@dentaguru.com' : email.trim(),
       phone: phone.trim(),
@@ -2794,12 +3456,14 @@ class PatientProblemService extends ChangeNotifier {
       address: address.trim(),
       city: city.trim(),
       pincode: pincode.trim(),
+      state: effectiveState,
+      languages: effectiveLanguages,
       photoBytes: cachedPhoto,
     );
     _saveToStorage();
 
     // Persist profile metadata to Supabase DB users table in device_token column
-    if (email.trim().isNotEmpty) {
+    if (email.trim().isNotEmpty || phone.trim().isNotEmpty || effectiveId.isNotEmpty) {
       try {
         final profileMeta = jsonEncode({
           'age': age.trim(),
@@ -2808,16 +3472,95 @@ class PatientProblemService extends ChangeNotifier {
           'emergencyContact': emergencyContact.trim(),
           'city': city.trim(),
           'pincode': pincode.trim(),
+          'state': effectiveState,
           'address': address.trim(),
+          'languages': effectiveLanguages,
         });
-        Supabase.instance.client.from('users').update({
+        final updatePayload = <String, dynamic>{
+          'name': currentPatient.name,
+          'phone': currentPatient.phone,
           'device_token': profileMeta,
-        }).ilike('email', email.trim()).then((_) {}).catchError((_) {});
+        };
+        if (effectiveId.isNotEmpty) {
+          Supabase.instance.client
+              .from('users')
+              .update(updatePayload)
+              .eq('id', effectiveId)
+              .then((_) {})
+              .catchError((_) {});
+        } else if (email.trim().isNotEmpty) {
+          Supabase.instance.client
+              .from('users')
+              .update(updatePayload)
+              .ilike('email', email.trim())
+              .then((_) {})
+              .catchError((_) {});
+        }
       } catch (_) {}
     }
 
     syncAllDataFromApi();
     notifyListeners();
+  }
+
+  Future<void> updatePatientLanguages(List<String> languages) async {
+    final cleaned = languages
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toSet()
+        .toList();
+    final effectiveLanguages = cleaned.isNotEmpty ? cleaned : <String>['English'];
+
+    currentPatient.languages = effectiveLanguages;
+    await _saveToStorage();
+    notifyListeners();
+
+    try {
+      final profileMeta = jsonEncode({
+        'age': currentPatient.age.trim(),
+        'bloodGroup': currentPatient.bloodGroup.trim(),
+        'gender': currentPatient.gender.trim(),
+        'emergencyContact': currentPatient.emergencyContact.trim(),
+        'city': currentPatient.city.trim(),
+        'pincode': currentPatient.pincode.trim(),
+        'state': currentPatient.state.trim(),
+        'address': currentPatient.address.trim(),
+        'languages': effectiveLanguages,
+      });
+      if (currentPatient.id.trim().isNotEmpty) {
+        await Supabase.instance.client
+            .from('users')
+            .update({'device_token': profileMeta})
+            .eq('id', currentPatient.id.trim());
+      } else if (currentPatient.email.trim().isNotEmpty) {
+        await Supabase.instance.client
+            .from('users')
+            .update({'device_token': profileMeta})
+            .ilike('email', currentPatient.email.trim());
+      }
+    } catch (_) {}
+  }
+
+  Future<Map<String, dynamic>> deleteCurrentPatientAccount() async {
+    final pId = currentPatient.id.trim();
+    final pEmail = currentPatient.email.trim();
+    final pPhone = currentPatient.phone.trim();
+
+    try {
+      if (pId.isNotEmpty) {
+        await Supabase.instance.client.from('users').delete().eq('id', pId);
+      } else if (pEmail.isNotEmpty) {
+        await Supabase.instance.client.from('users').delete().ilike('email', pEmail);
+      } else if (pPhone.isNotEmpty) {
+        await Supabase.instance.client.from('users').delete().eq('phone', pPhone);
+      }
+    } catch (_) {}
+
+    await clearAllData();
+    return {
+      'success': true,
+      'message': 'Patient account deleted successfully.',
+    };
   }
 
   Future<void> submitProblem({
@@ -3648,7 +4391,10 @@ class PatientProblemService extends ChangeNotifier {
   /// Get patients associated with the currently logged-in dentist (excluding unrelated patients)
   List<PatientProfile> getDentistAssociatedPatients() {
     var doc = currentDoctor;
-    final authUser = Supabase.instance.client.auth.currentUser;
+    User? authUser;
+    try {
+      authUser = Supabase.instance.client.auth.currentUser;
+    } catch (_) {}
     final authEmail = authUser?.email?.trim().toLowerCase();
     final authName = (authUser?.userMetadata?['name'] ?? '').toString().toLowerCase();
 
@@ -3780,7 +4526,10 @@ class PatientProblemService extends ChangeNotifier {
     String? doctorPhone,
   }) async {
     try {
-      final authUser = Supabase.instance.client.auth.currentUser;
+      User? authUser;
+      try {
+        authUser = Supabase.instance.client.auth.currentUser;
+      } catch (_) {}
       final doc = currentDoctor;
       final referrerId = referrerPatientId ??
           (doc != null && doc.id.isNotEmpty
@@ -4888,6 +5637,464 @@ class PatientProblemService extends ChangeNotifier {
       return true;
     }
     return false;
+  }
+
+  // ─────────────────────────────────────────────
+  // CLINIC DASHBOARD HELPERS, DETAILS, BOOKINGS & AD REQUESTS
+  // ─────────────────────────────────────────────
+
+  ClinicModel? resolveClinic({String? explicitClinicName}) {
+    final targetName = (explicitClinicName ?? _authenticatedClinicName).trim().toLowerCase();
+    final targetId = _authenticatedClinicId.trim();
+
+    if (targetId.isNotEmpty) {
+      final byId = _allClinics.where((c) => c.id == targetId || c.userId == targetId).firstOrNull;
+      if (byId != null) return byId;
+    }
+    if (targetName.isNotEmpty) {
+      final byName = _allClinics
+          .where((c) => c.clinicName.trim().toLowerCase() == targetName)
+          .firstOrNull;
+      if (byName != null) return byName;
+      final byContains = _allClinics
+          .where((c) =>
+              c.clinicName.trim().toLowerCase().contains(targetName) ||
+              targetName.contains(c.clinicName.trim().toLowerCase()))
+          .firstOrNull;
+      if (byContains != null) return byContains;
+    }
+    return null;
+  }
+
+  Uint8List? clinicCoverBytesFor(String clinicId, String clinicName) {
+    final idKey = clinicId.trim().toLowerCase();
+    final nameKey = clinicName.trim().toLowerCase();
+    return (idKey.isNotEmpty ? _clinicCoverBytesByKey[idKey] : null) ??
+        (nameKey.isNotEmpty ? _clinicCoverBytesByKey[nameKey] : null) ??
+        _authenticatedClinicCoverBytes;
+  }
+
+  String clinicCoverUrlFor(String clinicId, String clinicName, {String fallbackUrl = ''}) {
+    final idKey = clinicId.trim().toLowerCase();
+    final nameKey = clinicName.trim().toLowerCase();
+    final cached = (idKey.isNotEmpty ? _clinicCoverUrlByKey[idKey] : null) ??
+        (nameKey.isNotEmpty ? _clinicCoverUrlByKey[nameKey] : null);
+    if (cached != null && cached.isNotEmpty) return cached;
+    if (fallbackUrl.trim().isNotEmpty) return fallbackUrl.trim();
+    if (_authenticatedClinicCoverUrl.trim().isNotEmpty &&
+        (_authenticatedClinicId == clinicId ||
+            _authenticatedClinicName.trim().toLowerCase() == nameKey)) {
+      return _authenticatedClinicCoverUrl.trim();
+    }
+    return '';
+  }
+
+  bool isClinicFeaturedFor(String clinicId, String clinicName, {bool modelValue = false}) {
+    final idKey = clinicId.trim().toLowerCase();
+    final nameKey = clinicName.trim().toLowerCase();
+    if (idKey.isNotEmpty && _clinicFeaturedByKey.containsKey(idKey)) {
+      return _clinicFeaturedByKey[idKey] == true;
+    }
+    if (nameKey.isNotEmpty && _clinicFeaturedByKey.containsKey(nameKey)) {
+      return _clinicFeaturedByKey[nameKey] == true;
+    }
+    if (modelValue) return true;
+    if (_isClinicMode &&
+        ((clinicId.isNotEmpty && _authenticatedClinicId == clinicId) ||
+            (nameKey.isNotEmpty && _authenticatedClinicName.trim().toLowerCase() == nameKey))) {
+      return _authenticatedClinicIsFeatured;
+    }
+    return false;
+  }
+
+  String clinicFeaturedPlanFor(String clinicId, String clinicName, {String modelValue = ''}) {
+    final idKey = clinicId.trim().toLowerCase();
+    final nameKey = clinicName.trim().toLowerCase();
+    final cached = (idKey.isNotEmpty ? _clinicFeaturedPlanByKey[idKey] : null) ??
+        (nameKey.isNotEmpty ? _clinicFeaturedPlanByKey[nameKey] : null);
+    if (cached != null && cached.isNotEmpty) return cached;
+    if (modelValue.trim().isNotEmpty) return modelValue.trim();
+    return _authenticatedClinicFeaturedPlan;
+  }
+
+  List<DoctorModel> clinicDoctorsFor(String clinicName) {
+    final cleanClinic = clinicName.trim().toLowerCase();
+    if (cleanClinic.isEmpty) return const [];
+    return _allDoctors.where((d) {
+      final docClinic = d.clinicName.trim().toLowerCase();
+      if (docClinic.isEmpty) return false;
+      return docClinic == cleanClinic ||
+          (cleanClinic.length > 3 && docClinic.contains(cleanClinic));
+    }).toList();
+  }
+
+  List<PatientConsultationRequest> clinicBookingsFor({
+    String? clinicId,
+    required String clinicName,
+  }) {
+    final cleanClinic = clinicName.trim().toLowerCase();
+    if (cleanClinic.isEmpty) return const [];
+
+    final attachedDocs = clinicDoctorsFor(clinicName);
+    final docIds = <String>{
+      for (final d in attachedDocs) ...[
+        if (d.id.trim().isNotEmpty) d.id.trim(),
+        if (d.userId.trim().isNotEmpty) d.userId.trim(),
+      ]
+    };
+    final docNames = <String>{
+      for (final d in attachedDocs)
+        if (d.name.trim().isNotEmpty)
+          d.name.replaceAll('Dr.', '').trim().toLowerCase(),
+    };
+
+    final Map<String, PatientConsultationRequest> merged = {};
+    for (final r in _requests) {
+      merged[r.id] = r;
+    }
+    for (final r in _dentistAssignedRequests) {
+      merged.putIfAbsent(r.id, () => r);
+    }
+
+    return merged.values.where((req) {
+      final reqClinic = req.displayDoctorClinic.trim().toLowerCase();
+      final prefClinic = (req.preferredDoctorClinic ?? '').trim().toLowerCase();
+      final reqLoc = req.preferredLocation.trim().toLowerCase();
+      final reqDocId = (req.assignedDoctorId ?? req.preferredDoctorId ?? '').trim();
+      final reqDocName = (req.assignedDoctorName ?? req.preferredDoctorName ?? '')
+          .replaceAll('Dr.', '')
+          .trim()
+          .toLowerCase();
+
+      if (reqClinic == cleanClinic || prefClinic == cleanClinic) return true;
+      if (cleanClinic.length > 3 &&
+          (reqClinic.contains(cleanClinic) ||
+              prefClinic.contains(cleanClinic) ||
+              reqLoc.contains(cleanClinic))) {
+        return true;
+      }
+      if (reqDocId.isNotEmpty && docIds.contains(reqDocId)) return true;
+      if (reqDocName.isNotEmpty &&
+          docNames.any((n) => reqDocName == n || reqDocName.contains(n) || n.contains(reqDocName))) {
+        return true;
+      }
+      return false;
+    }).toList();
+  }
+
+  List<PatientReferral> clinicReferralsFor({required String clinicName}) {
+    final cleanClinic = clinicName.trim().toLowerCase();
+    if (cleanClinic.isEmpty) return const [];
+
+    final attachedDocs = clinicDoctorsFor(clinicName);
+    final docIds = <String>{
+      for (final d in attachedDocs) ...[
+        if (d.id.trim().isNotEmpty) d.id.trim(),
+        if (d.userId.trim().isNotEmpty) d.userId.trim(),
+      ]
+    };
+    final docNames = <String>{
+      for (final d in attachedDocs)
+        if (d.name.trim().isNotEmpty)
+          d.name.replaceAll('Dr.', '').trim().toLowerCase(),
+    };
+
+    final Map<String, PatientReferral> result = {};
+    final pool = [..._adminPatientReferrals, ..._doctorReceivedPatientReferrals];
+    for (final ref in pool) {
+      final refClinic = ref.doctorClinicName.trim().toLowerCase();
+      final refDocId = ref.doctorId.trim();
+      final refDocName = ref.doctorName.replaceAll('Dr.', '').trim().toLowerCase();
+      final matchesClinic = refClinic.isNotEmpty &&
+          (refClinic == cleanClinic ||
+              (cleanClinic.length > 3 && refClinic.contains(cleanClinic)));
+      final matchesDoc = (refDocId.isNotEmpty && docIds.contains(refDocId)) ||
+          (refDocName.isNotEmpty &&
+              docNames.any((n) => refDocName == n || refDocName.contains(n) || n.contains(refDocName)));
+      if (matchesClinic || matchesDoc) {
+        if (ref.id.isNotEmpty) {
+          result[ref.id] = ref;
+        }
+      }
+    }
+    return result.values.toList();
+  }
+
+  Future<Map<String, dynamic>> updateClinicDetails({
+    required String clinicId,
+    required String clinicName,
+    required String location,
+    String? previousClinicName,
+    String? coverImageUrl,
+    Uint8List? coverImageBytes,
+    bool? isFeatured,
+    String? featuredPlan,
+  }) async {
+    final cleanName = clinicName.trim();
+    final cleanLoc = location.trim();
+    final prevName = (previousClinicName ?? _authenticatedClinicName).trim();
+
+    if (cleanName.isNotEmpty) {
+      _authenticatedClinicName = cleanName;
+    }
+    _authenticatedClinicLocation = cleanLoc;
+    if (clinicId.trim().isNotEmpty) {
+      _authenticatedClinicId = clinicId.trim();
+    }
+    if (coverImageUrl != null) {
+      _authenticatedClinicCoverUrl = coverImageUrl.trim();
+    }
+    if (coverImageBytes != null) {
+      _authenticatedClinicCoverBytes = coverImageBytes;
+    }
+    if (isFeatured != null) {
+      _authenticatedClinicIsFeatured = isFeatured;
+    }
+    if (featuredPlan != null) {
+      _authenticatedClinicFeaturedPlan = featuredPlan.trim();
+    }
+
+    final idKey = clinicId.trim().toLowerCase();
+    final nameKey = cleanName.toLowerCase();
+    final prevKey = prevName.toLowerCase();
+    for (final key in {idKey, nameKey, prevKey}) {
+      if (key.isEmpty) continue;
+      if (coverImageBytes != null) _clinicCoverBytesByKey[key] = coverImageBytes;
+      if (coverImageUrl != null && coverImageUrl.trim().isNotEmpty) {
+        _clinicCoverUrlByKey[key] = coverImageUrl.trim();
+      }
+      if (isFeatured != null) _clinicFeaturedByKey[key] = isFeatured;
+      if (featuredPlan != null && featuredPlan.trim().isNotEmpty) {
+        _clinicFeaturedPlanByKey[key] = featuredPlan.trim();
+      }
+    }
+
+    int idx = _allClinics.indexWhere((c) =>
+        (clinicId.trim().isNotEmpty && c.id == clinicId.trim()) ||
+        (prevName.isNotEmpty && c.clinicName.trim().toLowerCase() == prevName.toLowerCase()) ||
+        (cleanName.isNotEmpty && c.clinicName.trim().toLowerCase() == cleanName.toLowerCase()));
+
+    String resolvedId = clinicId.trim();
+    if (idx != -1) {
+      final base = _allClinics[idx];
+      resolvedId = base.id;
+      _allClinics[idx] = ClinicModel(
+        id: base.id,
+        userId: base.userId,
+        clinicName: cleanName.isNotEmpty ? cleanName : base.clinicName,
+        location: cleanLoc,
+        phone: base.phone,
+        coverImageUrl: coverImageUrl != null ? coverImageUrl.trim() : base.coverImageUrl,
+        isFeatured: isFeatured ?? base.isFeatured,
+        featuredPlan: featuredPlan != null ? featuredPlan.trim() : base.featuredPlan,
+        rating: base.rating,
+        reviewsCount: base.reviewsCount,
+        verified: base.verified,
+        verificationStatus: base.verificationStatus,
+        services: base.services,
+        pricing: base.pricing,
+      );
+    } else if (cleanName.isNotEmpty) {
+      resolvedId = resolvedId.isNotEmpty
+          ? resolvedId
+          : 'LOCAL-CLN-${DateTime.now().millisecondsSinceEpoch}';
+      _authenticatedClinicId = resolvedId;
+      _allClinics.insert(
+        0,
+        ClinicModel(
+          id: resolvedId,
+          clinicName: cleanName,
+          location: cleanLoc,
+          coverImageUrl: _authenticatedClinicCoverUrl,
+          isFeatured: _authenticatedClinicIsFeatured,
+          featuredPlan: _authenticatedClinicFeaturedPlan,
+        ),
+      );
+    }
+
+    // Keep linked doctors' clinicName aligned when a clinic renames itself
+    if (prevName.isNotEmpty &&
+        cleanName.isNotEmpty &&
+        prevName.toLowerCase() != cleanName.toLowerCase()) {
+      for (var i = 0; i < _allDoctors.length; i++) {
+        final d = _allDoctors[i];
+        if (d.clinicName.trim().toLowerCase() == prevName.toLowerCase()) {
+          _allDoctors[i] = DoctorModel(
+            id: d.id,
+            userId: d.userId,
+            name: d.name,
+            specialty: d.specialty,
+            qualification: d.qualification,
+            experienceYears: d.experienceYears,
+            rating: d.rating,
+            reviewCount: d.reviewCount,
+            clinicName: cleanName,
+            phone: d.phone,
+            email: d.email,
+            status: d.status,
+            verificationStatus: d.verificationStatus,
+            nextAvailableSlots: d.nextAvailableSlots,
+            consultationFee: d.consultationFee,
+            licenseNumber: d.licenseNumber,
+            photoBytes: d.photoBytes,
+            clinicAddress: cleanLoc.isNotEmpty ? cleanLoc : d.clinicAddress,
+            city: d.city,
+            pincode: d.pincode,
+            state: d.state,
+            bio: d.bio,
+            languages: d.languages,
+            latitude: d.latitude,
+            longitude: d.longitude,
+            procedureFees: d.procedureFees,
+          );
+        }
+      }
+    }
+
+    await _saveToStorage();
+    notifyListeners();
+
+    final apiRes = await _api.updateClinicProfileApi(
+      clinicId: resolvedId,
+      clinicName: cleanName,
+      location: cleanLoc,
+      coverImageUrl: coverImageUrl,
+      isFeatured: isFeatured,
+      featuredPlan: featuredPlan,
+    );
+    return {'success': true, 'clinicId': resolvedId, 'apiResult': apiRes};
+  }
+
+  Future<Map<String, dynamic>> confirmBookingByClinic(String requestId) async {
+    final reqIdx = _requests.indexWhere((r) => r.id == requestId);
+    final assignedIdx = _dentistAssignedRequests.indexWhere((r) => r.id == requestId);
+    if (reqIdx == -1 && assignedIdx == -1) {
+      return {'success': false, 'message': 'Booking not found.'};
+    }
+
+    String patientName = 'Patient';
+    String patientId = '';
+    String? slot;
+    String? dateStr;
+
+    if (reqIdx != -1) {
+      _requests[reqIdx].status = 'Confirmed';
+      patientName = _requests[reqIdx].patientName;
+      patientId = _requests[reqIdx].patientId ?? '';
+      slot = _requests[reqIdx].confirmedTimeSlot;
+      dateStr = _requests[reqIdx].confirmedDate;
+    }
+    if (assignedIdx != -1) {
+      _dentistAssignedRequests[assignedIdx].status = 'Confirmed';
+      patientName = _dentistAssignedRequests[assignedIdx].patientName;
+      patientId = _dentistAssignedRequests[assignedIdx].patientId ?? patientId;
+      slot ??= _dentistAssignedRequests[assignedIdx].confirmedTimeSlot;
+      dateStr ??= _dentistAssignedRequests[assignedIdx].confirmedDate;
+    }
+
+    addNotification(
+      recipientRole: 'Patient',
+      recipientId: patientId.isNotEmpty ? patientId : patientName,
+      title: 'Appointment Confirmed',
+      message: 'Your clinic booking has been confirmed.',
+    );
+
+    await _saveToStorage();
+    notifyListeners();
+
+    try {
+      final res = await _api.acceptAppointment(requestId);
+      if (res['success'] != true) {
+        await _api.acceptProblemRequest(
+          requestId: requestId,
+          timeSlot: slot,
+          date: dateStr,
+        );
+      }
+    } catch (_) {}
+
+    return {'success': true, 'message': 'Booking confirmed.'};
+  }
+
+  Future<Map<String, dynamic>> cancelBookingByClinic(
+    String requestId, {
+    String? reason,
+  }) async {
+    final reqIdx = _requests.indexWhere((r) => r.id == requestId);
+    final assignedIdx = _dentistAssignedRequests.indexWhere((r) => r.id == requestId);
+    if (reqIdx == -1 && assignedIdx == -1) {
+      return {'success': false, 'message': 'Booking not found.'};
+    }
+
+    final cleanReason = (reason ?? '').trim();
+    String patientName = 'Patient';
+    String patientId = '';
+
+    if (reqIdx != -1) {
+      _requests[reqIdx].status = 'Cancelled';
+      if (cleanReason.isNotEmpty) {
+        _requests[reqIdx].adminNotes = 'Cancelled by clinic: $cleanReason';
+      }
+      patientName = _requests[reqIdx].patientName;
+      patientId = _requests[reqIdx].patientId ?? '';
+    }
+    if (assignedIdx != -1) {
+      _dentistAssignedRequests[assignedIdx].status = 'Cancelled';
+      if (cleanReason.isNotEmpty) {
+        _dentistAssignedRequests[assignedIdx].adminNotes = 'Cancelled by clinic: $cleanReason';
+      }
+      patientName = _dentistAssignedRequests[assignedIdx].patientName;
+      patientId = _dentistAssignedRequests[assignedIdx].patientId ?? patientId;
+    }
+
+    addNotification(
+      recipientRole: 'Patient',
+      recipientId: patientId.isNotEmpty ? patientId : patientName,
+      title: 'Appointment Cancelled',
+      message: cleanReason.isNotEmpty
+          ? 'Your clinic booking was cancelled ($cleanReason).'
+          : 'Your clinic booking was cancelled.',
+    );
+
+    await _saveToStorage();
+    notifyListeners();
+
+    try {
+      await _api.cancelAppointment(requestId);
+    } catch (_) {}
+
+    return {'success': true, 'message': 'Booking cancelled.'};
+  }
+
+  Future<Map<String, dynamic>> submitClinicAdRequest({
+    required String clinicName,
+    required String headline,
+    required String targetAudience,
+    String? notes,
+  }) async {
+    final cleanClinic = clinicName.trim().isEmpty ? 'Clinic' : clinicName.trim();
+    final cleanHeadline = headline.trim();
+    final cleanNotes = (notes ?? '').trim();
+    final summaryMsg = cleanNotes.isNotEmpty
+        ? '$cleanClinic requested a GS HEALTH sponsored banner for $targetAudience: "$cleanHeadline" ($cleanNotes).'
+        : '$cleanClinic requested a GS HEALTH sponsored banner for $targetAudience: "$cleanHeadline".';
+
+    addNotification(
+      recipientRole: 'Admin',
+      recipientId: 'ALL_ADMINS',
+      title: 'Sponsored Banner Request',
+      message: summaryMsg,
+    );
+
+    await _api.createInAppNotification(
+      recipientRole: 'Admin',
+      recipientId: 'ALL_ADMINS',
+      title: 'Sponsored Banner Request',
+      message: summaryMsg,
+      type: 'CLINIC_AD_REQUEST',
+    );
+
+    return {'success': true, 'message': 'Sponsored banner request submitted.'};
   }
 }
 

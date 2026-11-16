@@ -1,4 +1,4 @@
-const { Appointment, Clinic, Dentist, User, Notification, MedicalRecord, Referral, DoctorAvailability } = require('../models/Schemas');
+const { Appointment, Clinic, Dentist, User, Notification, MedicalRecord, Referral, DoctorAvailability, PatientAssignmentHistory, District, ASSIGNMENT_SOURCES } = require('../models/Schemas');
 const { sendPushNotification } = require('../services/notificationService');
 
 // 1. BOOK APPOINTMENT (Patient -> Dentist) [Initial Status: PENDING]
@@ -88,6 +88,57 @@ exports.bookAppointment = async (req, res) => {
             status: 'PENDING',
             qr_code_string: `DENTAGURU-${targetPatientId || 'PATIENT'}-${Date.now()}`
         });
+
+        // 📜 Immutable Patient Assignment Audit Record (Scenario A: Direct Booking)
+        if (targetPatientId && dentistId) {
+            try {
+                const patientUser = await User.findById(targetPatientId).catch(() => null);
+                const locRes = District.resolveDistrictFromLocation({
+                    city: patientUser?.city,
+                    district: patientUser?.district,
+                    state: patientUser?.state,
+                    pincode: patientUser?.pincode
+                });
+
+                const userRoleLower = (req.user?.role || '').toLowerCase();
+                const isMainAdmin = userRoleLower === 'admin' || userRoleLower === 'primaryadmin' || userRoleLower === 'superadmin';
+                const isSubAdmin = userRoleLower === 'sub-admin' || userRoleLower === 'subadmin';
+
+                let source = ASSIGNMENT_SOURCES.PATIENT_DIRECT_BOOKING;
+                let assignedRole = 'PATIENT';
+                let assignedName = patientUser?.name || req.user?.name || 'Direct Patient Booking';
+                let assignedUserId = targetPatientId;
+
+                if (isMainAdmin) {
+                    source = ASSIGNMENT_SOURCES.MAIN_ADMIN_ASSIGNMENT;
+                    assignedRole = 'MAIN_ADMIN';
+                    assignedName = req.user?.name || 'Main Admin';
+                    assignedUserId = req.user?.id;
+                } else if (isSubAdmin) {
+                    source = ASSIGNMENT_SOURCES.SUB_ADMIN_ASSIGNMENT;
+                    assignedRole = 'SUB_ADMIN';
+                    assignedName = req.user?.name || 'Sub-Admin';
+                    assignedUserId = req.user?.id;
+                }
+
+                await PatientAssignmentHistory.recordAssignment({
+                    patientId: targetPatientId,
+                    doctorId: dentistId,
+                    appointmentId: appointment.id,
+                    requestId: requestId || null,
+                    assignedByUserId: assignedUserId,
+                    assignedByName: assignedName,
+                    assignedByRole: assignedRole,
+                    assignmentSource: source,
+                    districtId: locRes.districtId || null,
+                    districtName: locRes.district || patientUser?.district || patientUser?.city || 'Unassigned / Review',
+                    assignmentReason: treatment ? `Direct consultation booking for ${treatment}` : 'Patient consultation booking.',
+                    status: 'ASSIGNED'
+                });
+            } catch (auditErr) {
+                console.warn('⚠️ Patient assignment audit trail notice:', auditErr.message);
+            }
+        }
 
         // 🔗 Update Referral Attribution if patient was referred
         if (targetPatientId) {

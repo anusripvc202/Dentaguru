@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../services/session_service.dart';
+import '../services/patient_problem_service.dart';
 import '../widgets/session_gate_screen.dart';
-import '../../features/home/presentation/screens/home_screen.dart';
 import '../../features/patient/presentation/screens/patient_dashboard.dart';
 import '../../features/patient/presentation/screens/find_doctors_screen.dart';
+import '../../features/patient/presentation/screens/talk_to_dentist_now_screen.dart';
+import '../../features/patient/presentation/screens/ai_triage_screen.dart';
 import '../../features/dentist/presentation/screens/dentist_timeline.dart';
+import '../../features/dentist/presentation/screens/doctor_patient_record_screen.dart';
 import '../../features/clinic/presentation/screens/clinic_dashboard.dart';
 import '../../features/admin/presentation/screens/admin_dashboard.dart';
 import '../../features/admin/presentation/screens/sub_admin_dashboard.dart';
@@ -16,7 +19,7 @@ class LoginScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const AuthScreen();
+    return const AuthScreen(initialTab: 1);
   }
 }
 
@@ -66,29 +69,31 @@ final GoRouter appRouter = GoRouter(
       path: '/login',
       builder: (context, state) {
         final role = state.uri.queryParameters['role'];
+        final tab = int.tryParse(state.uri.queryParameters['tab'] ?? '1') ?? 1;
+        return AuthScreen(initialRole: role, initialTab: tab);
+      },
+    ),
+    GoRoute(
+      path: '/register',
+      builder: (context, state) {
+        final role = state.uri.queryParameters['role'];
         final tab = int.tryParse(state.uri.queryParameters['tab'] ?? '0') ?? 0;
         return AuthScreen(initialRole: role, initialTab: tab);
       },
     ),
     GoRoute(
       path: '/admin-login',
-      builder: (context, state) {
-        final tab = int.tryParse(state.uri.queryParameters['tab'] ?? '0') ?? 0;
-        return AuthScreen(initialRole: 'admin', initialTab: tab, allowAdminRole: true);
-      },
+      builder: (context, state) => const AuthScreen(initialTab: 1),
     ),
     GoRoute(
       path: '/admin/auth',
-      builder: (context, state) {
-        final tab = int.tryParse(state.uri.queryParameters['tab'] ?? '0') ?? 0;
-        return AuthScreen(initialRole: 'admin', initialTab: tab, allowAdminRole: true);
-      },
+      builder: (context, state) => const AuthScreen(initialTab: 1),
     ),
     GoRoute(
       path: '/auth',
       builder: (context, state) {
         final role = state.uri.queryParameters['role'];
-        final tab = int.tryParse(state.uri.queryParameters['tab'] ?? '0') ?? 0;
+        final tab = int.tryParse(state.uri.queryParameters['tab'] ?? '1') ?? 1;
         return AuthScreen(initialRole: role, initialTab: tab);
       },
     ),
@@ -101,8 +106,28 @@ final GoRouter appRouter = GoRouter(
       builder: (context, state) => const FindDoctorsScreen(),
     ),
     GoRoute(
+      path: '/patient/talk-to-dentist',
+      builder: (context, state) => const TalkToDentistNowScreen(),
+    ),
+    GoRoute(
+      path: '/patient/ai-triage',
+      builder: (context, state) {
+        final initialSymptom = state.uri.queryParameters['symptom'];
+        return AiTriageScreen(initialSymptom: initialSymptom);
+      },
+    ),
+    GoRoute(
       path: '/dentist',
       builder: (context, state) => const DentistTimelineScreen(),
+    ),
+    GoRoute(
+      path: '/dentist/patient-record',
+      builder: (context, state) {
+        final patient = state.extra is PatientProfile
+            ? state.extra as PatientProfile
+            : PatientProblemService().currentPatient;
+        return DoctorPatientRecordScreen(patient: patient);
+      },
     ),
     GoRoute(
       path: '/clinic',

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/services/patient_problem_service.dart';
+import '../widgets/gs_health_assignment_timeline_dialog.dart';
 
 class PatientDetailsScreen extends StatefulWidget {
   final PatientProfile patient;
@@ -172,6 +173,13 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
         doctor: doctor,
         adminNotes: notesController.text.trim(),
       );
+      if (widget.patient.id.isNotEmpty) {
+        await _problemService.assignPatientToDoctor(
+          patientId: widget.patient.id,
+          dentistId: doctor.id,
+          notes: notesController.text.trim(),
+        );
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -275,6 +283,11 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
               children: [
                 // 1. TOP PATIENT HEADER BANNER
                 _buildPatientHeaderCard(displayName, isAssigned),
+
+                const SizedBox(height: 14),
+
+                // 1B. ASSIGNMENT INFORMATION & AUDIT TRAIL CARD
+                _buildAssignmentInfoCard(assignedDoctor, latestReq),
 
                 const SizedBox(height: 14),
 
@@ -478,8 +491,172 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
   }
 
   // ==========================================
-  // CARD 2: CURRENTLY ASSIGNED DENTIST DETAILS
+  // CARD 1B: ASSIGNMENT INFORMATION & AUDIT TRAIL
   // ==========================================
+  Widget _buildAssignmentInfoCard(DoctorModel? assignedDoctor, PatientConsultationRequest? latestReq) {
+    final patientId = widget.patient.id.isNotEmpty ? widget.patient.id : 'PAT-DIRECT';
+    final district = (widget.patient.district ?? '').isNotEmpty
+        ? widget.patient.district!
+        : (widget.patient.city.isNotEmpty ? widget.patient.city : 'Pending Identification');
+    final isDistrictIdentified = (widget.patient.district ?? '').isNotEmpty || widget.patient.city.isNotEmpty;
+
+    // Search assignment history for this patient
+    final historyList = _problemService.assignmentHistory.where((h) =>
+        (h['patient_id'] ?? '').toString() == patientId ||
+        (h['patient_name'] ?? '').toString().toLowerCase() == widget.patient.name.toLowerCase()).toList();
+
+    final latestAssignment = historyList.isNotEmpty ? historyList.first : null;
+    final source = latestAssignment != null
+        ? (latestAssignment['assignment_source'] ?? 'MAIN_ADMIN_ASSIGNMENT').toString()
+        : (assignedDoctor != null ? 'MAIN_ADMIN_ASSIGNMENT' : 'None');
+    final assignedBy = latestAssignment != null
+        ? (latestAssignment['assigned_by_name'] ?? 'Administrator').toString()
+        : 'Administrator';
+    final status = latestAssignment != null
+        ? (latestAssignment['status'] ?? (assignedDoctor != null ? 'ACTIVE' : 'PENDING')).toString()
+        : (assignedDoctor != null ? 'ACTIVE' : 'Awaiting Assignment');
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF012A58).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.assignment_ind_rounded, color: Color(0xFF012A58), size: 20),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  'Assignment Information',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Tooltip(
+                message: 'Assignment History',
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.history_rounded, size: 14),
+                  label: const Text('History', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF012A58),
+                    side: const BorderSide(color: Color(0xFF012A58)),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () {
+                    GsHealthAssignmentTimelineDialog.show(
+                      context,
+                      patientId: patientId,
+                      patientName: widget.patient.name.isNotEmpty ? widget.patient.name : 'Patient',
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Divider(height: 1, color: Color(0xFFF1F5F9)),
+          const SizedBox(height: 10),
+          _buildAssignmentRow('Patient ID:', patientId),
+          _buildAssignmentRow(
+            'District:',
+            district,
+            badge: isDistrictIdentified ? 'Verified' : 'PENDING_ADMIN_REVIEW',
+            badgeColor: isDistrictIdentified ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+          ),
+          _buildAssignmentRow(
+            'Assigned Doctor:',
+            assignedDoctor != null ? '${assignedDoctor.name} (${assignedDoctor.specialty})' : 'Not yet assigned',
+          ),
+          _buildAssignmentRow('Assignment Source:', _formatAssignmentSource(source)),
+          _buildAssignmentRow('Assigned By:', assignedDoctor != null ? assignedBy : '—'),
+          _buildAssignmentRow(
+            'Status:',
+            status,
+            badge: status,
+            badgeColor: status == 'ACTIVE' ? const Color(0xFF16A34A) : const Color(0xFFD97706),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAssignmentRow(String label, String value, {String? badge, Color? badgeColor}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 130,
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF64748B)),
+            ),
+          ),
+          Expanded(
+            child: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    value,
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (badge != null) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: (badgeColor ?? const Color(0xFF012A58)).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      badge,
+                      style: TextStyle(
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.bold,
+                        color: badgeColor ?? const Color(0xFF012A58),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatAssignmentSource(String s) {
+    if (s == 'PATIENT_DIRECT_BOOKING') return 'Direct Patient Booking';
+    if (s == 'SUB_ADMIN_ASSIGNMENT') return 'Sub-Admin Assignment';
+    if (s == 'MAIN_ADMIN_ASSIGNMENT') return 'Main Admin Assignment';
+    return s;
+  }
   Widget _buildAssignedDentistCard(bool isAssigned, DoctorModel? doc, PatientConsultationRequest? req) {
     return Container(
       padding: const EdgeInsets.all(16),

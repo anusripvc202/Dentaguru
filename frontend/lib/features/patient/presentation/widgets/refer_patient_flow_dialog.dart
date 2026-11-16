@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/models/referral_model.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
+import '../screens/refer_a_friend_screen.dart';
 
 class ReferPatientFlowDialog extends StatefulWidget {
   final VoidCallback? onViewMyReferrals;
@@ -23,6 +24,13 @@ class ReferPatientFlowDialog extends StatefulWidget {
     bool isDentistMode = false,
     PatientProfile? preselectedPatient,
   }) {
+    if (!isDentistMode && preselectedPatient == null) {
+      return Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => const ReferAFriendScreen(),
+        ),
+      );
+    }
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,

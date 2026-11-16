@@ -16,7 +16,7 @@ void main() {
   });
 
   group('Patient Appointments Screen & Booking Flow Verification', () {
-    testWidgets('1. Appointments tab displays Book Visit button, No Scheduled Visits and Past Visit History', (tester) async {
+    testWidgets('1. Visits tab displays My visits heading, Upcoming and Past & cancelled tabs, and empty state', (tester) async {
       tester.view.physicalSize = const Size(1080, 2400);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -38,30 +38,23 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
-      // Navigate to Appointments tab via bottom nav bar
-      final appointmentsNav = find.descendant(
+      // Navigate to Visits tab via bottom nav bar
+      final visitsNav = find.descendant(
         of: find.byType(BottomNavigationBar),
-        matching: find.text('Appointments'),
+        matching: find.text('Visits'),
       );
-      expect(appointmentsNav, findsOneWidget);
-      await tester.tap(appointmentsNav);
+      expect(visitsNav, findsOneWidget);
+      await tester.tap(visitsNav);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
-      // Verify "My Appointments" heading and subtitle
-      expect(find.text('My Appointments'), findsOneWidget);
-      expect(find.text('Track upcoming and past dental visits'), findsOneWidget);
+      // Verify "My visits" heading and tabs
+      expect(find.text('My visits'), findsOneWidget);
+      expect(find.text('Upcoming'), findsOneWidget);
+      expect(find.text('Past & cancelled'), findsOneWidget);
 
-      // Verify clearly visible "Book Visit" button
-      expect(find.widgetWithText(ElevatedButton, 'Book Visit'), findsOneWidget);
-
-      // Verify "No Scheduled Visits" card is present when empty
-      expect(find.text('No Scheduled Visits'), findsOneWidget);
-      expect(find.text('Submit a dental problem or report symptoms to schedule a visit.'), findsOneWidget);
-
-      // Verify "Past Visit History" section and empty state
-      expect(find.text('Past Visit History'), findsOneWidget);
-      expect(find.text('No past dental visits recorded.'), findsOneWidget);
+      // Verify empty state when no visits exist
+      expect(find.text('No upcoming visits'), findsOneWidget);
     });
 
     testWidgets('2. Clicking Book Visit opens the 4-step booking flow dialog', (tester) async {
@@ -274,33 +267,23 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
-      // Switch to Appointments tab via bottom nav bar
-      final appointmentsNav = find.descendant(
+      // Switch to Visits tab via bottom nav bar
+      final visitsNav = find.descendant(
         of: find.byType(BottomNavigationBar),
-        matching: find.text('Appointments'),
+        matching: find.text('Visits'),
       );
-      expect(appointmentsNav, findsOneWidget);
-      await tester.tap(appointmentsNav);
+      expect(visitsNav, findsOneWidget);
+      await tester.tap(visitsNav);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
-      // Verify scheduled appointment card
-      expect(find.text('Your Next Scheduled Visit'), findsOneWidget);
+      // Verify scheduled appointment card in My visits
+      expect(find.text('My visits'), findsOneWidget);
       expect(find.text('Dr. Sheshu kumar'), findsOneWidget);
       expect(find.text('Kakaji Dental Clinic'), findsOneWidget);
       expect(find.text('Confirmed'), findsOneWidget);
-      expect(find.text('Details'), findsOneWidget);
-      expect(find.text('Reschedule'), findsOneWidget);
-      expect(find.text('Cancel'), findsOneWidget);
-
-      // Tap Details to open AppointmentManagementDialog
-      await tester.tap(find.text('Details'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
-
-      expect(find.text('Appointment Details'), findsOneWidget);
-      expect(find.text('Teeth Cleaning & Whitening'), findsWidgets);
-      expect(find.textContaining('11:30 AM'), findsWidgets);
+      expect(find.text('IN-CLINIC'), findsOneWidget);
+      expect(find.text('Cancel visit'), findsOneWidget);
     });
 
     testWidgets('5. Appointment Reschedule and Cancel flows', (tester) async {

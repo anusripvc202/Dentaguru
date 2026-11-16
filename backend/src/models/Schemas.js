@@ -19,24 +19,53 @@ const comparePassword = async (plainPassword, hashedPassword) => {
 };
 
 const PERMISSION_CONSTANTS = {
+    // 1. Patient Management
     PATIENT_VIEW: 'PATIENT_VIEW',
+    PATIENT_DETAILS_VIEW: 'PATIENT_DETAILS_VIEW',
+    PATIENT_RECORDS_VIEW: 'PATIENT_RECORDS_VIEW',
+    PATIENT_ASSIGNMENT_HISTORY_VIEW: 'PATIENT_ASSIGNMENT_HISTORY_VIEW',
     PATIENT_ADD: 'PATIENT_ADD',
     PATIENT_EDIT: 'PATIENT_EDIT',
 
+    // 2. Doctor / Dentist Management
     DENTIST_VIEW: 'DENTIST_VIEW',
+    DOCTOR_VIEW: 'DOCTOR_VIEW',
+    DOCTOR_AVAILABILITY_VIEW: 'DOCTOR_AVAILABILITY_VIEW',
+    DOCTOR_PROFILE_VIEW: 'DOCTOR_PROFILE_VIEW',
     DENTIST_CREATE: 'DENTIST_CREATE',
     DENTIST_EDIT: 'DENTIST_EDIT',
 
+    // 3. Patient Assignment
     ASSIGNMENT_VIEW: 'ASSIGNMENT_VIEW',
     ASSIGNMENT_CREATE: 'ASSIGNMENT_CREATE',
+    PATIENT_ASSIGN: 'PATIENT_ASSIGN',
+    PATIENT_REASSIGN: 'PATIENT_REASSIGN',
+    ASSIGNMENT_HISTORY_VIEW: 'ASSIGNMENT_HISTORY_VIEW',
 
+    // 4. Clinic Management
+    CLINIC_VIEW: 'CLINIC_VIEW',
+    CLINIC_MANAGE: 'CLINIC_MANAGE',
+
+    // 5. Referral Management
+    REFERRAL_VIEW: 'REFERRAL_VIEW',
+    REFERRAL_MANAGE: 'REFERRAL_MANAGE',
+
+    // 6. Reports & District Analytics
+    REPORT_VIEW: 'REPORT_VIEW',
+    REPORT_DISTRICT_VIEW: 'REPORT_DISTRICT_VIEW',
+    REPORT_ASSIGNMENT_VIEW: 'REPORT_ASSIGNMENT_VIEW',
+
+    // 7. Appointment & Problem Management (Legacy backward-compatibility)
     APPOINTMENT_VIEW: 'APPOINTMENT_VIEW',
     APPOINTMENT_MANAGE: 'APPOINTMENT_MANAGE',
-
     PROBLEM_VIEW: 'PROBLEM_VIEW',
     PROBLEM_UPDATE: 'PROBLEM_UPDATE',
+};
 
-    REPORT_VIEW: 'REPORT_VIEW',
+const ASSIGNMENT_SOURCES = {
+    PATIENT_DIRECT_BOOKING: 'PATIENT_DIRECT_BOOKING',
+    MAIN_ADMIN_ASSIGNMENT: 'MAIN_ADMIN_ASSIGNMENT',
+    SUB_ADMIN_ASSIGNMENT: 'SUB_ADMIN_ASSIGNMENT',
 };
 
 // 1. USER MODEL (Supabase PostgreSQL)
@@ -302,6 +331,492 @@ const SubAdminPermission = {
         } catch (e) {
             console.warn('⚠️ sub_admin_permissions sync warning:', e.message);
         }
+    }
+};
+
+// 1c. DISTRICTS & MULTI-DISTRICT MANAGEMENT MODEL (Supabase PostgreSQL + In-Memory Fallback)
+const DEFAULT_DISTRICTS = [
+    { id: 'dist-hyd', name: 'Hyderabad', state: 'Telangana', country: 'India', is_active: true },
+    { id: 'dist-medchal', name: 'Medchal-Malkajgiri', state: 'Telangana', country: 'India', is_active: true },
+    { id: 'dist-rangareddy', name: 'Rangareddy', state: 'Telangana', country: 'India', is_active: true },
+    { id: 'dist-warangal', name: 'Warangal', state: 'Telangana', country: 'India', is_active: true },
+    { id: 'dist-karimnagar', name: 'Karimnagar', state: 'Telangana', country: 'India', is_active: true },
+    { id: 'dist-nizamabad', name: 'Nizamabad', state: 'Telangana', country: 'India', is_active: true },
+    { id: 'dist-adilabad', name: 'Adilabad', state: 'Telangana', country: 'India', is_active: true },
+    { id: 'dist-khammam', name: 'Khammam', state: 'Telangana', country: 'India', is_active: true },
+    { id: 'dist-nalgonda', name: 'Nalgonda', state: 'Telangana', country: 'India', is_active: true },
+    { id: 'dist-mahabubnagar', name: 'Mahabubnagar', state: 'Telangana', country: 'India', is_active: true },
+    { id: 'dist-mumbai-city', name: 'Mumbai City', state: 'Maharashtra', country: 'India', is_active: true },
+    { id: 'dist-mumbai-sub', name: 'Mumbai Suburban', state: 'Maharashtra', country: 'India', is_active: true },
+    { id: 'dist-pune', name: 'Pune', state: 'Maharashtra', country: 'India', is_active: true },
+    { id: 'dist-thane', name: 'Thane', state: 'Maharashtra', country: 'India', is_active: true },
+    { id: 'dist-bengaluru', name: 'Bengaluru Urban', state: 'Karnataka', country: 'India', is_active: true },
+    { id: 'dist-chennai', name: 'Chennai', state: 'Tamil Nadu', country: 'India', is_active: true },
+    { id: 'dist-delhi', name: 'Delhi', state: 'Delhi', country: 'India', is_active: true }
+];
+
+const _inMemoryDistricts = DEFAULT_DISTRICTS.map(d => ({
+    ...d,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+}));
+
+const District = {
+    async find(query = {}) {
+        try {
+            let req = supabaseAdmin.from('districts').select('*');
+            if (query.is_active !== undefined) req = req.eq('is_active', query.is_active);
+            if (query.state) req = req.eq('state', query.state);
+            req = req.order('name', { ascending: true });
+            const { data, error } = await req;
+            if (!error && data && data.length > 0) return data;
+        } catch (_) {}
+
+        // In-memory fallback
+        let list = [..._inMemoryDistricts];
+        if (query.is_active !== undefined) list = list.filter(d => d.is_active === query.is_active);
+        if (query.state) list = list.filter(d => d.state.toLowerCase() === query.state.toLowerCase());
+        if (query.search) {
+            const q = query.search.toLowerCase();
+            list = list.filter(d => d.name.toLowerCase().includes(q) || d.state.toLowerCase().includes(q));
+        }
+        return list;
+    },
+
+    async findById(id) {
+        if (!id) return null;
+        try {
+            const { data, error } = await supabaseAdmin.from('districts').select('*').eq('id', id).maybeSingle();
+            if (!error && data) return data;
+        } catch (_) {}
+        return _inMemoryDistricts.find(d => d.id === id) || null;
+    },
+
+    async findOne(query = {}) {
+        try {
+            let req = supabaseAdmin.from('districts').select('*');
+            for (const [k, v] of Object.entries(query)) {
+                req = req.eq(k, v);
+            }
+            const { data, error } = await req.limit(1);
+            if (!error && data && data.length > 0) return data[0];
+        } catch (_) {}
+        return _inMemoryDistricts.find(d => {
+            return Object.entries(query).every(([k, v]) => d[k] === v);
+        }) || null;
+    },
+
+    async create(districtData) {
+        const row = {
+            id: districtData.id || `dist-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            name: (districtData.name || '').trim(),
+            state: (districtData.state || 'Telangana').trim(),
+            country: districtData.country || 'India',
+            is_active: districtData.is_active !== undefined ? districtData.is_active : true,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+        };
+
+        try {
+            const { data, error } = await supabaseAdmin.from('districts').insert(row).select().single();
+            if (!error && data) {
+                _inMemoryDistricts.push(data);
+                return data;
+            }
+        } catch (_) {}
+
+        _inMemoryDistricts.push(row);
+        return row;
+    },
+
+    async findByIdAndUpdate(id, updates) {
+        const updatePayload = {
+            ...updates,
+            updated_at: new Date().toISOString()
+        };
+
+        try {
+            const { data, error } = await supabaseAdmin.from('districts').update(updatePayload).eq('id', id).select().single();
+            if (!error && data) {
+                const idx = _inMemoryDistricts.findIndex(d => d.id === id);
+                if (idx !== -1) _inMemoryDistricts[idx] = { ..._inMemoryDistricts[idx], ...data };
+                return data;
+            }
+        } catch (_) {}
+
+        const idx = _inMemoryDistricts.findIndex(d => d.id === id);
+        if (idx !== -1) {
+            _inMemoryDistricts[idx] = { ..._inMemoryDistricts[idx], ...updatePayload };
+            return _inMemoryDistricts[idx];
+        }
+        return null;
+    },
+
+    resolveDistrictFromLocation({ city, district, state, pincode }) {
+        const cLower = (city || '').trim().toLowerCase();
+        const dLower = (district || '').trim().toLowerCase();
+        const pin = (pincode || '').toString().trim();
+
+        // 1. Direct district name match
+        if (dLower) {
+            const matched = _inMemoryDistricts.find(d => d.name.toLowerCase() === dLower || d.name.toLowerCase().includes(dLower));
+            if (matched) return { district: matched.name, districtId: matched.id, status: 'IDENTIFIED' };
+        }
+
+        // 2. City name match
+        if (cLower) {
+            if (cLower.includes('hyderabad')) {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Hyderabad');
+                return { district: matched?.name || 'Hyderabad', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+            if (cLower.includes('secunderabad') || cLower.includes('medchal') || cLower.includes('malkajgiri')) {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Medchal-Malkajgiri');
+                return { district: matched?.name || 'Medchal-Malkajgiri', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+            if (cLower.includes('rangareddy') || cLower.includes('cyberabad') || cLower.includes('gachibowli') || cLower.includes('madhapur')) {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Rangareddy');
+                return { district: matched?.name || 'Rangareddy', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+            if (cLower.includes('warangal') || cLower.includes('hanamkonda') || cLower.includes('kazipet')) {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Warangal');
+                return { district: matched?.name || 'Warangal', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+            if (cLower.includes('karimnagar')) {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Karimnagar');
+                return { district: matched?.name || 'Karimnagar', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+            if (cLower.includes('nizamabad')) {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Nizamabad');
+                return { district: matched?.name || 'Nizamabad', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+            if (cLower.includes('adilabad')) {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Adilabad');
+                return { district: matched?.name || 'Adilabad', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+            if (cLower.includes('mumbai') || cLower.includes('bandra') || cLower.includes('andheri') || cLower.includes('juhu') || cLower.includes('borivali')) {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Mumbai Suburban');
+                return { district: matched?.name || 'Mumbai Suburban', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+            if (cLower.includes('colaba') || cLower.includes('dadar') || cLower.includes('nariman')) {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Mumbai City');
+                return { district: matched?.name || 'Mumbai City', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+            if (cLower.includes('pune')) {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Pune');
+                return { district: matched?.name || 'Pune', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+            if (cLower.includes('thane')) {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Thane');
+                return { district: matched?.name || 'Thane', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+            if (cLower.includes('bengaluru') || cLower.includes('bangalore')) {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Bengaluru Urban');
+                return { district: matched?.name || 'Bengaluru Urban', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+            if (cLower.includes('chennai') || cLower.includes('madras')) {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Chennai');
+                return { district: matched?.name || 'Chennai', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+            if (cLower.includes('delhi')) {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Delhi');
+                return { district: matched?.name || 'Delhi', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+        }
+
+        // 3. Indian Postal Pincode prefix match
+        if (pin.length >= 3) {
+            const prefix = pin.substring(0, 3);
+            if (prefix === '500') {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Hyderabad');
+                return { district: matched?.name || 'Hyderabad', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+            if (prefix === '506') {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Warangal');
+                return { district: matched?.name || 'Warangal', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+            if (prefix === '505') {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Karimnagar');
+                return { district: matched?.name || 'Karimnagar', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+            if (prefix === '503') {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Nizamabad');
+                return { district: matched?.name || 'Nizamabad', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+            if (prefix === '504') {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Adilabad');
+                return { district: matched?.name || 'Adilabad', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+            if (prefix === '400') {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Mumbai Suburban');
+                return { district: matched?.name || 'Mumbai Suburban', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+            if (prefix === '411') {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Pune');
+                return { district: matched?.name || 'Pune', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+            if (prefix === '560') {
+                const matched = _inMemoryDistricts.find(d => d.name === 'Bengaluru Urban');
+                return { district: matched?.name || 'Bengaluru Urban', districtId: matched?.id, status: 'IDENTIFIED' };
+            }
+        }
+
+        // 4. District unidentifiable -> Requires admin review
+        return {
+            district: null,
+            districtId: null,
+            status: 'PENDING_ADMIN_REVIEW'
+        };
+    }
+};
+
+// 1d. SUB-ADMIN DISTRICT MAPPINGS MODEL (Many-to-Many: Sub-Admin <-> District)
+const _inMemorySubAdminDistricts = [];
+
+const SubAdminDistrict = {
+    async getDistrictsForSubAdmin(userId) {
+        if (!userId) return [];
+        try {
+            const { data, error } = await supabaseAdmin
+                .from('sub_admin_districts')
+                .select('district_id, districts(*)')
+                .eq('sub_admin_user_id', userId);
+            if (!error && data && data.length > 0) {
+                return data.map(d => d.districts).filter(Boolean);
+            }
+        } catch (_) {}
+
+        // In-memory fallback
+        const mappings = _inMemorySubAdminDistricts.filter(m => m.sub_admin_user_id === userId);
+        return mappings.map(m => _inMemoryDistricts.find(d => d.id === m.district_id)).filter(Boolean);
+    },
+
+    async getSubAdminsForDistrict(districtId) {
+        if (!districtId) return [];
+        try {
+            const { data, error } = await supabaseAdmin
+                .from('sub_admin_districts')
+                .select('sub_admin_user_id')
+                .eq('district_id', districtId);
+            if (!error && data) return data.map(d => d.sub_admin_user_id);
+        } catch (_) {}
+
+        return _inMemorySubAdminDistricts
+            .filter(m => m.district_id === districtId)
+            .map(m => m.sub_admin_user_id);
+    },
+
+    async assignDistrictsToSubAdmin(userId, districtIds = [], assignedBy = null) {
+        if (!userId) return [];
+        // Deduplicate district IDs
+        const uniqueDistrictIds = [...new Set(districtIds.filter(Boolean))];
+
+        try {
+            await supabaseAdmin.from('sub_admin_districts').delete().eq('sub_admin_user_id', userId);
+            if (uniqueDistrictIds.length > 0) {
+                const rows = uniqueDistrictIds.map(dId => ({
+                    sub_admin_user_id: userId,
+                    district_id: dId,
+                    assigned_by: assignedBy,
+                    created_at: new Date().toISOString()
+                }));
+                await supabaseAdmin.from('sub_admin_districts').insert(rows);
+            }
+        } catch (_) {}
+
+        // In-memory update
+        for (let i = _inMemorySubAdminDistricts.length - 1; i >= 0; i--) {
+            if (_inMemorySubAdminDistricts[i].sub_admin_user_id === userId) {
+                _inMemorySubAdminDistricts.splice(i, 1);
+            }
+        }
+        for (const dId of uniqueDistrictIds) {
+            _inMemorySubAdminDistricts.push({
+                id: `sad-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                sub_admin_user_id: userId,
+                district_id: dId,
+                assigned_by: assignedBy,
+                created_at: new Date().toISOString()
+            });
+        }
+
+        return this.getDistrictsForSubAdmin(userId);
+    },
+
+    async removeDistrictFromSubAdmin(userId, districtId) {
+        if (!userId || !districtId) return false;
+        try {
+            await supabaseAdmin.from('sub_admin_districts')
+                .delete()
+                .eq('sub_admin_user_id', userId)
+                .eq('district_id', districtId);
+        } catch (_) {}
+
+        const idx = _inMemorySubAdminDistricts.findIndex(
+            m => m.sub_admin_user_id === userId && m.district_id === districtId
+        );
+        if (idx !== -1) {
+            _inMemorySubAdminDistricts.splice(idx, 1);
+            return true;
+        }
+        return false;
+    }
+};
+
+// 1e. PERMISSION CHANGE AUDIT LOG MODEL
+const _inMemoryPermissionHistory = [];
+
+const PermissionChangeHistory = {
+    async logChange({ subAdminUserId, changedByUserId, changedByRole = 'Admin', action, permissionKey, previousState = null, newState = null, reason = '' }) {
+        const record = {
+            id: `pch-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            sub_admin_user_id: subAdminUserId,
+            changed_by_user_id: changedByUserId,
+            changed_by_role: changedByRole,
+            action: action || 'MODIFIED',
+            permission_key: permissionKey,
+            previous_state: previousState,
+            new_state: newState,
+            reason: reason || 'Permission updated by administrator.',
+            created_at: new Date().toISOString()
+        };
+
+        try {
+            await supabaseAdmin.from('permission_change_history').insert(record);
+        } catch (_) {}
+
+        _inMemoryPermissionHistory.unshift(record);
+        return record;
+    },
+
+    async getHistoryForUser(subAdminUserId) {
+        try {
+            const { data, error } = await supabaseAdmin
+                .from('permission_change_history')
+                .select('*')
+                .eq('sub_admin_user_id', subAdminUserId)
+                .order('created_at', { ascending: false });
+            if (!error && data && data.length > 0) return data;
+        } catch (_) {}
+
+        return _inMemoryPermissionHistory.filter(h => h.sub_admin_user_id === subAdminUserId);
+    }
+};
+
+// 1f. IMMUTABLE PATIENT ASSIGNMENT AUDIT HISTORY MODEL
+const _inMemoryAssignmentHistory = [];
+
+const PatientAssignmentHistory = {
+    async recordAssignment({
+        patientId,
+        doctorId,
+        appointmentId = null,
+        requestId = null,
+        assignedByUserId = null,
+        assignedByName = 'Direct Patient Booking',
+        assignedByRole = 'PATIENT',
+        assignmentSource = ASSIGNMENT_SOURCES.PATIENT_DIRECT_BOOKING,
+        districtId = null,
+        districtName = '',
+        previousAssignmentId = null,
+        assignmentReason = '',
+        status = 'ASSIGNED'
+    }) {
+        const record = {
+            id: `pah-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+            patient_id: patientId,
+            doctor_id: doctorId,
+            appointment_id: appointmentId,
+            request_id: requestId,
+            assigned_by_user_id: assignedByUserId,
+            assigned_by_name: assignedByName,
+            assigned_by_role: assignedByRole,
+            assignment_source: assignmentSource,
+            district_id: districtId,
+            district_name: districtName,
+            previous_assignment_id: previousAssignmentId,
+            assignment_reason: assignmentReason,
+            status: status,
+            created_at: new Date().toISOString()
+        };
+
+        try {
+            const { data, error } = await supabaseAdmin
+                .from('patient_assignment_history')
+                .insert(record)
+                .select()
+                .single();
+            if (!error && data) {
+                _inMemoryAssignmentHistory.unshift(data);
+                return data;
+            }
+        } catch (_) {}
+
+        _inMemoryAssignmentHistory.unshift(record);
+        return record;
+    },
+
+    async getHistory(filters = {}) {
+        try {
+            let req = supabaseAdmin.from('patient_assignment_history').select('*');
+            if (filters.patientId) req = req.eq('patient_id', filters.patientId);
+            if (filters.doctorId) req = req.eq('doctor_id', filters.doctorId);
+            if (filters.districtId) req = req.eq('district_id', filters.districtId);
+            if (filters.assignedByUserId) req = req.eq('assigned_by_user_id', filters.assignedByUserId);
+            if (filters.assignedByRole) req = req.eq('assigned_by_role', filters.assignedByRole);
+            if (filters.assignmentSource) req = req.eq('assignment_source', filters.assignmentSource);
+            if (filters.status) req = req.eq('status', filters.status);
+            req = req.order('created_at', { ascending: false });
+            const { data, error } = await req;
+            if (!error && data) return data;
+        } catch (_) {}
+
+        // In-memory fallback
+        let list = [..._inMemoryAssignmentHistory];
+        if (filters.patientId) list = list.filter(h => h.patient_id === filters.patientId);
+        if (filters.doctorId) list = list.filter(h => h.doctor_id === filters.doctorId);
+        if (filters.districtId) list = list.filter(h => h.district_id === filters.districtId);
+        if (filters.assignedByUserId) list = list.filter(h => h.assigned_by_user_id === filters.assignedByUserId);
+        if (filters.assignedByRole) list = list.filter(h => h.assigned_by_role === filters.assignedByRole);
+        if (filters.assignmentSource) list = list.filter(h => h.assignment_source === filters.assignmentSource);
+        if (filters.status) list = list.filter(h => h.status === filters.status);
+        if (filters.search) {
+            const q = filters.search.toLowerCase();
+            list = list.filter(h =>
+                (h.assigned_by_name && h.assigned_by_name.toLowerCase().includes(q)) ||
+                (h.district_name && h.district_name.toLowerCase().includes(q)) ||
+                (h.assignment_reason && h.assignment_reason.toLowerCase().includes(q)) ||
+                (h.patient_id && h.patient_id.toLowerCase().includes(q))
+            );
+        }
+        return list;
+    },
+
+    async getHistoryForPatient(patientId) {
+        if (!patientId) return [];
+        return this.getHistory({ patientId });
+    },
+
+    async getStatistics() {
+        const history = await this.getHistory();
+        const directBookings = history.filter(h => h.assignment_source === ASSIGNMENT_SOURCES.PATIENT_DIRECT_BOOKING).length;
+        const adminAssignments = history.filter(h => h.assignment_source === ASSIGNMENT_SOURCES.MAIN_ADMIN_ASSIGNMENT).length;
+        const subAdminAssignments = history.filter(h => h.assignment_source === ASSIGNMENT_SOURCES.SUB_ADMIN_ASSIGNMENT).length;
+        const uniquePatientsAssigned = new Set(history.map(h => h.patient_id)).size;
+
+        const districtCounts = {};
+        for (const h of history) {
+            const dName = h.district_name || 'Unassigned / Review';
+            districtCounts[dName] = (districtCounts[dName] || 0) + 1;
+        }
+
+        return {
+            totalAssignments: history.length,
+            totalAssignedPatients: uniquePatientsAssigned,
+            directBookings,
+            adminAssignments,
+            subAdminAssignments,
+            districtCounts
+        };
     }
 };
 
@@ -2462,6 +2977,12 @@ module.exports = {
     DoctorAvailability,
     MedicalSpecialty,
     DEFAULT_MEDICAL_SPECIALTIES,
+    District,
+    DEFAULT_DISTRICTS,
+    SubAdminDistrict,
+    PermissionChangeHistory,
+    PatientAssignmentHistory,
+    ASSIGNMENT_SOURCES,
     isDentalSpecialtyText,
     getDefaultQualificationForSpecialty,
     matchesSpecialtyQuery,

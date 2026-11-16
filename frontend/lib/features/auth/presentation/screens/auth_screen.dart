@@ -1,11 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/models/medical_specialty_model.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
+import '../../../../core/widgets/gs_health_hero_banner.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/supabase_service.dart';
@@ -14,20 +16,21 @@ import '../../../../core/services/session_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/widgets/map_location_picker_dialog.dart';
-
-/// Role enum for authentication
-enum UserRole { patient, dentist, admin }
+import '../widgets/gs_health_registration_view.dart';
+export '../widgets/gs_health_registration_view.dart' show UserRole;
 
 class AuthScreen extends StatefulWidget {
-  final String? initialRole; // 'Patient', 'Dentist', 'Admin'
+  final String? initialRole; // 'Patient', 'Dentist', 'Clinic', 'Admin'
   final int initialTab; // 0 for Register, 1 for Sign In
   final bool? allowAdminRole;
+  final String? initialVerifiedPhone;
 
   const AuthScreen({
     super.key,
     this.initialRole,
-    this.initialTab = 0,
+    this.initialTab = 1,
     this.allowAdminRole,
+    this.initialVerifiedPhone,
   });
 
   @override
@@ -44,7 +47,17 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   final _loginEmailController = TextEditingController();
   bool _isLoggingIn = false;
 
-  // Controllers for Registration
+  // Login OTP & Stage Controller
+  bool _isLoginOtpSent = false;
+  bool _isSendingLoginCode = false;
+  bool _isVerifyingLoginCode = false;
+  String? _loginOtpErrorMessage;
+  String? _currentLoginOtp;
+  late final List<TextEditingController> _otpDigitControllers;
+  late final List<FocusNode> _otpDigitFocusNodes;
+  Timer? _resendTimer;
+  int _resendCountdown = 30;
+  bool _canResendOtp = false;
   final _registerFormKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
@@ -69,21 +82,30 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   // Role-Specific Fields - Dentist / Doctor
   final _licenseNoController = TextEditingController();
   final _clinicNameController = TextEditingController();
-  final _experienceController = TextEditingController(text: '5');
-  final _qualificationController = TextEditingController(text: 'MBBS, MD');
+  final _experienceController = TextEditingController();
+  final _qualificationController = TextEditingController();
   final _clinicAddressController = TextEditingController();
-  String? _selectedSpecialty;
+  String? _selectedSpecialty = 'General Dentistry';
 
   // Role-Specific Fields - Sub-Admin / Admin
   final _adminEmployeeIdController = TextEditingController();
   final _adminDeptController = TextEditingController();
   String _selectedAdminRoleType = 'Admin';
 
-  // Languages Selection
-  static const List<String> _availableLanguages = [
-    'English', 'Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam', 'Marathi', 'Bengali', 'Gujarati', 'Punjabi', 'Spanish'
-  ];
-  String? _selectedLanguage;
+  // Preferred Languages multi-select state (defaults to ['English'])
+  final Set<String> _selectedLanguages = <String>{'English'};
+
+  void _toggleLanguage(String language) {
+    setState(() {
+      if (_selectedLanguages.contains(language)) {
+        if (_selectedLanguages.length > 1) {
+          _selectedLanguages.remove(language);
+        }
+      } else {
+        _selectedLanguages.add(language);
+      }
+    });
+  }
 
   // Profile Image Picker Bytes
   Uint8List? _pickedImageBytes;
@@ -96,7 +118,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   bool _isVerifyingOtp = false;
   final _otpController = TextEditingController();
   String? _otpErrorMessage;
-  String? _currentExpectedOtp;
+  String? _currentRegistrationOtp;
   String? _verifiedPhone;
   String? _verifiedEmail;
 
@@ -126,7 +148,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       setState(() {
         _isOtpVerified = false;
         _isOtpSent = false;
-        _currentExpectedOtp = null;
         _otpErrorMessage = null;
         _verifiedPhone = null;
         _verifiedEmail = null;
@@ -136,12 +157,27 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   }
 
   @override
+  @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this, initialIndex: widget.initialTab);
     _tabController.addListener(() {
       setState(() {});
     });
+    _otpDigitControllers = List.generate(4, (_) => TextEditingController());
+    _otpDigitFocusNodes = List.generate(4, (_) => FocusNode());
+
+    final rawInitialVerified = widget.initialVerifiedPhone;
+    if (rawInitialVerified != null && rawInitialVerified.trim().isNotEmpty) {
+      final normalizedVerified = _normalizePhone(rawInitialVerified);
+      if (normalizedVerified.length == 10) {
+        _phoneController.text = normalizedVerified;
+        _verifiedPhone = normalizedVerified;
+        _isOtpVerified = true;
+        _isOtpSent = true;
+      }
+    }
+
     _phoneController.addListener(_onContactDetailsChanged);
     _emailController.addListener(_onContactDetailsChanged);
 
@@ -160,8 +196,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     if (_isAdminMode) {
       _selectedRole = UserRole.admin;
       _selectedAdminRoleType = (roleStr == 'sub-admin' || roleStr == 'subadmin') ? 'Sub-Admin' : 'Admin';
-    } else if (roleStr == 'dentist') {
+    } else if (roleStr == 'dentist' || roleStr == 'doctor') {
       _selectedRole = UserRole.dentist;
+    } else if (roleStr == 'clinic') {
+      _selectedRole = UserRole.clinic;
     } else {
       _selectedRole = UserRole.patient;
     }
@@ -169,10 +207,17 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
   @override
   void dispose() {
+    _resendTimer?.cancel();
     _phoneController.removeListener(_onContactDetailsChanged);
     _emailController.removeListener(_onContactDetailsChanged);
     _tabController.dispose();
     _loginEmailController.dispose();
+    for (final c in _otpDigitControllers) {
+      c.dispose();
+    }
+    for (final n in _otpDigitFocusNodes) {
+      n.dispose();
+    }
     _nameController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
@@ -192,49 +237,14 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     _otpController.dispose();
     super.dispose();
   }
-
-  String get _roleName {
-    switch (_selectedRole) {
-      case UserRole.patient:
-        return 'Patient';
-      case UserRole.dentist:
-        return 'Dentist';
-      case UserRole.admin:
-        if (_tabController.index == 0) {
-          return _selectedAdminRoleType == 'Admin' ? 'Primary Admin' : 'Sub-Admin';
-        }
-        return 'Admin';
-    }
-  }
-
-  Color get _accentColor {
-    switch (_selectedRole) {
-      case UserRole.patient:
-        return AppTheme.primaryBlue; // #0052CC
-      case UserRole.dentist:
-        return const Color(0xFF0D9488); // Teal
-      case UserRole.admin:
-        return const Color(0xFF6366F1); // Indigo
-    }
-  }
-
-  IconData get _roleIcon {
-    switch (_selectedRole) {
-      case UserRole.patient:
-        return Icons.person_rounded;
-      case UserRole.dentist:
-        return Icons.medical_services_rounded;
-      case UserRole.admin:
-        return Icons.admin_panel_settings_rounded;
-    }
-  }
-
   String get _targetRoute {
     switch (_selectedRole) {
       case UserRole.patient:
         return '/patient';
       case UserRole.dentist:
         return '/dentist';
+      case UserRole.clinic:
+        return '/clinic';
       case UserRole.admin:
         return _selectedAdminRoleType == 'Sub-Admin' ? '/sub-admin' : '/admin';
     }
@@ -260,9 +270,337 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     }
   }
 
-  Future<void> _handleLogin() async {
+  String _maskPhone(String raw) {
+    final d = _normalizePhone(raw);
+    if (d.length == 10) {
+      return '${d.substring(0, 5)} *****';
+    }
+    return d;
+  }
+
+  void _startResendTimer() {
+    _resendTimer?.cancel();
+    setState(() {
+      _resendCountdown = 30;
+      _canResendOtp = false;
+    });
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_resendCountdown > 1) {
+        setState(() {
+          _resendCountdown--;
+        });
+      } else {
+        timer.cancel();
+        setState(() {
+          _resendCountdown = 0;
+          _canResendOtp = true;
+        });
+      }
+    });
+  }
+
+  String _getEnteredOtp() {
+    return _otpDigitControllers.map((c) => c.text.trim()).join();
+  }
+
+  void _handleOtpDigitChange(String val, int index) {
+    if (val.length > 1) {
+      final digits = val.replaceAll(RegExp(r'[^0-9]'), '');
+      for (int i = 0; i < 4; i++) {
+        if (i < digits.length) {
+          _otpDigitControllers[i].text = digits[i];
+        }
+      }
+      final nextIdx = digits.length >= 4 ? 3 : digits.length;
+      _otpDigitFocusNodes[nextIdx].requestFocus();
+      if (digits.length >= 4) {
+        _handleVerifyLoginCode();
+      }
+      return;
+    }
+
+    if (val.isNotEmpty && index < 3) {
+      _otpDigitFocusNodes[index + 1].requestFocus();
+    }
+    if (_getEnteredOtp().length == 4) {
+      _handleVerifyLoginCode();
+    }
+  }
+
+  void _fillLoginOtp(String? otp) {
+    if (otp == null || otp.isEmpty) return;
+    final digits = otp.replaceAll(RegExp(r'[^0-9]'), '');
+    for (int i = 0; i < _otpDigitControllers.length; i++) {
+      if (i < digits.length) {
+        _otpDigitControllers[i].text = digits[i];
+      } else {
+        _otpDigitControllers[i].clear();
+      }
+    }
+    if (digits.length >= 4) {
+      _handleVerifyLoginCode();
+    }
+  }
+
+  void _showTermsDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Terms of Use', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const SingleChildScrollView(
+          child: Text(
+            'GS HEALTH Terms of Use:\n\n'
+            '1. Acceptance: By accessing GS HEALTH, you agree to comply with all applicable medical records standards.\n'
+            '2. Triage & Consultations: Information provided is intended for triage, specialist matching, and care management.\n'
+            '3. Security: All health and consultation data is protected with 256-bit encryption.',
+            style: TextStyle(fontSize: 13.5, height: 1.45),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close', style: TextStyle(color: Color(0xFF012A58), fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showPrivacyDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Privacy Policy', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const SingleChildScrollView(
+          child: Text(
+            'GS HEALTH Privacy Policy:\n\n'
+            '1. We respect and protect your personal and healthcare information.\n'
+            '2. We never sell patient data to third parties.\n'
+            '3. Medical records are shared only with authorized clinical practitioners involved in your care.',
+            style: TextStyle(fontSize: 13.5, height: 1.45),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close', style: TextStyle(color: Color(0xFF012A58), fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFourDigitOtpInput() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final boxWidth = ((constraints.maxWidth - 42) / 4).clamp(54.0, 72.0);
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: List.generate(4, (index) {
+            return SizedBox(
+              width: boxWidth,
+              height: 56,
+              child: Focus(
+                onKeyEvent: (node, event) {
+                  if (event is KeyDownEvent &&
+                      event.logicalKey == LogicalKeyboardKey.backspace) {
+                    if (_otpDigitControllers[index].text.isEmpty && index > 0) {
+                      _otpDigitFocusNodes[index - 1].requestFocus();
+                      _otpDigitControllers[index - 1].clear();
+                      return KeyEventResult.handled;
+                    }
+                  }
+                  return KeyEventResult.ignored;
+                },
+                child: TextFormField(
+                  controller: _otpDigitControllers[index],
+                  focusNode: _otpDigitFocusNodes[index],
+                  keyboardType: TextInputType.number,
+                  textAlign: TextAlign.center,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(4),
+                  ],
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF1E293B),
+                  ),
+                  decoration: InputDecoration(
+                    counterText: '',
+                    contentPadding: EdgeInsets.zero,
+                    filled: true,
+                    fillColor: const Color(0xFFF8FAFC),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppTheme.gsNavy, width: 2),
+                    ),
+                  ),
+                  onChanged: (val) => _handleOtpDigitChange(val, index),
+                ),
+              ),
+            );
+          }),
+        );
+      },
+    );
+  }
+
+  Future<void> _handleSendLoginCode() async {
+    final rawInput = _loginEmailController.text.trim();
+    if (rawInput.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('⚠️ Please enter your 10-digit mobile number.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final normalized = _normalizePhone(rawInput);
+    if (normalized.length != 10) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('⚠️ Please enter a valid 10-digit mobile number.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isSendingLoginCode = true;
+      _loginOtpErrorMessage = null;
+    });
+
+    try {
+      final res = await ApiService().requestOtp(
+        phone: normalized,
+        email: rawInput.contains('@') ? rawInput : '',
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _isSendingLoginCode = false;
+      });
+
+      if (res['success'] == true) {
+        final generatedCode = (res['otp'] ?? '123456').toString();
+        final bool isAuthorizedAdminMatch = res['isAdmin'] == true;
+        setState(() {
+          _isLoginOtpSent = true;
+          _currentLoginOtp = generatedCode;
+          if (isAuthorizedAdminMatch) {
+            _isAdminMode = true;
+            _selectedRole = UserRole.admin;
+          } else {
+            _isAdminMode = false;
+          }
+          for (final c in _otpDigitControllers) {
+            c.clear();
+          }
+        });
+        _startResendTimer();
+
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_otpDigitFocusNodes.isNotEmpty && mounted) {
+            _otpDigitFocusNodes[0].requestFocus();
+          }
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('One-time code sent to +91 $normalized. (OTP: $generatedCode)'),
+            backgroundColor: AppTheme.gsNavy,
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res['message'] ?? 'Failed to send OTP SMS. Please check your mobile number.'),
+            backgroundColor: const Color(0xFFEF4444),
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isSendingLoginCode = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error dispatching OTP: $e'),
+          backgroundColor: const Color(0xFFEF4444),
+        ),
+      );
+    }
+  }
+
+  Future<void> _handleVerifyLoginCode() async {
+    final code = _getEnteredOtp();
+    if (code.length < 4) {
+      setState(() {
+        _loginOtpErrorMessage = 'Please enter all 4 digits of the verification code.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isVerifyingLoginCode = true;
+      _loginOtpErrorMessage = null;
+    });
+
+    final rawInput = _loginEmailController.text.trim();
+    final normalized = _normalizePhone(rawInput);
+
+    try {
+      final res = await ApiService().verifyOtp(
+        phone: normalized,
+        email: rawInput.contains('@') ? rawInput : '',
+        code: code,
+      );
+      final bool verified = res['success'] == true;
+
+      if (!mounted) return;
+      setState(() => _isVerifyingLoginCode = false);
+
+      if (verified) {
+        await _handleLogin(verifiedOtpCode: code);
+      } else {
+        setState(() {
+          _loginOtpErrorMessage = res['message']?.toString() ?? 'Invalid or expired OTP code.';
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isVerifyingLoginCode = false;
+        _loginOtpErrorMessage = 'Verification error: $e';
+      });
+    }
+  }
+
+  Future<void> _handleLogin({String? verifiedOtpCode}) async {
     if (_isLoggingIn) return;
-    if (!_loginFormKey.currentState!.validate()) return;
+
+    final String otpToUse = (verifiedOtpCode ?? _getEnteredOtp()).trim();
 
     FocusManager.instance.primaryFocus?.unfocus();
 
@@ -271,14 +609,20 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         ? _normalizePhone(rawIdentifier)
         : rawIdentifier;
 
-    setState(() => _isLoggingIn = true);
+    setState(() {
+      _isLoggingIn = true;
+      _loginOtpErrorMessage = null;
+    });
     ScaffoldMessenger.of(context).clearSnackBars();
 
     try {
       final res = await ApiService().loginUser(
         email: identifier,
         phone: identifier,
-        role: _roleName,
+        otp: otpToUse.isNotEmpty ? otpToUse : null,
+        role: _isAdminMode
+            ? 'Admin'
+            : (_selectedRole == UserRole.clinic ? 'Clinic' : null),
       );
 
       if (!mounted) return;
@@ -289,31 +633,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ? responseData['user']
             : (res['user'] is Map<String, dynamic> ? res['user'] : {});
 
-        final String registeredRole = (userData['role'] ?? _roleName).toString().toLowerCase();
-
-        // ⛔ ENFORCE STRICT PORTAL ROLE MATCHING (Sub-Admin is also valid for Admin portal)
-        final bool isSelAdmin = _selectedRole == UserRole.admin;
-        final bool isSelDentist = _selectedRole == UserRole.dentist;
-        final bool isSelPatient = _selectedRole == UserRole.patient;
-
-        final bool isRegAdmin = registeredRole.contains('admin');
-        final bool isRegSubAdmin = registeredRole.contains('sub-admin') || registeredRole.contains('subadmin');
-        final bool isRegDentist = registeredRole.contains('dentist') || registeredRole.contains('doctor');
-        final bool isRegPatient = registeredRole.contains('patient');
-
-        // Sub-admins should be treated as admin-class for portal routing
-        if ((isSelAdmin && !isRegAdmin && !isRegSubAdmin) || (isSelDentist && !isRegDentist) || (isSelPatient && !isRegPatient)) {
-          setState(() => _isLoggingIn = false);
-          final displayRole = userData['role'] ?? (isRegDentist ? 'Dentist' : (isRegAdmin || isRegSubAdmin ? 'Admin' : 'Patient'));
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('⛔ Access Denied: This account is registered as a $displayRole. Please switch to the $displayRole tab to sign in.'),
-              backgroundColor: const Color(0xFFEF4444),
-              duration: const Duration(seconds: 4),
-            ),
-          );
-          return;
-        }
+        // Authoritative role directly from database
+        final String registeredRole = (userData['role'] ?? 'patient').toString().toLowerCase();
 
         final String? returnedPhoto = userData['profilePhoto'];
         Uint8List? photoBytes;
@@ -321,17 +642,12 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           try {
             final base64Str = returnedPhoto.contains(',') ? returnedPhoto.split(',').last : returnedPhoto;
             photoBytes = base64Decode(base64Str.trim());
-            debugPrint('✅ Successfully decoded user profile photo (${photoBytes.length} bytes)');
-          } catch (e) {
-            debugPrint('❌ Error decoding returned user photo: $e');
-          }
+          } catch (_) {}
         }
 
         final userPhone = (userData['phone'] != null && userData['phone'].toString().isNotEmpty)
             ? userData['phone'].toString()
-            : (_phoneController.text.trim().isNotEmpty
-                ? _phoneController.text.trim()
-                : (!identifier.contains('@') && identifier.isNotEmpty ? identifier : ''));
+            : (!identifier.contains('@') && identifier.isNotEmpty ? identifier : '');
 
         final String effectiveToken = (responseData['accessToken'] ?? res['accessToken'] ?? res['token'] ?? 'sb_session_${userData['id'] ?? DateTime.now().millisecondsSinceEpoch}').toString();
         final String effectiveUserId = (userData['id'] ?? Supabase.instance.client.auth.currentUser?.id ?? 'user_${DateTime.now().millisecondsSinceEpoch}').toString();
@@ -340,23 +656,60 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ? userData['name'].toString().trim()
             : (effectiveEmail.contains('@') ? effectiveEmail.split('@').first : identifier);
 
-        AnalyticsService.logLogin(method: 'Direct_Contact_Login', role: _roleName);
+        AnalyticsService.logLogin(method: 'OTP_Mobile_Login', role: registeredRole);
 
-        if (registeredRole.contains('dentist') || registeredRole.contains('doctor')) {
+        // Direct Authoritative Role Routing
+        if (registeredRole.contains('clinic') ||
+            (_selectedRole == UserRole.clinic && !registeredRole.contains('admin'))) {
+          final String clinicName = (userData['clinicName'] ??
+                  userData['clinic_name'] ??
+                  effectiveName)
+              .toString()
+              .trim();
+          final String clinicAddress = (userData['clinicAddress'] ??
+                  userData['location'] ??
+                  userData['city'] ??
+                  '')
+              .toString()
+              .trim();
+          PatientProblemService().setAuthenticatedClinicSession(
+            id: effectiveUserId,
+            clinicName: clinicName.isNotEmpty ? clinicName : effectiveName,
+            location: clinicAddress,
+            phone: userPhone,
+            email: effectiveEmail,
+          );
+          await SessionService().saveSession(
+            token: effectiveToken,
+            role: 'Clinic',
+            userId: effectiveUserId,
+            email: effectiveEmail,
+            phone: userPhone,
+            name: effectiveName,
+            metadata: {
+              ...userData,
+              'clinicName': clinicName.isNotEmpty ? clinicName : effectiveName,
+              if (clinicAddress.isNotEmpty) 'location': clinicAddress,
+            },
+          );
+          if (!mounted) return;
+          setState(() => _isLoggingIn = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('🎉 Welcome back, ${userData['name'] ?? clinicName}! Opening Clinic Dashboard...'),
+              backgroundColor: AppTheme.gsNavy,
+            ),
+          );
+          context.go('/clinic');
+        } else if (registeredRole.contains('dentist') || registeredRole.contains('doctor')) {
           final docName = (userData['name'] != null && userData['name'].toString().trim().isNotEmpty)
               ? userData['name'].toString().trim()
               : (userData['email'] != null ? userData['email'].toString() : identifier);
           final docId = (userData['id'] ?? Supabase.instance.client.auth.currentUser?.id ?? '').toString();
           final returnedSpec = (userData['specialty'] ?? userData['speciality'] ?? '').toString().trim();
-          final effectiveSpec = returnedSpec.isNotEmpty
-              ? returnedSpec
-              : (PatientProblemService().currentDoctor?.specialty.isNotEmpty == true
-                  ? PatientProblemService().currentDoctor!.specialty
-                  : 'General Dentistry');
+          final effectiveSpec = returnedSpec.isNotEmpty ? returnedSpec : 'General Dentistry';
           final returnedQual = (userData['qualification'] ?? userData['qualifications'] ?? '').toString().trim();
-          final effectiveQual = returnedQual.isNotEmpty
-              ? returnedQual
-              : MedicalSpecialtyModel.getDefaultQualificationForSpecialty(effectiveSpec);
+          final effectiveQual = returnedQual.isNotEmpty ? returnedQual : 'BDS, MDS';
           final returnedExp = int.tryParse((userData['experienceYears'] ?? userData['experience_years'] ?? '').toString()) ?? 5;
 
           PatientProblemService().registerDoctor(
@@ -389,13 +742,13 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           setState(() => _isLoggingIn = false);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('🎉 Welcome back, ${userData['name'] ?? 'Doctor'}! Logging into Dentist Workspace...'),
-              backgroundColor: const Color(0xFF10B981),
+              content: Text('🎉 Welcome back, Dr. $docName! Opening Dentist Workspace...'),
+              backgroundColor: AppTheme.gsNavy,
             ),
           );
           context.go('/dentist');
         } else if (registeredRole.contains('admin') || registeredRole.contains('sub-admin') || registeredRole.contains('subadmin') || registeredRole.contains('sub_admin')) {
-          final isSubAdmin = registeredRole.contains('sub-admin') || registeredRole.contains('subadmin') || registeredRole.contains('sub_admin') || (userData['role']?.toString().toLowerCase().contains('sub') ?? false);
+          final isSubAdmin = registeredRole.contains('sub-admin') || registeredRole.contains('subadmin') || registeredRole.contains('sub_admin');
 
           if (isSubAdmin) {
             List<String> perms = [];
@@ -413,6 +766,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           } else {
             PatientProblemService().clearSubAdminSession();
           }
+
           await SessionService().saveSession(
             token: effectiveToken,
             role: isSubAdmin ? 'Sub-Admin' : 'Admin',
@@ -430,7 +784,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('🎉 Welcome back, ${userData['name'] ?? (isSubAdmin ? 'Sub-Admin' : 'Admin')}! Opening ${isSubAdmin ? 'Sub-Admin Workspace' : 'Admin Dashboard'}...'),
-              backgroundColor: const Color(0xFF6366F1),
+              backgroundColor: const Color(0xFF012A58),
             ),
           );
           context.go(isSubAdmin ? '/sub-admin' : '/admin');
@@ -458,6 +812,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           final String loginGender = (userData['gender'] ?? dbProfileMeta['gender'] ?? cachedMap['gender'] ?? authMeta['gender'] ?? 'Female').toString();
           final String loginBloodGroup = (userData['bloodGroup'] ?? userData['blood_group'] ?? dbProfileMeta['bloodGroup'] ?? cachedMap['bloodGroup'] ?? authMeta['bloodGroup'] ?? 'O Positive (O+)').toString();
           final String loginEmergency = (userData['emergencyContact'] ?? userData['emergency_contact'] ?? dbProfileMeta['emergencyContact'] ?? cachedMap['emergencyContact'] ?? authMeta['emergencyContact'] ?? userPhone).toString();
+          final dynamic rawLoginLangs = userData['languages'] ?? dbProfileMeta['languages'] ?? cachedMap['languages'] ?? authMeta['languages'];
+          final List<String> loginLanguages = (rawLoginLangs is List && rawLoginLangs.isNotEmpty)
+              ? rawLoginLangs.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList()
+              : <String>['English'];
 
           PatientProblemService().updatePatientProfile(
             id: userData['id']?.toString() ?? '',
@@ -470,6 +828,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             emergencyContact: loginEmergency.isNotEmpty ? loginEmergency : userPhone,
             city: (userData['city'] ?? dbProfileMeta['city'] ?? cachedMap['city'] ?? '').toString(),
             pincode: (userData['pincode'] ?? dbProfileMeta['pincode'] ?? cachedMap['pincode'] ?? '').toString(),
+            languages: loginLanguages,
             photoBytes: photoBytes,
           );
           await SessionService().saveSession(
@@ -485,45 +844,83 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               'gender': loginGender,
               'bloodGroup': loginBloodGroup,
               'emergencyContact': loginEmergency,
-              'city': (userData['city'] ?? dbProfileMeta['city'] ?? cachedMap['city'] ?? '').toString(),
-              'pincode': (userData['pincode'] ?? dbProfileMeta['pincode'] ?? cachedMap['pincode'] ?? '').toString(),
+              'languages': loginLanguages,
             },
           );
           if (!mounted) return;
           setState(() => _isLoggingIn = false);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('🎉 Welcome back, ${userData['name'] ?? 'Patient'}! Logging into Patient Portal...'),
-              backgroundColor: const Color(0xFF10B981),
+              content: Text('🎉 Welcome back, ${userData['name'] ?? 'Patient'}!'),
+              backgroundColor: AppTheme.gsNavy,
             ),
           );
           context.go('/patient');
         }
       } else {
-        setState(() => _isLoggingIn = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ Login Failed: ${res['message'] ?? 'User not registered. Please Register first.'}'),
-            backgroundColor: const Color(0xFFEF4444),
-            duration: const Duration(seconds: 4),
-          ),
-        );
+        final String errMsg = (res['message'] ?? 'Failed to authenticate user.').toString();
+        final String lowerErr = errMsg.toLowerCase();
+        final bool isUnregisteredMobile = verifiedOtpCode != null &&
+            verifiedOtpCode.trim().isNotEmpty &&
+            !identifier.contains('@') &&
+            _isValidMobilePhone(identifier) &&
+            (lowerErr.contains('not registered') ||
+                lowerErr.contains('not found') ||
+                lowerErr.contains('no account') ||
+                lowerErr.contains('does not exist'));
+
+        if (isUnregisteredMobile) {
+          final String normalizedPhone = _normalizePhone(identifier);
+          setState(() {
+            _isLoggingIn = false;
+            _loginOtpErrorMessage = null;
+            _isLoginOtpSent = false;
+            _verifiedPhone = normalizedPhone;
+            _isOtpVerified = true;
+            _isOtpSent = true;
+            _phoneController.text = normalizedPhone;
+            if (widget.allowAdminRole != true && _selectedRole == UserRole.admin) {
+              _selectedRole = UserRole.patient;
+              _isAdminMode = false;
+            }
+            _tabController.index = 0;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Mobile +91$normalizedPhone verified! Complete your GS HEALTH profile.'),
+              backgroundColor: AppTheme.gsNavy,
+            ),
+          );
+          return;
+        }
+
+        setState(() {
+          _isLoggingIn = false;
+          _loginOtpErrorMessage = errMsg;
+        });
       }
     } catch (e) {
-      debugPrint('Login Error: $e');
       if (!mounted) return;
-      setState(() => _isLoggingIn = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('❌ Network error during login: $e'),
-          backgroundColor: const Color(0xFFEF4444),
-        ),
-      );
+      setState(() {
+        _isLoggingIn = false;
+        _loginOtpErrorMessage = 'Sign in error: $e';
+      });
     }
   }
-
   void _handleRegister() async {
     if (_isRegistering) return;
+
+    // Security Guard: Never allow Admin/Sub-Admin registration outside the authorized Admin portal.
+    if (_selectedRole == UserRole.admin && widget.allowAdminRole != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Admin accounts require authorized Admin Console provisioning or portal access.'),
+          backgroundColor: AppTheme.gsRed,
+        ),
+      );
+      return;
+    }
+
     if (!_registerFormKey.currentState!.validate()) return;
 
     final name = _nameController.text.trim();
@@ -535,8 +932,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     if (rawPhone.isEmpty || !_isValidMobilePhone(rawPhone)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('⚠️ Please enter a valid 10-digit Mobile Phone Number.'),
-          backgroundColor: Color(0xFFEF4444),
+          content: Text('⚠️ Please enter a valid 10-digit Mobile Phone Number and verify OTP below.'),
+          backgroundColor: AppTheme.gsRed,
         ),
       );
       return;
@@ -546,13 +943,12 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       setState(() {
         _isOtpVerified = false;
         _isOtpSent = false;
-        _currentExpectedOtp = null;
         _verifiedPhone = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('⚠️ Mobile number changed or not verified. Please verify OTP for the current number.'),
-          backgroundColor: Color(0xFFEF4444),
+          backgroundColor: AppTheme.gsRed,
         ),
       );
       return;
@@ -563,36 +959,49 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       photoBase64 = 'data:image/png;base64,${base64Encode(_pickedImageBytes!)}';
     }
 
-    final location = _selectedRole == UserRole.dentist
-        ? _clinicAddressController.text.trim()
+    final clinicAddress = _clinicAddressController.text.trim();
+    final location = (_selectedRole == UserRole.dentist || _selectedRole == UserRole.clinic)
+        ? clinicAddress
         : _locationController.text.trim();
     final city = _cityController.text.trim();
     final pincode = _pincodeController.text.trim();
-    final clinicAddress = _clinicAddressController.text.trim();
     final String chosenRole = _selectedRole == UserRole.dentist
         ? 'Dentist'
-        : (_selectedRole == UserRole.admin ? _selectedAdminRoleType : 'Patient');
+        : (_selectedRole == UserRole.clinic
+            ? 'Clinic'
+            : (_selectedRole == UserRole.admin ? _selectedAdminRoleType : 'Patient'));
 
     // Mandatory Field Validations
     if (city.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('⚠️ City is a mandatory field.'), backgroundColor: Color(0xFFEF4444)),
+        const SnackBar(content: Text('⚠️ City is a mandatory field.'), backgroundColor: AppTheme.gsRed),
       );
       return;
     }
 
-    if (pincode.isEmpty || !RegExp(r'^\d{6}$').hasMatch(pincode)) {
+    if (pincode.isNotEmpty && !RegExp(r'^\d{6}$').hasMatch(pincode)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('⚠️ Please enter a valid 6-digit Pincode.'), backgroundColor: Color(0xFFEF4444)),
+        const SnackBar(content: Text('⚠️ Please enter a valid 6-digit Pincode.'), backgroundColor: AppTheme.gsRed),
       );
       return;
     }
 
     setState(() => _isRegistering = true);
 
-    final List<String> selectedLangs = (_selectedLanguage != null && _selectedLanguage!.trim().isNotEmpty)
-        ? [_selectedLanguage!.trim()]
-        : <String>['English'];
+    final List<String> selectedLangs = kGsHealthLanguages.where(_selectedLanguages.contains).toList();
+    if (selectedLangs.isEmpty) {
+      selectedLangs.add('English');
+    }
+
+    final bool isFacilityRole = _selectedRole == UserRole.dentist || _selectedRole == UserRole.clinic;
+    final String? submittedClinicName = isFacilityRole
+        ? (_clinicNameController.text.trim().isNotEmpty
+            ? _clinicNameController.text.trim()
+            : (_selectedRole == UserRole.clinic ? name : null))
+        : null;
+    final String? submittedClinicAddress = isFacilityRole && clinicAddress.isNotEmpty
+        ? clinicAddress
+        : (_selectedRole == UserRole.clinic && location.isNotEmpty ? location : null);
 
     try {
       final res = await ApiService().registerUser(
@@ -614,9 +1023,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ? (int.tryParse(_experienceController.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 5)
             : null,
         licenseNumber: _selectedRole == UserRole.dentist ? _licenseNoController.text.trim() : null,
-        clinicName: _selectedRole == UserRole.dentist ? _clinicNameController.text.trim() : null,
-        clinicAddress: _selectedRole == UserRole.dentist && clinicAddress.isNotEmpty ? clinicAddress : null,
-        location: location.isNotEmpty ? location : (_selectedRole == UserRole.dentist && clinicAddress.isNotEmpty ? clinicAddress : null),
+        clinicName: submittedClinicName,
+        clinicAddress: submittedClinicAddress,
+        location: location.isNotEmpty ? location : (clinicAddress.isNotEmpty ? clinicAddress : null),
         city: city,
         pincode: pincode,
         latitude: _selectedRole == UserRole.patient ? null : _selectedLatitude,
@@ -636,7 +1045,17 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ? regData['user']
             : (res['user'] is Map<String, dynamic> ? res['user'] : {});
 
-        final String regToken = (regData['accessToken'] ?? res['accessToken'] ?? res['token'] ?? 'sb_session_${regUser['id'] ?? DateTime.now().millisecondsSinceEpoch}').toString();
+        final String regToken = (regData['accessToken'] ?? res['accessToken'] ?? res['token'] ?? '').toString().trim();
+        if (regToken.isEmpty) {
+          setState(() => _isRegistering = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('❌ Registration Error: Server did not issue a valid session token.'),
+              backgroundColor: Color(0xFFEF4444),
+            ),
+          );
+          return;
+        }
         final String regUserId = (regUser['id'] ?? Supabase.instance.client.auth.currentUser?.id ?? 'user_${DateTime.now().millisecondsSinceEpoch}').toString();
 
         if (_selectedRole == UserRole.patient) {
@@ -652,6 +1071,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             address: location,
             city: city,
             pincode: pincode,
+            languages: selectedLangs,
             photoBytes: _pickedImageBytes,
           );
           await SessionService().saveSession(
@@ -669,6 +1089,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               'city': city,
               'pincode': pincode,
               'address': location,
+              'languages': selectedLangs,
               if (_selectedLatitude != null) 'latitude': _selectedLatitude,
               if (_selectedLongitude != null) 'longitude': _selectedLongitude,
             },
@@ -717,6 +1138,37 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               if (_selectedLongitude != null) 'longitude': _selectedLongitude,
               'experienceYears': exp,
               'languages': selectedLangs,
+            },
+          );
+        } else if (_selectedRole == UserRole.clinic) {
+          final resolvedClinicName = _clinicNameController.text.trim().isNotEmpty
+              ? _clinicNameController.text.trim()
+              : name;
+          final resolvedClinicAddr = clinicAddress.isNotEmpty ? clinicAddress : location;
+          PatientProblemService().setAuthenticatedClinicSession(
+            id: regUserId,
+            clinicName: resolvedClinicName,
+            location: '$resolvedClinicAddr${city.isNotEmpty ? ", $city" : ""}',
+            phone: phone,
+            email: email,
+          );
+          await PatientProblemService().registerClinic(
+            clinicName: resolvedClinicName,
+            location: resolvedClinicAddr.isNotEmpty ? resolvedClinicAddr : city,
+          );
+          await SessionService().saveSession(
+            token: regToken,
+            role: 'Clinic',
+            userId: regUserId,
+            email: email,
+            phone: phone,
+            name: resolvedClinicName,
+            metadata: {
+              'clinicName': resolvedClinicName,
+              'clinicAddress': resolvedClinicAddr,
+              'location': resolvedClinicAddr.isNotEmpty ? resolvedClinicAddr : city,
+              'city': city,
+              'pincode': pincode,
             },
           );
         } else {
@@ -772,7 +1224,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('🎉 Registered $chosenRole account successfully!'),
-            backgroundColor: const Color(0xFF10B981),
+            backgroundColor: AppTheme.gsNavy,
             duration: const Duration(seconds: 2),
           ),
         );
@@ -820,7 +1272,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       _isSendingOtp = true;
       _isOtpVerified = false;
       _otpErrorMessage = null;
-      _currentExpectedOtp = null;
       _verifiedPhone = phone;
       _verifiedEmail = email.toLowerCase();
     });
@@ -832,16 +1283,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     if (phone.isNotEmpty) {
       final backendRes = await ApiService().requestOtp(phone: phone, email: email);
       sendSuccess = backendRes['success'] == true;
-      if (backendRes['otp'] != null) {
-        _currentExpectedOtp = backendRes['otp'].toString();
-      }
 
       if (sendSuccess) {
-        if (backendRes['simulated'] == true && backendRes['otp'] != null) {
-          successMsg = 'OTP sent to mobile $phone (Code: ${backendRes['otp']})';
-        } else {
-          successMsg = 'OTP sent to mobile number $phone.';
-        }
+        final generatedCode = (backendRes['otp'] ?? '123456').toString();
+        _currentRegistrationOtp = generatedCode;
+        successMsg = 'OTP code $generatedCode dispatched to mobile $phone.';
       }
     }
 
@@ -872,7 +1318,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(successMsg.isNotEmpty ? successMsg : 'OTP sent successfully.'),
-          backgroundColor: const Color(0xFF10B981),
+          backgroundColor: AppTheme.gsNavy,
           duration: const Duration(seconds: 6),
         ),
       );
@@ -907,7 +1353,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       setState(() {
         _isOtpVerified = false;
         _isOtpSent = false;
-        _currentExpectedOtp = null;
         _otpErrorMessage = 'Mobile number changed. Please send a new OTP.';
       });
       return;
@@ -920,18 +1365,13 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
     bool verified = false;
 
-    // 1. Direct match with received OTP
-    if (_currentExpectedOtp != null && _currentExpectedOtp == code) {
-      verified = true;
-    }
-
-    // 2. Mobile Phone SMS OTP verification via Backend API & Supabase
-    if (!verified && phone.isNotEmpty) {
+    // 1. Mobile Phone SMS OTP verification via Backend API
+    if (phone.isNotEmpty) {
       final res = await ApiService().verifyOtp(phone: phone, email: email, code: code);
       verified = res['success'] == true;
     }
 
-    // 3. Email OTP verification via Supabase Auth
+    // 2. Email OTP verification via Supabase Auth
     if (!verified && email.isNotEmpty) {
       final supabaseVerify = await SupabaseService().verifyEmailOtp(email: email, token: code);
       verified = supabaseVerify['success'] == true;
@@ -951,7 +1391,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('🎉 OTP verified successfully! You can now complete registration.'),
-          backgroundColor: Color(0xFF10B981),
+          backgroundColor: AppTheme.gsNavy,
         ),
       );
     } else {
@@ -961,78 +1401,111 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
   Widget _buildOtpVerificationSection() {
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 12),
+      key: const Key('reg_mobile_otp_card'),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFFF0FDF4),
+        color: const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF86EFAC)),
+        border: Border.all(
+          color: _isOtpVerified
+              ? AppTheme.gsNavy.withValues(alpha: 0.3)
+              : const Color(0xFFE2E8F0),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.mark_email_read_rounded, color: Color(0xFF16A34A), size: 18),
-              const SizedBox(width: 6),
+              const Icon(Icons.phone_android_rounded, color: AppTheme.gsRed, size: 18),
+              const SizedBox(width: 8),
               const Expanded(
                 child: Text(
-                  'Security OTP Verification',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF166534)),
+                  'MOBILE NUMBER & OTP VERIFICATION',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                    letterSpacing: 0.6,
+                    color: AppTheme.gsNavy,
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: _isOtpVerified ? const Color(0xFFDCF8C6) : const Color(0xFFFEF3C7),
+                  color: _isOtpVerified ? const Color(0xFFEFF4FA) : const Color(0xFFFFF1F2),
                   borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: (_isOtpVerified ? AppTheme.gsNavy : AppTheme.gsRed).withValues(alpha: 0.25),
+                  ),
                 ),
                 child: Text(
-                  _isOtpVerified ? 'VERIFIED ✓' : 'STEP 1 OF 2',
+                  _isOtpVerified ? 'VERIFIED' : 'REQUIRED',
                   style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.bold,
-                    color: _isOtpVerified ? const Color(0xFF15803D) : const Color(0xFFD97706),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: _isOtpVerified ? AppTheme.gsNavy : AppTheme.gsRed,
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          const Text(
-            'Enter the OTP verification code dispatched to your Mobile Phone SMS or Email Inbox.',
-            style: TextStyle(fontSize: 11, color: Color(0xFF166534)),
+          const SizedBox(height: 12),
+          TextFormField(
+            key: const Key('reg_phone_field'),
+            controller: _phoneController,
+            keyboardType: TextInputType.phone,
+            scrollPadding: const EdgeInsets.only(bottom: 120),
+            style: const TextStyle(color: Color(0xFF0F172A), fontSize: 14, fontWeight: FontWeight.w600),
+            validator: (val) {
+              if (val == null || val.trim().isEmpty) return 'Mobile phone number is mandatory';
+              if (!_isValidMobilePhone(val)) return 'Enter valid 10-digit mobile number';
+              return null;
+            },
+            decoration: InputDecoration(
+              hintText: '+91 98765 43210',
+              hintStyle: const TextStyle(fontSize: 14, color: Color(0xFF94A3B8)),
+              prefixIcon: const Icon(Icons.call_outlined, color: AppTheme.gsNavy, size: 18),
+              filled: true,
+              fillColor: Colors.white,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: AppTheme.gsNavy, width: 1.6),
+              ),
+            ),
           ),
           const SizedBox(height: 12),
-
           if (!_isOtpSent && !_isOtpVerified) ...[
-            Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF16A34A), Color(0xFF15803D)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF16A34A).withValues(alpha: 0.3),
-                    blurRadius: 8,
-                    offset: const Offset(0, 3),
-                  ),
-                ],
-              ),
+            SizedBox(
+              width: double.infinity,
+              height: 44,
               child: ElevatedButton.icon(
+                key: const Key('reg_send_otp_button'),
                 icon: _isSendingOtp
-                    ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    ? const SizedBox(
+                        height: 14,
+                        width: 14,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                      )
                     : const Icon(Icons.send_to_mobile_rounded, size: 16),
-                label: Text(_isSendingOtp ? 'Sending OTP...' : 'Send OTP to Mobile & Email', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
+                label: Text(
+                  _isSendingOtp ? 'Sending OTP...' : 'Send verification code',
+                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                ),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.transparent,
+                  backgroundColor: AppTheme.gsNavy,
                   foregroundColor: Colors.white,
-                  shadowColor: Colors.transparent,
-                  minimumSize: const Size.fromHeight(42),
+                  elevation: 0,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 onPressed: _isSendingOtp ? null : _handleSendOtp,
@@ -1040,88 +1513,43 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ),
             if (_otpErrorMessage != null) ...[
               const SizedBox(height: 6),
-              Text(_otpErrorMessage!, style: const TextStyle(color: Color(0xFFEF4444), fontSize: 11, fontWeight: FontWeight.w600)),
+              Text(
+                _otpErrorMessage!,
+                style: const TextStyle(color: AppTheme.gsRed, fontSize: 11.5, fontWeight: FontWeight.w600),
+              ),
             ],
           ] else if (!_isOtpVerified && _isOtpSent) ...[
             Container(
               margin: const EdgeInsets.only(bottom: 10),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
-                color: const Color(0xFFDCFCE7),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFF86EFAC)),
+                color: const Color(0xFFEFF4FA),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppTheme.gsNavy.withValues(alpha: 0.25)),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Row(
                 children: [
-                  const Row(
-                    children: [
-                      Icon(Icons.mark_email_read_rounded, color: Color(0xFF15803D), size: 16),
-                      SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          'OTP verification code has been dispatched to your Mobile SMS / Email Inbox.',
-                          style: TextStyle(fontSize: 11, color: Color(0xFF15803D), fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (ApiService.lastGeneratedOtp != null) ...[
-                    const SizedBox(height: 6),
-                    InkWell(
-                      onTap: () {
-                        _otpController.text = ApiService.lastGeneratedOtp ?? '';
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('OTP code filled into input field!'),
-                            duration: Duration(seconds: 1),
-                          ),
-                        );
-                      },
-                      borderRadius: BorderRadius.circular(6),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: const Color(0xFF16A34A)),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.key_rounded, size: 14, color: Color(0xFF16A34A)),
-                            const SizedBox(width: 5),
-                            const Expanded(
-                              child: Text(
-                                'Verification Code:',
-                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFDCFCE7),
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: const Color(0xFF86EFAC)),
-                              ),
-                              child: Text(
-                                ApiService.lastGeneratedOtp ?? '',
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 1.2,
-                                  color: Color(0xFF15803D),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            const Icon(Icons.touch_app_rounded, size: 12, color: Color(0xFF16A34A)),
-                          ],
-                        ),
-                      ),
+                  const Icon(Icons.info_outline_rounded, color: AppTheme.gsNavy, size: 16),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Demo mode: SMS is off. Use code ${_currentRegistrationOtp ?? "1234"}.',
+                      style: const TextStyle(fontSize: 12, color: AppTheme.gsNavy, fontWeight: FontWeight.w700),
                     ),
-                  ],
+                  ),
+                  InkWell(
+                    onTap: () {
+                      _otpController.text = _currentRegistrationOtp ?? '1234';
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppTheme.gsRed,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text('Fill', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -1130,52 +1558,55 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 Expanded(
                   flex: 3,
                   child: TextField(
+                    key: const Key('reg_otp_code_field'),
                     controller: _otpController,
                     keyboardType: TextInputType.number,
                     maxLength: 8,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w600),
+                    scrollPadding: const EdgeInsets.only(bottom: 120),
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 14, fontWeight: FontWeight.w600),
                     decoration: InputDecoration(
                       hintText: 'Enter OTP code',
                       counterText: '',
                       filled: true,
                       fillColor: Colors.white,
                       isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: AppTheme.gsNavy, width: 1.5),
+                      ),
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   flex: 2,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(10),
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF10B981), Color(0xFF059669)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFF10B981).withValues(alpha: 0.25),
-                          blurRadius: 6,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
+                  child: SizedBox(
+                    height: 44,
                     child: ElevatedButton(
+                      key: const Key('reg_verify_otp_button'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.transparent,
-                        shadowColor: Colors.transparent,
+                        backgroundColor: AppTheme.gsNavy,
                         foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                        elevation: 0,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
                       onPressed: _isVerifyingOtp ? null : _handleVerifyOtp,
                       child: _isVerifyingOtp
-                          ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                          : const Text('Verify', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
+                          ? const SizedBox(
+                              height: 14,
+                              width: 14,
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                            )
+                          : const Text('Verify', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                     ),
                   ),
                 ),
@@ -1183,428 +1614,908 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ),
             if (_otpErrorMessage != null) ...[
               const SizedBox(height: 6),
-              Text(_otpErrorMessage!, style: const TextStyle(color: Color(0xFFEF4444), fontSize: 11, fontWeight: FontWeight.w600)),
+              Text(
+                _otpErrorMessage!,
+                style: const TextStyle(color: AppTheme.gsRed, fontSize: 11.5, fontWeight: FontWeight.w600),
+              ),
             ],
             const SizedBox(height: 6),
             InkWell(
               onTap: _handleSendOtp,
-              child: const Text('Didn\'t receive code? Resend OTP to Mobile & Email', style: TextStyle(fontSize: 10, color: AppTheme.primaryBlue, fontWeight: FontWeight.bold, decoration: TextDecoration.underline)),
+              child: const Text(
+                'Resend verification code',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: AppTheme.gsNavy,
+                  fontWeight: FontWeight.w700,
+                  decoration: TextDecoration.underline,
+                ),
+              ),
             ),
           ] else ...[
             const Text(
-              'Identity verified via 4-digit Mobile SMS & Email OTP. Click Create Account below to finish.',
-              style: TextStyle(fontSize: 11, color: Color(0xFF15803D), fontWeight: FontWeight.w600),
+              'Mobile verified. Tap Continue below to finish creating your account.',
+              style: TextStyle(fontSize: 12, color: AppTheme.gsNavy, fontWeight: FontWeight.w600),
             ),
           ],
         ],
       ),
     );
-  }
-
-  void _autoFillDemo(UserRole role) {
-    setState(() {
-      _selectedRole = role;
-      if (role == UserRole.admin) {
-        _loginEmailController.text = '9281030535';
-      } else if (role == UserRole.dentist) {
-        _loginEmailController.text = '8688815865';
-      } else {
-        _loginEmailController.text = '9063663180';
-      }
-    });
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_tabController.index == 0) {
+      return _buildRegistrationScaffold(context);
+    }
+    return _buildHeroSignInScaffold(context);
+  }
+
+  // ================= HERO LAUNCH / SIGN IN VIEW (Based on Reference UI) =================
+  Widget _buildHeroSignInScaffold(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.softBlueBg,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 1,
-        shadowColor: Colors.black.withValues(alpha: 0.05),
-        automaticallyImplyLeading: false,
-        title: Row(
+      backgroundColor: Colors.white,
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth >= 900) {
+            return _buildDesktopHeroSignIn(context, constraints);
+          }
+          return _buildMobileHeroSignIn(context, constraints);
+        },
+      ),
+    );
+  }
+
+  Widget _buildMobileHeroSignIn(BuildContext context, BoxConstraints constraints) {
+    final screenHeight = constraints.maxHeight;
+    final heroHeight = (screenHeight * 0.44).clamp(280.0, 400.0);
+
+    return SafeArea(
+      top: false,
+      bottom: true,
+      child: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const DentaGuruLogo(height: 26),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                _isAdminMode
-                    ? (_tabController.index == 0 ? 'Admin / Sub-Admin Registration' : 'Admin Portal Authentication')
-                    : (_tabController.index == 0 ? '$_roleName Registration' : '$_roleName Portal Authentication'),
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
-                overflow: TextOverflow.ellipsis,
+            // 1. HERO SECTION WITH IMAGE & OVERLAY
+            Stack(
+              children: [
+                SizedBox(
+                  height: heroHeight,
+                  width: double.infinity,
+                  child: const GsHealthHeroBanner(fit: BoxFit.cover),
+                ),
+                Positioned.fill(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withValues(alpha: 0.15),
+                          Colors.black.withValues(alpha: 0.85),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 20,
+                  right: 20,
+                  bottom: 40,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Calm, expert medical care.',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 25,
+                          fontWeight: FontWeight.w800,
+                          height: 1.2,
+                          letterSpacing: -0.4,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'AI triage, verified doctors across all specialties, and your records, all in one place.',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.92),
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w400,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+
+            // 2. OVERLAPPING WHITE LOGIN CARD
+            Transform.translate(
+              offset: const Offset(0, -22),
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Color(0x14000000),
+                      blurRadius: 18,
+                      offset: Offset(0, -4),
+                    ),
+                  ],
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 24),
+                child: _buildLoginCardContent(context),
               ),
             ),
           ],
-        ),
-        actions: [
-          if (!_isAdminMode)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: TextButton.icon(
-                onPressed: () {
-                  setState(() {
-                    _isAdminMode = true;
-                    _selectedRole = UserRole.admin;
-                  });
-                },
-                icon: const Icon(Icons.shield_outlined, size: 16, color: Color(0xFF6366F1)),
-                label: const Text(
-                  'Admin Portal',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF6366F1)),
-                ),
-              ),
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: TextButton.icon(
-                onPressed: () {
-                  setState(() {
-                    _isAdminMode = false;
-                    _selectedRole = UserRole.patient;
-                  });
-                },
-                icon: const Icon(Icons.people_outline_rounded, size: 16, color: AppTheme.primaryBlue),
-                label: const Text(
-                  'Patient / Dentist',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
-                ),
-              ),
-            ),
-        ],
-      ),
-      body: Center(
-        child: SingleChildScrollView(
-          physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 16),
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 520),
-            child: Card(
-              elevation: 8,
-              shadowColor: Colors.black.withValues(alpha: 0.08),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              color: Colors.white,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 20),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Prominent Brand Logo Header
-                    const Center(
-                      child: Padding(
-                        padding: EdgeInsets.only(bottom: 16),
-                        child: DentaGuruLogo(height: 44),
-                      ),
-                    ),
-
-                    // Dynamic Header with Role Icon & Gradient
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [_accentColor.withValues(alpha: 0.15), _accentColor.withValues(alpha: 0.05)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: _accentColor.withValues(alpha: 0.25)),
-                      ),
-                      child: Row(
-                        children: [
-                          AnimatedContainer(
-                            duration: const Duration(milliseconds: 300),
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: _accentColor,
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: _accentColor.withValues(alpha: 0.35),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 3),
-                                ),
-                              ],
-                            ),
-                            child: Icon(_roleIcon, color: Colors.white, size: 24),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'GS HEALTH Platform',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16,
-                                    color: _accentColor,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  _tabController.index == 0
-                                      ? 'Create your $_roleName account on GS HEALTH'
-                                      : 'Select your role to access $_roleName Workspace',
-                                  style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-
-                    // Material 3 Dynamic Role Selector Segmented Bar
-                    if (!_isAdminMode) ...[
-                      Text(
-                        _tabController.index == 0 ? 'Registering as:' : 'Select User Role:',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textDark),
-                      ),
-                      const SizedBox(height: 8),
-                      Container(
-                        height: 48,
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF1F5F9),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: const Color(0xFFE2E8F0)),
-                        ),
-                        child: Row(
-                          children: [
-                            _buildRoleTile(UserRole.patient, 'Patient', Icons.person_rounded),
-                            const SizedBox(width: 4),
-                            _buildRoleTile(UserRole.dentist, 'Doctor', Icons.medical_services_rounded),
-                          ],
-                        ),
-                      ),
-                    ] else ...[
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            _tabController.index == 0 ? 'Registering Administrative Account:' : 'Administrative Workspace:',
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textDark),
-                          ),
-                          InkWell(
-                            onTap: () {
-                              setState(() {
-                                _isAdminMode = false;
-                                _selectedRole = UserRole.patient;
-                              });
-                            },
-                            child: const Text(
-                              '← Patient/Dentist',
-                              style: TextStyle(fontSize: 11, color: AppTheme.primaryBlue, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Container(
-                        height: 48,
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF1F5F9),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: const Color(0xFFE2E8F0)),
-                        ),
-                        child: Row(
-                          children: [
-                            _buildRoleTile(UserRole.admin, _tabController.index == 0 ? 'Sub-Admin / Admin' : 'Admin & Sub-Admin Portal', Icons.admin_panel_settings_rounded),
-                          ],
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 18),
-
-                    // Tab Bar (Register & Sign In)
-                    Container(
-                      height: 48,
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF1F5F9),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
-                      ),
-                      child: TabBar(
-                        controller: _tabController,
-                        dividerColor: Colors.transparent,
-                        indicatorSize: TabBarIndicatorSize.tab,
-                        indicator: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              _accentColor,
-                              _accentColor.withValues(alpha: 0.9),
-                            ],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          borderRadius: BorderRadius.circular(10),
-                          boxShadow: [
-                            BoxShadow(
-                              color: _accentColor.withValues(alpha: 0.35),
-                              blurRadius: 8,
-                              offset: const Offset(0, 3),
-                            ),
-                          ],
-                        ),
-                        labelColor: Colors.white,
-                        unselectedLabelColor: const Color(0xFF64748B),
-                        labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, letterSpacing: 0.2),
-                        unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
-                        tabs: const [
-                          Tab(
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.person_add_alt_1_rounded, size: 16),
-                                SizedBox(width: 6),
-                                Text('Register'),
-                              ],
-                            ),
-                          ),
-                          Tab(
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.login_rounded, size: 16),
-                                SizedBox(width: 6),
-                                Text('Sign In'),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-
-                    // Tab Body
-                    AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 250),
-                      child: _tabController.index == 0
-                          ? KeyedSubtree(key: const ValueKey('register_tab'), child: _buildRegisterForm())
-                          : KeyedSubtree(key: const ValueKey('signin_tab'), child: _buildSignInForm()),
-                    ),
-
-                    if (!_isAdminMode) ...[
-                      const SizedBox(height: 14),
-                      InkWell(
-                        onTap: () {
-                          setState(() {
-                            _isAdminMode = true;
-                            _selectedRole = UserRole.admin;
-                          });
-                        },
-                        borderRadius: BorderRadius.circular(12),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                const Color(0xFF6366F1).withValues(alpha: 0.08),
-                                const Color(0xFF4F46E5).withValues(alpha: 0.03),
-                              ],
-                            ),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFF6366F1).withValues(alpha: 0.2)),
-                          ),
-                          child: const Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.admin_panel_settings_rounded, size: 16, color: Color(0xFF6366F1)),
-                              SizedBox(width: 8),
-                              Flexible(
-                                child: Text(
-                                  'Administrator or Staff? Access Admin Portal →',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Color(0xFF4F46E5),
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          ),
         ),
       ),
     );
   }
 
-  Widget _buildRoleTile(UserRole role, String label, IconData icon) {
+  Widget _buildDesktopHeroSignIn(BuildContext context, BoxConstraints constraints) {
+    return Row(
+      children: [
+        // Left Hero Column (54% width)
+        Expanded(
+          flex: 12,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              const GsHealthHeroBanner(fit: BoxFit.cover),
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.30),
+                      Colors.black.withValues(alpha: 0.85),
+                    ],
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 48,
+                right: 48,
+                bottom: 64,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Comprehensive, expert medical care.',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 38,
+                        fontWeight: FontWeight.w800,
+                        height: 1.15,
+                        letterSpacing: -0.6,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      'AI triage, verified doctors across all specialties, and your records, all in one place.',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.92),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w400,
+                        height: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 10,
+                      children: [
+                        _buildFeaturePill('Verified Doctors', Icons.verified_user_rounded),
+                        _buildFeaturePill('All Medical Specialties', Icons.medical_services_rounded),
+                        _buildFeaturePill('Health Records & AI', Icons.health_and_safety_rounded),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Right Sign In Card Column (46% width)
+        Expanded(
+          flex: 10,
+          child: Container(
+            color: Colors.white,
+            alignment: Alignment.center,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 44, vertical: 32),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 440),
+                child: _buildLoginCardContent(context),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFeaturePill(String title, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white, size: 16),
+          const SizedBox(width: 8),
+          Text(
+            title,
+            style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoginCardContent(BuildContext context) {
+    return Form(
+      key: _loginFormKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Centered Official GS HEALTH Logo
+          const Center(
+            child: GsHealthLogo(
+              height: 42,
+              alignment: Alignment.center,
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Heading & Subtitle
+          Text(
+            _isLoginOtpSent ? 'Enter your code' : 'Sign in with mobile',
+            style: const TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF1E293B),
+              letterSpacing: -0.4,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            _isLoginOtpSent
+                ? 'Sent to +91 ${_maskPhone(_loginEmailController.text)}'
+                : "We'll text you a one-time code.",
+            style: const TextStyle(
+              fontSize: 14,
+              color: Color(0xFF64748B),
+              fontWeight: FontWeight.w400,
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          if (!_isLoginOtpSent) ...[
+            _buildSignInRoleSelector(),
+            const SizedBox(height: 16),
+          ],
+
+          // Stage 1: Mobile Number Input
+          if (!_isLoginOtpSent) ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Country Code Selector
+                Container(
+                  height: 52,
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F2),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  alignment: Alignment.center,
+                  child: const Text(
+                    '+91',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1E293B),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // Mobile Number Field
+                Expanded(
+                  child: TextFormField(
+                    controller: _loginEmailController,
+                    enabled: !_isLoggingIn && !_isSendingLoginCode,
+                    keyboardType: TextInputType.phone,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(10),
+                    ],
+                    textInputAction: TextInputAction.done,
+                    onFieldSubmitted: (_) => _handleSendLoginCode(),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF1E293B),
+                      letterSpacing: 0.5,
+                    ),
+                    validator: (val) {
+                      if (val == null || val.trim().isEmpty) {
+                        return 'Please enter mobile number';
+                      }
+                      if (_normalizePhone(val).length != 10) {
+                        return 'Please enter 10 digits';
+                      }
+                      return null;
+                    },
+                    decoration: InputDecoration(
+                      hintText: '98765 43210',
+                      hintStyle: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w400,
+                        color: Color(0xFF94A3B8),
+                        letterSpacing: 0.5,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppTheme.gsNavy, width: 2),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            // Primary "Send code" Button
+            SizedBox(
+              height: 52,
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: (_isLoggingIn || _isSendingLoginCode) ? null : _handleSendLoginCode,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.gsNavy,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: (_isSendingLoginCode || _isLoggingIn)
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.2),
+                      )
+                    : const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 18),
+                          SizedBox(width: 8),
+                          Text(
+                            'Send code',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+            ),
+          ] else ...[
+            // Stage 2: OTP Verification Field
+            if (_loginOtpErrorMessage != null) ...[
+              Container(
+                margin: const EdgeInsets.only(bottom: 14),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF2F2),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFFCA5A5)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.error_outline_rounded, color: Color(0xFFDC2626), size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _loginOtpErrorMessage!,
+                        style: const TextStyle(fontSize: 12.5, color: Color(0xFFB91C1C), fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            _buildFourDigitOtpInput(),
+
+            // On-Screen OTP Display Card matching UI Reference Screenshot
+            if (_currentLoginOtp != null) ...[
+              Container(
+                margin: const EdgeInsets.only(top: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8F1F5),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFCFDEE5)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline_rounded, size: 20, color: Color(0xFF335C6D)),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Demo mode: SMS is off. Use code $_currentLoginOtp.',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF1E3A47),
+                        ),
+                      ),
+                    ),
+                    InkWell(
+                      onTap: () => _fillLoginOtp(_currentLoginOtp),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF335C6D),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Text(
+                          'Fill',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Flexible(
+                  child: TextButton(
+                    onPressed: () {
+                      setState(() {
+                        _isLoginOtpSent = false;
+                        _loginOtpErrorMessage = null;
+                        for (final c in _otpDigitControllers) {
+                          c.clear();
+                        }
+                      });
+                    },
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(50, 30),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text(
+                      '← Edit mobile number',
+                      style: TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+                if (!_canResendOtp)
+                  Flexible(
+                    child: Text(
+                      'Resend code in ${_resendCountdown}s',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF64748B)),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  )
+                else
+                  Flexible(
+                    child: TextButton(
+                      onPressed: _isSendingLoginCode ? null : _handleSendLoginCode,
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        minimumSize: const Size(50, 30),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text(
+                        'Resend code',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF012A58)),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 14),
+
+            // Verify & continue Button
+            SizedBox(
+              height: 52,
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: (_isVerifyingLoginCode || _isLoggingIn) ? null : _handleVerifyLoginCode,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.gsNavy,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: (_isVerifyingLoginCode || _isLoggingIn)
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.2),
+                      )
+                    : const Text(
+                        'Verify & continue',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 20),
+
+          // Registration and Switch Link
+          Center(
+            child: Wrap(
+              alignment: WrapAlignment.center,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                const Text(
+                  "Don't have an account?",
+                  style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+                ),
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      _tabController.index = 0;
+                    });
+                  },
+                  child: const Text(
+                    'Register here',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF012A58),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          // Terms of Use and Privacy Policy Footer
+          Center(
+            child: Wrap(
+              alignment: WrapAlignment.center,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                const Text(
+                  'By continuing you agree to our ',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: Color(0xFF94A3B8),
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () => _showTermsDialog(context),
+                  child: const Text(
+                    'Terms of Use',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF012A58),
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
+                const Text(
+                  ' and ',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: Color(0xFF94A3B8),
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () => _showPrivacyDialog(context),
+                  child: const Text(
+                    'Privacy Policy',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF012A58),
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  Widget _buildRegistrationScaffold(BuildContext context) {
+    final service = PatientProblemService();
+    return ListenableBuilder(
+      listenable: service,
+      builder: (context, _) => _buildRegistrationView(service),
+    );
+  }
+
+  List<GsRegistrationClinicOption> _registeredClinicOptions(PatientProblemService service) {
+    final seen = <String>{};
+    final options = <GsRegistrationClinicOption>[];
+    for (final c in service.allClinics) {
+      final name = c.clinicName.trim();
+      final status = c.verificationStatus.trim().toUpperCase();
+      if (name.isEmpty || status == 'REJECTED' || status == 'SUSPENDED') continue;
+      if (!seen.add(name.toLowerCase())) continue;
+      options.add(GsRegistrationClinicOption(id: c.id, name: name, location: c.location.trim()));
+    }
+    return options;
+  }
+
+  Widget _buildRegistrationView(PatientProblemService service) {
+    // Dental specialties first (matches reference chip order), followed by every
+    // other active specialty already supported by the platform.
+    final specialtyOptions = <String>{
+      'General Dentistry',
+      'Orthodontics',
+      'Endodontics',
+      'Periodontics',
+      'Pediatric Dentistry',
+      'Oral & Maxillofacial Surgery',
+      'Prosthodontics',
+      ...service.activeSpecialtyNames,
+    }.toList();
+
+    return GsHealthRegistrationView(
+      formKey: _registerFormKey,
+      selectedRole: _selectedRole,
+      isAuthorizedAdminPortal: widget.allowAdminRole == true,
+      isOtpVerified: _isOtpVerified,
+      verifiedPhone: _verifiedPhone,
+      isRegistering: _isRegistering,
+      nameController: _nameController,
+      cityController: _cityController,
+      pincodeController: _pincodeController,
+      emailController: _emailController,
+      phoneController: _phoneController,
+      locationController: _locationController,
+      licenseNoController: _licenseNoController,
+      qualificationController: _qualificationController,
+      clinicNameController: _clinicNameController,
+      clinicAddressController: _clinicAddressController,
+      experienceController: _experienceController,
+      adminEmployeeIdController: _adminEmployeeIdController,
+      adminDeptController: _adminDeptController,
+      selectedAdminRoleType: _selectedAdminRoleType,
+      selectedSpecialty: _selectedSpecialty,
+      specialtyOptions: specialtyOptions,
+      selectedLanguages: _selectedLanguages,
+      selectedLatitude: _selectedLatitude,
+      selectedLongitude: _selectedLongitude,
+      selectedMapLocationName: _selectedMapLocationName,
+      pickedImageBytes: _pickedImageBytes,
+      pickedImageName: _pickedImageName,
+      mobileOtpSectionBuilder: _buildOtpVerificationSection,
+      onRoleSelected: (role) {
+        setState(() {
+          _selectedRole = role;
+          _isAdminMode = widget.allowAdminRole == true && role == UserRole.admin;
+        });
+        if (role == UserRole.dentist && service.allClinics.isEmpty) {
+          // Refresh registered clinics so the dentist can associate with one.
+          service.syncClinicsFromApi();
+        }
+      },
+      onLanguageToggled: _toggleLanguage,
+      onAdminRoleTypeChanged: (type) {
+        setState(() => _selectedAdminRoleType = type);
+      },
+      onSpecialtyChanged: (specialty) {
+        setState(() {
+          final previousDefault = MedicalSpecialtyModel.getDefaultQualificationForSpecialty(
+            _selectedSpecialty ?? 'General Dentistry',
+          );
+          final currentQual = _qualificationController.text.trim();
+          _selectedSpecialty = specialty;
+          // Suggest the specialty's typical qualification without overwriting
+          // anything the dentist has typed themselves.
+          if (currentQual.isEmpty || currentQual == previousDefault) {
+            _qualificationController.text =
+                MedicalSpecialtyModel.getDefaultQualificationForSpecialty(specialty);
+          }
+        });
+      },
+      clinicOptions: _registeredClinicOptions(service),
+      onClinicSelected: (clinic) {
+        setState(() {
+          if (clinic == null) {
+            _clinicNameController.clear();
+            _clinicAddressController.clear();
+          } else {
+            _clinicNameController.text = clinic.name;
+            _clinicAddressController.text = clinic.location;
+          }
+        });
+      },
+      onPickImage: _pickGalleryImage,
+      onOpenMapPicker: _openMapLocationPicker,
+      onContinuePressed: _handleRegister,
+      onUseAnotherNumber: () {
+        setState(() {
+          _isOtpVerified = false;
+          _isOtpSent = false;
+          _verifiedPhone = null;
+          _verifiedEmail = null;
+          _currentRegistrationOtp = null;
+          _otpErrorMessage = null;
+          _otpController.clear();
+          _phoneController.clear();
+          _loginEmailController.clear();
+          _isLoginOtpSent = false;
+          _loginOtpErrorMessage = null;
+          _currentLoginOtp = null;
+          for (final c in _otpDigitControllers) {
+            c.clear();
+          }
+          _tabController.index = 1;
+        });
+      },
+      onOpenAdminSignIn: () {
+        setState(() {
+          _selectedRole = UserRole.admin;
+          _isAdminMode = true;
+          _isLoginOtpSent = false;
+          _loginOtpErrorMessage = null;
+          _tabController.index = 1;
+        });
+      },
+    );
+  }
+
+  Widget _buildSignInRoleSelector() {
+    return Container(
+      key: const Key('signin_role_selector'),
+      padding: const EdgeInsets.all(5),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1F4F9),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        children: [
+          _buildLoginRoleOption(
+            UserRole.patient,
+            'Patient',
+            Icons.person_rounded,
+            AppTheme.gsNavy,
+          ),
+          const SizedBox(width: 5),
+          _buildLoginRoleOption(
+            UserRole.dentist,
+            'Dentist',
+            Icons.medical_services_rounded,
+            AppTheme.gsNavy,
+          ),
+          const SizedBox(width: 5),
+          _buildLoginRoleOption(
+            UserRole.clinic,
+            'Clinic',
+            Icons.add_box_rounded,
+            AppTheme.gsRed,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoginRoleOption(
+    UserRole role,
+    String label,
+    IconData icon,
+    Color roleAccent,
+  ) {
     final bool isSelected = _selectedRole == role;
     return Expanded(
       child: GestureDetector(
+        key: Key('signin_role_${role.name}'),
         onTap: () {
           setState(() {
             _selectedRole = role;
+            _isAdminMode = false;
           });
         },
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 250),
+          duration: const Duration(milliseconds: 220),
           curve: Curves.easeInOut,
-          padding: const EdgeInsets.symmetric(vertical: 6),
+          padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 6),
           decoration: BoxDecoration(
             color: isSelected ? Colors.white : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(11),
             border: isSelected
-                ? Border.all(color: _accentColor.withValues(alpha: 0.2), width: 1.2)
+                ? Border.all(color: const Color(0xFFCBD5E1), width: 1.0)
                 : Border.all(color: Colors.transparent),
             boxShadow: isSelected
                 ? [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.06),
-                      blurRadius: 8,
+                      color: Colors.black.withValues(alpha: 0.05),
+                      blurRadius: 5,
                       offset: const Offset(0, 2),
                     ),
-                    BoxShadow(
-                      color: _accentColor.withValues(alpha: 0.1),
-                      blurRadius: 4,
-                      offset: const Offset(0, 1),
-                    ),
                   ]
-                : [],
+                : const [],
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                padding: const EdgeInsets.all(4),
+                padding: const EdgeInsets.all(4.5),
                 decoration: BoxDecoration(
-                  color: isSelected ? _accentColor.withValues(alpha: 0.12) : Colors.transparent,
-                  shape: BoxShape.circle,
+                  color: isSelected
+                      ? const Color(0xFFE9EEF5)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(7),
                 ),
                 child: Icon(
                   icon,
-                  size: 16,
-                  color: isSelected ? _accentColor : const Color(0xFF64748B),
+                  size: 15,
+                  color: isSelected ? const Color(0xFF012A58) : const Color(0xFF64748B),
                 ),
               ),
               const SizedBox(width: 6),
               Flexible(
                 child: Text(
                   label,
-                  style: TextStyle(
-                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
-                    fontSize: 12.5,
-                    color: isSelected ? _accentColor : const Color(0xFF64748B),
-                    letterSpacing: 0.2,
-                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                    color: isSelected ? const Color(0xFF0F172A) : const Color(0xFF475569),
+                  ),
                 ),
               ),
             ],
@@ -1614,932 +2525,22 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     );
   }
 
-  // ================= 1. SIGN IN FORM =================
-  Widget _buildSignInForm() {
-    return Form(
-      key: _loginFormKey,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const SizedBox(height: 6),
-
-          // Demo Auto-fill Banner
-          InkWell(
-            onTap: _isLoggingIn ? null : () => _autoFillDemo(_selectedRole),
-            borderRadius: BorderRadius.circular(12),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: _accentColor.withValues(alpha: 0.06),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _accentColor.withValues(alpha: 0.18)),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: _accentColor.withValues(alpha: 0.12),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(Icons.touch_app_rounded, color: _accentColor, size: 14),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Tap to auto-fill $_roleName demo credentials',
-                      style: TextStyle(fontSize: 12, color: _accentColor, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  Icon(Icons.arrow_forward_ios_rounded, color: _accentColor.withValues(alpha: 0.6), size: 12),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Fast Direct Login Flow (Mobile Number OR Email Address - No password/OTP required)
-          TextFormField(
-            controller: _loginEmailController,
-            enabled: !_isLoggingIn,
-            keyboardType: TextInputType.emailAddress,
-            textInputAction: TextInputAction.done,
-            onFieldSubmitted: (_) => _handleLogin(),
-            style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
-            validator: (val) {
-              if (val == null || val.trim().isEmpty) {
-                return 'Please enter your registered mobile number or email address';
-              }
-              return null;
-            },
-            decoration: _buildInputDecoration(
-              label: 'Registered Mobile Number or Email *',
-              hint: 'e.g. +91 98765 43210 or user@gshealth.com',
-              icon: Icons.phone_android_rounded,
-            ),
-          ),
-          const SizedBox(height: 20),
-
-          // Direct Sign In Button
-          Container(
-            height: 48,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              gradient: LinearGradient(
-                colors: [
-                  _accentColor,
-                  _accentColor.withValues(alpha: 0.88),
-                ],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: _accentColor.withValues(alpha: 0.35),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: ElevatedButton.icon(
-              icon: _isLoggingIn
-                  ? const SizedBox(
-                      height: 18,
-                      width: 18,
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.2),
-                    )
-                  : const Icon(Icons.arrow_forward_rounded, size: 18),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.transparent,
-                foregroundColor: Colors.white,
-                disabledForegroundColor: Colors.white,
-                disabledBackgroundColor: Colors.transparent,
-                shadowColor: Colors.transparent,
-                minimumSize: const Size(double.infinity, 48),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-              onPressed: _isLoggingIn ? null : _handleLogin,
-              label: Text(
-                _isLoggingIn ? 'Signing In...' : 'Sign In as $_roleName',
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14.5,
-                  letterSpacing: 0.3,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-        ],
-      ),
-    );
-  }
-
-  // ================= 2. DYNAMIC REGISTER FORM =================
-  Widget _buildRegisterForm() {
-    return Form(
-      key: _registerFormKey,
-      child: SingleChildScrollView(
-        physics: const BouncingScrollPhysics(),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const SizedBox(height: 4),
-
-            // Profile Picture Picker Box
-            GestureDetector(
-              onTap: _pickGalleryImage,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 250),
-                height: 80,
-                decoration: BoxDecoration(
-                  color: _pickedImageBytes != null ? _accentColor.withValues(alpha: 0.05) : const Color(0xFFF8FAFC),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: _pickedImageBytes != null ? _accentColor : const Color(0xFFCBD5E1),
-                    width: _pickedImageBytes != null ? 2 : 1.5,
-                  ),
-                ),
-                child: _pickedImageBytes != null
-                    ? Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          CircleAvatar(
-                            radius: 26,
-                            backgroundImage: MemoryImage(_pickedImageBytes!),
-                          ),
-                          const SizedBox(width: 12),
-                          Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _pickedImageName ?? 'Photo Selected',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.textDark),
-                              ),
-                              Text(
-                                'Tap to change photo',
-                                style: TextStyle(fontSize: 10, color: _accentColor, fontWeight: FontWeight.w600),
-                              ),
-                            ],
-                          ),
-                        ],
-                      )
-                    : Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.add_a_photo_outlined, color: _accentColor, size: 22),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Upload Profile Picture (Optional)',
-                            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 11, color: _accentColor),
-                          ),
-                        ],
-                      ),
-              ),
-            ),
-            const SizedBox(height: 14),
-
-            // Mandatory Primary Identifier: Full Name
-            TextFormField(
-              controller: _nameController,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-              validator: (val) => (val == null || val.trim().isEmpty) ? 'Please enter your name' : null,
-              decoration: _buildInputDecoration(
-                label: _selectedRole == UserRole.dentist
-                    ? "Doctor's Full Name"
-                    : _selectedRole == UserRole.admin
-                        ? 'Administrator / Sub-Admin Full Name'
-                        : 'Patient Full Name',
-                hint: _selectedRole == UserRole.dentist ? 'e.g. Dr. Jane Smith' : 'e.g. Jane Smith',
-                isRequired: true,
-                icon: Icons.person_outline_rounded,
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            // Age & Gender Row (Directly after Name)
-            Row(
-              children: [
-                Expanded(
-                  flex: 4,
-                  child: TextFormField(
-                    controller: _ageController,
-                    keyboardType: TextInputType.number,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                    decoration: _buildInputDecoration(
-                      label: 'Age',
-                      hint: '28',
-                      icon: Icons.cake_outlined,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 6,
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _selectedGender,
-                    dropdownColor: Colors.white,
-                    isExpanded: true,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
-                    decoration: _buildInputDecoration(
-                      label: 'Gender',
-                      hint: '',
-                      icon: Icons.people_outline_rounded,
-                    ),
-                    items: ['Female', 'Male', 'Other', 'Prefer not to say'].map((g) {
-                      return DropdownMenuItem(
-                        value: g,
-                        child: Text(
-                          g,
-                          style: const TextStyle(color: Color(0xFF0F172A), fontSize: 12.5, fontWeight: FontWeight.w600),
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 1,
-                        ),
-                      );
-                    }).toList(),
-                    onChanged: (val) => setState(() => _selectedGender = val ?? 'Female'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-
-            // Mandatory Primary Identifier: Mobile Phone Number
-            TextFormField(
-              controller: _phoneController,
-              keyboardType: TextInputType.phone,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-              validator: (val) {
-                if (val == null || val.trim().isEmpty) return 'Mobile phone number is mandatory';
-                if (!_isValidMobilePhone(val)) return 'Enter valid 10-digit mobile number';
-                return null;
-              },
-              decoration: _buildInputDecoration(
-                label: 'Mobile Phone Number',
-                hint: '+91 98765 43210',
-                isRequired: true,
-                icon: Icons.phone_android_rounded,
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            // Optional Field: Preferred Language
-            DropdownButtonFormField<String>(
-              initialValue: _selectedLanguage,
-              dropdownColor: Colors.white,
-              isExpanded: true,
-              validator: (val) => null,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
-              decoration: _buildInputDecoration(
-                label: 'Select Language',
-                hint: '',
-                isRequired: false,
-                icon: Icons.translate_rounded,
-              ),
-              items: _availableLanguages.map((lang) {
-                return DropdownMenuItem(
-                  value: lang,
-                  child: Text(
-                    lang,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 12.5, fontWeight: FontWeight.w600),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                );
-              }).toList(),
-              onChanged: (val) {
-                if (val != null) {
-                  setState(() => _selectedLanguage = val);
-                }
-              },
-            ),
-            const SizedBox(height: 12),
-
-            // City & Pincode Row (Directly after Language)
-            Row(
-              children: [
-                // Optional Field: City
-                Expanded(
-                  child: TextFormField(
-                    controller: _cityController,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                    validator: (val) => null,
-                    decoration: _buildInputDecoration(
-                      label: 'City',
-                      hint: 'e.g. City Name',
-                      isRequired: false,
-                      icon: Icons.location_city_rounded,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // Optional Field: Pincode (Format checked if provided)
-                Expanded(
-                  child: TextFormField(
-                    controller: _pincodeController,
-                    keyboardType: TextInputType.number,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                    validator: (val) {
-                      if (val == null || val.trim().isEmpty) return null;
-                      if (!RegExp(r'^\d{6}$').hasMatch(val.trim())) return '6-digit PIN';
-                      return null;
-                    },
-                    decoration: _buildInputDecoration(
-                      label: 'Pincode',
-                      hint: '6-Digit PIN',
-                      isRequired: false,
-                      icon: Icons.pin_drop_outlined,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-
-            // Optional Field: Email Address
-            TextFormField(
-              controller: _emailController,
-              keyboardType: TextInputType.emailAddress,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-              validator: (val) {
-                if (val != null && val.trim().isNotEmpty && !val.contains('@')) {
-                  return 'Enter a valid email address';
-                }
-                return null;
-              },
-              decoration: _buildInputDecoration(
-                label: 'Email Address (Optional)',
-                hint: 'user@gshealth.com (Optional)',
-                isRequired: false, // optional per requirement
-                icon: Icons.email_outlined,
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            // Optional Field: Location / Clinic Address (with Map Pinning for Dentists/Admins)
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextFormField(
-                  controller: _selectedRole == UserRole.dentist ? _clinicAddressController : _locationController,
-                  validator: (val) => null,
-                  style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                  decoration: _buildInputDecoration(
-                    label: _selectedRole == UserRole.dentist
-                        ? 'Location / Clinic Address'
-                        : _selectedRole == UserRole.admin
-                            ? 'Location / Office Address (Optional)'
-                            : 'Location / Address (Optional)',
-                    hint: _selectedRole == UserRole.dentist
-                        ? 'Tap "Pick from Map" or enter clinic address'
-                        : _selectedRole == UserRole.admin
-                            ? 'e.g. Headquarters / Branch Area'
-                            : 'e.g. Door No, Street / Area Name',
-                    isRequired: false, // optional per requirement
-                    icon: Icons.location_on_outlined,
-                    suffixIcon: _selectedRole == UserRole.patient
-                        ? null
-                        : Padding(
-                            padding: const EdgeInsets.only(right: 6),
-                            child: InkWell(
-                              onTap: _openMapLocationPicker,
-                              borderRadius: BorderRadius.circular(8),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                decoration: BoxDecoration(
-                                  color: _accentColor.withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: _accentColor.withValues(alpha: 0.3)),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.map_rounded, size: 14, color: _accentColor),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      'Pick on Map',
-                                      style: TextStyle(
-                                        color: _accentColor,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                  ),
-                ),
-                if (_selectedRole != UserRole.patient && _selectedLatitude != null && _selectedLongitude != null) ...[
-                  const SizedBox(height: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFECFDF5),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFFA7F3D0)),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.location_pin, size: 14, color: Color(0xFF059669)),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            '📍 Map Pin: ${_selectedMapLocationName ?? 'Pinned Location'} (${_selectedLatitude!.toStringAsFixed(4)}, ${_selectedLongitude!.toStringAsFixed(4)})',
-                            style: const TextStyle(fontSize: 11, color: Color(0xFF065F46), fontWeight: FontWeight.w600),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        InkWell(
-                          onTap: _openMapLocationPicker,
-                          child: const Text(
-                            'Change',
-                            style: TextStyle(fontSize: 11, color: Color(0xFF059669), fontWeight: FontWeight.bold, decoration: TextDecoration.underline),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
-            ),
-            const SizedBox(height: 12),
-
-            // DYNAMIC ROLE-SPECIFIC FIELDS
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 300),
-              child: _buildRoleSpecificFields(),
-            ),
-
-            const SizedBox(height: 12),
-
-            // OTP Verification Box Before Creating Account
-            _buildOtpVerificationSection(),
-
-            const SizedBox(height: 16),
-
-            // Register Submit Button (ACTIVE ONLY AFTER OTP VERIFICATION)
-            Container(
-              height: 48,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                gradient: _isOtpVerified
-                    ? LinearGradient(
-                        colors: [
-                          _accentColor,
-                          _accentColor.withValues(alpha: 0.88),
-                        ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      )
-                    : null,
-                color: _isOtpVerified ? null : const Color(0xFFE2E8F0),
-                boxShadow: _isOtpVerified
-                    ? [
-                        BoxShadow(
-                          color: _accentColor.withValues(alpha: 0.35),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ]
-                    : [],
-              ),
-              child: ElevatedButton.icon(
-                icon: _isRegistering
-                    ? const SizedBox.shrink()
-                    : Icon(
-                        _isOtpVerified ? Icons.check_circle_rounded : Icons.lock_rounded,
-                        size: 18,
-                        color: _isOtpVerified ? Colors.white : const Color(0xFF94A3B8),
-                      ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.transparent,
-                  foregroundColor: _isOtpVerified ? Colors.white : const Color(0xFF94A3B8),
-                  shadowColor: Colors.transparent,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-                onPressed: (_isRegistering || !_isOtpVerified) ? null : _handleRegister,
-                label: _isRegistering
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.2),
-                      )
-                    : Text(
-                        _isOtpVerified ? 'Create $_roleName Account' : 'Verify Mobile OTP to Complete Registration',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13.5,
-                          letterSpacing: 0.2,
-                          color: _isOtpVerified ? Colors.white : const Color(0xFF64748B),
-                        ),
-                      ),
-              ),
-            ),
-            const SizedBox(height: 12),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRoleSpecificFields() {
-    switch (_selectedRole) {
-      case UserRole.patient:
-        return Column(
-          key: const ValueKey('patient_fields'),
-          children: [
-            DropdownButtonFormField<String>(
-              initialValue: _selectedBloodGroup,
-              dropdownColor: Colors.white,
-              isExpanded: true,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
-              decoration: _buildInputDecoration(
-                label: 'Blood Group',
-                hint: '',
-                icon: Icons.bloodtype_outlined,
-              ),
-              items: [
-                'O Positive (O+)',
-                'A Positive (A+)',
-                'B Positive (B+)',
-                'AB Positive (AB+)',
-                'O Negative (O-)',
-                'A Negative (A-)',
-                'B Negative (B-)',
-                'AB Negative (AB-)',
-              ].map((bg) {
-                return DropdownMenuItem(
-                  value: bg,
-                  child: Text(
-                    bg,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 12.5, fontWeight: FontWeight.w600),
-                    overflow: TextOverflow.ellipsis,
-                    maxLines: 1,
-                  ),
-                );
-              }).toList(),
-              onChanged: (val) => setState(() => _selectedBloodGroup = val ?? 'O Positive (O+)'),
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _emergencyContactController,
-              keyboardType: TextInputType.phone,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-              decoration: _buildInputDecoration(
-                label: 'Emergency Contact (Optional)',
-                hint: '+91 98765 99880',
-                icon: Icons.contact_phone_outlined,
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _referralCodeController,
-              textCapitalization: TextCapitalization.characters,
-              style: const TextStyle(color: Color(0xFF5B21B6), fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 1.2),
-              decoration: _buildInputDecoration(
-                label: 'Referral Code (Optional)',
-                hint: 'e.g. DG-RAH7302',
-                icon: Icons.card_giftcard_rounded,
-              ),
-            ),
-          ],
-        );
-
-      case UserRole.dentist:
-        final specialtyOptions = <String>{
-          ...PatientProblemService().activeSpecialtyNames,
-          'General Dentistry',
-          'Orthodontics',
-          'Endodontics',
-          'Periodontics',
-          'Pediatric Dentistry',
-          'Oral & Maxillofacial Surgery',
-          'Prosthodontics',
-        }.toList();
-        return Column(
-          key: const ValueKey('dentist_fields'),
-          children: [
-            TextFormField(
-              controller: _licenseNoController,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-              validator: (val) => null,
-              decoration: _buildInputDecoration(
-                label: 'Medical / Dental Council License Number',
-                hint: 'e.g. MCI-LIC-88490 or DEN-LIC-88490 (Optional)',
-                isRequired: false,
-                icon: Icons.badge_outlined,
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            DropdownButtonFormField<String>(
-              initialValue: _selectedSpecialty != null && specialtyOptions.contains(_selectedSpecialty)
-                  ? _selectedSpecialty
-                  : null,
-              isExpanded: true,
-              dropdownColor: Colors.white,
-              validator: (val) => null,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
-              decoration: _buildInputDecoration(
-                label: 'Select Medical Specialty',
-                hint: '',
-                isRequired: false,
-                icon: Icons.medical_services_outlined,
-              ),
-              items: specialtyOptions.map((sp) {
-                return DropdownMenuItem(
-                  value: sp,
-                  child: Text(
-                    sp,
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 12.5, fontWeight: FontWeight.w600),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                );
-              }).toList(),
-              onChanged: (val) {
-                setState(() {
-                  _selectedSpecialty = val ?? 'General Medicine';
-                  _qualificationController.text =
-                      MedicalSpecialtyModel.getDefaultQualificationForSpecialty(_selectedSpecialty!);
-                });
-              },
-            ),
-            const SizedBox(height: 12),
-
-            TextFormField(
-              controller: _qualificationController,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-              validator: (val) => null,
-              decoration: _buildInputDecoration(
-                label: 'Professional Qualifications',
-                hint: 'e.g. MBBS, MD or BDS, MDS',
-                isRequired: false,
-                icon: Icons.school_outlined,
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            TextFormField(
-              controller: _clinicNameController,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-              validator: (val) => null,
-              decoration: _buildInputDecoration(
-                label: 'Primary Clinic / Hospital Name',
-                hint: 'e.g. GS HEALTH Multi-Specialty Center (Optional)',
-                isRequired: false,
-                icon: Icons.domain_rounded,
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            TextFormField(
-              controller: _experienceController,
-              keyboardType: TextInputType.number,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-              decoration: _buildInputDecoration(
-                label: 'Clinical Experience (Years)',
-                hint: '5',
-                icon: Icons.work_outline_rounded,
-              ),
-            ),
-          ],
-        );
-
-      case UserRole.admin:
-        return Column(
-          key: const ValueKey('admin_fields'),
-          children: [
-            // Administrative Role Level Selector: Sub-Admin vs Admin
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFF6366F1).withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFF6366F1).withValues(alpha: 0.25)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Administrative Role Type *',
-                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF4338CA)),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => setState(() => _selectedAdminRoleType = 'Sub-Admin'),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 250),
-                            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-                            decoration: BoxDecoration(
-                              color: _selectedAdminRoleType == 'Sub-Admin' ? Colors.white : Colors.transparent,
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: _selectedAdminRoleType == 'Sub-Admin' ? const Color(0xFF6366F1).withValues(alpha: 0.3) : Colors.transparent,
-                              ),
-                              boxShadow: _selectedAdminRoleType == 'Sub-Admin'
-                                  ? [
-                                      BoxShadow(
-                                        color: Colors.black.withValues(alpha: 0.06),
-                                        blurRadius: 8,
-                                        offset: const Offset(0, 2),
-                                      ),
-                                      BoxShadow(
-                                        color: const Color(0xFF6366F1).withValues(alpha: 0.12),
-                                        blurRadius: 4,
-                                        offset: const Offset(0, 1),
-                                      ),
-                                    ]
-                                  : [],
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.badge_rounded,
-                                  size: 16,
-                                  color: _selectedAdminRoleType == 'Sub-Admin' ? const Color(0xFF6366F1) : const Color(0xFF64748B),
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  'Sub-Admin',
-                                  style: TextStyle(
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.bold,
-                                    color: _selectedAdminRoleType == 'Sub-Admin' ? const Color(0xFF6366F1) : const Color(0xFF64748B),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => setState(() => _selectedAdminRoleType = 'Admin'),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 250),
-                            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-                            decoration: BoxDecoration(
-                              color: _selectedAdminRoleType == 'Admin' ? Colors.white : Colors.transparent,
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: _selectedAdminRoleType == 'Admin' ? const Color(0xFF6366F1).withValues(alpha: 0.3) : Colors.transparent,
-                              ),
-                              boxShadow: _selectedAdminRoleType == 'Admin'
-                                  ? [
-                                      BoxShadow(
-                                        color: Colors.black.withValues(alpha: 0.06),
-                                        blurRadius: 8,
-                                        offset: const Offset(0, 2),
-                                      ),
-                                      BoxShadow(
-                                        color: const Color(0xFF6366F1).withValues(alpha: 0.12),
-                                        blurRadius: 4,
-                                        offset: const Offset(0, 1),
-                                      ),
-                                    ]
-                                  : [],
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.shield_rounded,
-                                  size: 16,
-                                  color: _selectedAdminRoleType == 'Admin' ? const Color(0xFF6366F1) : const Color(0xFF64748B),
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  'Primary Admin',
-                                  style: TextStyle(
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.bold,
-                                    color: _selectedAdminRoleType == 'Admin' ? const Color(0xFF6366F1) : const Color(0xFF64748B),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    _selectedAdminRoleType == 'Sub-Admin'
-                        ? 'ℹ️ Sub-Admins manage patients, appointments, consultation cases, referrals, and dentists.'
-                        : 'ℹ️ Primary Admin has full administrative governance over the entire platform.',
-                    style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _adminEmployeeIdController,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-              decoration: _buildInputDecoration(
-                label: 'Admin ID / Employee ID (Optional)',
-                hint: 'ADM-901',
-                icon: Icons.badge_outlined,
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _adminDeptController,
-              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-              decoration: _buildInputDecoration(
-                label: 'Department / Key Code (Optional)',
-                hint: 'Clinical Operations',
-                icon: Icons.admin_panel_settings_outlined,
-              ),
-            ),
-          ],
-        );
-    }
-  }
-
-  InputDecoration _buildInputDecoration({
-    required String label,
-    required String hint,
-    bool isRequired = false,
-    IconData? icon,
-    Widget? suffixIcon,
-  }) {
-    return InputDecoration(
-      isDense: true,
-      label: isRequired
-          ? Text.rich(
-              TextSpan(
-                text: label,
-                style: const TextStyle(color: Color(0xFF475569), fontSize: 12.5, fontWeight: FontWeight.w500),
-                children: const [
-                  TextSpan(
-                    text: ' *',
-                    style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold, fontSize: 13),
-                  ),
-                ],
-              ),
-              maxLines: 1,
-              softWrap: false,
-              overflow: TextOverflow.ellipsis,
-            )
-          : Text(
-              label,
-              style: const TextStyle(color: Color(0xFF475569), fontSize: 12.5, fontWeight: FontWeight.w500),
-              maxLines: 1,
-              softWrap: false,
-              overflow: TextOverflow.ellipsis,
-            ),
-      labelStyle: const TextStyle(color: Color(0xFF475569), fontSize: 12.5, fontWeight: FontWeight.w500),
-      hintText: hint.isNotEmpty ? hint : null,
-      hintStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
-      prefixIcon: icon != null ? Icon(icon, color: _accentColor, size: 17) : null,
-      prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-      suffixIcon: suffixIcon,
-      filled: true,
-      fillColor: const Color(0xFFF8FAFC),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: _accentColor, width: 2),
-      ),
-      errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xFFEF4444)),
-      ),
-    );
-  }
-
   void _openMapLocationPicker() {
+    final bool useClinicController =
+        _selectedRole == UserRole.dentist || _selectedRole == UserRole.clinic;
     MapLocationPickerDialog.show(
       context: context,
-      initialAddress: _selectedRole == UserRole.dentist ? _clinicAddressController.text : _locationController.text,
+      initialAddress: useClinicController
+          ? _clinicAddressController.text
+          : _locationController.text,
       initialCity: _cityController.text,
       initialPincode: _pincodeController.text,
       initialLat: _selectedLatitude,
       initialLng: _selectedLongitude,
-      isDentist: _selectedRole == UserRole.dentist,
+      isDentist: useClinicController,
       onLocationSelected: (address, city, pincode, lat, lng, locationName) {
         setState(() {
-          if (_selectedRole == UserRole.dentist) {
+          if (useClinicController) {
             _clinicAddressController.text = address;
           } else {
             _locationController.text = address;
@@ -2553,7 +2554,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('📍 Map Location Attached: $address, $city ($pincode)'),
-            backgroundColor: const Color(0xFF10B981),
+            backgroundColor: AppTheme.gsNavy,
             duration: const Duration(seconds: 2),
           ),
         );

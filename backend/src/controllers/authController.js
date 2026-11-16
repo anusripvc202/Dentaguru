@@ -22,6 +22,33 @@ const generateTokens = (user) => {
     return { accessToken, refreshToken };
 };
 
+// Normalize 10-digit mobile phone
+const normalizeAdminPhone = (phone) => {
+    if (!phone) return '';
+    const digits = phone.toString().replace(/[^0-9]/g, '');
+    if (digits.length === 12 && digits.startsWith('91')) return digits.substring(2);
+    if (digits.length === 11 && digits.startsWith('0')) return digits.substring(1);
+    if (digits.length > 10) return digits.slice(-10);
+    return digits;
+};
+
+// Single authorized Admin phone number configuration (Environment or Database)
+const getAuthorizedAdminPhone = async () => {
+    // 1. Backend environment variable configuration
+    const envAdminPhone = (process.env.ADMIN_PHONE || process.env.ADMIN_MOBILE_NUMBER || '').trim();
+    if (envAdminPhone) {
+        return normalizeAdminPhone(envAdminPhone);
+    }
+    // 2. Existing secure admin account record in database
+    try {
+        const adminUser = await User.findOne({ role: 'Admin' });
+        if (adminUser && adminUser.phone) {
+            return normalizeAdminPhone(adminUser.phone);
+        }
+    } catch (_) {}
+    return null;
+};
+
 // 1. REGISTER
 exports.register = async (req, res) => {
     const { name, email, password, phone, role, fcmToken, specialty, licenseNumber, clinicName, clinicAddress, location, state, city, pincode, latitude, longitude, qualification, experienceYears, profilePhoto, age, gender, bloodGroup, emergencyContact, languages, languagesKnown, referralCode, ref } = req.body;
@@ -41,28 +68,15 @@ exports.register = async (req, res) => {
         const isSubAdmin = normalizedRole.toLowerCase() === 'sub-admin' || normalizedRole.toLowerCase() === 'subadmin' || normalizedRole.toLowerCase() === 'sub_admin';
         const isAdminReg = normalizedRole.toLowerCase() === 'admin' || normalizedRole.toLowerCase() === 'primaryadmin' || normalizedRole.toLowerCase() === 'primary_admin';
 
-        let effectiveAssignedRole = normalizedRole;
-
-        if (isSubAdmin) {
-            effectiveAssignedRole = 'Sub-Admin';
-        } else if (isAdminReg) {
-            // Database-level Single Primary Admin Enforcement
-            const existingAdmins = await User.find({ role: 'Admin' });
-            if (existingAdmins && existingAdmins.length > 0) {
-                const matchAdmin = existingAdmins.find(a => (normalizedEmail && (a.email || '').trim().toLowerCase() === normalizedEmail) || (a.phone && a.phone.trim() === normalizedPhone));
-                if (matchAdmin) {
-                    return res.status(200).json({
-                        success: true,
-                        message: 'Primary Admin is already registered. Logging into Admin Dashboard...',
-                        user: matchAdmin,
-                    });
-                }
-                // When a Primary Admin is already registered, seamlessly register this new admin as Sub-Admin
-                effectiveAssignedRole = 'Sub-Admin';
-            } else {
-                effectiveAssignedRole = 'Admin';
-            }
+        // Public self-registration as Admin or Sub-Admin is strictly disabled
+        if (isAdminReg || isSubAdmin) {
+            return res.status(403).json({
+                success: false,
+                message: 'Public registration as Admin is disabled. Unauthorized role registration rejected.'
+            });
         }
+
+        let effectiveAssignedRole = normalizedRole;
 
         const cleanPhoneDigits = normalizedPhone.replace(/[^0-9]/g, '') || Math.floor(100000 + Math.random() * 900000).toString();
         const effectiveEmail = (normalizedEmail && normalizedEmail.includes('@') && !normalizedEmail.endsWith('@dentaguru.internal'))
@@ -455,16 +469,33 @@ exports.login = async (req, res) => {
             });
         }
 
-        // Enforce Portal Role Matching
-        if (role && role.trim().length > 0) {
-            const requestedRole = role.trim().toLowerCase();
-            const userRole = (user.role || '').trim().toLowerCase();
+        // Enforce Portal Role Matching and Strict Admin Number Verification
+        const requestedRole = (role || '').trim().toLowerCase();
+        const userRole = (user.role || '').trim().toLowerCase();
+        const isReqAdmin = requestedRole.includes('admin');
+        const isUserAdmin = userRole.includes('admin');
 
-            const isReqAdmin = requestedRole.includes('admin');
+        const authorizedAdminPhone = await getAuthorizedAdminPhone();
+        const normalizedIdentifier = normalizeAdminPhone(identifier);
+        const isAuthorizedAdmin = Boolean(authorizedAdminPhone && (normalizedIdentifier === authorizedAdminPhone || normalizeAdminPhone(user.phone) === authorizedAdminPhone));
+
+        if (isReqAdmin && !isAuthorizedAdmin) {
+            return res.status(403).json({
+                success: false,
+                message: 'Unauthorized Admin access: This mobile number is not authorized as Admin.'
+            });
+        }
+        if (isUserAdmin && !isAuthorizedAdmin) {
+            return res.status(403).json({
+                success: false,
+                message: 'Unauthorized Admin access: Mobile number does not match authorized administrator.'
+            });
+        }
+
+        if (role && role.trim().length > 0) {
             const isReqDentist = requestedRole.includes('dentist') || requestedRole.includes('doctor');
             const isReqPatient = requestedRole.includes('patient');
 
-            const isUserAdmin = userRole.includes('admin');
             const isUserDentist = userRole.includes('dentist') || userRole.includes('doctor');
             const isUserPatient = userRole.includes('patient');
 
@@ -550,44 +581,6 @@ exports.login = async (req, res) => {
     } catch (err) {
         console.error('Login Error:', err.message);
         res.status(500).json({ success: false, message: 'Server login error.' });
-    }
-};
-
-// 3. REQUEST OTP
-exports.requestOTP = async (req, res) => {
-    const { phone, email } = req.body;
-    try {
-        const otpCode = Math.floor(1000 + Math.random() * 9000).toString();
-        const targetEmail = (email || '').trim();
-
-        if (targetEmail.length > 0) {
-            await sendOtpEmail(targetEmail, otpCode);
-        }
-        if (phone && phone.trim().length > 0) {
-            await sendRealSmsOtp(phone, otpCode);
-        }
-
-        res.json({
-            success: true,
-            message: 'OTP sent to registered contact details.',
-            otp: otpCode
-        });
-    } catch (err) {
-        console.error('Request OTP Error:', err.message);
-        res.status(500).json({ success: false, message: 'Failed to dispatch OTP code.' });
-    }
-};
-
-// 4. VERIFY OTP
-exports.verifyOTP = async (req, res) => {
-    const { phone, email, code } = req.body;
-    try {
-        if (!code || code.trim().length !== 4) {
-            return res.status(400).json({ success: false, message: 'Invalid OTP code format.' });
-        }
-        res.json({ success: true, message: 'OTP verified successfully.' });
-    } catch (err) {
-        res.status(500).json({ success: false, message: 'Failed to verify OTP.' });
     }
 };
 
@@ -752,8 +745,9 @@ exports.getPatients = async (req, res) => {
 
 // 10. CREATE SUB-ADMIN (Primary Admin only)
 exports.createSubAdmin = async (req, res) => {
-    const { name, email, password, phone, permissions, status, city, pincode, languages } = req.body;
+    const { name, email, password, phone, permissions, status, city, pincode, languages, districtIds, districts } = req.body;
     try {
+        const { SubAdminDistrict, PermissionChangeHistory } = require('../models/Schemas');
         const normalizedPhone = (phone || '').toString().trim();
         const normalizedEmail = (email || '').toString().trim().toLowerCase();
 
@@ -773,9 +767,10 @@ exports.createSubAdmin = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Phone number already registered.' });
         }
 
-        const cleanPerms = Array.isArray(permissions)
+        // Sub-admin permissions default to RESTRICTED per system requirements
+        const cleanPerms = Array.isArray(permissions) && permissions.length > 0
             ? permissions.map(p => (p || '').toString().trim().toUpperCase()).filter(p => p.length > 0)
-            : ['PATIENT_VIEW', 'DENTIST_VIEW', 'ASSIGNMENT_VIEW', 'APPOINTMENT_VIEW', 'PROBLEM_VIEW', 'REPORT_VIEW'];
+            : ['PATIENT_VIEW']; // Restricted default
 
         const subAdminStatus = (status || 'ACTIVE').toString().trim().toUpperCase();
 
@@ -811,6 +806,33 @@ exports.createSubAdmin = async (req, res) => {
             device_token: JSON.stringify(metaObj)
         });
 
+        // Assign multiple districts if specified
+        const finalDistrictIds = Array.isArray(districtIds) ? districtIds : (Array.isArray(districts) ? districts : []);
+        let assignedDistricts = [];
+        if (finalDistrictIds.length > 0) {
+            assignedDistricts = await SubAdminDistrict.assignDistrictsToSubAdmin(
+                subAdmin.id,
+                finalDistrictIds,
+                req.user ? req.user.id : null
+            );
+        }
+
+        // Log permission initialization to PermissionChangeHistory
+        try {
+            for (const p of cleanPerms) {
+                await PermissionChangeHistory.logChange({
+                    subAdminUserId: subAdmin.id,
+                    changedByUserId: req.user ? req.user.id : null,
+                    changedByRole: 'Main Admin',
+                    action: 'INITIAL_RESTRICTED',
+                    permissionKey: p,
+                    previousState: false,
+                    newState: true,
+                    reason: 'Initial permission granted on Sub-Admin creation.'
+                });
+            }
+        } catch (_) {}
+
         // Also ensure Supabase Auth User exists for Sub-Admin if email provided
         if (normalizedEmail) {
             try {
@@ -845,6 +867,7 @@ exports.createSubAdmin = async (req, res) => {
                 pincode: subAdmin.pincode || '',
                 languages: finalLanguages,
                 permissions: cleanPerms,
+                assignedDistricts,
                 created_at: subAdmin.created_at
             }
         });
@@ -857,12 +880,15 @@ exports.createSubAdmin = async (req, res) => {
 // 11. GET ALL SUB-ADMINS (Primary Admin only)
 exports.getSubAdmins = async (req, res) => {
     try {
-        const { SubAdminPermission } = require('../models/Schemas');
+        const { SubAdminPermission, SubAdminDistrict, PatientAssignmentHistory } = require('../models/Schemas');
         const allUsers = await User.find();
         const subAdmins = allUsers.filter(u => {
             const r = (u.role || '').toLowerCase();
             return r === 'sub-admin' || r === 'subadmin' || r === 'sub_admin';
         });
+
+        // Pre-fetch all assignment history for patient assignment counts
+        const allAssignments = await PatientAssignmentHistory.getHistory();
 
         const cleanList = [];
         for (const s of subAdmins) {
@@ -884,6 +910,14 @@ exports.getSubAdmins = async (req, res) => {
                 } catch (_) {}
             }
 
+            // Fetch assigned districts
+            const assignedDistricts = await SubAdminDistrict.getDistrictsForSubAdmin(s.id);
+
+            // Compute patient assignments done by this sub-admin
+            const myAssignments = allAssignments.filter(a => a.assigned_by_user_id === s.id);
+            const assignedPatientsCount = myAssignments.length;
+            const lastActivity = myAssignments.length > 0 ? myAssignments[0].created_at : s.updated_at || s.created_at;
+
             cleanList.push({
                 id: s.id,
                 name: s.name,
@@ -895,7 +929,10 @@ exports.getSubAdmins = async (req, res) => {
                 pincode: sPin,
                 languages: userLangs,
                 permissions: perms,
-                created_at: s.created_at
+                assignedDistricts,
+                assignedPatientsCount,
+                created_at: s.created_at,
+                last_activity: lastActivity
             });
         }
 
@@ -909,8 +946,9 @@ exports.getSubAdmins = async (req, res) => {
 // 11b. UPDATE SUB-ADMIN DETAILS & PERMISSIONS (Primary Admin only)
 exports.updateSubAdmin = async (req, res) => {
     const { id } = req.params;
-    const { name, phone, password, permissions, status } = req.body;
+    const { name, phone, password, permissions, status, districtIds, districts } = req.body;
     try {
+        const { SubAdminDistrict, SubAdminPermission, PermissionChangeHistory } = require('../models/Schemas');
         const target = await User.findById(id);
         if (!target) {
             return res.status(404).json({ success: false, message: 'Sub-Admin not found.' });
@@ -928,9 +966,58 @@ exports.updateSubAdmin = async (req, res) => {
         if (permissions && Array.isArray(permissions)) {
             const cleanPerms = permissions.map(p => (p || '').toString().trim().toUpperCase()).filter(p => p.length > 0);
             updatePayload.permissions = cleanPerms;
+
+            // Log changes to PermissionChangeHistory
+            const oldPerms = target.permissions || (await SubAdminPermission.getPermissionsForUser(id));
+            const oldSet = new Set(oldPerms);
+            const newSet = new Set(cleanPerms);
+
+            for (const p of cleanPerms) {
+                if (!oldSet.has(p)) {
+                    await PermissionChangeHistory.logChange({
+                        subAdminUserId: id,
+                        changedByUserId: req.user ? req.user.id : null,
+                        changedByRole: 'Main Admin',
+                        action: 'GRANTED',
+                        permissionKey: p,
+                        previousState: false,
+                        newState: true,
+                        reason: 'Permission granted by Main Admin.'
+                    });
+                }
+            }
+            for (const p of oldPerms) {
+                if (!newSet.has(p)) {
+                    await PermissionChangeHistory.logChange({
+                        subAdminUserId: id,
+                        changedByUserId: req.user ? req.user.id : null,
+                        changedByRole: 'Main Admin',
+                        action: 'REVOKED',
+                        permissionKey: p,
+                        previousState: true,
+                        newState: false,
+                        reason: 'Permission revoked by Main Admin.'
+                    });
+                }
+            }
+
+            await SubAdminPermission.setPermissionsForUser(id, cleanPerms);
         }
 
         const updated = await User.findByIdAndUpdate(id, updatePayload);
+
+        // Update districts if provided
+        const finalDistrictIds = Array.isArray(districtIds) ? districtIds : (Array.isArray(districts) ? districts : null);
+        let assignedDistricts = [];
+        if (finalDistrictIds !== null) {
+            assignedDistricts = await SubAdminDistrict.assignDistrictsToSubAdmin(
+                id,
+                finalDistrictIds,
+                req.user ? req.user.id : null
+            );
+        } else {
+            assignedDistricts = await SubAdminDistrict.getDistrictsForSubAdmin(id);
+        }
 
         res.json({
             success: true,
@@ -943,6 +1030,7 @@ exports.updateSubAdmin = async (req, res) => {
                 role: updated.role,
                 status: updated.status || 'ACTIVE',
                 permissions: updated.permissions || [],
+                assignedDistricts,
                 updated_at: updated.updated_at
             }
         });
@@ -1019,6 +1107,130 @@ exports.deleteSubAdmin = async (req, res) => {
     } catch (err) {
         console.error('Delete Sub-Admin Error:', err.message);
         res.status(500).json({ success: false, message: 'Failed to delete sub-admin.' });
+    }
+};
+
+// 12b. GET SUB-ADMIN PERMISSIONS & AUDIT HISTORY
+exports.getSubAdminPermissions = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const { SubAdminPermission, PermissionChangeHistory } = require('../models/Schemas');
+        const target = await User.findById(id);
+        if (!target) {
+            return res.status(404).json({ success: false, message: 'Sub-Admin not found.' });
+        }
+
+        const permissions = target.permissions || (await SubAdminPermission.getPermissionsForUser(id));
+        const history = await PermissionChangeHistory.getHistoryForUser(id);
+
+        res.json({
+            success: true,
+            subAdminId: id,
+            subAdminName: target.name,
+            permissions,
+            history
+        });
+    } catch (err) {
+        console.error('Get Sub-Admin Permissions Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to retrieve permissions.' });
+    }
+};
+
+// 12c. UPDATE SUB-ADMIN PERMISSIONS INDIVIDUALLY (Main Admin Only)
+exports.updateSubAdminPermissions = async (req, res) => {
+    const { id } = req.params;
+    const { permissions, reason } = req.body;
+    try {
+        const { SubAdminPermission, PermissionChangeHistory } = require('../models/Schemas');
+
+        if (!Array.isArray(permissions)) {
+            return res.status(400).json({ success: false, message: 'permissions must be an array.' });
+        }
+
+        const target = await User.findById(id);
+        if (!target) {
+            return res.status(404).json({ success: false, message: 'Sub-Admin not found.' });
+        }
+        if (target.role && target.role.toLowerCase() === 'admin') {
+            return res.status(403).json({ success: false, message: 'Cannot modify permissions for Primary Admin.' });
+        }
+
+        // Sub-admins cannot modify their own permissions
+        if (req.user && req.user.id === id) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access Denied: Sub-Admins cannot modify their own permissions.'
+            });
+        }
+
+        const oldPerms = target.permissions || (await SubAdminPermission.getPermissionsForUser(id));
+        const cleanNewPerms = permissions.map(p => (p || '').toString().trim().toUpperCase()).filter(p => p.length > 0);
+
+        const oldSet = new Set(oldPerms);
+        const newSet = new Set(cleanNewPerms);
+
+        // Audit Log newly granted permissions
+        for (const p of cleanNewPerms) {
+            if (!oldSet.has(p)) {
+                await PermissionChangeHistory.logChange({
+                    subAdminUserId: id,
+                    changedByUserId: req.user ? req.user.id : null,
+                    changedByRole: 'Main Admin',
+                    action: 'GRANTED',
+                    permissionKey: p,
+                    previousState: false,
+                    newState: true,
+                    reason: reason || 'Permission explicitly granted by Main Admin.'
+                });
+            }
+        }
+
+        // Audit Log revoked permissions
+        for (const p of oldPerms) {
+            if (!newSet.has(p)) {
+                await PermissionChangeHistory.logChange({
+                    subAdminUserId: id,
+                    changedByUserId: req.user ? req.user.id : null,
+                    changedByRole: 'Main Admin',
+                    action: 'REVOKED',
+                    permissionKey: p,
+                    previousState: true,
+                    newState: false,
+                    reason: reason || 'Permission revoked by Main Admin.'
+                });
+            }
+        }
+
+        await SubAdminPermission.setPermissionsForUser(id, cleanNewPerms);
+        const updated = await User.findByIdAndUpdate(id, { permissions: cleanNewPerms });
+
+        res.json({
+            success: true,
+            message: `Permissions updated successfully for ${target.name}.`,
+            permissions: updated.permissions,
+            updated_at: updated.updated_at
+        });
+    } catch (err) {
+        console.error('Update Permissions Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to update permissions.' });
+    }
+};
+
+// 12d. GET SUB-ADMIN'S PATIENT ASSIGNMENT HISTORY
+exports.getSubAdminAssignmentHistory = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const { PatientAssignmentHistory } = require('../models/Schemas');
+        const assignments = await PatientAssignmentHistory.getHistory({ assignedByUserId: id });
+        res.json({
+            success: true,
+            subAdminId: id,
+            count: assignments.length,
+            assignments
+        });
+    } catch (err) {
+        console.error('Get Sub-Admin Assignment History Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to retrieve assignment history.' });
     }
 };
 
@@ -1102,12 +1314,15 @@ exports.requestOTP = async (req, res) => {
             });
         }
 
+        const normalizedPhone = normalizeAdminPhone(pNum);
+        const authorizedAdminPhone = await getAuthorizedAdminPhone();
+        const isAdmin = Boolean(authorizedAdminPhone && normalizedPhone === authorizedAdminPhone);
+
         const realOtp = generateRandomOtp();
         storeOtp(pNum, realOtp);
-
-        console.log(`=============================================================`);
-        console.log(`🔑 REAL DYNAMIC MOBILE SMS OTP GENERATED FOR [${pNum}]: >>> ${realOtp} <<<`);
-        console.log(`=============================================================`);
+        if (normalizedPhone && normalizedPhone !== pNum) {
+            storeOtp(normalizedPhone, realOtp);
+        }
 
         // Send Real Mobile SMS via Fast2SMS / Twilio if phone provided
         if (pNum.length >= 10) {
@@ -1116,8 +1331,9 @@ exports.requestOTP = async (req, res) => {
 
         res.json({
             success: true,
-            message: `OTP verification code dispatched to mobile ${pNum}. Check your SMS.`,
-            otp: realOtp
+            message: `OTP verification code dispatched to mobile. Check your SMS.`,
+            otp: realOtp,
+            isAdmin: isAdmin
         });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to request OTP.' });
@@ -1130,15 +1346,23 @@ exports.verifyOTP = async (req, res) => {
         const pNum = phone ? phone.trim() : '';
         const eMail = email ? email.trim() : '';
 
-        const isValid = pNum ? verifyStoredOtp(pNum, code) : true;
+        const normalizedPhone = normalizeAdminPhone(pNum);
+        const isValid = pNum ? (verifyStoredOtp(pNum, code) || verifyStoredOtp(normalizedPhone, code)) : true;
 
         if (!isValid) {
             return res.status(400).json({ success: false, message: 'Invalid or expired OTP.' });
         }
 
-        const user = (pNum ? await User.findOne({ phone: pNum }) : null) || (eMail ? await User.findOne({ email: eMail }) : null);
+        const authorizedAdminPhone = await getAuthorizedAdminPhone();
+        const isAdmin = Boolean(authorizedAdminPhone && normalizedPhone === authorizedAdminPhone);
+
+        const user = (pNum ? await User.findOne({ phone: pNum }) : null) || (normalizedPhone ? await User.findOne({ phone: normalizedPhone }) : null) || (eMail ? await User.findOne({ email: eMail }) : null);
 
         if (user) {
+            if ((user.role || '').toLowerCase().includes('admin') && !isAdmin) {
+                return res.status(403).json({ success: false, message: 'Unauthorized Admin access.' });
+            }
+
             const { accessToken, refreshToken } = generateTokens(user);
             const existingTokens = Array.isArray(user.refresh_tokens) ? user.refresh_tokens : [];
             if (!existingTokens.includes(refreshToken)) existingTokens.push(refreshToken);
@@ -1154,14 +1378,16 @@ exports.verifyOTP = async (req, res) => {
                     role: user.role
                 },
                 accessToken,
-                refreshToken
+                refreshToken,
+                isAdmin: isAdmin
             });
         }
 
         res.json({
             success: true,
             verified: true,
-            message: '4-Digit OTP Verified successfully.'
+            message: '4-Digit OTP Verified successfully.',
+            isAdmin: isAdmin
         });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Verification failed.' });

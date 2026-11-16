@@ -1,4 +1,4 @@
-const { PatientProblemRequest, DentistSuggestion, Dentist, User, Notification } = require('../models/Schemas');
+const { PatientProblemRequest, DentistSuggestion, Dentist, User, Notification, PatientAssignmentHistory, District, SubAdminDistrict, ASSIGNMENT_SOURCES } = require('../models/Schemas');
 const { sendPushNotification } = require('../services/notificationService');
 
 // 1. PATIENT: CREATE DENTAL PROBLEM REQUEST
@@ -299,16 +299,72 @@ exports.suggestDentist = async (req, res) => {
 
         const docName = doctorName || (dentist ? (dentist.users?.name || dentist.name) : 'Dr. Specialist');
 
+        // Resolve Patient District & Enforce Sub-Admin Access
+        const patientUserObj = await User.findById(problemReq.patient_id).catch(() => null);
+        const locRes = District.resolveDistrictFromLocation({
+            city: problemReq.city || patientUserObj?.city,
+            district: problemReq.district || patientUserObj?.district,
+            state: problemReq.state || patientUserObj?.state,
+            pincode: problemReq.pincode || patientUserObj?.pincode
+        });
+
+        const userRoleLower = (req.user?.role || '').toLowerCase();
+        const isMainAdmin = userRoleLower === 'admin' || userRoleLower === 'primaryadmin' || userRoleLower === 'primary_admin' || userRoleLower === 'superadmin';
+        const isSubAdmin = userRoleLower === 'sub-admin' || userRoleLower === 'subadmin' || userRoleLower === 'sub_admin';
+
+        const finalDistrictName = locRes.district || problemReq.district || patientUserObj?.district || problemReq.city || 'Unassigned / Review';
+        const finalDistrictId = locRes.districtId || null;
+
+        // Sub-Admin District Jurisdiction Enforcement
+        if (isSubAdmin && req.user?.id) {
+            const assignedDistricts = await SubAdminDistrict.getDistrictsForSubAdmin(req.user.id);
+            const isAuthorized = assignedDistricts.some(d =>
+                (finalDistrictId && d.id === finalDistrictId) ||
+                (finalDistrictName && d.name.toLowerCase() === finalDistrictName.toLowerCase())
+            );
+            if (!isAuthorized) {
+                return res.status(403).json({
+                    success: false,
+                    message: `Access Denied: You cannot assign patients in '${finalDistrictName}'. This request is outside your assigned districts.`
+                });
+            }
+        }
+
         // 1. Update Request Status to DENTIST_ASSIGNED with valid native schema columns
         const updatedReq = await PatientProblemRequest.findByIdAndUpdate(id, {
             status: 'DENTIST_ASSIGNED',
             suggested_dentist_id: resolvedDentistTableId,
+            district_id: finalDistrictId,
+            district: finalDistrictName,
             admin_notes: notes || 'Admin reviewed symptoms and suggested specialized dentist.'
         });
 
+        // 📜 Record in Immutable Patient Assignment Audit History
+        try {
+            const assignmentSource = isMainAdmin ? ASSIGNMENT_SOURCES.MAIN_ADMIN_ASSIGNMENT : ASSIGNMENT_SOURCES.SUB_ADMIN_ASSIGNMENT;
+            const assignedByRole = isMainAdmin ? 'MAIN_ADMIN' : 'SUB_ADMIN';
+            const assignedByName = req.user?.name || (isMainAdmin ? 'Main Admin' : 'Sub-Admin');
+
+            await PatientAssignmentHistory.recordAssignment({
+                patientId: problemReq.patient_id,
+                doctorId: resolvedDentistTableId,
+                appointmentId: null,
+                requestId: id,
+                assignedByUserId: req.user?.id || null,
+                assignedByName,
+                assignedByRole,
+                assignmentSource,
+                districtId: finalDistrictId,
+                districtName: finalDistrictName,
+                assignmentReason: notes || 'Admin reviewed symptoms and suggested specialized dentist.',
+                status: 'ASSIGNED'
+            });
+        } catch (auditErr) {
+            console.warn('⚠️ Patient assignment audit trail notice:', auditErr.message);
+        }
+
         // 2. Create Dentist Suggestion Record with Location Snapshot
         const adminId = req.user ? req.user.id : null;
-        const patientUserObj = await User.findById(problemReq.patient_id).catch(() => null);
         await DentistSuggestion.create({
             request_id: id,
             patient_id: problemReq.patient_id,

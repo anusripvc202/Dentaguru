@@ -53,21 +53,15 @@ void main() {
     expect(find.text('Please enter your city'), findsNothing);
     expect(find.text('Enter Pincode'), findsNothing);
 
-    // 2. If user enters an invalid 5-digit Pincode, format check applies
-    final textFields = find.byType(TextFormField);
-    await tester.enterText(textFields.at(0), 'Aarav Sharma'); // Patient Full Name *
-    await tester.enterText(textFields.at(2), '9876543219');   // Mobile Phone Number *
-    await tester.enterText(textFields.at(4), '50008');        // Invalid 5-digit Pincode (optional format check)
-    expect(formState.validate(), isFalse);
-    await tester.pump();
-    expect(find.text('6-digit PIN'), findsOneWidget);
-
-    // 3. Clear pincode (leave blank) -> validation passes since it is optional
-    await tester.enterText(textFields.at(4), '');
-    expect(formState.validate(), isTrue);
-
-    // 4. Enter valid 6-digit Pincode -> validation also passes
-    await tester.enterText(textFields.at(4), '500081');
+    // 2. Providing Full Name and Mobile Number passes Patient form validation cleanly (City is optional here)
+    await tester.enterText(
+      find.byKey(const Key('reg_full_name_field')),
+      'Aarav Sharma',
+    );
+    await tester.enterText(
+      find.byKey(const Key('reg_phone_field')),
+      '9876543219',
+    );
     expect(formState.validate(), isTrue);
   });
 
@@ -98,10 +92,27 @@ void main() {
     expect(find.text('Enter Dental License Number'), findsNothing);
     expect(find.text('Enter clinic name'), findsNothing);
 
-    // Providing only Full Name and Contact Number passes validation
-    final textFields = find.byType(TextFormField);
-    await tester.enterText(textFields.at(0), 'Dr. Priya Nair');
-    await tester.enterText(textFields.at(2), '9812345678');
+    // Providing Full Name + Contact Number passes; out-of-range optional Years of Practice is caught
+    await tester.enterText(
+      find.byKey(const Key('reg_full_name_field')),
+      'Dr. Priya Nair',
+    );
+    await tester.enterText(
+      find.byKey(const Key('reg_phone_field')),
+      '9812345678',
+    );
+    await tester.enterText(
+      find.byKey(const Key('reg_experience_field')),
+      '99',
+    );
+    expect(formState.validate(), isFalse);
+    await tester.pump();
+    expect(find.text('Enter valid years of practice (0-70)'), findsOneWidget);
+
+    // Blank or valid Years of Practice both pass
+    await tester.enterText(find.byKey(const Key('reg_experience_field')), '');
+    expect(formState.validate(), isTrue);
+    await tester.enterText(find.byKey(const Key('reg_experience_field')), '6');
     expect(formState.validate(), isTrue);
   });
 
@@ -127,8 +138,8 @@ void main() {
     );
     await tester.pump();
 
-    // Switch to Doctors tab
-    await tester.tap(find.text('Doctors'));
+    // Attached doctors section is on the Overview scroll view
+    await tester.ensureVisible(find.byKey(const Key('clinic_add_doctor_button')));
     await tester.pumpAndSettle();
 
     // Tap Add Doctor button

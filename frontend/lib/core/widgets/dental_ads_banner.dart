@@ -103,6 +103,19 @@ const List<DentalAd> _patientAds = [
   ),
 ];
 
+/// Read-only view of the partner ads patients currently see (excludes the
+/// platform's own self-promotion entry). Used by the Admin/Sub-Admin dashboards.
+List<DentalAd> sponsoredAdsForAdmin() =>
+    _patientAds.where((a) => !a.isDentaGuru).toList(growable: false);
+
+/// Partner and implant supply ads tailored for clinics (GS Implants first,
+/// followed by clinical supply partners; excludes DentaGuru self-promotion).
+List<DentalAd> sponsoredAdsForClinic() {
+  final partnerAds = _dentistAds.where((a) => !a.isDentaGuru).toList();
+  partnerAds.sort((a, b) => (b.isGsiPartner ? 1 : 0) - (a.isGsiPartner ? 1 : 0));
+  return List.unmodifiable(partnerAds);
+}
+
 const List<DentalAd> _dentistAds = [
   DentalAd(
     brand: 'GS HEALTH Pro',

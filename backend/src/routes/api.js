@@ -13,9 +13,11 @@ const verification = require('../controllers/verificationController');
 const referrals = require('../controllers/referralController');
 const availability = require('../controllers/availabilityController');
 const specialties = require('../controllers/specialtyController');
+const districts = require('../controllers/districtController');
+const assignments = require('../controllers/assignmentController');
 
 // Middlewares
-const { authenticateJWT, optionalAuth, requireRole, requireMainAdmin, requirePermission, requireChatAccess } = require('../middleware/auth');
+const { authenticateJWT, optionalAuth, requireRole, requireMainAdmin, requirePermission, requireChatAccess, enforceDistrictAccess } = require('../middleware/auth');
 
 // ─────────────────────────────────────────────
 // 1. AUTHENTICATION ENDPOINTS
@@ -60,6 +62,31 @@ router.get('/admin/sub-admins', optionalAuth, requireMainAdmin, auth.getSubAdmin
 router.put('/admin/sub-admins/:id', optionalAuth, requireMainAdmin, auth.updateSubAdmin);
 router.patch('/admin/sub-admins/:id/status', optionalAuth, requireMainAdmin, auth.toggleSubAdminStatus);
 router.delete('/admin/sub-admins/:id', optionalAuth, requireMainAdmin, auth.deleteSubAdmin);
+router.get('/admin/sub-admins/:id/permissions', optionalAuth, requireMainAdmin, auth.getSubAdminPermissions);
+router.put('/admin/sub-admins/:id/permissions', optionalAuth, requireMainAdmin, auth.updateSubAdminPermissions);
+router.get('/admin/sub-admins/:id/assignment-history', optionalAuth, requireMainAdmin, auth.getSubAdminAssignmentHistory);
+
+// ─────────────────────────────────────────────
+// 2b. DISTRICT MANAGEMENT ENDPOINTS
+// ─────────────────────────────────────────────
+router.get('/districts', optionalAuth, districts.getDistricts);
+router.get('/admin/districts', optionalAuth, requireMainAdmin, districts.getAdminDistricts);
+router.post('/admin/districts', optionalAuth, requireMainAdmin, districts.createDistrict);
+router.put('/admin/districts/:id', optionalAuth, requireMainAdmin, districts.updateDistrict);
+router.patch('/admin/districts/:id/status', optionalAuth, requireMainAdmin, districts.toggleDistrictStatus);
+router.get('/admin/sub-admins/:id/districts', optionalAuth, districts.getSubAdminDistricts);
+router.post('/admin/sub-admins/:id/districts', optionalAuth, requireMainAdmin, districts.assignSubAdminDistricts);
+router.delete('/admin/sub-admins/:id/districts/:districtId', optionalAuth, requireMainAdmin, districts.removeSubAdminDistrict);
+
+// ─────────────────────────────────────────────
+// 2c. PATIENT ASSIGNMENT & IMMUTABLE AUDIT TRAIL ENDPOINTS
+// ─────────────────────────────────────────────
+router.post('/patient-assignments', optionalAuth, requirePermission('ASSIGNMENT_CREATE', ['PATIENT_ASSIGN']), assignments.assignPatientToDoctor);
+router.post('/patient-assignments/reassign', optionalAuth, requirePermission('ASSIGNMENT_CREATE', ['PATIENT_REASSIGN']), assignments.reassignPatient);
+router.get('/patient-assignments/history', optionalAuth, requirePermission('ASSIGNMENT_VIEW', ['ASSIGNMENT_HISTORY_VIEW']), assignments.getAssignmentHistory);
+router.get('/patient-assignments/patient/:patientId', optionalAuth, requirePermission('ASSIGNMENT_VIEW', ['PATIENT_VIEW']), assignments.getPatientTimeline);
+router.get('/admin/reports/assignment-statistics', optionalAuth, requirePermission('REPORT_VIEW', ['REPORT_ASSIGNMENT_VIEW']), assignments.getAssignmentStatistics);
+router.get('/admin/reports/districts', optionalAuth, requirePermission('REPORT_VIEW', ['REPORT_DISTRICT_VIEW']), assignments.getDistrictReports);
 
 // ─────────────────────────────────────────────
 // 3. ADMIN VERIFICATION ENDPOINTS

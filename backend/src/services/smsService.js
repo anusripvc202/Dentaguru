@@ -12,7 +12,7 @@ const sendRealSmsOtp = async (phone, otpCode) => {
         return { success: false, reason: 'No phone number provided' };
     }
 
-    const cleanPhone = phone.trim().replaceAll(/[^0-9]/g, '');
+    const cleanPhone = phone.trim().replace(/[^0-9]/g, '');
     const isIndia = cleanPhone.length === 10 || (cleanPhone.length === 12 && cleanPhone.startsWith('91'));
     const phone10Digit = cleanPhone.length > 10 ? cleanPhone.slice(-10) : cleanPhone;
 

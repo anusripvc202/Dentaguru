@@ -155,6 +155,22 @@ class SessionService {
         languages: meta['languages'] is List ? List<String>.from(meta['languages']) : ['English'],
       );
     }
+    // 1b. Restore Clinic State
+    else if (normalizedRole.contains('clinic')) {
+      final meta = session.metadata;
+      final clinicName = (meta['clinicName'] ?? session.name ?? '').toString().trim();
+      final clinicAddr = (meta['clinicAddress'] ?? meta['location'] ?? '').toString().trim();
+      final clinicId = (meta['clinicId'] ?? session.userId).toString().trim();
+      if (clinicName.isNotEmpty) {
+        PatientProblemService().setAuthenticatedClinicSession(
+          id: clinicId,
+          clinicName: clinicName,
+          location: clinicAddr,
+          isFeatured: meta['isFeatured'] == true || meta['is_featured'] == true,
+          coverImageUrl: (meta['coverImageUrl'] ?? meta['cover_image_url'] ?? '')?.toString(),
+        );
+      }
+    }
     // 2. Restore Sub-Admin or Admin State
     else if (normalizedRole.contains('sub-admin') || normalizedRole.contains('subadmin') || normalizedRole.contains('sub_admin')) {
       final meta = session.metadata;
@@ -162,12 +178,14 @@ class SessionService {
       if (meta['permissions'] is List) {
         perms = List<String>.from((meta['permissions'] as List).map((e) => e.toString()));
       }
+      final districts = meta['assignedDistricts'] ?? meta['districts'] ?? meta['districtIds'];
       PatientProblemService().setSubAdminSession(
         id: session.userId,
         name: session.name ?? 'Sub-Admin',
         email: session.email ?? '',
         phone: session.phone ?? '',
         permissions: perms,
+        assignedDistricts: districts is List ? districts : null,
         status: meta['status']?.toString() ?? 'ACTIVE',
       );
     }

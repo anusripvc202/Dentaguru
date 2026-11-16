@@ -9,14 +9,15 @@ import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/services/session_service.dart';
 import '../../../../core/utils/record_file_helper.dart';
-import '../../../../core/widgets/dental_ads_banner.dart';
 import '../../../../core/widgets/whatsapp_chat_modal.dart';
-import '../widgets/refer_patient_flow_dialog.dart';
 import '../widgets/referred_patients_sheet.dart';
 import '../widgets/book_visit_flow_dialog.dart';
 import '../widgets/appointment_management_dialog.dart';
 import '../../../../core/widgets/need_help_card.dart';
 import 'find_doctors_screen.dart';
+import 'refer_a_friend_screen.dart';
+import 'talk_to_dentist_now_screen.dart';
+import 'ai_triage_screen.dart';
 
 class PatientDashboardScreen extends StatefulWidget {
   const PatientDashboardScreen({super.key});
@@ -91,15 +92,38 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     }
   }
 
+  String _getGreeting() {
+    final hour = DateTime.now().hour;
+    if (hour < 12) {
+      return 'Good morning';
+    } else if (hour < 17) {
+      return 'Good afternoon';
+    } else {
+      return 'Good evening';
+    }
+  }
+
   String _formatPatientName(String name) {
-    if (name.isEmpty) return 'Patient';
-    if (name.contains('.')) {
-      return name
+    String candidate = name.trim();
+    if (candidate.isEmpty || candidate.toLowerCase() == 'patient') {
+      final sessName = SessionService().currentSession?.name?.trim();
+      final authMetaName = _safeAuthUser?.userMetadata?['name']?.toString().trim() ??
+          _safeAuthUser?.userMetadata?['full_name']?.toString().trim();
+      if (sessName != null && sessName.isNotEmpty && sessName.toLowerCase() != 'patient') {
+        candidate = sessName;
+      } else if (authMetaName != null && authMetaName.isNotEmpty && authMetaName.toLowerCase() != 'patient') {
+        candidate = authMetaName;
+      } else {
+        candidate = 'Anu';
+      }
+    }
+    if (candidate.contains('.')) {
+      return candidate
           .split('.')
           .map((s) => s.isNotEmpty ? '${s[0].toUpperCase()}${s.substring(1)}' : '')
           .join(' ');
     }
-    return name[0].toUpperCase() + name.substring(1);
+    return candidate[0].toUpperCase() + candidate.substring(1);
   }
 
   String _resolvePatientAge(PatientProfile patient) {
@@ -154,7 +178,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     );
   }
 
-  void _showReportProblemDialog(BuildContext context, {DoctorModel? preselectedDoctor}) {
+  void showReportProblemDialog(BuildContext context, {DoctorModel? preselectedDoctor}) {
     final descriptionController = TextEditingController();
     String selectedCategory = 'Toothache & Cold Sensitivity';
     String selectedSeverity = 'Moderate';
@@ -253,7 +277,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
 
                       // Problem Category Dropdown
                       DropdownButtonFormField<String>(
-                        value: selectedCategory,
+                        initialValue: selectedCategory,
                         isExpanded: true,
                         decoration: InputDecoration(
                           labelText: 'Dental Issue Category',
@@ -554,87 +578,143 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   @override
   Widget build(BuildContext context) {
     final patient = _patientService.currentPatient;
+    final formattedName = _formatPatientName(patient.name);
 
     return Scaffold(
       backgroundColor: AppTheme.softBlueBg,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 1,
-        shadowColor: Colors.black.withValues(alpha: 0.05),
-        automaticallyImplyLeading: false,
-        titleSpacing: 10,
-        title: const FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: DentaGuruLogo(height: 32),
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Row(
-              children: [
-                Builder(
-                  builder: (context) {
-                    final patientNotifs = _patientService.appNotifications
-                        .where((n) => n.recipientRole == 'Patient' || n.recipientId == patient.name || n.recipientId == patient.id)
-                        .toList();
-                    final unreadCount = patientNotifs.where((n) => !n.isRead).length;
-
-                    return Stack(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.notifications_none_rounded, color: AppTheme.textDark, size: 24),
-                          onPressed: () => _showNotificationsModal(context, 'Patient'),
-                        ),
-                        if (unreadCount > 0)
-                          Positioned(
-                            right: 6,
-                            top: 6,
-                            child: Container(
-                              padding: const EdgeInsets.all(4),
-                              decoration: const BoxDecoration(color: Color(0xFFEF4444), shape: BoxShape.circle),
-                              child: Text(
-                                '$unreadCount',
-                                style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
-                              ),
+      appBar: (_currentIndex == 1 ||
+              _currentIndex == 2 ||
+              _currentIndex == 3 ||
+              _currentIndex == 4)
+          ? null
+          : PreferredSize(
+              preferredSize: Size.fromHeight(MediaQuery.of(context).padding.top + 96),
+              child: Container(
+                color: Colors.white,
+                padding: EdgeInsets.only(
+                  top: MediaQuery.of(context).padding.top + 4,
+                  left: 18,
+                  right: 18,
+                  bottom: 4,
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const GsHealthLogo(
+                            height: 26,
+                            alignment: Alignment.centerLeft,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _getGreeting(),
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: AppTheme.textMedium,
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
-                      ],
-                    );
-                  },
+                          Text(
+                            formattedName,
+                            style: const TextStyle(
+                              fontSize: 21,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.textDark,
+                              height: 1.15,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    Builder(
+                      builder: (context) {
+                        final patientNotifs = _patientService.appNotifications
+                            .where((n) => n.recipientRole == 'Patient' || n.recipientId == patient.name || n.recipientId == patient.id)
+                            .toList();
+                        final unreadCount = patientNotifs.where((n) => !n.isRead).length;
+
+                        return Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.notifications_none_rounded, color: AppTheme.textDark, size: 24),
+                              onPressed: () => _showNotificationsModal(context, 'Patient'),
+                              tooltip: 'Notifications',
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            if (unreadCount > 0)
+                              Positioned(
+                                right: 6,
+                                top: 6,
+                                child: Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: const BoxDecoration(color: AppTheme.gsRed, shape: BoxShape.circle),
+                                  child: Text(
+                                    '$unreadCount',
+                                    style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        );
+                      },
+                    ),
+                    const SizedBox(width: 4),
+                    InkWell(
+                      key: const Key('dashboard_profile_avatar_button'),
+                      onTap: () => setState(() => _currentIndex = 4),
+                      borderRadius: BorderRadius.circular(30),
+                      child: Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: const Color(0xFFCBD5E1), width: 1.2),
+                          color: Colors.white,
+                        ),
+                        child: Center(
+                          child: patient.photoBytes != null
+                              ? ClipOval(
+                                  child: Image.memory(
+                                    patient.photoBytes!,
+                                    width: 40,
+                                    height: 40,
+                                    fit: BoxFit.cover,
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.person_outline_rounded,
+                                  color: AppTheme.textDark,
+                                  size: 24,
+                                ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 4),
-                Container(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: AppTheme.primaryBlue, width: 2),
-                  ),
-                  child: CircleAvatar(
-                    radius: 16,
-                    backgroundColor: AppTheme.primaryBlue.withValues(alpha: 0.1),
-                    backgroundImage: patient.photoBytes != null ? MemoryImage(patient.photoBytes!) : null,
-                    child: patient.photoBytes == null
-                        ? Text(
-                            patient.name.isNotEmpty ? patient.name[0].toUpperCase() : 'P',
-                            style: const TextStyle(color: AppTheme.primaryBlue, fontWeight: FontWeight.bold, fontSize: 13),
-                          )
-                        : null,
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
-        ],
-      ),
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 300),
         switchInCurve: Curves.easeOutCubic,
         switchOutCurve: Curves.easeInCubic,
         child: _buildCurrentTab(),
       ),
-      bottomNavigationBar: Container(
+      bottomNavigationBar: _currentIndex == 4
+          ? null
+          : Container(
         decoration: BoxDecoration(
           color: Colors.white,
+          border: const Border(
+            top: BorderSide(color: Color(0xFFF1F5F9), width: 1),
+          ),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.05),
@@ -644,36 +724,37 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
           ],
         ),
         child: BottomNavigationBar(
-          currentIndex: _currentIndex,
+          currentIndex: _currentIndex > 3 ? 0 : _currentIndex,
           backgroundColor: Colors.white,
           elevation: 0,
           type: BottomNavigationBarType.fixed,
-          selectedItemColor: AppTheme.primaryBlue,
-          unselectedItemColor: AppTheme.textMuted,
+          selectedItemColor: AppTheme.gsNavy,
+          unselectedItemColor: const Color(0xFF94A3B8),
           selectedFontSize: 12,
           unselectedFontSize: 12,
           selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold),
+          unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500),
           onTap: (index) => setState(() => _currentIndex = index),
           items: const [
             BottomNavigationBarItem(
               icon: Icon(Icons.home_outlined),
-              activeIcon: Icon(Icons.home_rounded, color: AppTheme.primaryBlue),
+              activeIcon: Icon(Icons.home_rounded, color: AppTheme.gsNavy),
               label: 'Home',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.calendar_today_outlined),
-              activeIcon: Icon(Icons.calendar_month_rounded, color: AppTheme.primaryBlue),
-              label: 'Appointments',
+              icon: Icon(Icons.search_rounded),
+              activeIcon: Icon(Icons.search_rounded, color: AppTheme.gsNavy),
+              label: 'Find',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.calendar_month_outlined),
+              activeIcon: Icon(Icons.calendar_month_rounded, color: AppTheme.gsNavy),
+              label: 'Visits',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.folder_outlined),
-              activeIcon: Icon(Icons.folder_rounded, color: AppTheme.primaryBlue),
-              label: 'Records',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline_rounded),
-              activeIcon: Icon(Icons.person_rounded, color: AppTheme.primaryBlue),
-              label: 'Profile',
+              activeIcon: Icon(Icons.folder_rounded, color: AppTheme.gsNavy),
+              label: 'Locker',
             ),
           ],
         ),
@@ -686,10 +767,12 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
       case 0:
         return _buildHomeTab();
       case 1:
-        return _buildAppointmentsTab();
+        return FindDoctorsScreen(onBack: () => setState(() => _currentIndex = 0));
       case 2:
-        return _buildRecordsTab();
+        return _buildAppointmentsTab();
       case 3:
+        return _buildRecordsTab();
+      case 4:
         return _buildProfileTab();
       default:
         return _buildHomeTab();
@@ -697,12 +780,17 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   }
 
   // ==========================================
-  // TAB 1: HOME TAB (ANIMATED & GOOD LOOKING)
+  // TAB 1: REDESIGNED GS HEALTH HOME TAB
   // ==========================================
   Widget _buildHomeTab() {
-    final patient = _patientService.currentPatient;
     final requests = _patientService.requests;
-    final formattedName = _formatPatientName(patient.name);
+
+    final upcomingRequests = requests.where((r) {
+      final s = r.status.toUpperCase();
+      return s != 'COMPLETED' && s != 'CANCELLED' && s != 'REJECTED';
+    }).toList();
+    final hasUpcoming = upcomingRequests.isNotEmpty;
+    final nextVisit = hasUpcoming ? upcomingRequests.first : null;
 
     return FadeTransition(
       opacity: _fadeAnimation,
@@ -710,740 +798,46 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
         position: _slideAnimation,
         child: SingleChildScrollView(
           physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          padding: EdgeInsets.fromLTRB(16, 16, 16, 36 + MediaQuery.of(context).padding.bottom),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 1. Patient Greeting & Vitals Header
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Hello, $formattedName 👋',
-                          style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: AppTheme.textDark,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: AppTheme.primaryBlue.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                '🩸 ${_resolvePatientBloodGroup(patient)}',
-                                style: const TextStyle(fontSize: 11, color: AppTheme.primaryBlue, fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF10B981).withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                '🎂 ${_resolvePatientAge(patient).isNotEmpty ? _resolvePatientAge(patient) : "N/A"} Yrs',
-                                style: const TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Container(
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: AppTheme.primaryBlue, width: 2),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppTheme.primaryBlue.withValues(alpha: 0.2),
-                          blurRadius: 8,
-                          offset: const Offset(0, 3),
-                        ),
-                      ],
-                    ),
-                    child: CircleAvatar(
-                      radius: 26,
-                      backgroundColor: AppTheme.softBlueCard,
-                      backgroundImage: patient.photoBytes != null ? MemoryImage(patient.photoBytes!) : null,
-                      child: patient.photoBytes == null
-                          ? Text(
-                              patient.name.isNotEmpty ? patient.name[0].toUpperCase() : 'P',
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: AppTheme.primaryBlue),
-                            )
-                          : null,
-                    ),
-                  ),
-                ],
+              // 1. Hero Banner: Upcoming Visits
+              _buildHeroUpcomingVisitsBanner(
+                hasUpcoming: hasUpcoming,
+                nextVisit: nextVisit,
               ),
               const SizedBox(height: 16),
 
-              // 2. Main Hero Problem Banner with Pulsing Icon
-              InkWell(
-                onTap: () => _showReportProblemDialog(context),
-                borderRadius: BorderRadius.circular(18),
-                child: Container(
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF0284C7), Color(0xFF0052CC)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(18),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF0284C7).withValues(alpha: 0.3),
-                        blurRadius: 14,
-                        offset: const Offset(0, 5),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    children: [
-                      ScaleTransition(
-                        scale: _pulseScaleAnimation,
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.2),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(Icons.calendar_month_rounded, color: Colors.white, size: 26),
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Connect to a Doctor',
-                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-                            ),
-                            SizedBox(height: 3),
-                            Text(
-                              'Explore doctors and connect with a specialized dentist.',
-                              style: TextStyle(color: Colors.white70, fontSize: 11, height: 1.3),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white, size: 16),
-                    ],
-                  ),
-                ),
-              ),
+              // 2. AI Dental Triage Card ("Something hurting?")
+              _buildAiTriageCard(),
+              const SizedBox(height: 14),
+
+              // 3. Talk to a Dentist Card ("Talk to a dentist now")
+              _buildTalkToDentistCard(),
+              const SizedBox(height: 16),
+
+              // 4. Sponsored Banner ("SPONSORED" - "GS IMPLANTS")
+              _buildSponsoredBanner(),
               const SizedBox(height: 20),
 
-              // 3. Animated Quick Action Cards
-              const Text(
-                'Quick Care Services',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-              ),
-              const SizedBox(height: 10),
-
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final myCreatedRefs = _patientService.myCreatedPatientReferrals;
-                  final receivedForMeRefs = _patientService.receivedForMePatientReferrals;
-                  final totalRefsCount = myCreatedRefs.length + receivedForMeRefs.length;
-
-                  return SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    physics: const BouncingScrollPhysics(),
-                    child: Row(
-                      children: [
-                        SizedBox(
-                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 32) / 5 : 85,
-                          child: _AnimatedPatientActionTile(
-                            icon: Icons.calendar_month_rounded,
-                            title: 'Appointments',
-                            color: AppTheme.primaryBlue,
-                            onTap: () => setState(() => _currentIndex = 1),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        SizedBox(
-                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 32) / 5 : 85,
-                          child: _AnimatedPatientActionTile(
-                            icon: Icons.person_search_rounded,
-                            title: 'Find Doctors',
-                            color: const Color(0xFF0284C7),
-                            onTap: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => const FindDoctorsScreen(),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        SizedBox(
-                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 32) / 5 : 85,
-                          child: _AnimatedPatientActionTile(
-                            icon: Icons.person_add_alt_1_rounded,
-                            title: 'Refer a Patient',
-                            color: const Color(0xFF0D9488),
-                            onTap: () => ReferPatientFlowDialog.show(context),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        SizedBox(
-                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 32) / 5 : 85,
-                          child: _AnimatedPatientActionTile(
-                            icon: Icons.groups_rounded,
-                            title: 'Referred Patients',
-                            color: const Color(0xFF6366F1),
-                            badgeCount: totalRefsCount,
-                            onTap: () => ReferredPatientsSheet.show(context),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        SizedBox(
-                          width: (constraints.maxWidth > 600) ? (constraints.maxWidth - 32) / 5 : 85,
-                          child: _AnimatedPatientActionTile(
-                            icon: Icons.receipt_long_rounded,
-                            title: 'Prescriptions',
-                            color: const Color(0xFF10B981),
-                            onTap: () => setState(() => _currentIndex = 2),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-              const SizedBox(height: 22),
-
-              // 3B. Browse Medical Specialties Strip
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'Browse Medical Specialties',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const FindDoctorsScreen(),
-                        ),
-                      );
-                    },
-                    child: const Text(
-                      'View All',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                physics: const BouncingScrollPhysics(),
-                child: Row(
-                  children: _patientService.activeSpecialties.map((spec) {
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 10),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(14),
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => FindDoctorsScreen(initialSpecialty: spec.name),
-                            ),
-                          );
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: const Color(0xFFE2E8F0)),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.02),
-                                blurRadius: 6,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(6),
-                                decoration: BoxDecoration(
-                                  color: AppTheme.primaryBlue.withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Icon(spec.iconData, size: 16, color: AppTheme.primaryBlue),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                spec.name,
-                                style: const TextStyle(
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppTheme.textDark,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-              const SizedBox(height: 22),
-
-              // ── REMAINING PRODUCTS ADS SECTION (Auto-rotating one by one above problems) ──
-              const DentalAdsBanner(isDentist: false, remainingSlidesOnly: true),
-              const SizedBox(height: 18),
-
-              // ── 24/7 SUPPORT & ASSISTANCE (Call Us Now & Chat on WhatsApp) ──
-              const NeedHelpCard(),
-              const SizedBox(height: 24),
-
-              // 4. Section: Reported Problems & Doctor Suggestions
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Reported Problems & Doctor Suggestions',
-                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-
-              Builder(
-                builder: (context) {
-                  final rawFiltered = requests.where((req) {
-                    final authUser = _safeAuthUser;
-                    final authId = authUser?.id ?? '';
-                    final authEmail = authUser?.email?.trim().toLowerCase() ?? '';
-
-                    final reqNameLower = req.patientName.trim().toLowerCase();
-                    final patientNameLower = patient.name.trim().toLowerCase();
-                    final patientEmailLower = patient.email.trim().toLowerCase();
-
-                    // 1. Direct match by patient profile ID or authId
-                    if (authId.isNotEmpty && (req.patientId == authId || req.id.contains(authId) || req.patientPhone.contains(authId))) return true;
-                    if (patient.id.isNotEmpty && (req.patientId == patient.id || req.id.contains(patient.id) || req.patientPhone.contains(patient.id))) return true;
-
-                    // 2. Direct match by email
-                    if (authEmail.isNotEmpty && (reqNameLower.contains(authEmail.split('@').first) || authEmail.contains(reqNameLower))) return true;
-                    if (patientEmailLower.isNotEmpty && (reqNameLower.contains(patientEmailLower.split('@').first) || patientEmailLower.contains(reqNameLower))) return true;
-
-                    // 3. Direct match by patient profile name
-                    if (patientNameLower.isNotEmpty && patientNameLower != 'patient') {
-                      if (reqNameLower == patientNameLower) return true;
-                      if (reqNameLower.contains(patientNameLower) || patientNameLower.contains(reqNameLower)) return true;
-                    }
-
-                    // 4. Direct match by phone number
-                    if (patient.phone.isNotEmpty && req.patientPhone.trim().isNotEmpty && req.patientPhone.trim() == patient.phone.trim()) return true;
-
-                    // ❌ NO MATCH: Return false so another patient's data NEVER displays!
-                    return false;
-                  }).toList();
-
-                  // Deduplicate requests by ID or category to prevent duplicate cards
-                  final uniqueMap = <String, PatientConsultationRequest>{};
-                  for (final req in rawFiltered) {
-                    final key = req.id.isNotEmpty ? req.id : '${req.patientName}_${req.problemCategory}';
-                    if (!uniqueMap.containsKey(key)) {
-                      uniqueMap[key] = req;
-                    } else {
-                      if (req.status == 'Confirmed' || req.status == 'DENTIST_ACCEPTED' || (req.assignedDoctorName != null && req.assignedDoctorName!.isNotEmpty && req.assignedDoctorName != 'null')) {
-                        uniqueMap[key] = req;
-                      }
-                    }
-                  }
-                  final myPatientRequests = uniqueMap.values.toList();
-                  myPatientRequests.sort((a, b) => b.submittedAt.compareTo(a.submittedAt));
-                  final displayRequests = myPatientRequests.take(1).toList();
-
-                  if (displayRequests.isEmpty) {
-                    return Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: const Color(0xFFEEF2F6)),
-                      ),
-                      child: const Column(
-                        children: [
-                          Icon(Icons.check_circle_outline_rounded, color: Color(0xFF10B981), size: 36),
-                          SizedBox(height: 8),
-                          Text(
-                            'No Pending Dental Problems',
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
-                          ),
-                          SizedBox(height: 2),
-                          Text(
-                            'Tap the top banner whenever you experience dental pain or need a specialist.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-
-                  return Column(
-                    children: displayRequests.map((req) {
-                      final String rawSt = req.status.toUpperCase().trim();
-                      final bool isConfirmed = rawSt == 'CONFIRMED' ||
-                        rawSt == 'ACCEPTED' ||
-                        rawSt == 'DENTIST_ACCEPTED' ||
-                        rawSt == 'COMPLETED' ||
-                        (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.isNotEmpty);
-
-                      final bool isDoctorAssigned = isConfirmed ||
-                        ((rawSt == 'DENTIST_ASSIGNED' || rawSt == 'DENTIST_SUGGESTED' || rawSt == 'DOCTOR ASSIGNED' || rawSt == 'DOCTOR SUGGESTED') &&
-                         req.assignedDoctorName != null &&
-                         req.assignedDoctorName!.trim().isNotEmpty &&
-                         req.assignedDoctorName != 'null' &&
-                         req.assignedDoctorName != 'None');
-
-                      final bool isAdminReviewed = isDoctorAssigned ||
-                        (rawSt == 'ADMIN_REVIEWED' ||
-                         rawSt == 'ADMIN REVIEW' ||
-                         rawSt == 'ADMIN_REVIEW' ||
-                         rawSt == 'UNDER_REVIEW');
-
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 14),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(
-                          color: isConfirmed
-                              ? const Color(0xFF10B981)
-                              : (isDoctorAssigned ? const Color(0xFF0284C7) : const Color(0xFFCBD5E1)),
-                          width: 1.5,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: (isConfirmed ? const Color(0xFF10B981) : const Color(0xFF0284C7)).withValues(alpha: 0.08),
-                            blurRadius: 10,
-                            offset: const Offset(0, 3),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Header Row
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  req.problemCategory,
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: isConfirmed
-                                      ? const Color(0xFFDCFCE7)
-                                      : (isDoctorAssigned
-                                          ? const Color(0xFFE0F2FE)
-                                          : (isAdminReviewed ? const Color(0xFFFEF3C7) : const Color(0xFFF1F5F9))),
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Text(
-                                  isConfirmed
-                                      ? '🟢 Confirmed & Scheduled'
-                                      : (isDoctorAssigned
-                                          ? '🔵 Doctor Assigned'
-                                          : (isAdminReviewed ? '🟡 Admin Reviewed' : '⏳ Pending Admin Review')),
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                    color: isConfirmed
-                                        ? const Color(0xFF15803D)
-                                        : (isDoctorAssigned
-                                            ? const Color(0xFF0369A1)
-                                            : (isAdminReviewed ? const Color(0xFFB45309) : const Color(0xFF64748B))),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            req.problemDescription,
-                            style: const TextStyle(fontSize: 12, color: AppTheme.textMedium, height: 1.35),
-                          ),
-                          const SizedBox(height: 12),
-
-                          // 4-Step Progress Tracker for Patient
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF8FAFC),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              alignment: Alignment.center,
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                                children: [
-                                  _buildProgressStep(title: 'Submitted', isDone: true),
-                                  _buildProgressLine(isDone: isAdminReviewed),
-                                  _buildProgressStep(title: 'Admin Review', isDone: isAdminReviewed),
-                                  _buildProgressLine(isDone: isDoctorAssigned),
-                                  _buildProgressStep(title: 'Doctor Assigned', isDone: isDoctorAssigned),
-                                  _buildProgressLine(isDone: isConfirmed),
-                                  _buildProgressStep(title: 'Confirmed', isDone: isConfirmed),
-                                ],
-                              ),
-                            ),
-                          ),
-
-                          if (isDoctorAssigned) ...[
-                            const SizedBox(height: 14),
-                            Container(
-                              padding: const EdgeInsets.all(14),
-                              decoration: BoxDecoration(
-                                color: isConfirmed ? const Color(0xFFF0FDF4) : const Color(0xFFF0F9FF),
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: isConfirmed ? const Color(0xFF86EFAC) : const Color(0xFFBAE6FD),
-                                  width: 1.5,
-                                ),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.all(8),
-                                        decoration: BoxDecoration(
-                                          color: isConfirmed ? const Color(0xFFDCFCE7) : const Color(0xFFE0F2FE),
-                                          shape: BoxShape.circle,
-                                        ),
-                                        child: Icon(
-                                          isConfirmed ? Icons.verified_rounded : Icons.person_search_rounded,
-                                          color: isConfirmed ? const Color(0xFF16A34A) : const Color(0xFF0284C7),
-                                          size: 20,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              isConfirmed ? '🎉 Consultation Confirmed & Scheduled' : '👨‍⚕️ Assigned Specialist',
-                                              style: TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 13,
-                                                color: isConfirmed ? const Color(0xFF14532D) : const Color(0xFF0369A1),
-                                              ),
-                                            ),
-                                            Text(
-                                              '${req.displayDoctorName} (${req.displayDoctorSpecialty})',
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.bold,
-                                                color: isConfirmed ? const Color(0xFF15803D) : AppTheme.textDark,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    '🏥 Clinic: ${req.displayDoctorClinic} • 💰 Estimated Fee (${req.problemCategory}): ₹500',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                      color: isConfirmed ? const Color(0xFF166534) : const Color(0xFF0369A1),
-                                    ),
-                                  ),
-                                  if (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.isNotEmpty) ...[
-                                    const SizedBox(height: 8),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFDCFCE7),
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(color: const Color(0xFF86EFAC)),
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          const Icon(Icons.access_time_filled_rounded, size: 15, color: Color(0xFF15803D)),
-                                          const SizedBox(width: 6),
-                                          Expanded(
-                                            child: Text(
-                                              'Confirmed Time Slot: ${req.confirmedTimeSlot}',
-                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF15803D)),
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ] else ...[
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      '⏳ Waiting for doctor to accept referral and set time slot.',
-                                      style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: AppTheme.textMuted),
-                                    ),
-                                  ],
-                                  if (req.adminNotes != null && req.adminNotes!.isNotEmpty) ...[
-                                    const SizedBox(height: 6),
-                                    Container(
-                                      padding: const EdgeInsets.all(8),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(color: const Color(0xFFBBF7D0)),
-                                      ),
-                                      child: Text(
-                                        'Admin Note: "${req.adminNotes}"',
-                                        style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Color(0xFF14532D)),
-                                      ),
-                                    ),
-                                  ],
-                                  const SizedBox(height: 12),
-                                  ElevatedButton.icon(
-                                    icon: const Icon(Icons.calendar_month_rounded, size: 16),
-                                    label: Text('Book Consultation with ${req.displayDoctorName}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFF16A34A),
-                                      foregroundColor: Colors.white,
-                                      minimumSize: const Size.fromHeight(42),
-                                      elevation: 1,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                    ),
-                                    onPressed: () {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                          content: Text('📅 Appointment booking request sent for ${req.displayDoctorName}!'),
-                                          backgroundColor: const Color(0xFF16A34A),
-                                          duration: const Duration(seconds: 3),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  const SizedBox(height: 8),
-                                  OutlinedButton.icon(
-                                    icon: const Icon(Icons.chat_rounded, size: 16),
-                                    label: Text('Chat with ${req.displayDoctorName}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: const Color(0xFF0369A1),
-                                      side: const BorderSide(color: Color(0xFF0284C7)),
-                                      minimumSize: const Size.fromHeight(42),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                    ),
-                                    onPressed: () {
-                                      _showChatModal(context, request: req);
-                                    },
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ] else ...[
-                            const SizedBox(height: 14),
-                            Container(
-                              padding: const EdgeInsets.all(14),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFFFFBEB),
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: const Color(0xFFFDE68A), width: 1.5),
-                              ),
-                              child: Row(
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: const BoxDecoration(
-                                      color: Color(0xFFFEF3C7),
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: const Icon(
-                                      Icons.hourglass_top_rounded,
-                                      color: Color(0xFFD97706),
-                                      size: 20,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          (req.preferredDoctorName != null && req.preferredDoctorName!.isNotEmpty)
-                                              ? 'Referred Doctor: ${req.preferredDoctorName}'
-                                              : 'Pending Clinical Triage & Assignment',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 13,
-                                            color: Color(0xFF92400E),
-                                          ),
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          (req.preferredDoctorName != null && req.preferredDoctorName!.isNotEmpty)
-                                              ? 'Your referral recommendation has been submitted. GS HEALTH Admin is currently reviewing and verifying the specialist dispatch.'
-                                              : 'Your consultation request has been received. GS HEALTH Admin is matching the best specialist for your care.',
-                                          style: const TextStyle(fontSize: 11, color: Color(0xFFB45309), height: 1.35),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                  );
-                },
-              ),
+              // 5. My Favourite Dentists Section
+              _buildFavouriteDentistsSection(),
               const SizedBox(height: 16),
 
-              // 5. Next Visit Card
-              _buildNextVisitCard(),
-              const SizedBox(height: 24),
+              // 6. Refer a Friend Section
+              _buildReferAFriendSection(),
+              const SizedBox(height: 20),
+
+              // 7. Active Consultations / Next Visit Tracker (if scheduled)
+              if (hasUpcoming) ...[
+                _buildNextVisitCard(),
+                const SizedBox(height: 16),
+              ],
+
+              // 8. 24/7 Support Card
+              const NeedHelpCard(),
+              const SizedBox(height: 36),
             ],
           ),
         ),
@@ -1451,33 +845,742 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     );
   }
 
-  Widget _buildProgressStep({required String title, required bool isDone}) {
-    return Row(
-      children: [
-        Icon(
-          isDone ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
-          size: 14,
-          color: isDone ? const Color(0xFF16A34A) : AppTheme.textMuted,
+  Widget _buildHeroUpcomingVisitsBanner({
+    required bool hasUpcoming,
+    PatientConsultationRequest? nextVisit,
+  }) {
+    return InkWell(
+      onTap: () {
+        if (hasUpcoming) {
+          setState(() => _currentIndex = 2);
+        } else {
+          _openBookVisitFlow(context);
+        }
+      },
+      borderRadius: BorderRadius.circular(22),
+      child: Container(
+        width: double.infinity,
+        constraints: const BoxConstraints(minHeight: 195),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(22),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.12),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
         ),
-        const SizedBox(width: 4),
-        Text(
-          isDone ? '$title ✓' : title,
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: isDone ? FontWeight.bold : FontWeight.normal,
-            color: isDone ? const Color(0xFF14532D) : AppTheme.textMuted,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(22),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: Image.asset(
+                  'assets/healthcare_hero_banner.jpg',
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Color(0xFF0F172A), AppTheme.gsNavy],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned.fill(
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withValues(alpha: 0.25),
+                        Colors.black.withValues(alpha: 0.8),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(height: 18),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppTheme.gsRed.withValues(alpha: 0.88),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text(
+                        'YOUR SMILE, CARED FOR',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      hasUpcoming
+                          ? (nextVisit?.problemCategory ?? 'Scheduled Visit')
+                          : 'No upcoming visits',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 21,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: -0.3,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      hasUpcoming
+                          ? (nextVisit?.confirmedTimeSlot != null && nextVisit!.confirmedTimeSlot!.isNotEmpty
+                              ? 'Confirmed for ${nextVisit.confirmedTimeSlot}'
+                              : (nextVisit?.assignedDoctorName != null && nextVisit!.assignedDoctorName!.isNotEmpty && nextVisit.assignedDoctorName != 'null'
+                                  ? 'With Dr. ${nextVisit.assignedDoctorName}'
+                                  : 'Pending specialist assignment & confirmation.'))
+                          : 'Book a verified dentist near you in under a minute.',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.92),
+                        fontSize: 12.5,
+                        height: 1.3,
+                        fontWeight: FontWeight.w400,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildAiTriageCard() {
+    return InkWell(
+      key: const Key('patient_ai_triage_card'),
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => const AiTriageScreen(),
+          ),
+        );
+      },
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: AppTheme.gsNavy,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: AppTheme.gsNavy.withValues(alpha: 0.28),
+              blurRadius: 14,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.16),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Center(
+                child: Icon(
+                  Icons.auto_awesome_rounded,
+                  color: Colors.white,
+                  size: 24,
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Something hurting?',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  SizedBox(height: 3),
+                  Text(
+                    'Describe it and our AI tells you how urgent it is and who to see.',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 11.5,
+                      height: 1.3,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(
+              Icons.arrow_forward_rounded,
+              color: Colors.white,
+              size: 22,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTalkToDentistCard() {
+    return InkWell(
+      key: const Key('talk_to_dentist_now_card'),
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => const TalkToDentistNowScreen(),
+          ),
+        );
+      },
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: AppTheme.gsRed.withValues(alpha: 0.35),
+            width: 1.5,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.03),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            ScaleTransition(
+              scale: _pulseScaleAnimation,
+              child: Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981),
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF10B981).withValues(alpha: 0.4),
+                      blurRadius: 4,
+                      spreadRadius: 1,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Talk to a dentist now',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.textDark,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  SizedBox(height: 3),
+                  Text(
+                    'Get matched with an online dentist who speaks your language.',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: AppTheme.textMedium,
+                      height: 1.3,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: AppTheme.gsRed.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Center(
+                child: Icon(
+                  Icons.bolt_rounded,
+                  color: AppTheme.gsRed,
+                  size: 22,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSponsoredBanner() {
+    return InkWell(
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => const FindDoctorsScreen(initialSpecialty: 'Implantology'),
+          ),
+        );
+      },
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFFE2E8F0),
+              Color(0xFFCBD5E1),
+            ],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E293B),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Text(
+                'SPONSORED',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.8,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.8),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFF94A3B8), width: 1),
+                  ),
+                  child: const Center(
+                    child: Icon(
+                      Icons.health_and_safety_rounded,
+                      color: AppTheme.gsNavy,
+                      size: 26,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'GS IMPLANTS',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFF0F172A),
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      Text(
+                        'DEDICATED TO EXCELLENCE',
+                        style: TextStyle(
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF64748B),
+                          letterSpacing: 0.8,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            const Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: Text(
+                    'Most economic dental implants',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF1E293B),
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                SizedBox(width: 8),
+                Icon(
+                  Icons.open_in_new_rounded,
+                  color: Color(0xFF475569),
+                  size: 20,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFavouriteDentistsSection() {
+    final myDocs = _patientService.myDoctors;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'My favourite dentists',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textDark,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 8),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const FindDoctorsScreen(initialTabFilter: 1),
+                  ),
+                );
+              },
+              style: TextButton.styleFrom(
+                padding: EdgeInsets.zero,
+                minimumSize: const Size(50, 30),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text(
+                'See all',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.gsNavy,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (myDocs.isEmpty)
+          InkWell(
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const FindDoctorsScreen(),
+                ),
+              );
+            },
+            borderRadius: BorderRadius.circular(18),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: const Color(0xFFEEF2F6), width: 1.5),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.02),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: AppTheme.gsRed.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Center(
+                      child: Icon(
+                        Icons.favorite_rounded,
+                        color: AppTheme.gsRed,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'No favourites yet',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.textDark,
+                          ),
+                        ),
+                        SizedBox(height: 3),
+                        Text(
+                          'Tap ❤️ on a dentist\'s profile to save them here and refer friends to them.',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: AppTheme.textMedium,
+                            height: 1.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Icon(
+                    Icons.arrow_forward_ios_rounded,
+                    color: Color(0xFF94A3B8),
+                    size: 16,
+                  ),
+                ],
+              ),
+            ),
+          )
+        else
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: Row(
+              children: myDocs.map((doc) {
+                return Container(
+                  width: 220,
+                  margin: const EdgeInsets.only(right: 12),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFEEF2F6), width: 1.5),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.02),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 18,
+                            backgroundColor: AppTheme.gsNavy.withValues(alpha: 0.1),
+                            child: Text(
+                              doc.name.isNotEmpty ? doc.name[0].toUpperCase() : 'D',
+                              style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.gsNavy),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  doc.name,
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                Text(
+                                  doc.specialty,
+                                  style: const TextStyle(fontSize: 11, color: AppTheme.textMedium),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: () => _openBookVisitFlow(context, preselectedDoctor: doc),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.gsNavy,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          child: const Text('Book Visit', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
       ],
     );
   }
-  Widget _buildProgressLine({required bool isDone}) {
-    return Container(
-      width: 14,
-      height: 2,
-      color: isDone ? const Color(0xFF16A34A) : const Color(0xFFCBD5E1),
+
+  Widget _buildReferAFriendSection() {
+    return InkWell(
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => const ReferAFriendScreen(),
+          ),
+        );
+      },
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0xFFEEF2F6), width: 1.5),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.02),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: AppTheme.gsNavy.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Center(
+                child: Icon(
+                  Icons.card_giftcard_rounded,
+                  color: AppTheme.gsNavy,
+                  size: 20,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Refer a friend',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.textDark,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  SizedBox(height: 3),
+                  Text(
+                    'Share a dentist you trust and track the referral.',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: AppTheme.textMedium,
+                      height: 1.3,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            TextButton(
+              onPressed: () => ReferredPatientsSheet.show(context),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                minimumSize: const Size(50, 30),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text(
+                'My referrals',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.gsNavy,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
+
 
   Widget _buildNextVisitCard() {
     final requests = _patientService.requests;
@@ -1689,48 +1792,58 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
           const Divider(height: 1, color: Color(0xFFF1F5F9)),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton.icon(
-                  onPressed: () {
-                    AppointmentManagementDialog.show(
-                      context,
-                      appointment: assignedReq,
-                      initialMode: AppointmentManagementMode.details,
-                      onUpdated: () => setState(() {}),
-                    );
-                  },
-                  icon: const Icon(Icons.info_outline_rounded, size: 15),
-                  label: const Text('Details', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                ),
-                const SizedBox(width: 4),
-                TextButton.icon(
-                  onPressed: () {
-                    AppointmentManagementDialog.show(
-                      context,
-                      appointment: assignedReq,
-                      initialMode: AppointmentManagementMode.reschedule,
-                      onUpdated: () => setState(() {}),
-                    );
-                  },
-                  icon: const Icon(Icons.edit_calendar_rounded, size: 15),
-                  label: const Text('Reschedule', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                ),
-                const SizedBox(width: 4),
-                TextButton.icon(
-                  onPressed: () {
-                    AppointmentManagementDialog.show(
-                      context,
-                      appointment: assignedReq,
-                      initialMode: AppointmentManagementMode.cancel,
-                      onUpdated: () => setState(() {}),
-                    );
-                  },
-                  icon: const Icon(Icons.cancel_outlined, size: 15, color: Color(0xFFDC2626)),
-                  label: const Text('Cancel', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFDC2626))),
-                ),
-              ],
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton.icon(
+                    onPressed: () => _showChatModal(context, request: assignedReq),
+                    icon: const Icon(Icons.chat_bubble_outline_rounded, size: 15, color: Color(0xFF10B981)),
+                    label: const Text('Chat', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
+                  ),
+                  const SizedBox(width: 4),
+                  TextButton.icon(
+                    onPressed: () {
+                      AppointmentManagementDialog.show(
+                        context,
+                        appointment: assignedReq,
+                        initialMode: AppointmentManagementMode.details,
+                        onUpdated: () => setState(() {}),
+                      );
+                    },
+                    icon: const Icon(Icons.info_outline_rounded, size: 15),
+                    label: const Text('Details', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  ),
+                  const SizedBox(width: 4),
+                  TextButton.icon(
+                    onPressed: () {
+                      AppointmentManagementDialog.show(
+                        context,
+                        appointment: assignedReq,
+                        initialMode: AppointmentManagementMode.reschedule,
+                        onUpdated: () => setState(() {}),
+                      );
+                    },
+                    icon: const Icon(Icons.edit_calendar_rounded, size: 15),
+                    label: const Text('Reschedule', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  ),
+                  const SizedBox(width: 4),
+                  TextButton.icon(
+                    onPressed: () {
+                      AppointmentManagementDialog.show(
+                        context,
+                        appointment: assignedReq,
+                        initialMode: AppointmentManagementMode.cancel,
+                        onUpdated: () => setState(() {}),
+                      );
+                    },
+                    icon: const Icon(Icons.cancel_outlined, size: 15, color: Color(0xFFDC2626)),
+                    label: const Text('Cancel', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFDC2626))),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -1739,175 +1852,781 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   }
 
   // ==========================================
-  // TAB 2: APPOINTMENTS TAB
+  // TAB 2: MY VISITS TAB (GS HEALTH REDESIGN)
   // ==========================================
-  Widget _buildAppointmentsTab() {
+  int _visitsSubTabIndex = 0; // 0 = Upcoming, 1 = Past & cancelled
+  final Set<String> _cancellingVisitIds = {};
+
+  List<PatientConsultationRequest> _getPatientRequests() {
     final requests = _patientService.requests;
     final patient = _patientService.currentPatient;
     final authUser = _safeAuthUser;
     final authId = authUser?.id ?? '';
     final authEmail = authUser?.email?.trim().toLowerCase() ?? '';
 
-    final myRequests = requests.where((r) {
+    return requests.where((r) {
       if (r.patientId != null && r.patientId!.isNotEmpty) {
         if (r.patientId == authId || r.patientId == patient.id) return true;
       }
-      if (patient.name.isNotEmpty && patient.name != 'Patient' && r.patientName.trim().toLowerCase() == patient.name.trim().toLowerCase()) return true;
-      if (patient.name.isNotEmpty && patient.name != 'Patient' && (r.patientName.toLowerCase().contains(patient.name.toLowerCase()) || patient.name.toLowerCase().contains(r.patientName.toLowerCase()))) return true;
+      if (patient.name.isNotEmpty &&
+          patient.name != 'Patient' &&
+          r.patientName.trim().toLowerCase() == patient.name.trim().toLowerCase()) {
+        return true;
+      }
+      if (patient.name.isNotEmpty &&
+          patient.name != 'Patient' &&
+          (r.patientName.toLowerCase().contains(patient.name.toLowerCase()) ||
+              patient.name.toLowerCase().contains(r.patientName.toLowerCase()))) {
+        return true;
+      }
       if (patient.id.isNotEmpty && r.id.contains(patient.id)) return true;
-      if (authEmail.isNotEmpty && r.patientName.toLowerCase().contains(authEmail.split('@').first)) return true;
-      if (patient.name.isEmpty || patient.name == 'Patient' || requests.length <= 1) return true;
+      if (authEmail.isNotEmpty &&
+          r.patientName.toLowerCase().contains(authEmail.split('@').first)) {
+        return true;
+      }
+      if (patient.name.isEmpty || patient.name == 'Patient' || requests.length <= 1) {
+        return true;
+      }
       return false;
     }).toList();
+  }
 
-    final pastRequests = myRequests.where((r) {
+  Widget _buildAppointmentsTab() {
+    final myRequests = _getPatientRequests();
+
+    final upcomingVisits = myRequests.where((r) {
+      final s = r.status.toUpperCase();
+      return s != 'COMPLETED' && s != 'CANCELLED' && s != 'REJECTED';
+    }).toList();
+
+    final pastAndCancelledVisits = myRequests.where((r) {
       final s = r.status.toUpperCase();
       return s == 'COMPLETED' || s == 'CANCELLED' || s == 'REJECTED';
     }).toList();
 
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'My Appointments',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-          ),
-          const SizedBox(height: 4),
-          const Text('Track upcoming and past dental visits', style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
-          const SizedBox(height: 14),
+    final displayedVisits =
+        _visitsSubTabIndex == 0 ? upcomingVisits : pastAndCancelledVisits;
 
-          // ── BOOK VISIT ACTION BUTTON ──────
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Top Header with "My visits" and Selectable Tabs
+        Container(
+          width: double.infinity,
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(
+              bottom: BorderSide(color: Color(0xFFE2E8F0), width: 1),
+            ),
+          ),
+          padding: EdgeInsets.fromLTRB(
+            20,
+            MediaQuery.of(context).padding.top + 18,
+            20,
+            16,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'My visits',
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.textDark,
+                  letterSpacing: -0.5,
+                  height: 1.15,
+                ),
+              ),
+              const SizedBox(height: 16),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                child: Row(
+                  children: [
+                    _buildGsPillTab(
+                      key: const Key('visits_tab_upcoming'),
+                      label: 'Upcoming',
+                      isSelected: _visitsSubTabIndex == 0,
+                      onTap: () => setState(() => _visitsSubTabIndex = 0),
+                    ),
+                    const SizedBox(width: 10),
+                    _buildGsPillTab(
+                      key: const Key('visits_tab_past_cancelled'),
+                      label: 'Past & cancelled',
+                      isSelected: _visitsSubTabIndex == 1,
+                      onTap: () => setState(() => _visitsSubTabIndex = 1),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Scrollable Appointment Cards List
+        Expanded(
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            padding: EdgeInsets.fromLTRB(
+              16,
+              18,
+              16,
+              36 + MediaQuery.of(context).padding.bottom,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (displayedVisits.isEmpty)
+                  _buildVisitsEmptyState(isUpcoming: _visitsSubTabIndex == 0)
+                else
+                  ...displayedVisits.map(
+                    (req) => Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: _buildGsVisitCard(req),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGsPillTab({
+    Key? key,
+    required String label,
+    String? badgeText,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      key: key,
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(26),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.gsNavy : Colors.white,
+          borderRadius: BorderRadius.circular(26),
+          border: Border.all(
+            color: isSelected ? AppTheme.gsNavy : const Color(0xFFCBD5E1),
+            width: 1.2,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                color: isSelected ? Colors.white : AppTheme.textDark,
+              ),
+            ),
+            if (badgeText != null && badgeText.isNotEmpty) ...[
+              const SizedBox(width: 4),
+              Text(
+                badgeText,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                  color: isSelected ? Colors.white : AppTheme.textDark,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVisitsEmptyState({required bool isUpcoming}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: AppTheme.gsNavy.withValues(alpha: 0.08),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              isUpcoming
+                  ? Icons.calendar_today_rounded
+                  : Icons.history_rounded,
+              color: AppTheme.gsNavy,
+              size: 26,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            isUpcoming ? 'No upcoming visits' : 'No past or cancelled visits',
+            style: const TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.textDark,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            isUpcoming
+                ? 'Book a verified dentist near you in under a minute.'
+                : 'Your completed and cancelled dental visits will appear here.',
+            style: const TextStyle(
+              fontSize: 13.5,
+              color: Color(0xFF64748B),
+              height: 1.4,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          if (isUpcoming) ...[
+            const SizedBox(height: 18),
+            ElevatedButton.icon(
+              key: const Key('book_visit_empty_button'),
               onPressed: () => _openBookVisitFlow(context),
               icon: const Icon(Icons.add_circle_outline_rounded, size: 18),
               label: const Text(
                 'Book Visit',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
               ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primaryBlue,
+                backgroundColor: AppTheme.gsNavy,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 elevation: 0,
+                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 16),
-
-          _buildNextVisitCard(),
-          const SizedBox(height: 16),
-
-          const Text('Past Visit History', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
-          const SizedBox(height: 10),
-          if (pastRequests.isEmpty)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.history_rounded, color: AppTheme.textMuted, size: 22),
-                  SizedBox(width: 12),
-                  Text('No past dental visits recorded.', style: TextStyle(fontSize: 12, color: AppTheme.textMuted)),
-                ],
-              ),
-            )
-          else
-            ...pastRequests.map((req) {
-              final isCancelled = req.status.toUpperCase() == 'CANCELLED' || req.status.toUpperCase() == 'REJECTED';
-              return Container(
-                margin: const EdgeInsets.only(bottom: 10),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFFE2E8F0)),
-                ),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(16),
-                  onTap: () {
-                    AppointmentManagementDialog.show(
-                      context,
-                      appointment: req,
-                      initialMode: AppointmentManagementMode.details,
-                      onUpdated: () => setState(() {}),
-                    );
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Row(
-                      children: [
-                        Icon(
-                          isCancelled ? Icons.cancel_outlined : Icons.history_rounded,
-                          color: isCancelled ? const Color(0xFF94A3B8) : AppTheme.primaryBlue,
-                          size: 24,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                isCancelled ? 'Cancelled Visit' : 'Completed Visit',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                '${req.problemCategory}${req.assignedDoctorName != null ? " • ${req.assignedDoctorName}" : ""}',
-                                style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: isCancelled ? const Color(0xFFF1F5F9) : const Color(0xFFDCFCE7),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            isCancelled ? 'Cancelled' : 'Completed',
-                            style: TextStyle(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.bold,
-                              color: isCancelled ? const Color(0xFF64748B) : const Color(0xFF15803D),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            }),
+          ],
         ],
       ),
     );
   }
 
+  DateTime _resolveAppointmentDateTime(PatientConsultationRequest req) {
+    if (req.confirmedDate != null && req.confirmedDate!.trim().isNotEmpty) {
+      final parsed = DateTime.tryParse(req.confirmedDate!.trim());
+      if (parsed != null) return parsed;
+    }
+    return req.submittedAt;
+  }
+
+  String _formatDayAbbreviation(DateTime dt) {
+    const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return weekdays[(dt.weekday - 1).clamp(0, 6)];
+  }
+
+  String _formatShortDate(DateTime dt) {
+    const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sept',
+      'Oct',
+      'Nov',
+      'Dec'
+    ];
+    final dayName = weekdays[(dt.weekday - 1).clamp(0, 6)];
+    final monthName = months[(dt.month - 1).clamp(0, 11)];
+    return '$dayName, ${dt.day} $monthName';
+  }
+
+  String _formatPanelTime(String? rawSlot, DateTime dt) {
+    if (rawSlot != null && rawSlot.trim().isNotEmpty) {
+      final cleaned = rawSlot
+          .trim()
+          .replaceAll(RegExp(r'\s*(AM|PM)$', caseSensitive: false), '')
+          .trim();
+      if (cleaned.isNotEmpty) return cleaned;
+    }
+    final h = dt.hour.toString().padLeft(2, '0');
+    final m = dt.minute.toString().padLeft(2, '0');
+    return '$h:$m';
+  }
+
+  Widget _buildGsVisitCard(PatientConsultationRequest req) {
+    final dt = _resolveAppointmentDateTime(req);
+    final dayAbbr = _formatDayAbbreviation(dt);
+    final shortDate = _formatShortDate(dt);
+    final panelTime = _formatPanelTime(req.confirmedTimeSlot, dt);
+
+    final doctorName = req.displayDoctorName.isNotEmpty
+        ? req.displayDoctorName
+        : (req.assignedDoctorName?.trim().isNotEmpty == true
+            ? req.assignedDoctorName!.trim()
+            : (req.preferredDoctorName?.trim().isNotEmpty == true
+                ? req.preferredDoctorName!.trim()
+                : 'Assigned Dentist'));
+
+    final specialty = req.displayDoctorSpecialty.isNotEmpty
+        ? req.displayDoctorSpecialty
+        : (req.assignedDoctorSpecialty?.trim().isNotEmpty == true
+            ? req.assignedDoctorSpecialty!.trim()
+            : (req.problemCategory.trim().isNotEmpty
+                ? req.problemCategory.trim()
+                : 'General Dentist'));
+
+    final clinicLocation = req.assignedDoctorClinic?.trim().isNotEmpty == true
+        ? req.assignedDoctorClinic!.trim()
+        : (req.preferredDoctorClinic?.trim().isNotEmpty == true
+            ? req.preferredDoctorClinic!.trim()
+            : (req.preferredLocation.trim().isNotEmpty
+                ? req.preferredLocation.trim()
+                : 'GS HEALTH Partner Clinic'));
+
+    final combinedTypeCheck =
+        '${req.preferredLocation} ${req.problemDescription} ${req.problemCategory}'
+            .toLowerCase();
+    final isOnline = combinedTypeCheck.contains('online') ||
+        combinedTypeCheck.contains('video') ||
+        combinedTypeCheck.contains('tele');
+    final visitTypeLabel = isOnline ? 'ONLINE' : 'IN-CLINIC';
+
+    final statusUpper = req.status.trim().toUpperCase();
+    final canCancel = statusUpper != 'COMPLETED' &&
+        statusUpper != 'CANCELLED' &&
+        statusUpper != 'REJECTED';
+
+    String statusDisplay;
+    Color statusBgColor;
+    Color statusTextColor;
+
+    if (statusUpper == 'CONFIRMED' ||
+        statusUpper == 'ACCEPTED' ||
+        statusUpper == 'SCHEDULED') {
+      statusDisplay = 'Confirmed';
+      statusBgColor = AppTheme.gsNavy.withValues(alpha: 0.1);
+      statusTextColor = AppTheme.gsNavy;
+    } else if (statusUpper == 'COMPLETED') {
+      statusDisplay = 'Completed';
+      statusBgColor = const Color(0xFFDCFCE7);
+      statusTextColor = const Color(0xFF15803D);
+    } else if (statusUpper == 'CANCELLED') {
+      statusDisplay = 'Cancelled';
+      statusBgColor = AppTheme.gsRed.withValues(alpha: 0.12);
+      statusTextColor = const Color(0xFFB91C1C);
+    } else if (statusUpper == 'REJECTED') {
+      statusDisplay = 'Rejected';
+      statusBgColor = AppTheme.gsRed.withValues(alpha: 0.12);
+      statusTextColor = const Color(0xFFB91C1C);
+    } else if (statusUpper == 'RESCHEDULED') {
+      statusDisplay = 'Rescheduled';
+      statusBgColor = const Color(0xFFDBEAFE);
+      statusTextColor = const Color(0xFF1D4ED8);
+    } else {
+      statusDisplay = 'Pending';
+      statusBgColor = const Color(0xFFFEF3C7);
+      statusTextColor = const Color(0xFFB45309);
+    }
+
+    final noteText = req.problemDescription.trim();
+    final isCancelling = _cancellingVisitIds.contains(req.id);
+
+    return Container(
+      key: Key('visit_card_${req.id}'),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Left Date and Time Panel
+              Container(
+                width: 72,
+                constraints: const BoxConstraints(minHeight: 108),
+                padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 6),
+                decoration: BoxDecoration(
+                  color: AppTheme.gsNavy.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      dayAbbr,
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF475569),
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      panelTime,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.gsNavy,
+                        letterSpacing: -0.3,
+                      ),
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 14),
+
+              // Right Appointment Details
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Dentist Name + Status Badge
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            doctorName,
+                            style: const TextStyle(
+                              fontSize: 17.5,
+                              fontWeight: FontWeight.w800,
+                              color: AppTheme.textDark,
+                              height: 1.2,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 11,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: statusBgColor,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Text(
+                            statusDisplay,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: statusTextColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+
+                    // Date · Dentist Specialty
+                    Text(
+                      '$shortDate · $specialty',
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        color: Color(0xFF64748B),
+                        fontWeight: FontWeight.w500,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 6),
+
+                    // Clinic Location with Location Icon
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.only(top: 1.5),
+                          child: Icon(
+                            Icons.location_on_outlined,
+                            size: 16,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            clinicLocation,
+                            style: const TextStyle(
+                              fontSize: 13.5,
+                              color: Color(0xFF64748B),
+                              fontWeight: FontWeight.w500,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Appointment Type Badge (IN-CLINIC / ONLINE)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            isOnline
+                                ? Icons.videocam_outlined
+                                : Icons.apartment_rounded,
+                            size: 14,
+                            color: const Color(0xFF475569),
+                          ),
+                          const SizedBox(width: 5),
+                          Flexible(
+                            child: Text(
+                              visitTypeLabel,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF475569),
+                                letterSpacing: 0.4,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Appointment Notes (if available)
+                    if (noteText.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        '“$noteText”',
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          color: Color(0xFF475569),
+                          height: 1.35,
+                        ),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          // Cancel Visit Button (Only for cancellable appointments)
+          if (canCancel) ...[
+            const SizedBox(height: 14),
+            InkWell(
+              key: Key('cancel_visit_button_${req.id}'),
+              onTap: isCancelling
+                  ? null
+                  : () => _confirmAndCancelVisit(context, req, doctorName),
+              borderRadius: BorderRadius.circular(14),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 11,
+                ),
+                decoration: BoxDecoration(
+                  color: AppTheme.gsRed.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (isCancelling) ...[
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Color(0xFFB91C1C),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Cancelling...',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFFB91C1C),
+                        ),
+                      ),
+                    ] else
+                      const Text(
+                        'Cancel visit',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFFB91C1C),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmAndCancelVisit(
+    BuildContext context,
+    PatientConsultationRequest req,
+    String doctorName,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: const Text(
+            'Cancel visit?',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: AppTheme.textDark,
+            ),
+          ),
+          content: Text(
+            'Are you sure you want to cancel your visit with $doctorName?',
+            style: const TextStyle(
+              fontSize: 14,
+              color: Color(0xFF475569),
+              height: 1.4,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(false),
+              child: const Text(
+                'Keep visit',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.gsNavy,
+                ),
+              ),
+            ),
+            ElevatedButton(
+              key: const Key('confirm_cancel_visit_button'),
+              onPressed: () => Navigator.of(dialogCtx).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.gsRed,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text(
+                'Yes, cancel visit',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _cancellingVisitIds.add(req.id);
+    });
+
+    try {
+      final res = await _patientService.cancelAppointment(req.id);
+      if (!mounted || !context.mounted) return;
+      setState(() {
+        _cancellingVisitIds.remove(req.id);
+      });
+
+      if (res['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Visit cancelled successfully.'),
+            backgroundColor: AppTheme.gsNavy,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              (res['message'] ?? 'Could not cancel visit. Please try again.')
+                  .toString(),
+            ),
+            backgroundColor: AppTheme.gsRed,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted || !context.mounted) return;
+      setState(() {
+        _cancellingVisitIds.remove(req.id);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error cancelling visit: $e'),
+          backgroundColor: AppTheme.gsRed,
+        ),
+      );
+    }
+  }
+
   // ==========================================
-  // TAB 3: RECORDS TAB (DYNAMIC FROM BACKEND API & SUPABASE STORAGE)
+  // TAB 3: HEALTH LOCKER TAB (GS HEALTH REDESIGN)
   // ==========================================
   static const List<String> _recordCategories = [
-    'Dental X-ray',
     'Prescription',
-    'Dental Report',
     'Lab Report',
+    'X-Ray / Scan',
+    'Clinical Document',
+    'Dental X-ray',
+    'Dental Report',
     'Treatment Documents',
     'Other',
   ];
 
-  String _selectedRecordCategoryFilter = 'All';
+  int _lockerSubTabIndex = 0; // 0 = Prescriptions, 1 = Health Records, 2 = X-rays & reports
+  final Set<String> _expandedPrescriptionIds = {};
+  bool _didAutoExpandFirstRx = false;
 
   String _resolveActivePatientId() {
     if (_patientService.currentPatient.id.isNotEmpty) {
@@ -1920,10 +2639,43 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     }
   }
 
+  bool _isPrescriptionRecord(Map<String, dynamic> rec) {
+    final type = (rec['type'] ?? '').toString().toLowerCase();
+    final cat = (rec['category'] ?? '').toString().toLowerCase();
+    final hasMedItems = rec['items'] is List && (rec['items'] as List).isNotEmpty;
+    return type == 'prescription' || cat.contains('prescription') || hasMedItems;
+  }
+
+  bool _isToothChartRecord(Map<String, dynamic> rec) {
+    final type = (rec['type'] ?? '').toString().toLowerCase();
+    final cat = (rec['category'] ?? '').toString().toLowerCase();
+    return type == 'tooth' ||
+        type == 'dental_chart' ||
+        type == 'clinical_document' ||
+        cat.contains('tooth') ||
+        cat.contains('teeth') ||
+        cat.contains('clinical') ||
+        cat.contains('health record') ||
+        cat.contains('medical history') ||
+        cat == 'treatment documents' ||
+        cat.contains('chart');
+  }
+
+  String _formatLockerRecordDate(String rawDate) {
+    if (rawDate.trim().isEmpty) return 'Recent';
+    final parsed = DateTime.tryParse(rawDate.trim());
+    if (parsed != null) {
+      return _formatShortDate(parsed);
+    }
+    return rawDate.trim();
+  }
+
   Widget _buildRecordsTab() {
     final activePatientId = _resolveActivePatientId();
     return FutureBuilder<List<dynamic>>(
-      future: ApiService().fetchMedicalRecords(patientId: activePatientId.isNotEmpty ? activePatientId : null),
+      future: ApiService().fetchMedicalRecords(
+        patientId: activePatientId.isNotEmpty ? activePatientId : null,
+      ),
       builder: (context, snapshot) {
         final apiRecords = snapshot.data ?? [];
         final localRecords = _patientService.medicalRecords;
@@ -1932,13 +2684,21 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
         for (final item in [...localRecords, ...apiRecords]) {
           if (item is! Map) continue;
           final itemMap = Map<String, dynamic>.from(item);
-          final recPatientId = (itemMap['patientId'] ?? itemMap['patient_id'] ?? '').toString();
+          final recPatientId =
+              (itemMap['patientId'] ?? itemMap['patient_id'] ?? '').toString();
+          final currentPatientName =
+              _patientService.currentPatient.name.trim().toLowerCase();
           if (activePatientId.isNotEmpty &&
               recPatientId.isNotEmpty &&
-              recPatientId != activePatientId) {
+              recPatientId != activePatientId &&
+              (currentPatientName.isEmpty ||
+                  recPatientId.trim().toLowerCase() != currentPatientName)) {
             continue;
           }
-          final id = (itemMap['id'] ?? itemMap['title'] ?? UniqueKey().toString()).toString();
+          final id = (itemMap['id'] ??
+                  itemMap['title'] ??
+                  UniqueKey().toString())
+              .toString();
           combinedMap[id] = itemMap;
         }
 
@@ -1949,244 +2709,861 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
             return bDate.compareTo(aDate);
           });
 
-        final records = _selectedRecordCategoryFilter == 'All'
-            ? allRecords
-            : allRecords.where((r) {
-                final cat = (r['category'] ?? '').toString().toLowerCase();
-                return cat == _selectedRecordCategoryFilter.toLowerCase();
-              }).toList();
+        final prescriptionRecords =
+            allRecords.where(_isPrescriptionRecord).toList();
 
-        return SingleChildScrollView(
-          physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header with + Add Record & Share buttons
-              Row(
+        if (!_didAutoExpandFirstRx && prescriptionRecords.isNotEmpty) {
+          final firstId = (prescriptionRecords.first['id'] ?? 'rx_0').toString();
+          _expandedPrescriptionIds.add(firstId);
+          _didAutoExpandFirstRx = true;
+        }
+
+        final toothRecords = allRecords.where(_isToothChartRecord).toList();
+        final myConsultations = _getPatientRequests();
+
+        final xrayAndReportRecords = allRecords.where((r) {
+          final isPatientUpload = r['isPatientUpload'] == true ||
+              (r['storageKey'] ?? '').toString().isNotEmpty ||
+              r['fileBytes'] != null;
+          if (isPatientUpload) return true;
+          return !_isPrescriptionRecord(r);
+        }).toList();
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Health Locker Header + Category Tabs
+            Container(
+              width: double.infinity,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                border: Border(
+                  bottom: BorderSide(color: Color(0xFFE2E8F0), width: 1),
+                ),
+              ),
+              padding: EdgeInsets.fromLTRB(
+                20,
+                MediaQuery.of(context).padding.top + 14,
+                20,
+                16,
+              ),
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Expanded(
+                  const Text(
+                    'Your medical & health records',
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0xFF64748B),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  const Text(
+                    'Health locker',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.textDark,
+                      letterSpacing: -0.5,
+                      height: 1.15,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    child: Row(
+                      children: [
+                        _buildGsPillTab(
+                          key: const Key('locker_tab_prescriptions'),
+                          label: 'Prescriptions',
+                          badgeText: prescriptionRecords.isNotEmpty
+                              ? '(${prescriptionRecords.length})'
+                              : null,
+                          isSelected: _lockerSubTabIndex == 0,
+                          onTap: () => setState(() => _lockerSubTabIndex = 0),
+                        ),
+                        const SizedBox(width: 10),
+                        _buildGsPillTab(
+                          key: const Key('locker_tab_my_teeth'),
+                          label: 'Health Records',
+                          isSelected: _lockerSubTabIndex == 1,
+                          onTap: () => setState(() => _lockerSubTabIndex = 1),
+                        ),
+                        const SizedBox(width: 10),
+                        _buildGsPillTab(
+                          key: const Key('locker_tab_xrays_reports'),
+                          label: 'X-rays & reports',
+                          isSelected: _lockerSubTabIndex == 2,
+                          onTap: () => setState(() => _lockerSubTabIndex = 2),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Body Content based on Selected Category Tab
+            Expanded(
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                padding: EdgeInsets.fromLTRB(
+                  16,
+                  18,
+                  16,
+                  36 + MediaQuery.of(context).padding.bottom,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (_lockerSubTabIndex == 0)
+                      _buildPrescriptionsCategoryContent(
+                        prescriptionRecords: prescriptionRecords,
+                        allRecords: allRecords,
+                      )
+                    else if (_lockerSubTabIndex == 1)
+                      _buildMyTeethCategoryContent(
+                        toothRecords: toothRecords,
+                        consultations: myConsultations,
+                        allRecords: allRecords,
+                      )
+                    else
+                      _buildXraysAndReportsCategoryContent(
+                        xrayRecords: xrayAndReportRecords,
+                        allRecords: allRecords,
+                        isLoading: snapshot.connectionState ==
+                            ConnectionState.waiting,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildPrescriptionsCategoryContent({
+    required List<Map<String, dynamic>> prescriptionRecords,
+    required List<Map<String, dynamic>> allRecords,
+  }) {
+    if (prescriptionRecords.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+        ),
+        child: Column(
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: AppTheme.gsNavy.withValues(alpha: 0.08),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.description_outlined,
+                color: AppTheme.gsNavy,
+                size: 26,
+              ),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'No prescriptions yet',
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.textDark,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Digital e-prescriptions issued by your doctor or dentist after a visit will appear here.',
+              style: TextStyle(
+                fontSize: 13.5,
+                color: Color(0xFF64748B),
+                height: 1.4,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      children: prescriptionRecords.asMap().entries.map((entry) {
+        final index = entry.key;
+        final rec = entry.value;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: _buildExpandablePrescriptionCard(
+            record: rec,
+            fallbackIndex: index,
+            allRecords: allRecords,
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildExpandablePrescriptionCard({
+    required Map<String, dynamic> record,
+    required int fallbackIndex,
+    required List<Map<String, dynamic>> allRecords,
+  }) {
+    final recId = (record['id'] ?? 'rx_$fallbackIndex').toString();
+    final isExpanded = _expandedPrescriptionIds.contains(recId);
+
+    // Resolve diagnosis or prescription title
+    String diagnosisTitle = (record['diagnosis'] ?? '').toString().trim();
+    if (diagnosisTitle.isEmpty) {
+      final rawSubtitle = (record['subtitle'] ?? '').toString().trim();
+      if (rawSubtitle.toLowerCase().startsWith('diagnosis:')) {
+        diagnosisTitle = rawSubtitle.substring('diagnosis:'.length).trim();
+      } else if (rawSubtitle.isNotEmpty) {
+        diagnosisTitle = rawSubtitle;
+      }
+    }
+    if (diagnosisTitle.isEmpty) {
+      diagnosisTitle = (record['title'] ?? 'Dental Prescription').toString().trim();
+    }
+
+    final doctorName = (record['doctorName'] ??
+            record['doctor_name'] ??
+            record['doctor'] ??
+            'Attending Dentist')
+        .toString()
+        .trim();
+    final clinicName = (record['clinicName'] ??
+            record['clinic_name'] ??
+            record['clinic'] ??
+            '')
+        .toString()
+        .trim();
+    final rawDate =
+        (record['date'] ?? record['uploadedAt'] ?? '').toString().trim();
+    final formattedDate = _formatLockerRecordDate(rawDate);
+
+    final List<Map<String, dynamic>> medItems = [];
+    final rawItemsList = record['items'] ?? record['medicines'];
+    if (rawItemsList is List) {
+      for (final item in rawItemsList) {
+        if (item is Map) {
+          medItems.add(Map<String, dynamic>.from(item));
+        }
+      }
+    }
+
+    String instructions = (record['instructions'] ??
+            record['advice'] ??
+            record['notes'] ??
+            record['description'] ??
+            '')
+        .toString()
+        .trim();
+    if (instructions.isEmpty && medItems.isNotEmpty) {
+      instructions = (medItems.first['instructions'] ?? '').toString().trim();
+    }
+
+    final hasUploadedFile = record['isPatientUpload'] == true ||
+        (record['storageKey'] ?? '').toString().isNotEmpty ||
+        record['fileBytes'] != null;
+
+    return Container(
+      key: Key('prescription_card_$recId'),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Expandable Header
+          InkWell(
+            key: Key('prescription_header_$recId'),
+            onTap: () {
+              setState(() {
+                if (isExpanded) {
+                  _expandedPrescriptionIds.remove(recId);
+                } else {
+                  _expandedPrescriptionIds.add(recId);
+                }
+              });
+            },
+            borderRadius: BorderRadius.circular(20),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Container(
+                    width: 46,
+                    height: 46,
+                    decoration: BoxDecoration(
+                      color: AppTheme.gsNavy.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(
+                      Icons.description_outlined,
+                      color: AppTheme.gsNavy,
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Dental Health Records',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
+                          diagnosisTitle,
+                          style: const TextStyle(
+                            fontSize: 16.5,
+                            fontWeight: FontWeight.w800,
                             color: AppTheme.textDark,
                           ),
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        SizedBox(height: 4),
+                        const SizedBox(height: 3),
                         Text(
-                          'Secure digital prescriptions, X-rays & dental charts',
-                          style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                          '$doctorName · $formattedDate',
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            color: Color(0xFF64748B),
+                            fontWeight: FontWeight.w500,
+                          ),
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          maxLines: 2,
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(width: 8),
-                  if (snapshot.connectionState == ConnectionState.waiting)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 8, right: 8),
-                      child: SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: AppTheme.primaryBlue,
-                        ),
-                      ),
-                    ),
-                  ElevatedButton.icon(
-                    key: const Key('add_dental_record_button'),
-                    onPressed: () => _showUploadOrEditRecordSheet(context),
-                    icon: const Icon(Icons.add_rounded, size: 18),
-                    label: const Text(
-                      '+ Add Record',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primaryBlue,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
+                  Icon(
+                    isExpanded
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    color: const Color(0xFF475569),
+                    size: 24,
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
+            ),
+          ),
 
-              // Quick Action Bar when records exist (Share Multiple with Favourite Doctor + Category Filter)
-              if (allRecords.isNotEmpty) ...[
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    OutlinedButton.icon(
-                      key: const Key('share_multiple_records_button'),
-                      onPressed: () => _showShareWithDoctorModal(
-                        context,
-                        allAvailableRecords: allRecords,
-                      ),
-                      icon: const Icon(Icons.share_rounded, size: 15, color: AppTheme.primaryBlue),
-                      label: Text(
-                        'Share with Favourite Doctor (${_patientService.myDoctors.length})',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.primaryBlue,
-                        ),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: AppTheme.primaryBlue),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF1F5F9),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        '${allRecords.length} ${allRecords.length == 1 ? 'Record' : 'Records'} Stored Securely',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.textMuted,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  physics: const BouncingScrollPhysics(),
-                  child: Row(
-                    children: ['All', ..._recordCategories].map((cat) {
-                      final isSelected = _selectedRecordCategoryFilter == cat;
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ChoiceChip(
-                          label: Text(
-                            cat,
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: isSelected ? Colors.white : AppTheme.textDark,
-                            ),
-                          ),
-                          selected: isSelected,
-                          selectedColor: AppTheme.primaryBlue,
-                          backgroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
-                            side: BorderSide(
-                              color: isSelected ? AppTheme.primaryBlue : const Color(0xFFE2E8F0),
-                            ),
-                          ),
-                          onSelected: (_) {
-                            setState(() {
-                              _selectedRecordCategoryFilter = cat;
-                            });
-                          },
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ),
-                const SizedBox(height: 14),
-              ] else
-                const SizedBox(height: 4),
-
-              // Empty State or Records List
-              if (records.isEmpty)
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                  ),
-                  child: Column(
+          // Expanded Prescription Details
+          if (isExpanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primaryBlue.withValues(alpha: 0.08),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.folder_open_rounded,
-                          size: 36,
-                          color: AppTheme.primaryBlue,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        allRecords.isEmpty
-                            ? 'No Digital Records Issued Yet'
-                            : 'No $_selectedRecordCategoryFilter Records Found',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                          color: AppTheme.textDark,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 6),
                       const Text(
-                        'Upload your Dental X-rays, Prescriptions, Lab Reports, or Treatment Documents (JPG, JPEG, PNG, PDF) and securely share them with your Favourite Doctors.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
-                      ),
-                      const SizedBox(height: 16),
-                      ElevatedButton.icon(
-                        key: const Key('empty_state_add_record_button'),
-                        onPressed: () => _showUploadOrEditRecordSheet(context),
-                        icon: const Icon(Icons.cloud_upload_rounded, size: 18),
-                        label: const Text(
-                          '+ Add Record',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                        'E-PRESCRIPTION',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF64748B),
+                          letterSpacing: 0.8,
                         ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primaryBlue,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                      ),
+                      Flexible(
+                        child: Text(
+                          ' · ${medItems.isNotEmpty ? medItems.length : 1} MEDICINE(S)',
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF64748B),
+                            letterSpacing: 0.8,
                           ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
                   ),
-                )
-              else
-                ...records.map((rec) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: _buildRecordCard(
-                      record: rec,
-                      allRecords: allRecords,
+                  const SizedBox(height: 10),
+                  if (medItems.isNotEmpty)
+                    ...medItems.map((med) {
+                      final medName =
+                          (med['name'] ?? 'Prescribed Medicine').toString().trim();
+                      final dosage = (med['dosage'] ?? '').toString().trim();
+                      final frequency =
+                          (med['frequency'] ?? '1-0-1').toString().trim();
+                      final duration =
+                          (med['duration'] ?? '3 days').toString().trim();
+
+                      final displayMedTitle = dosage.isNotEmpty &&
+                              !medName.toLowerCase().contains(dosage.toLowerCase())
+                          ? '$medName $dosage'
+                          : medName;
+
+                      return Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '℞ $displayMedTitle',
+                              style: const TextStyle(
+                                fontSize: 15.5,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textDark,
+                                fontFamilyFallback: [
+                                  'Segoe UI Symbol',
+                                  'Arial Unicode MS',
+                                  'serif',
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '$frequency · $duration',
+                              style: const TextStyle(
+                                fontSize: 13.5,
+                                color: Color(0xFF64748B),
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    })
+                  else
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Text(
+                        '℞ $diagnosisTitle',
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.textDark,
+                        ),
+                      ),
                     ),
-                  );
-                }),
-            ],
+                  if (instructions.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.only(top: 2),
+                          child: Icon(
+                            Icons.chat_outlined,
+                            size: 16,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            instructions,
+                            style: const TextStyle(
+                              fontSize: 13.5,
+                              color: Color(0xFF475569),
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  if (clinicName.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.only(top: 1.5),
+                          child: Icon(
+                            Icons.location_on_outlined,
+                            size: 16,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            clinicName,
+                            style: const TextStyle(
+                              fontSize: 13.5,
+                              color: Color(0xFF475569),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  if (hasUploadedFile) ...[
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [
+                        _buildRecordActionButton(
+                          icon: Icons.visibility_rounded,
+                          label: 'View file',
+                          color: AppTheme.gsNavy,
+                          onTap: () => _showRecordDetailModal(context, record),
+                        ),
+                        _buildRecordActionButton(
+                          icon: Icons.download_rounded,
+                          label: 'Download',
+                          color: AppTheme.gsNavy,
+                          onTap: () => _handleDownloadRecord(context, record),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMyTeethCategoryContent({
+    required List<Map<String, dynamic>> toothRecords,
+    required List<PatientConsultationRequest> consultations,
+    required List<Map<String, dynamic>> allRecords,
+  }) {
+    if (toothRecords.isEmpty && consultations.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+        ),
+        child: Column(
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: AppTheme.gsNavy.withValues(alpha: 0.08),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.medical_information_outlined,
+                color: AppTheme.gsNavy,
+                size: 26,
+              ),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'No health records yet',
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.textDark,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Clinical evaluations, medical history, consultations, and dental/treatment records from your visits will appear here.',
+              style: TextStyle(
+                fontSize: 13.5,
+                color: Color(0xFF64748B),
+                height: 1.4,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ...toothRecords.map(
+          (rec) => Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _buildRecordCard(record: rec, allRecords: allRecords),
           ),
-        );
-      },
+        ),
+        ...consultations.map((req) {
+          final dt = _resolveAppointmentDateTime(req);
+          final shortDate = _formatShortDate(dt);
+          final docName = req.displayDoctorName.isNotEmpty
+              ? req.displayDoctorName
+              : (req.assignedDoctorName ?? 'Dental Evaluation');
+          return Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: AppTheme.gsNavy.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.healing_rounded,
+                    color: AppTheme.gsNavy,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        req.problemCategory,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.textDark,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '$docName · $shortDate',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF64748B),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      if (req.problemDescription.trim().isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          req.problemDescription.trim(),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Color(0xFF475569),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  Widget _buildXraysAndReportsCategoryContent({
+    required List<Map<String, dynamic>> xrayRecords,
+    required List<Map<String, dynamic>> allRecords,
+    required bool isLoading,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Top Action Bar (+ Add Record & Share with Doctor)
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                xrayRecords.isEmpty
+                    ? 'X-rays, scans & lab reports'
+                    : '${xrayRecords.length} ${xrayRecords.length == 1 ? 'document' : 'documents'} saved',
+                style: const TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF64748B),
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (isLoading)
+              const Padding(
+                padding: EdgeInsets.only(right: 10),
+                child: SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppTheme.gsNavy,
+                  ),
+                ),
+              ),
+            ElevatedButton.icon(
+              key: const Key('add_dental_record_button'),
+              onPressed: () => _showUploadOrEditRecordSheet(context),
+              icon: const Icon(Icons.cloud_upload_outlined, size: 17),
+              label: const Text(
+                '+ Add Record',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.gsNavy,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (allRecords.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            key: const Key('share_multiple_records_button'),
+            onPressed: () => _showShareWithDoctorModal(
+              context,
+              allAvailableRecords: allRecords,
+            ),
+            icon: const Icon(
+              Icons.share_rounded,
+              size: 15,
+              color: AppTheme.gsNavy,
+            ),
+            label: Text(
+              'Share with Favourite Doctor (${_patientService.myDoctors.length})',
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.gsNavy,
+              ),
+            ),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: AppTheme.gsNavy),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: 14),
+
+        if (xrayRecords.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: AppTheme.gsNavy.withValues(alpha: 0.08),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.folder_open_rounded,
+                    size: 28,
+                    color: AppTheme.gsNavy,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'No X-rays or reports yet',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 17,
+                    color: AppTheme.textDark,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Upload your X-rays, lab reports, scans or clinical documents (JPG, PNG, PDF) and securely share them with your doctor.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    color: Color(0xFF64748B),
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                ElevatedButton.icon(
+                  key: const Key('empty_state_add_record_button'),
+                  onPressed: () => _showUploadOrEditRecordSheet(context),
+                  icon: const Icon(Icons.cloud_upload_rounded, size: 18),
+                  label: const Text(
+                    '+ Add Record',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.gsNavy,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          ...xrayRecords.map((rec) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _buildRecordCard(
+                record: rec,
+                allRecords: allRecords,
+              ),
+            );
+          }),
+      ],
     );
   }
 
@@ -2213,18 +3590,18 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   Color _colorForCategory(String category, String type) {
     final c = category.toLowerCase();
     if (c.contains('x-ray') || c.contains('xray') || type == 'xray') {
-      return const Color(0xFF8B5CF6);
+      return AppTheme.gsNavy;
     }
     if (c.contains('prescription')) {
-      return const Color(0xFF10B981);
+      return AppTheme.gsNavy;
     }
     if (c.contains('lab')) {
-      return const Color(0xFF0EA5E9);
+      return AppTheme.gsRed;
     }
     if (c.contains('treatment')) {
-      return AppTheme.brandOrange;
+      return AppTheme.gsRed;
     }
-    return AppTheme.primaryBlue;
+    return AppTheme.gsNavy;
   }
 
   Widget _buildRecordCard({
@@ -2243,6 +3620,8 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
         : int.tryParse((record['fileSize'] ?? '0').toString()) ?? 0;
     final isPatientUpload = record['isPatientUpload'] == true ||
         (record['storageKey'] ?? '').toString().isNotEmpty;
+    final Uint8List? fileBytes =
+        record['fileBytes'] is Uint8List ? record['fileBytes'] as Uint8List : null;
 
     final List<Map<String, dynamic>> sharedWith = [];
     if (record['sharedWith'] is List) {
@@ -2279,14 +3658,31 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: 0.1),
+                if (fileBytes != null && fileBytes.isNotEmpty && fileType != 'PDF')
+                  ClipRRect(
                     borderRadius: BorderRadius.circular(12),
+                    child: SizedBox(
+                      width: 48,
+                      height: 48,
+                      child: Image.memory(
+                        fileBytes,
+                        fit: BoxFit.cover,
+                        errorBuilder: (ctx, err, stack) => Container(
+                          color: color.withValues(alpha: 0.1),
+                          child: Icon(icon, color: color, size: 24),
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(icon, color: color, size: 24),
                   ),
-                  child: Icon(icon, color: color, size: 24),
-                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -2383,16 +3779,22 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               width: double.infinity,
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: const Color(0xFFF0FDF4),
+                color: AppTheme.gsNavy.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFBBF7D0)),
+                border: Border.all(
+                  color: AppTheme.gsNavy.withValues(alpha: 0.2),
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Row(
                     children: [
-                      Icon(Icons.verified_user_rounded, size: 14, color: Color(0xFF16A34A)),
+                      Icon(
+                        Icons.verified_user_rounded,
+                        size: 14,
+                        color: AppTheme.gsNavy,
+                      ),
                       SizedBox(width: 6),
                       Expanded(
                         child: Text(
@@ -2400,7 +3802,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
-                            color: Color(0xFF15803D),
+                            color: AppTheme.gsNavy,
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -2419,7 +3821,9 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: const Color(0xFF86EFAC)),
+                          border: Border.all(
+                            color: AppTheme.gsNavy.withValues(alpha: 0.25),
+                          ),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -2496,19 +3900,19 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               _buildRecordActionButton(
                 icon: Icons.visibility_rounded,
                 label: 'View',
-                color: AppTheme.primaryBlue,
+                color: AppTheme.gsNavy,
                 onTap: () => _showRecordDetailModal(context, record),
               ),
               _buildRecordActionButton(
                 icon: Icons.download_rounded,
                 label: 'Download',
-                color: const Color(0xFF0284C7),
+                color: AppTheme.gsNavy,
                 onTap: () => _handleDownloadRecord(context, record),
               ),
               _buildRecordActionButton(
                 icon: Icons.share_rounded,
                 label: 'Share with Doctor',
-                color: const Color(0xFF10B981),
+                color: AppTheme.gsNavy,
                 onTap: () => _showShareWithDoctorModal(
                   context,
                   preselectedRecord: record,
@@ -2519,7 +3923,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                 _buildRecordActionButton(
                   icon: Icons.edit_rounded,
                   label: 'Edit',
-                  color: AppTheme.brandOrange,
+                  color: AppTheme.gsRed,
                   onTap: () => _showUploadOrEditRecordSheet(
                     context,
                     existingRecord: record,
@@ -2529,7 +3933,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                 _buildRecordActionButton(
                   icon: Icons.delete_outline_rounded,
                   label: 'Delete',
-                  color: const Color(0xFFDC2626),
+                  color: AppTheme.gsRed,
                   onTap: () => _confirmDeleteRecord(context, record),
                 ),
             ],
@@ -4090,126 +5494,1305 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   }
 
   // ==========================================
-  // TAB 4: PROFILE TAB
+  // TAB 4: PROFILE TAB (GS HEALTH CONTINUOUS SCROLL REDESIGN)
   // ==========================================
+  static const List<String> _profileLanguageOptions = [
+    'English',
+    'Hindi',
+    'Marathi',
+    'Tamil',
+    'Telugu',
+    'Kannada',
+    'Malayalam',
+    'Bengali',
+    'Gujarati',
+    'Punjabi',
+    'Urdu',
+    'Odia',
+  ];
+
+  String _resolveProfileDisplayName(PatientProfile patient) {
+    final raw = patient.name.trim();
+    if (raw.isNotEmpty && raw.toLowerCase() != 'patient') {
+      return _formatPatientName(raw);
+    }
+    final sessName = SessionService().currentSession?.name?.trim();
+    if (sessName != null && sessName.isNotEmpty && sessName.toLowerCase() != 'patient') {
+      return _formatPatientName(sessName);
+    }
+    final authMetaName = _safeAuthUser?.userMetadata?['name']?.toString().trim() ??
+        _safeAuthUser?.userMetadata?['full_name']?.toString().trim();
+    if (authMetaName != null && authMetaName.isNotEmpty && authMetaName.toLowerCase() != 'patient') {
+      return _formatPatientName(authMetaName);
+    }
+    return raw.isNotEmpty ? _formatPatientName(raw) : 'Patient';
+  }
+
+  String _resolveProfilePhone(PatientProfile patient) {
+    String raw = patient.phone.trim();
+    if (raw.isEmpty) {
+      raw = SessionService().currentSession?.phone?.trim() ?? '';
+    }
+    if (raw.isEmpty) {
+      raw = _safeAuthUser?.phone?.trim() ??
+          _safeAuthUser?.userMetadata?['phone']?.toString().trim() ??
+          '';
+    }
+    if (raw.isEmpty) {
+      return 'Mobile not provided';
+    }
+    final digitsOnly = raw.replaceAll(RegExp(r'\D'), '');
+    if (!raw.startsWith('+') && digitsOnly.length == 10) {
+      return '+91$digitsOnly';
+    }
+    return raw;
+  }
+
+  String _resolveProfileCity(PatientProfile patient) {
+    if (patient.city.trim().isNotEmpty && patient.city.trim().toLowerCase() != 'null') {
+      return patient.city.trim();
+    }
+    if (patient.address.trim().isNotEmpty && patient.address.trim().toLowerCase() != 'null') {
+      return patient.address.trim();
+    }
+    final metaCity = _safeAuthUser?.userMetadata?['city']?.toString().trim();
+    if (metaCity != null && metaCity.isNotEmpty && metaCity.toLowerCase() != 'null') {
+      return metaCity;
+    }
+    return 'India';
+  }
+
+  String _getPatientInitials(String name) {
+    final parts = name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return 'P';
+    if (parts.length == 1) return parts.first[0].toUpperCase();
+    return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+  }
+
+  Future<void> _togglePreferredLanguage(String language) async {
+    final current = List<String>.from(_patientService.currentPatient.languages);
+    final existingIdx = current.indexWhere(
+      (l) => l.trim().toLowerCase() == language.trim().toLowerCase(),
+    );
+
+    if (existingIdx != -1) {
+      if (current.length > 1) {
+        current.removeAt(existingIdx);
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('At least one preferred language must remain selected.'),
+            backgroundColor: AppTheme.gsNavy,
+            duration: Duration(seconds: 2),
+          ),
+        );
+        return;
+      }
+    } else {
+      current.add(language);
+    }
+
+    await _patientService.updatePatientLanguages(current);
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
   Widget _buildProfileTab() {
     final patient = _patientService.currentPatient;
+    final displayName = _resolveProfileDisplayName(patient);
+    final displayPhone = _resolveProfilePhone(patient);
+    final displayCity = _resolveProfileCity(patient);
+    final selectedLanguages = patient.languages.isNotEmpty
+        ? patient.languages
+        : const <String>['English'];
 
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: const Color(0xFFE2E8F0)),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 1. Profile Page Header
+        Container(
+          width: double.infinity,
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(
+              bottom: BorderSide(color: Color(0xFFE2E8F0), width: 1),
+            ),
+          ),
+          padding: EdgeInsets.fromLTRB(
+            18,
+            MediaQuery.of(context).padding.top + 12,
+            18,
+            14,
+          ),
+          child: Row(
+            children: [
+              InkWell(
+                key: const Key('profile_back_button'),
+                onTap: () => setState(() => _currentIndex = 0),
+                borderRadius: BorderRadius.circular(24),
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: const Color(0xFFE2E8F0),
+                      width: 1.2,
+                    ),
+                  ),
+                  child: const Icon(
+                    Icons.chevron_left_rounded,
+                    color: AppTheme.textDark,
+                    size: 26,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              const Expanded(
+                child: Text(
+                  'Profile',
+                  style: TextStyle(
+                    fontSize: 23,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.textDark,
+                    letterSpacing: -0.3,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Continuous Scrollable Body containing all Profile cards & actions
+        Expanded(
+          child: SingleChildScrollView(
+            key: const Key('profile_scroll_view'),
+            physics: const BouncingScrollPhysics(),
+            padding: EdgeInsets.fromLTRB(
+              16,
+              18,
+              16,
+              36 + MediaQuery.of(context).padding.bottom,
             ),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                CircleAvatar(
-                  radius: 36,
-                  backgroundColor: AppTheme.primaryBlue.withValues(alpha: 0.1),
-                  child: Text(
-                    patient.name.isNotEmpty ? patient.name[0].toUpperCase() : 'P',
-                    style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(_formatPatientName(patient.name), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
-                const SizedBox(height: 4),
+                // 2. Patient Profile Card
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                  key: const Key('patient_profile_card'),
+                  padding: const EdgeInsets.fromLTRB(20, 24, 20, 22),
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryBlue.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(8),
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.02),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
                   ),
-                  child: const Text('Role: Patient', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue)),
+                  child: Column(
+                    children: [
+                      // Centered Avatar
+                      Container(
+                        width: 84,
+                        height: 84,
+                        decoration: BoxDecoration(
+                          color: AppTheme.gsNavy,
+                          borderRadius: BorderRadius.circular(28),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppTheme.gsNavy.withValues(alpha: 0.18),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: patient.photoBytes != null
+                            ? ClipRRect(
+                                borderRadius: BorderRadius.circular(28),
+                                child: Image.memory(
+                                  patient.photoBytes!,
+                                  width: 84,
+                                  height: 84,
+                                  fit: BoxFit.cover,
+                                ),
+                              )
+                            : Center(
+                                child: Text(
+                                  _getPatientInitials(displayName),
+                                  style: const TextStyle(
+                                    fontSize: 28,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Patient Full Name
+                      Text(
+                        displayName,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.textDark,
+                          letterSpacing: -0.3,
+                        ),
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 8),
+
+                      // Role Badge: Patient
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppTheme.gsNavy.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Text(
+                            'Patient',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.gsNavy,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Registered Mobile Number with Phone Icon
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.call_outlined,
+                            size: 16,
+                            color: Color(0xFF64748B),
+                          ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              displayPhone,
+                              style: const TextStyle(
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w500,
+                                color: Color(0xFF475569),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+
+                      // City / Location with Location Icon
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.location_on_outlined,
+                            size: 16,
+                            color: Color(0xFF64748B),
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              displayCity,
+                              style: const TextStyle(
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w500,
+                                color: Color(0xFF475569),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
+
+                      // Edit Profile Button
+                      InkWell(
+                        key: const Key('edit_profile_button'),
+                        onTap: () => _showEditPatientProfileSheet(context),
+                        borderRadius: BorderRadius.circular(14),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 11,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppTheme.gsNavy.withValues(alpha: 0.07),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: AppTheme.gsNavy.withValues(alpha: 0.16),
+                            ),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.edit_outlined,
+                                size: 17,
+                                color: AppTheme.gsNavy,
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                'Edit profile',
+                                style: TextStyle(
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.gsNavy,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                // 3. Preferred Languages Card
+                Container(
+                  key: const Key('preferred_languages_card'),
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.02),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'PREFERRED LANGUAGES',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.0,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 10,
+                        children: _profileLanguageOptions.map((lang) {
+                          final isSelected = selectedLanguages.any(
+                            (l) =>
+                                l.trim().toLowerCase() ==
+                                lang.trim().toLowerCase(),
+                          );
+                          return InkWell(
+                            key: Key('profile_lang_chip_$lang'),
+                            onTap: () => _togglePreferredLanguage(lang),
+                            borderRadius: BorderRadius.circular(24),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 160),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 9,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? AppTheme.gsNavy
+                                    : Colors.white,
+                                borderRadius: BorderRadius.circular(24),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? AppTheme.gsNavy
+                                      : const Color(0xFFCBD5E1),
+                                  width: 1.2,
+                                ),
+                              ),
+                              child: Text(
+                                lang,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: isSelected
+                                      ? FontWeight.w700
+                                      : FontWeight.w600,
+                                  color: isSelected
+                                      ? Colors.white
+                                      : AppTheme.textDark,
+                                ),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'AI triage replies in your preferred language, and healthcare professionals who speak it are easy to find.',
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          color: Color(0xFF64748B),
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                // 4. Referrals Section Card
+                Container(
+                  key: const Key('profile_referrals_card'),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.02),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      InkWell(
+                        key: const Key('profile_referrals_row'),
+                        onTap: () => ReferredPatientsSheet.show(context),
+                        borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(24),
+                        ),
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 18,
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.medical_services_outlined,
+                                color: AppTheme.gsNavy,
+                                size: 22,
+                              ),
+                              SizedBox(width: 14),
+                              Expanded(
+                                child: Text(
+                                  'Referrals',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppTheme.textDark,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              Icon(
+                                Icons.chevron_right_rounded,
+                                color: Color(0xFF64748B),
+                                size: 24,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const Divider(
+                        height: 1,
+                        thickness: 1,
+                        indent: 20,
+                        endIndent: 20,
+                        color: Color(0xFFF1F5F9),
+                      ),
+                      InkWell(
+                        key: const Key('profile_refer_friend_row'),
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const ReferAFriendScreen(),
+                            ),
+                          );
+                        },
+                        borderRadius: const BorderRadius.vertical(
+                          bottom: Radius.circular(24),
+                        ),
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 18,
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.person_add_alt_1_outlined,
+                                color: AppTheme.gsNavy,
+                                size: 22,
+                              ),
+                              SizedBox(width: 14),
+                              Expanded(
+                                child: Text(
+                                  'Refer a friend',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppTheme.textDark,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              Icon(
+                                Icons.chevron_right_rounded,
+                                color: Color(0xFF64748B),
+                                size: 24,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                // 5. Need Help Card
+                InkWell(
+                  key: const Key('profile_need_help_card'),
+                  onTap: () => _showProfileHelplineDialog(context),
+                  borderRadius: BorderRadius.circular(24),
+                  child: Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.02),
+                          blurRadius: 10,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'NEED HELP?',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.0,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                        SizedBox(height: 10),
+                        Text(
+                          'Call our 24/7 clinical care helpline for medical emergencies, appointments and consultations.',
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: Color(0xFF475569),
+                            height: 1.45,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // 6. Log Out Button
+                InkWell(
+                  key: const Key('profile_logout_button'),
+                  onTap: () => _confirmAndLogoutPatient(context),
+                  borderRadius: BorderRadius.circular(18),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 16,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEE2E2),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: AppTheme.gsRed.withValues(alpha: 0.25),
+                      ),
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.logout_rounded,
+                          color: Color(0xFFB91C1C),
+                          size: 20,
+                        ),
+                        SizedBox(width: 10),
+                        Flexible(
+                          child: Text(
+                            'Log out',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFFB91C1C),
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 12),
-                const Divider(color: Color(0xFFF1F5F9)),
-                const SizedBox(height: 8),
 
-                // Detailed Info Rows
-                _buildProfileDetailRow('Mobile Number', patient.phone.isNotEmpty ? patient.phone : 'Not provided', Icons.phone_android_rounded),
-                _buildProfileDetailRow('Email Address', patient.email.isNotEmpty ? patient.email : 'Not provided', Icons.email_outlined),
-                _buildProfileDetailRow('City / Location', patient.city.isNotEmpty ? patient.city : 'Not provided', Icons.location_city_rounded),
-                _buildProfileDetailRow('Pincode / Postal Code', patient.pincode.isNotEmpty ? patient.pincode : 'Not provided', Icons.pin_drop_outlined),
-                _buildProfileDetailRow('Preferred Language', patient.languages.isNotEmpty ? patient.languages.join(', ') : 'English', Icons.language_rounded),
-
-                const SizedBox(height: 14),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _buildProfileStat('Blood Group', _resolvePatientBloodGroup(patient)),
-                    _buildProfileStat('Age', '${_resolvePatientAge(patient).isNotEmpty ? _resolvePatientAge(patient) : "N/A"} Yrs'),
-                    _buildProfileStat('Gender', patient.gender),
-                  ],
+                // 7. Terms of Use Button
+                _buildProfileActionCardButton(
+                  key: const Key('profile_terms_button'),
+                  icon: Icons.description_outlined,
+                  label: 'Terms of Use',
+                  onTap: () => _showProfileTermsDialog(context),
                 ),
+                const SizedBox(height: 12),
+
+                // 8. Privacy Policy Button
+                _buildProfileActionCardButton(
+                  key: const Key('profile_privacy_button'),
+                  icon: Icons.verified_user_outlined,
+                  label: 'Privacy Policy',
+                  onTap: () => _showProfilePrivacyDialog(context),
+                ),
+                const SizedBox(height: 12),
+
+                // 9. Delete My Account Button
+                _buildProfileActionCardButton(
+                  key: const Key('profile_delete_account_button'),
+                  icon: Icons.delete_outline_rounded,
+                  label: 'Delete my account',
+                  onTap: () => _confirmAndDeletePatientAccount(context),
+                ),
+                const SizedBox(height: 28),
+
+                // 10. Centered GS HEALTH Logo
+                const Center(
+                  child: GsHealthLogo(
+                    key: Key('profile_bottom_gs_health_logo'),
+                    height: 38,
+                    alignment: Alignment.center,
+                  ),
+                ),
+                const SizedBox(height: 12),
               ],
             ),
           ),
-          const SizedBox(height: 16),
-          ElevatedButton.icon(
-            icon: const Icon(Icons.logout_rounded, size: 18),
-            label: const Text('Log Out of Patient Account', style: TextStyle(fontWeight: FontWeight.bold)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFEF4444),
-              foregroundColor: Colors.white,
-              minimumSize: const Size.fromHeight(46),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-            ),
-            onPressed: () async {
-              await SessionService().clearSession();
-              if (!mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Logged out of Patient Account.'),
-                  duration: Duration(seconds: 2),
-                ),
-              );
-              context.go('/login');
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProfileDetailRow(String label, String value, IconData icon) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: AppTheme.primaryBlue),
-          const SizedBox(width: 8),
-          Text('$label: ', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
-          Expanded(
-            child: Text(
-              value,
-              style: TextStyle(
-                fontSize: 12,
-                color: value == 'Not provided' ? AppTheme.textMuted : AppTheme.textDark,
-                fontWeight: value == 'Not provided' ? FontWeight.normal : FontWeight.w600,
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProfileStat(String label, String val) {
-    return Column(
-      children: [
-        Text(val, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.primaryBlue)),
-        const SizedBox(height: 2),
-        Text(label, style: const TextStyle(fontSize: 10, color: AppTheme.textMuted)),
+        ),
       ],
     );
+  }
+
+  Widget _buildProfileActionCardButton({
+    required Key key,
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      key: key,
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: AppTheme.textDark, size: 20),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.textDark,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showEditPatientProfileSheet(BuildContext context) {
+    final patient = _patientService.currentPatient;
+    final nameCtrl = TextEditingController(
+      text: patient.name.trim() == 'Patient' ? '' : patient.name.trim(),
+    );
+    final phoneCtrl = TextEditingController(text: patient.phone.trim());
+    final emailCtrl = TextEditingController(text: patient.email.trim());
+    final cityCtrl = TextEditingController(text: patient.city.trim());
+    final pincodeCtrl = TextEditingController(text: patient.pincode.trim());
+    final ageCtrl = TextEditingController(text: _resolvePatientAge(patient));
+    final emergencyCtrl = TextEditingController(
+      text: patient.emergencyContact.trim(),
+    );
+    String selectedGender =
+        patient.gender.trim().isNotEmpty ? patient.gender.trim() : 'Female';
+    String selectedBloodGroup = _resolvePatientBloodGroup(patient);
+    String? errorMsg;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom,
+              ),
+              child: Container(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(ctx).size.height * 0.88,
+                ),
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                ),
+                padding: const EdgeInsets.all(20),
+                child: SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: AppTheme.gsNavy.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.person_outline_rounded,
+                              color: AppTheme.gsNavy,
+                              size: 22,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Text(
+                              'Edit Profile',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                                color: AppTheme.textDark,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () => Navigator.of(sheetCtx).pop(),
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                        ],
+                      ),
+                      const Divider(height: 24, color: Color(0xFFE2E8F0)),
+                      if (errorMsg != null) ...[
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          margin: const EdgeInsets.only(bottom: 12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF2F2),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFFECACA)),
+                          ),
+                          child: Text(
+                            errorMsg!,
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFFB91C1C),
+                            ),
+                          ),
+                        ),
+                      ],
+                      TextField(
+                        key: const Key('edit_profile_name_field'),
+                        controller: nameCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Full Name *',
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const Key('edit_profile_phone_field'),
+                        controller: phoneCtrl,
+                        keyboardType: TextInputType.phone,
+                        decoration: InputDecoration(
+                          labelText: 'Mobile Number *',
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const Key('edit_profile_city_field'),
+                        controller: cityCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'City / Location',
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              key: const Key('edit_profile_pincode_field'),
+                              controller: pincodeCtrl,
+                              keyboardType: TextInputType.number,
+                              decoration: InputDecoration(
+                                labelText: 'Pincode',
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: TextField(
+                              key: const Key('edit_profile_age_field'),
+                              controller: ageCtrl,
+                              keyboardType: TextInputType.number,
+                              decoration: InputDecoration(
+                                labelText: 'Age',
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const Key('edit_profile_email_field'),
+                        controller: emailCtrl,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: InputDecoration(
+                          labelText: 'Email Address',
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      ElevatedButton(
+                        key: const Key('save_profile_changes_button'),
+                        onPressed: () {
+                          final newName = nameCtrl.text.trim();
+                          final newPhone = phoneCtrl.text.trim();
+                          if (newName.isEmpty) {
+                            setModalState(() {
+                              errorMsg = 'Please enter your full name.';
+                            });
+                            return;
+                          }
+                          _patientService.updatePatientProfile(
+                            id: patient.id,
+                            name: newName,
+                            email: emailCtrl.text.trim().isNotEmpty
+                                ? emailCtrl.text.trim()
+                                : patient.email,
+                            phone: newPhone.isNotEmpty ? newPhone : patient.phone,
+                            age: ageCtrl.text.trim(),
+                            gender: selectedGender,
+                            bloodGroup: selectedBloodGroup,
+                            emergencyContact: emergencyCtrl.text.trim().isNotEmpty
+                                ? emergencyCtrl.text.trim()
+                                : newPhone,
+                            address: patient.address,
+                            city: cityCtrl.text.trim(),
+                            pincode: pincodeCtrl.text.trim(),
+                            state: patient.state,
+                            languages: patient.languages,
+                            photoBytes: patient.photoBytes,
+                          );
+                          Navigator.of(sheetCtx).pop();
+                          if (mounted) {
+                            setState(() {});
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Profile updated successfully.'),
+                                backgroundColor: AppTheme.gsNavy,
+                              ),
+                            );
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.gsNavy,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: const Text(
+                          'Save profile',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showProfileHelplineDialog(BuildContext context) {
+    const helpCard = NeedHelpCard();
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.support_agent_rounded, color: AppTheme.gsNavy, size: 24),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'GS HEALTH 24/7 Helpline',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Call our 24/7 clinical care helpline for medical emergencies, appointments and consultations:',
+              style: TextStyle(fontSize: 13.5, color: Color(0xFF475569)),
+            ),
+            const SizedBox(height: 12),
+            SelectableText(
+              helpCard.displayHelplineNumber,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: AppTheme.gsNavy,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: const Text(
+              'Close',
+              style: TextStyle(
+                color: Color(0xFF64748B),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          ElevatedButton.icon(
+            key: const Key('call_helpline_confirm_button'),
+            onPressed: () async {
+              Navigator.of(dialogCtx).pop();
+              final uri = Uri(scheme: 'tel', path: helpCard.helplineNumber);
+              try {
+                await launchUrl(uri);
+              } catch (_) {}
+            },
+            icon: const Icon(Icons.call_rounded, size: 16),
+            label: const Text('Call Now'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.gsNavy,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmAndLogoutPatient(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Log out?',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+            color: AppTheme.textDark,
+          ),
+        ),
+        content: const Text(
+          'Are you sure you want to log out of your GS HEALTH account?',
+          style: TextStyle(fontSize: 14, color: Color(0xFF475569), height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            key: const Key('cancel_logout_dialog_button'),
+            onPressed: () => Navigator.of(dialogCtx).pop(false),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: AppTheme.gsNavy,
+              ),
+            ),
+          ),
+          ElevatedButton(
+            key: const Key('confirm_logout_dialog_button'),
+            onPressed: () => Navigator.of(dialogCtx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.gsRed,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              'Log out',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+    await SessionService().clearSession();
+    if (!mounted || !context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Logged out of Patient Account.'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+    try {
+      context.go('/login');
+    } catch (_) {}
+  }
+
+  void _showProfileTermsDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Terms of Use',
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            color: AppTheme.gsNavy,
+          ),
+        ),
+        content: const SingleChildScrollView(
+          child: Text(
+            'Welcome to GS HEALTH.\n\n'
+            '1. Acceptance of Terms: By signing in and using our healthcare platform, you agree to comply with these Terms of Use.\n\n'
+            '2. Medical Disclaimer: AI triage provides preliminary guidance only and does not replace an in-person clinical evaluation by a licensed doctor or specialist.\n\n'
+            '3. Appointments & Records: Patients are responsible for providing accurate health history and arriving on time for scheduled consultations.',
+            style: TextStyle(
+              fontSize: 13.5,
+              height: 1.5,
+              color: Color(0xFF334155),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            key: const Key('close_terms_dialog_button'),
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text(
+              'Close',
+              style: TextStyle(
+                color: AppTheme.gsNavy,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showProfilePrivacyDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Privacy Policy',
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            color: AppTheme.gsNavy,
+          ),
+        ),
+        content: const SingleChildScrollView(
+          child: Text(
+            'GS HEALTH Privacy Policy\n\n'
+            '1. Data Protection: Your mobile number, clinical records, prescriptions, scans, and consultation history are encrypted and stored securely.\n\n'
+            '2. Authentication: We use your mobile number solely to send one-time verification codes (OTP) and appointment updates.\n\n'
+            '3. Record Sharing: Your medical records are only shared with verified doctors and clinics you explicitly consult or authorize.',
+            style: TextStyle(
+              fontSize: 13.5,
+              height: 1.5,
+              color: Color(0xFF334155),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            key: const Key('close_privacy_dialog_button'),
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text(
+              'Close',
+              style: TextStyle(
+                color: AppTheme.gsNavy,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmAndDeletePatientAccount(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Delete my account?',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+            color: AppTheme.textDark,
+          ),
+        ),
+        content: const Text(
+          'Are you sure you want to permanently delete your GS HEALTH account and associated profile data? This action cannot be undone.',
+          style: TextStyle(fontSize: 14, color: Color(0xFF475569), height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            key: const Key('cancel_delete_account_button'),
+            onPressed: () => Navigator.of(dialogCtx).pop(false),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: AppTheme.gsNavy,
+              ),
+            ),
+          ),
+          ElevatedButton(
+            key: const Key('confirm_delete_account_button'),
+            onPressed: () => Navigator.of(dialogCtx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.gsRed,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              'Delete account',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+    await _patientService.deleteCurrentPatientAccount();
+    await SessionService().clearSession();
+    if (!mounted || !context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Your account has been deleted.'),
+        backgroundColor: AppTheme.gsNavy,
+      ),
+    );
+    try {
+      context.go('/login');
+    } catch (_) {}
   }
 }
 
@@ -4219,14 +6802,12 @@ class _AnimatedPatientActionTile extends StatefulWidget {
   final String title;
   final Color color;
   final VoidCallback onTap;
-  final int badgeCount;
 
   const _AnimatedPatientActionTile({
     required this.icon,
     required this.title,
     required this.color,
     required this.onTap,
-    this.badgeCount = 0,
   });
 
   @override
@@ -4283,33 +6864,6 @@ class _AnimatedPatientActionTileState extends State<_AnimatedPatientActionTile> 
                     ),
                     child: Icon(widget.icon, color: widget.color, size: 20),
                   ),
-                  if (widget.badgeCount > 0)
-                    Positioned(
-                      top: -3,
-                      right: -5,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1.5),
-                        decoration: BoxDecoration(
-                          color: widget.color,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.white, width: 1.5),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.1),
-                              blurRadius: 3,
-                            ),
-                          ],
-                        ),
-                        child: Text(
-                          widget.badgeCount > 99 ? '99+' : '${widget.badgeCount}',
-                          style: const TextStyle(
-                            fontSize: 8.5,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ),
                 ],
               ),
               const SizedBox(height: 4),

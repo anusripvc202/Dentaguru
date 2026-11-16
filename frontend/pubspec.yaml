@@ -58,6 +58,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/
+    - assets/healthcare_hero_banner.jpg
     - assets/app_icon.png
     - assets/app_icon_dark.png
     - assets/gs_health_full_logo.png

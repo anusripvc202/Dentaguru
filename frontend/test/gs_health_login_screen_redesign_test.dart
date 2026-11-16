@@ -1,0 +1,146 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:dentaguru/features/auth/presentation/screens/auth_screen.dart';
+import 'package:dentaguru/core/widgets/denta_guru_logo.dart';
+import 'package:dentaguru/core/widgets/gs_health_hero_banner.dart';
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    FlutterSecureStorage.setMockInitialValues({});
+  });
+
+  group('GS HEALTH Premium Mobile Login & OTP Experience Tests', () {
+    testWidgets('Renders Hero Section, GS HEALTH Branding, Mobile Input, and No Demo Buttons on Mobile Viewport', (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1080, 2400); // Standard mobile phone
+      tester.view.devicePixelRatio = 2.5;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(
+        const ProviderScope(
+          child: MaterialApp(
+            home: AuthScreen(), // Defaults to initialTab: 1 (Sign In)
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      // 1. Hero Section Content Verification (Multi-Specialty Healthcare)
+      expect(find.byType(GsHealthHeroBanner), findsOneWidget);
+      expect(find.text('Calm, expert medical care.'), findsOneWidget);
+      expect(
+        find.text('AI triage, verified doctors across all specialties, and your records, all in one place.'),
+        findsOneWidget,
+      );
+
+      // 2. Official GS HEALTH Branding in Card
+      expect(find.byType(GsHealthLogo), findsWidgets);
+      expect(find.text('DentaGuru'), findsNothing);
+
+      // 3. Login Card Typography & Form Structure
+      expect(find.text('Sign in with mobile'), findsOneWidget);
+      expect(find.text("We'll text you a one-time code."), findsOneWidget);
+      expect(find.text('+91'), findsOneWidget);
+      expect(find.text('98765 43210'), findsOneWidget);
+      expect(find.text('Send code'), findsOneWidget);
+
+      // 4. Strict Production Requirement: Only 3 public roles (Patient, Dentist, Clinic) - Admin removed
+      expect(find.text('DEMO ACCOUNTS · TAP TO FILL'), findsNothing);
+      expect(find.byKey(const Key('signin_role_patient')), findsOneWidget);
+      expect(find.byKey(const Key('signin_role_dentist')), findsOneWidget);
+      expect(find.byKey(const Key('signin_role_clinic')), findsOneWidget);
+      expect(find.byKey(const Key('signin_role_admin')), findsNothing);
+      expect(find.text('Admin & Staff Portal'), findsNothing);
+      expect(find.text('Doctor'), findsNothing);
+
+      // Tapping Clinic role pill keeps OTP flow intact without overflow
+      await tester.tap(find.byKey(const Key('signin_role_clinic')));
+      await tester.pumpAndSettle();
+
+      // 5. Terms & Privacy Policy Footer
+      expect(find.text('By continuing you agree to our '), findsOneWidget);
+      expect(find.text('Terms of Use'), findsOneWidget);
+      expect(find.text('Privacy Policy'), findsOneWidget);
+    });
+
+    testWidgets('Entering valid mobile and tapping Send Code transitions to OTP stage with masked phone and Verify button', (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 2.5;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(
+        const ProviderScope(
+          child: MaterialApp(
+            home: AuthScreen(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Enter valid 10-digit mobile number
+      final phoneField = find.byType(TextFormField).first;
+      await tester.enterText(phoneField, '9063663180');
+      await tester.pumpAndSettle();
+
+      // Tap Send code
+      final sendCodeButton = find.widgetWithText(ElevatedButton, 'Send code');
+      expect(sendCodeButton, findsOneWidget);
+      await tester.tap(sendCodeButton);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+
+      // 1. Should now display OTP verification stage (Screenshot 2 Reference)
+      expect(find.text('Enter your code'), findsOneWidget);
+      expect(find.text('Sent to +91 90636 *****'), findsOneWidget);
+
+      // 2. 4-digit OTP input boxes present
+      expect(find.byType(TextFormField), findsNWidgets(4));
+
+      // 3. Resend timer and edit mobile options present
+      expect(find.text('← Edit mobile number'), findsOneWidget);
+      expect(find.textContaining('Resend code in'), findsOneWidget);
+
+      // 4. Action button text is "Verify & continue"
+      expect(find.widgetWithText(ElevatedButton, 'Verify & continue'), findsOneWidget);
+
+      // 5. On-Screen OTP banner displayed when SMS is off (Reference Screenshot 2)
+      expect(find.textContaining('Demo mode: SMS is off. Use code'), findsOneWidget);
+      expect(find.text('Fill'), findsOneWidget);
+    });
+
+    testWidgets('Renders Responsive Two-Column Layout on Desktop Viewport (>900px)', (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1920, 1080); // Desktop screen
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(
+        const ProviderScope(
+          child: MaterialApp(
+            home: AuthScreen(),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      // Desktop hero column features (Multi-Specialty Healthcare)
+      expect(find.text('Comprehensive, expert medical care.'), findsOneWidget);
+      expect(find.text('AI triage, verified doctors across all specialties, and your records, all in one place.'), findsOneWidget);
+      expect(find.text('Verified Doctors'), findsOneWidget);
+      expect(find.text('All Medical Specialties'), findsOneWidget);
+      expect(find.text('Health Records & AI'), findsOneWidget);
+
+      // Right login column form
+      expect(find.text('Sign in with mobile'), findsOneWidget);
+      expect(find.text('+91'), findsOneWidget);
+      expect(find.text('Send code'), findsOneWidget);
+      expect(find.text('DEMO ACCOUNTS · TAP TO FILL'), findsNothing);
+    });
+  });
+}

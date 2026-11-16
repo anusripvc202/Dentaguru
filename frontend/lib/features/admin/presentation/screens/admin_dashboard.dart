@@ -14,6 +14,11 @@ import '../../../../core/models/referral_model.dart';
 import '../../../../core/models/medical_specialty_model.dart';
 import 'patient_details_screen.dart';
 import '../widgets/doctor_slot_management_dialog.dart';
+import '../widgets/gs_health_admin_overview.dart';
+import '../widgets/gs_health_district_management_panel.dart';
+import '../widgets/gs_health_patient_assignment_panel.dart';
+import '../widgets/gs_health_district_reports_panel.dart';
+import '../widgets/gs_health_sub_admin_district_dialog.dart';
 import '../../../patient/presentation/screens/find_doctors_screen.dart';
 import '../../../patient/presentation/screens/doctor_profile_screen.dart';
 import '../../../clinic/presentation/screens/clinic_dashboard.dart';
@@ -26,8 +31,13 @@ class AdminDashboardScreen extends StatefulWidget {
 }
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> with TickerProviderStateMixin {
-  int _selectedNavIndex = 0; // 0: Dashboard, 1: Clinics, 2: Dentists, 3: Patients, 4: Appointments, 5: Revenue, 6: Reports, 7: Reviews, 8: Settings, 9: Sub-Admins
+  int _selectedNavIndex = 0; // 0: Overview, 1: Clinics, 2: Dentists, 3: Patients, 4: Appointments, 5: Revenue, 6: Reports, 7: Reviews, 8: Settings, 9: Sub-Admins, 13: Requests
   final PatientProblemService _problemService = PatientProblemService();
+
+  bool _isOverviewLoading = false;
+  String? _overviewError;
+  List<AdminAppointmentItem> _overviewAppointments = const [];
+  bool _showPendingVerificationOnly = false;
 
   Timer? _autoSyncTimer;
   RealtimeChannel? _realtimeChannel;
@@ -43,7 +53,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     super.initState();
     _problemService.addListener(_onServiceUpdate);
     _problemService.setAdminMode(true);
-    _problemService.syncAllDataFromApi();
+    _refreshOverviewData();
 
     // ⏱️ Auto-sync timer: polls every 4s to catch new requests raised on other devices
     _autoSyncTimer = Timer.periodic(const Duration(seconds: 4), (_) {
@@ -1287,35 +1297,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
         return Scaffold(
           backgroundColor: const Color(0xFFF8FAFC),
-          appBar: isDesktop
-              ? null
-              : AppBar(
-                  backgroundColor: Colors.white,
-                  elevation: 1,
-                  titleSpacing: 10,
-                  title: const FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: DentaGuruLogo(height: 28),
-                  ),
-                  actions: [
-                    IconButton(
-                      icon: const Icon(Icons.logout_rounded, color: AppTheme.statusCancelText, size: 20),
-                      tooltip: 'Log Out',
-                      onPressed: () async {
-                        await SessionService().clearSession();
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Logged out of Admin Dashboard.'),
-                            duration: Duration(seconds: 2),
-                          ),
-                        );
-                        context.go('/login');
-                      },
-                    ),
-                  ],
-                ),
+          appBar: null,
           drawer: isDesktop ? null : Drawer(child: _buildSidebarContent()),
           body: Row(
             children: [
@@ -1334,6 +1316,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               Expanded(
                 child: Column(
                   children: [
+                    // Sticky GS HEALTH Header on Mobile / Sub-Desktop
+                    if (!isDesktop) _buildMobileGsHeader(context),
                     // Desktop Header Bar
                     if (isDesktop)
                       Container(
@@ -1430,36 +1414,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         ),
                       ),
 
-                    // Mobile Horizontal Navigation Bar Pills (When container is < 950px)
-                    if (!isDesktop)
-                      Container(
-                        height: 48,
-                        color: Colors.white,
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          child: Row(
-                            children: [
-                              _buildMobileNavPill(0, 'Dashboard', Icons.grid_view_rounded),
-                              _buildMobileNavPill(
-                                11,
-                                'Referrals',
-                                Icons.group_add_rounded,
-                                badgeCount: _problemService.adminPatientReferrals.where((r) => r.status == 'Pending').length,
-                              ),
-                              _buildMobileNavPill(3, 'Patients', Icons.people_outline_rounded),
-                              _buildMobileNavPill(1, 'Clinics', Icons.local_hospital_outlined),
-                              _buildMobileNavPill(12, 'Specialties', Icons.category_outlined),
-                              _buildMobileNavPill(2, 'Doctors', Icons.medical_services_outlined),
-                              _buildMobileNavPill(4, 'Appointments', Icons.calendar_month_outlined),
-                              _buildMobileNavPill(10, 'Chats', Icons.forum_outlined),
-                              _buildMobileNavPill(5, 'Revenue', Icons.account_balance_wallet_outlined),
-                              _buildMobileNavPill(6, 'Reports', Icons.bar_chart_rounded),
-                              _buildMobileNavPill(9, 'Sub-Admins', Icons.supervisor_account_outlined),
-                            ],
-                          ),
-                        ),
-                      ),
+                    // Mobile Horizontal Navigation Bar Pills when viewing secondary console sections
+                    if (!isDesktop && _selectedNavIndex != 0)
+                      _buildMobileSectionPillsBar(),
 
                     // Active Panel View
                     Expanded(
@@ -1478,22 +1435,44 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
           bottomNavigationBar: isDesktop
               ? null
               : BottomNavigationBar(
+                  type: BottomNavigationBarType.fixed,
+                  backgroundColor: Colors.white,
                   currentIndex: _getBottomNavIndex(),
-                  selectedItemColor: AppTheme.primaryBlue,
+                  selectedItemColor: AppTheme.gsNavy,
                   unselectedItemColor: AppTheme.textMuted,
                   selectedFontSize: 11,
                   unselectedFontSize: 11,
+                  selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w700),
                   onTap: (index) {
                     setState(() {
-                      if (index == 0) _selectedNavIndex = 0; // Dashboard
-                      if (index == 1) _selectedNavIndex = 3; // Patients
-                      if (index == 2) _selectedNavIndex = 5; // Revenue
+                      _showPendingVerificationOnly = false;
+                      if (index == 0) _selectedNavIndex = 0; // Overview
+                      if (index == 1) _selectedNavIndex = 13; // Requests
+                      if (index == 2) _selectedNavIndex = 2; // Dentists
+                      if (index == 3) _selectedNavIndex = 3; // Patients
                     });
                   },
                   items: const [
-                    BottomNavigationBarItem(icon: Icon(Icons.dashboard_rounded), label: 'Dashboard'),
-                    BottomNavigationBarItem(icon: Icon(Icons.people_alt_rounded), label: 'Patients'),
-                    BottomNavigationBarItem(icon: Icon(Icons.account_balance_wallet_rounded), label: 'Revenue'),
+                    BottomNavigationBarItem(
+                      icon: Icon(Icons.grid_view_outlined),
+                      activeIcon: Icon(Icons.grid_view_rounded),
+                      label: 'Overview',
+                    ),
+                    BottomNavigationBarItem(
+                      icon: Icon(Icons.inbox_outlined),
+                      activeIcon: Icon(Icons.inbox_rounded),
+                      label: 'Requests',
+                    ),
+                    BottomNavigationBarItem(
+                      icon: Icon(Icons.medical_services_outlined),
+                      activeIcon: Icon(Icons.medical_services_rounded),
+                      label: 'Dentists',
+                    ),
+                    BottomNavigationBarItem(
+                      icon: Icon(Icons.people_outline_rounded),
+                      activeIcon: Icon(Icons.people_alt_rounded),
+                      label: 'Patients',
+                    ),
                   ],
                 ),
         );
@@ -1549,16 +1528,228 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     );
   }
 
+  Future<void> _refreshOverviewData() async {
+    if (mounted) {
+      setState(() {
+        _isOverviewLoading = true;
+        _overviewError = null;
+      });
+    }
+    try {
+      await _problemService.syncAllDataFromApi();
+      final rows = await ApiService().fetchAllAppointmentsForAdmin();
+      final items = rows
+          .whereType<Map>()
+          .map(
+            (r) => AdminAppointmentItem.fromRow(
+              r,
+              patients: _problemService.allPatients,
+              doctors: _problemService.allDoctors,
+            ),
+          )
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        _overviewAppointments = items;
+        _isOverviewLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _overviewError = e.toString().replaceFirst('Exception: ', '');
+        _isOverviewLoading = false;
+      });
+    }
+  }
+
+  Widget _buildMobileGsHeader(BuildContext context) {
+    final adminNotifs = _problemService.appNotifications
+        .where((n) => n.recipientRole == 'Admin' || n.recipientId == 'ALL_ADMINS')
+        .toList();
+    final unreadCount = adminNotifs.where((n) => !n.isRead).length;
+    return GsHealthAdminHeader(
+      subtitle: 'Admin console',
+      title: 'GS HEALTH',
+      unreadCount: unreadCount,
+      onNotifications: () => _showNotificationsModal(context, 'Admin'),
+      onProfile: () => _showAdminProfileSheet(context),
+    );
+  }
+
+  Widget _buildMobileSectionPillsBar({bool embedded = false}) {
+    final referralBadge = _problemService.adminPatientReferrals.where((r) => r.status == 'Pending').length;
+    final row = Row(
+      children: [
+        _buildMobileNavPill(0, 'Overview', Icons.grid_view_rounded),
+        _buildMobileNavPill(13, 'Requests', Icons.inbox_rounded),
+        _buildMobileNavPill(11, 'Referrals', Icons.group_add_rounded, badgeCount: referralBadge),
+        _buildMobileNavPill(3, 'Patients', Icons.people_outline_rounded),
+        _buildMobileNavPill(1, 'Clinics', Icons.local_hospital_outlined),
+        _buildMobileNavPill(12, 'Specialties', Icons.category_outlined),
+        _buildMobileNavPill(2, 'Doctors', Icons.medical_services_outlined),
+        _buildMobileNavPill(4, 'Appointments', Icons.calendar_month_outlined),
+        _buildMobileNavPill(10, 'Chats', Icons.forum_outlined),
+        _buildMobileNavPill(5, 'Revenue', Icons.account_balance_wallet_outlined),
+        _buildMobileNavPill(6, 'Reports', Icons.bar_chart_rounded),
+        _buildMobileNavPill(9, 'Sub-Admins', Icons.supervisor_account_outlined),
+        _buildMobileNavPill(14, 'Districts', Icons.map_outlined),
+        _buildMobileNavPill(15, 'Assignments', Icons.assignment_ind_outlined),
+      ],
+    );
+    if (embedded) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Console sections',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.textMedium,
+            ),
+          ),
+          const SizedBox(height: 8),
+          SingleChildScrollView(scrollDirection: Axis.horizontal, child: row),
+        ],
+      );
+    }
+    return Container(
+      height: 48,
+      color: Colors.white,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: row,
+      ),
+    );
+  }
+
+  void _showAdminProfileSheet(BuildContext outerContext) {
+    showModalBottomSheet<void>(
+      context: outerContext,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetCtx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: AppTheme.gsNavy.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.admin_panel_settings_rounded, color: AppTheme.gsNavy),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'GS HEALTH Admin',
+                          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppTheme.gsNavy),
+                        ),
+                        Text(
+                          'Primary Admin console',
+                          style: TextStyle(fontSize: 13, color: AppTheme.textMuted),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => Navigator.of(sheetCtx).pop(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _profileQuickChip(sheetCtx, 13, 'Requests', Icons.inbox_rounded),
+                  _profileQuickChip(sheetCtx, 1, 'Clinics', Icons.local_hospital_outlined),
+                  _profileQuickChip(sheetCtx, 12, 'Specialties', Icons.category_outlined),
+                  _profileQuickChip(sheetCtx, 4, 'Appointments', Icons.calendar_month_outlined),
+                  _profileQuickChip(sheetCtx, 5, 'Revenue', Icons.account_balance_wallet_outlined),
+                  _profileQuickChip(sheetCtx, 9, 'Sub-Admins', Icons.supervisor_account_outlined),
+                  _profileQuickChip(sheetCtx, 10, 'Chats', Icons.forum_outlined),
+                ],
+              ),
+              const SizedBox(height: 18),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.logout_rounded, color: AppTheme.gsRed),
+                  label: const Text(
+                    'Sign out',
+                    style: TextStyle(color: AppTheme.gsRed, fontWeight: FontWeight.w800),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: AppTheme.gsRed),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: () async {
+                    Navigator.of(sheetCtx).pop();
+                    await SessionService().clearSession();
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Logged out of Admin Dashboard.'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                    context.go('/login');
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _profileQuickChip(BuildContext sheetCtx, int navIndex, String label, IconData icon) {
+    return ActionChip(
+      avatar: Icon(icon, size: 16, color: AppTheme.gsNavy),
+      label: Text(label, style: const TextStyle(color: AppTheme.gsNavy, fontWeight: FontWeight.w600)),
+      backgroundColor: const Color(0xFFF1F5F9),
+      side: const BorderSide(color: Color(0xFFE2E8F0)),
+      onPressed: () {
+        Navigator.of(sheetCtx).pop();
+        setState(() {
+          _showPendingVerificationOnly = false;
+          _selectedNavIndex = navIndex;
+        });
+      },
+    );
+  }
+
   int _getBottomNavIndex() {
-    if (_selectedNavIndex == 3) return 1;
-    if (_selectedNavIndex == 5) return 2;
+    if (_selectedNavIndex == 13) return 1;
+    if (_selectedNavIndex == 2) return 2;
+    if (_selectedNavIndex == 3) return 3;
     return 0;
   }
 
   String _getNavTitle() {
     switch (_selectedNavIndex) {
       case 0:
-        return 'Dashboard Overview';
+        return 'Overview';
+      case 13:
+        return 'Requests & Assignments';
       case 1:
         return 'Clinics Directory';
       case 2:
@@ -1583,6 +1774,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
         return 'Referral Management & Growth';
       case 12:
         return 'Medical Specialties Management';
+      case 14:
+        return 'District Management';
+      case 15:
+        return 'Patient Assignment Audit';
       default:
         return 'Admin Dashboard';
     }
@@ -1671,6 +1866,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   _buildSubNavItem(8, Icons.settings_rounded, 'General Settings'),
                   _buildSubNavItem(8, Icons.security_rounded, 'Role & Permissions'),
                   _buildSubNavItem(9, Icons.supervisor_account_rounded, 'Sub-Admins', badgeCount: _problemService.subAdmins.length),
+                  _buildSubNavItem(14, Icons.map_rounded, 'Districts', badgeCount: _problemService.districts.length),
+                  _buildSubNavItem(15, Icons.assignment_ind_rounded, 'Assignments & Audit', badgeCount: _problemService.assignmentHistory.length),
                 ],
               ),
             ],
@@ -1993,7 +2190,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   Widget _buildSelectedPanel() {
     switch (_selectedNavIndex) {
       case 0:
-        return _buildDashboardPanel();
+        return _buildAdminOverviewPanel();
       case 1:
         return _buildClinicsPanel();
       case 2:
@@ -2003,8 +2200,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
       case 4:
         return _buildAppointmentsSchedulePanel();
       case 5:
-      case 6:
         return _buildRevenuePanel();
+      case 6:
+        return GsHealthDistrictReportsPanel(problemService: _problemService, onRefresh: _refreshOverviewData);
       case 8:
       case 9:
         return _buildSubAdminsPanel();
@@ -2014,9 +2212,145 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
         return _buildReferralManagementPanel();
       case 12:
         return _buildMedicalSpecialtiesPanel();
-      default:
+      case 13:
         return _buildDashboardPanel();
+      case 14:
+        return GsHealthDistrictManagementPanel(problemService: _problemService, onRefresh: _refreshOverviewData);
+      case 15:
+        return GsHealthPatientAssignmentPanel(problemService: _problemService, onRefresh: _refreshOverviewData);
+      default:
+        return _buildAdminOverviewPanel();
     }
+  }
+
+  Widget _buildAdminOverviewPanel() {
+    final waiting = waitingConsultationRequests(_problemService.requests);
+    final pendingDocs = _problemService.allDoctors.where(isPendingVerificationDoctor).toList();
+    final ads = sponsoredAdsForOverview();
+    final appointmentCount = _overviewAppointments.length;
+
+    return GsHealthAdminOverview(
+      isLoading: _isOverviewLoading,
+      errorMessage: _overviewError,
+      onRetry: _refreshOverviewData,
+      onRefresh: _refreshOverviewData,
+      waitingCount: waiting.length,
+      onAssign: () {
+        if (waiting.length == 1) {
+          _showAssignDoctorDialog(context, waiting.first);
+        } else {
+          setState(() => _selectedNavIndex = 13);
+        }
+      },
+      stats: [
+        AdminStatCardData(
+          id: 'waiting',
+          label: 'Requests awaiting a doctor',
+          value: waiting.length,
+          icon: Icons.hourglass_bottom_rounded,
+          accentRed: true,
+          onTap: () => setState(() => _selectedNavIndex = 13),
+        ),
+        AdminStatCardData(
+          id: 'pending_doctors',
+          label: 'Dentists pending verification',
+          value: pendingDocs.length,
+          icon: Icons.verified_user_outlined,
+          accentRed: pendingDocs.isNotEmpty,
+          onTap: () => setState(() {
+            _showPendingVerificationOnly = true;
+            _selectedNavIndex = 2;
+          }),
+        ),
+        AdminStatCardData(
+          id: 'patients',
+          label: 'Patients',
+          value: _problemService.allPatients.length,
+          icon: Icons.people_outline_rounded,
+          onTap: () => setState(() => _selectedNavIndex = 3),
+        ),
+        AdminStatCardData(
+          id: 'dentists',
+          label: 'Dentists',
+          value: _problemService.allDoctors.length,
+          icon: Icons.medical_services_outlined,
+          onTap: () => setState(() {
+            _showPendingVerificationOnly = false;
+            _selectedNavIndex = 2;
+          }),
+        ),
+        AdminStatCardData(
+          id: 'clinics',
+          label: 'Clinics',
+          value: _problemService.allClinics.length,
+          icon: Icons.local_hospital_outlined,
+          accentRed: true,
+          onTap: () => setState(() => _selectedNavIndex = 1),
+        ),
+        AdminStatCardData(
+          id: 'appointments',
+          label: 'Appointments',
+          value: appointmentCount,
+          icon: Icons.calendar_today_outlined,
+          onTap: () => setState(() => _selectedNavIndex = 4),
+        ),
+        AdminStatCardData(
+          id: 'sub_admins',
+          label: 'Sub-Admins',
+          value: _problemService.subAdmins.length,
+          icon: Icons.supervisor_account_rounded,
+          onTap: () => setState(() => _selectedNavIndex = 9),
+        ),
+        AdminStatCardData(
+          id: 'districts',
+          label: 'Districts',
+          value: _problemService.districts.length,
+          icon: Icons.map_rounded,
+          onTap: () => setState(() => _selectedNavIndex = 14),
+        ),
+        AdminStatCardData(
+          id: 'assignments',
+          label: 'Assignments & Audit',
+          value: _problemService.assignmentHistory.length,
+          icon: Icons.assignment_ind_rounded,
+          onTap: () => setState(() => _selectedNavIndex = 15),
+        ),
+      ],
+      clinicsAction: AdminQuickActionData(
+        id: 'clinics_owners',
+        label: 'Clinics & owners',
+        icon: Icons.star_border_rounded,
+        onTap: () => setState(() => _selectedNavIndex = 1),
+      ),
+      referralsAction: AdminQuickActionData(
+        id: 'referrals',
+        label: 'Referrals',
+        icon: Icons.medical_information_outlined,
+        onTap: () => setState(() => _selectedNavIndex = 11),
+      ),
+      sponsoredAction: AdminQuickActionData(
+        id: 'sponsored_ads',
+        label: 'Sponsored ads',
+        icon: Icons.campaign_outlined,
+        onTap: () => showAdminSponsoredAdsSheet(context, ads),
+      ),
+      smsAction: AdminQuickActionData(
+        id: 'sms_login',
+        label: 'SMS login',
+        icon: Icons.chat_bubble_outline_rounded,
+        onTap: () => showAdminSmsLoginSheet(context),
+      ),
+      ads: ads,
+      appointments: _overviewAppointments,
+      canViewPhone: true,
+      onAppointmentTap: (item) => showAdminAppointmentDetailsSheet(
+        context,
+        item,
+        canViewPhone: true,
+        onOpenSchedule: () => setState(() => _selectedNavIndex = 4),
+      ),
+      footer: _buildMobileSectionPillsBar(embedded: true),
+    );
   }
 
   // ==========================================
@@ -2913,6 +3247,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     final String status = (sa['status'] ?? 'ACTIVE').toString().toUpperCase();
                     final bool isActive = status == 'ACTIVE';
 
+                    final assignedDistricts = sa['assignedDistricts'] is List ? (sa['assignedDistricts'] as List) : [];
+                    final int assignedPatientsCount = (sa['assignedPatientsCount'] is int)
+                        ? sa['assignedPatientsCount']
+                        : int.tryParse(sa['assignedPatientsCount']?.toString() ?? '0') ?? 0;
+
                     List<String> permissions = [];
                     if (sa['permissions'] is List) {
                       for (final p in sa['permissions']) {
@@ -2976,7 +3315,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                         Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                           decoration: BoxDecoration(
-                                            color: isActive ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
+                                            color: isActive ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E8),
                                             borderRadius: BorderRadius.circular(8),
                                           ),
                                           child: Text(
@@ -3058,24 +3397,120 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               ),
                             ],
                           ),
+                          const SizedBox(height: 8),
+
+                          // Assigned Districts
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Districts:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.textMuted)),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: assignedDistricts.isEmpty
+                                    ? const Text('None assigned (Unrestricted / All)', style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Color(0xFF64748B)))
+                                    : Wrap(
+                                        spacing: 6,
+                                        runSpacing: 4,
+                                        children: assignedDistricts.map((d) {
+                                          final dName = d is Map ? (d['name'] ?? 'District').toString() : d.toString();
+                                          return Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF012A58).withValues(alpha: 0.08),
+                                              borderRadius: BorderRadius.circular(6),
+                                              border: Border.all(color: const Color(0xFF012A58).withValues(alpha: 0.2)),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(Icons.location_on_rounded, size: 10, color: Color(0xFF012A58)),
+                                                const SizedBox(width: 3),
+                                                Text(
+                                                  dName,
+                                                  style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF012A58)),
+                                                ),
+                                              ],
+                                            ),
+                                          );
+                                        }).toList(),
+                                      ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+
+                          // Assigned Patients Count Badge
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF1F5F9),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  '👥 $assignedPatientsCount Patients Assigned',
+                                  style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
+                                ),
+                              ),
+                            ],
+                          ),
                           const SizedBox(height: 12),
 
-                          // Action Buttons: Edit Permissions & Remove
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
+                          // Action Buttons: Assign Districts, History, Edit Roles & Delete
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            alignment: WrapAlignment.end,
                             children: [
                               OutlinedButton.icon(
-                                icon: const Icon(Icons.edit_rounded, size: 14),
-                                label: const Text('Edit Details & Roles', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                icon: const Icon(Icons.share_location_rounded, size: 13),
+                                label: const Text('Assign Districts', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: const Color(0xFF012A58),
+                                  side: const BorderSide(color: Color(0xFF012A58)),
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                                onPressed: () async {
+                                  final ok = await GsHealthSubAdminDistrictDialog.show(
+                                    context,
+                                    subAdmin: sa,
+                                    problemService: _problemService,
+                                  );
+                                  if (ok == true && mounted) {
+                                    setState(() {});
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('✓ Districts updated for "$name".'),
+                                        backgroundColor: const Color(0xFF10B981),
+                                      ),
+                                    );
+                                  }
+                                },
+                              ),
+                              OutlinedButton.icon(
+                                icon: const Icon(Icons.history_rounded, size: 13),
+                                label: const Text('History', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: const Color(0xFF0284C7),
+                                  side: const BorderSide(color: Color(0xFF0284C7)),
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                                onPressed: () => _showSubAdminAssignmentHistoryModal(context, sa),
+                              ),
+                              OutlinedButton.icon(
+                                icon: const Icon(Icons.edit_rounded, size: 13),
+                                label: const Text('Edit Roles', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                                 style: OutlinedButton.styleFrom(
                                   foregroundColor: const Color(0xFF6366F1),
                                   side: const BorderSide(color: Color(0xFF6366F1)),
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                 ),
                                 onPressed: () => _showEditSubAdminModal(context, sa),
                               ),
-                              const SizedBox(width: 8),
                               InkWell(
                                 borderRadius: BorderRadius.circular(8),
                                 onTap: () => _confirmRemoveSubAdmin(context, saId, name),
@@ -3123,6 +3558,103 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
           ),
         ),
       ),
+    );
+  }
+
+  void _showSubAdminAssignmentHistoryModal(BuildContext context, Map<String, dynamic> sa) {
+    final saId = (sa['id'] ?? '').toString();
+    final name = (sa['name'] ?? 'Sub-Admin').toString();
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return FutureBuilder<List<dynamic>>(
+          future: ApiService().fetchSubAdminAssignmentHistory(saId),
+          builder: (ctx, snapshot) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF012A58).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.history_rounded, color: Color(0xFF012A58), size: 20),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Assignments by $name',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const Text(
+                          'Audit records of patients routed by this Sub-Admin',
+                          style: TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              content: SizedBox(
+                width: 480,
+                height: 360,
+                child: snapshot.connectionState == ConnectionState.waiting
+                    ? const Center(child: CircularProgressIndicator(color: Color(0xFF012A58)))
+                    : (snapshot.data == null || snapshot.data!.isEmpty)
+                        ? const Center(
+                            child: Text(
+                              'No patient assignments recorded by this sub-admin yet.',
+                              style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                            ),
+                          )
+                        : ListView.separated(
+                            itemCount: snapshot.data!.length,
+                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            itemBuilder: (ctx, idx) {
+                              final item = snapshot.data![idx];
+                              final pName = (item['patient_name'] ?? (item['patient'] is Map ? item['patient']['name'] : '') ?? 'Patient').toString();
+                              final dName = (item['dentist_name'] ?? (item['dentist'] is Map ? item['dentist']['name'] : '') ?? 'Doctor').toString();
+                              final dClinic = (item['clinic_name'] ?? (item['clinic'] is Map ? item['clinic']['clinic_name'] : '') ?? '').toString();
+                              final date = (item['created_at'] ?? '').toString();
+                              return ListTile(
+                                leading: CircleAvatar(
+                                  radius: 16,
+                                  backgroundColor: const Color(0xFF012A58).withValues(alpha: 0.08),
+                                  child: Text(
+                                    pName.isNotEmpty ? pName[0].toUpperCase() : 'P',
+                                    style: const TextStyle(fontSize: 12, color: Color(0xFF012A58), fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                                title: Text(pName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                subtitle: Text(
+                                  'Assigned to $dName${dClinic.isNotEmpty ? " • $dClinic" : ""}',
+                                  style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                                ),
+                                trailing: Text(
+                                  date.length >= 10 ? date.substring(0, 10) : '',
+                                  style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                                ),
+                              );
+                            },
+                          ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogCtx).pop(),
+                  child: const Text('Close'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
@@ -3181,6 +3713,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     String status = 'ACTIVE';
 
     final Set<String> selectedPerms = Set.from(AppPermissions.defaultPermissions);
+    final Set<String> selectedDistrictIds = {};
 
     const availableLanguages = [
       'English',
@@ -3368,6 +3901,40 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             ),
                             const SizedBox(height: 16),
 
+                            // District Jurisdiction Selection
+                            const Text('Assigned District Jurisdiction', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark)),
+                            const SizedBox(height: 4),
+                            const Text('Select one or more districts assigned to this Sub-Admin.', style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+                            const SizedBox(height: 8),
+                            _problemService.districts.isEmpty
+                                ? const Text('No districts registered yet. Districts can be assigned anytime.', style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: AppTheme.textMuted))
+                                : Wrap(
+                                    spacing: 6,
+                                    runSpacing: 6,
+                                    children: _problemService.districts.map((d) {
+                                      final dId = (d['id'] ?? '').toString();
+                                      final dName = (d['name'] ?? 'District').toString();
+                                      final isSelected = selectedDistrictIds.contains(dId);
+                                      return FilterChip(
+                                        label: Text(dName, style: TextStyle(fontSize: 11.5, color: isSelected ? Colors.white : const Color(0xFF1E293B))),
+                                        selected: isSelected,
+                                        selectedColor: const Color(0xFF012A58),
+                                        checkmarkColor: Colors.white,
+                                        backgroundColor: const Color(0xFFF1F5F9),
+                                        onSelected: (val) {
+                                          setModalState(() {
+                                            if (val) {
+                                              selectedDistrictIds.add(dId);
+                                            } else {
+                                              selectedDistrictIds.remove(dId);
+                                            }
+                                          });
+                                        },
+                                      );
+                                    }).toList(),
+                                  ),
+                            const SizedBox(height: 16),
+
                             // Permission Selector Section
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -3492,6 +4059,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     pincode: pincode.isNotEmpty ? pincode : '500032',
                                     languages: [selectedSubAdminLanguage],
                                     permissions: selectedPerms.toList(),
+                                    districtIds: selectedDistrictIds.isNotEmpty ? selectedDistrictIds.toList() : null,
                                     status: status,
                                   );
 
@@ -5816,6 +6384,67 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
             ),
           ),
           const SizedBox(height: 16),
+
+          if (_showPendingVerificationOnly) ...[
+            Builder(
+              builder: (context) {
+                final pendingList = _problemService.allDoctors.where(isPendingVerificationDoctor).toList();
+                return Container(
+                  key: const Key('admin_pending_verification_panel'),
+                  margin: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppTheme.gsRed.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppTheme.gsRed.withValues(alpha: 0.3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.verified_user_outlined, color: AppTheme.gsRed, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Dentists pending verification (${pendingList.length})',
+                              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: AppTheme.gsNavy),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () => setState(() => _showPendingVerificationOnly = false),
+                            child: const Text('Show all', style: TextStyle(color: AppTheme.gsNavy, fontWeight: FontWeight.w700)),
+                          ),
+                        ],
+                      ),
+                      if (pendingList.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.only(top: 6),
+                          child: Text(
+                            'No dentists currently pending verification.',
+                            style: TextStyle(fontSize: 12.5, color: AppTheme.textMedium),
+                          ),
+                        )
+                      else
+                        ...pendingList.map(
+                          (doc) => ListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(doc.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                            subtitle: Text('${doc.specialty} · ${doc.verificationStatus}', style: const TextStyle(fontSize: 11.5)),
+                            trailing: TextButton(
+                              onPressed: () => _showEditDoctorFeeAndSlotsDialog(context, doc),
+                              child: const Text('Verify'),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ],
 
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,

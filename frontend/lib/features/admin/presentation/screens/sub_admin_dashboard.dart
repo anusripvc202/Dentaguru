@@ -5,9 +5,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/constants/permissions.dart';
+import '../../../../core/services/api_service.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/session_service.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../widgets/gs_health_admin_overview.dart';
 
 class SubAdminDashboardScreen extends StatefulWidget {
   const SubAdminDashboardScreen({super.key});
@@ -21,6 +23,9 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
   final PatientProblemService _service = PatientProblemService();
 
   int _selectedTabIndex = 0;
+  bool _isOverviewLoading = false;
+  String? _overviewError;
+  List<AdminAppointmentItem> _overviewAppointments = const [];
   Timer? _autoSyncTimer;
   RealtimeChannel? _realtimeChannel;
 
@@ -69,7 +74,44 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
           .subscribe();
     } catch (_) {}
 
-    _service.syncAllDataFromApi();
+    _refreshOverviewData();
+  }
+
+  Future<void> _refreshOverviewData() async {
+    if (mounted) {
+      setState(() {
+        _isOverviewLoading = true;
+        _overviewError = null;
+      });
+    }
+    try {
+      await _service.syncAllDataFromApi();
+      List<AdminAppointmentItem> items = const [];
+      if (_service.hasPermission(AppPermissions.appointmentView)) {
+        final rows = await ApiService().fetchAllAppointmentsForAdmin();
+        items = rows
+            .whereType<Map>()
+            .map(
+              (r) => AdminAppointmentItem.fromRow(
+                r,
+                patients: _service.allPatients,
+                doctors: _service.allDoctors,
+              ),
+            )
+            .toList();
+      }
+      if (!mounted) return;
+      setState(() {
+        _overviewAppointments = items;
+        _isOverviewLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _overviewError = e.toString().replaceFirst('Exception: ', '');
+        _isOverviewLoading = false;
+      });
+    }
   }
 
   @override
@@ -148,176 +190,109 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
   @override
   Widget build(BuildContext context) {
     final permittedModules = _getPermittedModules();
+    final tabs = permittedModules.isEmpty
+        ? const <_NavModule>[]
+        : <_NavModule>[
+            const _NavModule(
+              key: 'overview',
+              label: 'Overview',
+              icon: Icons.grid_view_rounded,
+            ),
+            ...permittedModules,
+          ];
 
-    if (_selectedTabIndex >= permittedModules.length) {
+    if (_selectedTabIndex >= tabs.length) {
       _selectedTabIndex = 0;
     }
+
+    final subAdminNotifs = _service.appNotifications
+        .where((n) => n.recipientRole == 'Sub-Admin' || n.recipientRole == 'Admin' || n.recipientId == 'ALL_ADMINS')
+        .toList();
+    final unreadCount = subAdminNotifs.where((n) => !n.isRead).length;
 
     return GestureDetector(
       onTap: () => FocusScope.of(context).unfocus(),
       behavior: HitTestBehavior.translucent,
       child: Scaffold(
         backgroundColor: const Color(0xFFF8FAFC),
-        appBar: _buildSubAdminAppBar(context),
+        appBar: null,
         body: FadeTransition(
           opacity: _fadeAnimation,
           child: SlideTransition(
             position: _slideAnimation,
             child: Column(
               children: [
-                _buildSubAdminHeader(),
-                if (permittedModules.isEmpty)
+                GsHealthAdminHeader(
+                  subtitle: 'Sub-Admin console',
+                  title: 'GS HEALTH',
+                  unreadCount: unreadCount,
+                  onNotifications: () => showAdminNotificationsSheet(
+                    context,
+                    notifications: subAdminNotifs,
+                    onMarkAllRead: () => _service.markAllNotificationsRead('Sub-Admin'),
+                  ),
+                  onProfile: () => _showSubAdminProfileSheet(context),
+                ),
+                _buildAssignedDistrictsHeaderBar(),
+                if (tabs.isEmpty)
                   Expanded(child: _buildNoPermissionsRestrictedState())
                 else ...[
-                  _buildModuleTabBar(permittedModules),
-                  Expanded(child: _buildSelectedModuleContent(permittedModules[_selectedTabIndex].key)),
+                  if (_selectedTabIndex != 0) _buildModuleTabBar(tabs),
+                  Expanded(
+                    child: _buildSelectedModuleContent(tabs[_selectedTabIndex].key, tabs),
+                  ),
                 ],
               ],
             ),
           ),
         ),
+        bottomNavigationBar: tabs.isEmpty ? null : _buildSubAdminBottomNav(tabs),
       ),
     );
   }
 
-  PreferredSizeWidget _buildSubAdminAppBar(BuildContext context) {
-    return AppBar(
-      elevation: 0,
-      backgroundColor: Colors.white,
-      titleSpacing: 16,
-      title: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF6366F1), Color(0xFF818CF8)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(Icons.shield_outlined, color: Colors.white, size: 20),
-          ),
-          const SizedBox(width: 10),
-          const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'GS HEALTH Sub-Admin',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-              ),
-              Text(
-                'Role-Based Workspace',
-                style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
-              ),
-            ],
-          ),
-        ],
-      ),
-      actions: [
-        IconButton(
-          tooltip: 'Sync Data',
-          icon: const Icon(Icons.sync_rounded, color: Color(0xFF6366F1)),
-          onPressed: () async {
-            await _service.syncAllDataFromApi();
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('⚡ Sub-Admin data synchronized with cloud.'),
-                  duration: Duration(seconds: 1),
-                  backgroundColor: Color(0xFF6366F1),
-                ),
-              );
-            }
-          },
-        ),
-        IconButton(
-          tooltip: 'Log Out',
-          icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
-          onPressed: () => _handleLogout(context),
-        ),
-        const SizedBox(width: 8),
-      ],
-    );
-  }
-
-  Widget _buildSubAdminHeader() {
-    final name = _service.subAdminName.isNotEmpty ? _service.subAdminName : 'Sub-Admin';
-    final email = _service.subAdminEmail;
-    final permsCount = _service.subAdminPermissions.length;
-
+  Widget _buildAssignedDistrictsHeaderBar() {
+    final districts = _service.subAdminDistricts;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Colors.grey.withValues(alpha: 0.15))),
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: const Color(0xFF012A58),
       child: Row(
         children: [
-          CircleAvatar(
-            backgroundColor: const Color(0xFF6366F1).withValues(alpha: 0.15),
-            radius: 20,
-            child: Text(
-              name.isNotEmpty ? name[0].toUpperCase() : 'S',
-              style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF6366F1), fontSize: 16),
-            ),
+          const Icon(Icons.location_on_rounded, color: Color(0xFFFE3434), size: 16),
+          const SizedBox(width: 6),
+          const Text(
+            'Assigned Territory: ',
+            style: TextStyle(color: Colors.white70, fontSize: 11.5, fontWeight: FontWeight.bold),
           ),
-          const SizedBox(width: 12),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        name,
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFEDE9FE),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: const Text(
-                        'Sub-Admin',
-                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF6D28D9)),
-                      ),
-                    ),
-                  ],
-                ),
-                if (email.isNotEmpty)
-                  Text(
-                    email,
-                    style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+            child: districts.isEmpty
+                ? const Text(
+                    'All Districts (Global Jurisdiction)',
+                    style: TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w600),
                     overflow: TextOverflow.ellipsis,
+                  )
+                : SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    child: Row(
+                      children: districts.map((d) {
+                        final name = (d['name'] ?? 'District').toString();
+                        return Container(
+                          margin: const EdgeInsets.only(right: 6),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            name,
+                            style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.bold),
+                          ),
+                        );
+                      }).toList(),
+                    ),
                   ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: const Color(0xFFDCFCE7),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.lock_open_rounded, size: 12, color: Color(0xFF16A34A)),
-                const SizedBox(width: 4),
-                Text(
-                  '$permsCount Active Role${permsCount == 1 ? '' : 's'}',
-                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF16A34A)),
-                ),
-              ],
-            ),
           ),
         ],
       ),
@@ -352,7 +327,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   decoration: BoxDecoration(
-                    color: isSelected ? const Color(0xFF6366F1) : const Color(0xFFF1F5F9),
+                    color: isSelected ? AppTheme.gsNavy : const Color(0xFFF1F5F9),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Row(
@@ -401,8 +376,10 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
     );
   }
 
-  Widget _buildSelectedModuleContent(String moduleKey) {
+  Widget _buildSelectedModuleContent(String moduleKey, List<_NavModule> tabs) {
     switch (moduleKey) {
+      case 'overview':
+        return _buildSubAdminOverview(tabs);
       case 'assignments':
         return _buildAssignmentsModule();
       case 'problems':
@@ -420,16 +397,365 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
     }
   }
 
+  void _showRestrictedMessage(String area) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('Access restricted: your Sub-Admin role cannot open $area.'),
+          backgroundColor: AppTheme.gsRed,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+  }
+
+  void _switchToModuleKey(List<_NavModule> tabs, String moduleKey, String restrictedLabel) {
+    final idx = tabs.indexWhere((t) => t.key == moduleKey);
+    if (idx >= 0) {
+      setState(() => _selectedTabIndex = idx);
+    } else {
+      _showRestrictedMessage(restrictedLabel);
+    }
+  }
+
+  int _subAdminBottomNavIndex(List<_NavModule> tabs) {
+    if (_selectedTabIndex < 0 || _selectedTabIndex >= tabs.length) return 0;
+    final key = tabs[_selectedTabIndex].key;
+    if (key == 'assignments' || key == 'problems') return 1;
+    if (key == 'dentists') return 2;
+    if (key == 'patients') return 3;
+    return 0;
+  }
+
+  Widget _buildSubAdminBottomNav(List<_NavModule> tabs) {
+    return BottomNavigationBar(
+      type: BottomNavigationBarType.fixed,
+      backgroundColor: Colors.white,
+      currentIndex: _subAdminBottomNavIndex(tabs),
+      selectedItemColor: AppTheme.gsNavy,
+      unselectedItemColor: AppTheme.textMuted,
+      selectedFontSize: 11,
+      unselectedFontSize: 11,
+      selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w700),
+      onTap: (index) {
+        if (index == 0) {
+          setState(() => _selectedTabIndex = 0);
+        } else if (index == 1) {
+          if (_service.hasPermission(AppPermissions.assignmentView)) {
+            _switchToModuleKey(tabs, 'assignments', 'requests & assignments');
+          } else {
+            _switchToModuleKey(tabs, 'problems', 'requests & inquiry pool');
+          }
+        } else if (index == 2) {
+          _switchToModuleKey(tabs, 'dentists', 'dentists directory');
+        } else if (index == 3) {
+          _switchToModuleKey(tabs, 'patients', 'patients directory');
+        }
+      },
+      items: const [
+        BottomNavigationBarItem(
+          icon: Icon(Icons.grid_view_outlined),
+          activeIcon: Icon(Icons.grid_view_rounded),
+          label: 'Overview',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.inbox_outlined),
+          activeIcon: Icon(Icons.inbox_rounded),
+          label: 'Requests',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.medical_services_outlined),
+          activeIcon: Icon(Icons.medical_services_rounded),
+          label: 'Dentists',
+        ),
+        BottomNavigationBarItem(
+          icon: Icon(Icons.people_outline_rounded),
+          activeIcon: Icon(Icons.people_alt_rounded),
+          label: 'Patients',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSubAdminOverview(List<_NavModule> tabs) {
+    final canAssignView = _service.hasPermission(AppPermissions.assignmentView);
+    final canAssignCreate = _service.hasPermission(AppPermissions.assignmentCreate);
+    final canProblemView = _service.hasPermission(AppPermissions.problemView);
+    final canPatientView = _service.hasPermission(AppPermissions.patientView);
+    final canDentistView = _service.hasPermission(AppPermissions.dentistView);
+    final canAppointmentView = _service.hasPermission(AppPermissions.appointmentView);
+    final canReportView = _service.hasPermission(AppPermissions.reportView);
+
+    final filteredRequests = _service.getRequestsForCurrentRole();
+    final filteredPatients = _service.getPatientsForCurrentRole();
+    final filteredDoctors = _service.getDentistsForCurrentRole();
+
+    final waiting = waitingConsultationRequests(filteredRequests);
+    final pendingDocs = filteredDoctors.where(isPendingVerificationDoctor).toList();
+    final ads = sponsoredAdsForOverview();
+
+    return GsHealthAdminOverview(
+      isLoading: _isOverviewLoading,
+      errorMessage: _overviewError,
+      onRetry: _refreshOverviewData,
+      onRefresh: _refreshOverviewData,
+      waitingCount: (canAssignView || canProblemView || canAssignCreate) ? waiting.length : 0,
+      assignRestricted: !canAssignCreate,
+      onAssign: canAssignCreate
+          ? () {
+              if (canAssignView) {
+                _switchToModuleKey(tabs, 'assignments', 'requests');
+              } else if (canProblemView) {
+                _switchToModuleKey(tabs, 'problems', 'inquiry pool');
+              } else if (waiting.isNotEmpty) {
+                _showAssignDoctorModal(context, waiting.first);
+              }
+            }
+          : null,
+      stats: [
+        AdminStatCardData(
+          id: 'waiting',
+          label: 'Requests awaiting a doctor',
+          value: (canAssignView || canProblemView) ? waiting.length : null,
+          restricted: !(canAssignView || canProblemView),
+          icon: Icons.hourglass_bottom_rounded,
+          accentRed: true,
+          onTap: () {
+            if (canAssignView) {
+              _switchToModuleKey(tabs, 'assignments', 'requests');
+            } else if (canProblemView) {
+              _switchToModuleKey(tabs, 'problems', 'inquiry pool');
+            } else {
+              _showRestrictedMessage('consultation requests');
+            }
+          },
+        ),
+        AdminStatCardData(
+          id: 'pending_doctors',
+          label: 'Dentists pending verification',
+          value: canDentistView ? pendingDocs.length : null,
+          restricted: !canDentistView,
+          icon: Icons.verified_user_outlined,
+          accentRed: pendingDocs.isNotEmpty,
+          onTap: () => canDentistView
+              ? _switchToModuleKey(tabs, 'dentists', 'dentists directory')
+              : _showRestrictedMessage('dentists directory'),
+        ),
+        AdminStatCardData(
+          id: 'patients',
+          label: 'Patients',
+          value: canPatientView ? filteredPatients.length : null,
+          restricted: !canPatientView,
+          icon: Icons.people_outline_rounded,
+          onTap: () => canPatientView
+              ? _switchToModuleKey(tabs, 'patients', 'patients directory')
+              : _showRestrictedMessage('patients directory'),
+        ),
+        AdminStatCardData(
+          id: 'dentists',
+          label: 'Dentists',
+          value: canDentistView ? filteredDoctors.length : null,
+          restricted: !canDentistView,
+          icon: Icons.medical_services_outlined,
+          onTap: () => canDentistView
+              ? _switchToModuleKey(tabs, 'dentists', 'dentists directory')
+              : _showRestrictedMessage('dentists directory'),
+        ),
+        AdminStatCardData(
+          id: 'clinics',
+          label: 'Clinics',
+          value: (canDentistView || canReportView) ? _service.allClinics.length : null,
+          restricted: !(canDentistView || canReportView),
+          icon: Icons.local_hospital_outlined,
+          accentRed: true,
+          onTap: () {
+            if (canDentistView) {
+              _switchToModuleKey(tabs, 'dentists', 'dentists & clinics');
+            } else if (canReportView) {
+              _switchToModuleKey(tabs, 'reports', 'reports');
+            } else {
+              _showRestrictedMessage('clinics');
+            }
+          },
+        ),
+        AdminStatCardData(
+          id: 'appointments',
+          label: 'Appointments',
+          value: canAppointmentView ? _overviewAppointments.length : null,
+          restricted: !canAppointmentView,
+          icon: Icons.calendar_today_outlined,
+          onTap: () => canAppointmentView
+              ? _switchToModuleKey(tabs, 'appointments', 'appointments')
+              : _showRestrictedMessage('appointments'),
+        ),
+      ],
+      clinicsAction: AdminQuickActionData(
+        id: 'clinics_owners',
+        label: 'Clinics & owners',
+        icon: Icons.star_border_rounded,
+        restricted: !canDentistView,
+        onTap: () => canDentistView
+            ? _switchToModuleKey(tabs, 'dentists', 'clinics & dentists')
+            : _showRestrictedMessage('clinics & owners'),
+      ),
+      referralsAction: AdminQuickActionData(
+        id: 'referrals',
+        label: 'Referrals',
+        icon: Icons.medical_information_outlined,
+        restricted: !canAssignView,
+        onTap: () => canAssignView
+            ? _switchToModuleKey(tabs, 'assignments', 'referrals')
+            : _showRestrictedMessage('referrals'),
+      ),
+      sponsoredAction: AdminQuickActionData(
+        id: 'sponsored_ads',
+        label: 'Sponsored ads',
+        icon: Icons.campaign_outlined,
+        restricted: true,
+        onTap: () => _showRestrictedMessage('sponsored ads management'),
+      ),
+      smsAction: AdminQuickActionData(
+        id: 'sms_login',
+        label: 'SMS login',
+        icon: Icons.chat_bubble_outline_rounded,
+        restricted: true,
+        onTap: () => _showRestrictedMessage('SMS login management'),
+      ),
+      ads: ads,
+      appointments: canAppointmentView ? _overviewAppointments : const [],
+      appointmentsRestricted: !canAppointmentView,
+      canViewPhone: canPatientView,
+      onAppointmentTap: canAppointmentView
+          ? (item) => showAdminAppointmentDetailsSheet(
+                context,
+                item,
+                canViewPhone: canPatientView,
+                onOpenSchedule: () => _switchToModuleKey(tabs, 'appointments', 'appointments'),
+              )
+          : null,
+      footer: tabs.length > 1 ? _buildModuleTabBar(tabs) : null,
+    );
+  }
+
+  void _showSubAdminProfileSheet(BuildContext outerContext) {
+    final name = _service.subAdminName.isNotEmpty ? _service.subAdminName : 'Sub-Admin';
+    final email = _service.subAdminEmail.isNotEmpty ? _service.subAdminEmail : 'No email configured';
+    final perms = _service.subAdminPermissions;
+
+    showModalBottomSheet<void>(
+      context: outerContext,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetCtx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: AppTheme.gsNavy.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.verified_user_rounded, color: AppTheme.gsNavy),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          name,
+                          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: AppTheme.gsNavy),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          email,
+                          style: const TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => Navigator.of(sheetCtx).pop(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Granted permissions (${perms.length})',
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppTheme.gsNavy),
+              ),
+              const SizedBox(height: 8),
+              if (perms.isEmpty)
+                const Text(
+                  'No module permissions assigned. Contact Primary Admin.',
+                  style: TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
+                )
+              else
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: perms
+                      .map(
+                        (p) => Chip(
+                          label: Text(p, style: const TextStyle(fontSize: 11.5, color: AppTheme.gsNavy, fontWeight: FontWeight.w600)),
+                          backgroundColor: const Color(0xFFF1F5F9),
+                          side: const BorderSide(color: Color(0xFFE2E8F0)),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      )
+                      .toList(),
+                ),
+              const SizedBox(height: 18),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.logout_rounded, color: AppTheme.gsRed),
+                  label: const Text(
+                    'Sign out',
+                    style: TextStyle(color: AppTheme.gsRed, fontWeight: FontWeight.w800),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: AppTheme.gsRed),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: () {
+                    Navigator.of(sheetCtx).pop();
+                    _handleLogout(outerContext);
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   // ==========================================
   // MODULE 1: DOCTOR ASSIGNMENT & REFERRALS
   // ==========================================
   Widget _buildAssignmentsModule() {
     final canAssign = _service.hasPermission(AppPermissions.assignmentCreate);
-    final allRequests = _service.requests;
+    final allRequests = _service.getRequestsForCurrentRole();
+    final rolePatients = _service.getPatientsForCurrentRole();
     final filtered = allRequests.where((r) {
       final pName = r.patientName.isNotEmpty ? r.patientName : 'Patient';
-      final pCity = r.getDisplayCity(_service.allPatients);
-      final pPin = r.getDisplayPincode(_service.allPatients);
+      final pCity = r.getDisplayCity(rolePatients);
+      final pPin = r.getDisplayPincode(rolePatients);
       final matchSearch = _requestSearch.isEmpty ||
           pName.toLowerCase().contains(_requestSearch.toLowerCase()) ||
           r.problemDescription.toLowerCase().contains(_requestSearch.toLowerCase()) ||
@@ -622,7 +948,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
   // ==========================================
   Widget _buildProblemsModule() {
     final canUpdate = _service.hasPermission(AppPermissions.problemUpdate);
-    final requests = _service.requests;
+    final requests = _service.getRequestsForCurrentRole();
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -719,7 +1045,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
   // MODULE 3: PATIENT DIRECTORY
   // ==========================================
   Widget _buildPatientsModule() {
-    final patients = _service.allPatients.where((p) {
+    final patients = _service.getPatientsForCurrentRole().where((p) {
       final match = _patientSearch.isEmpty ||
           p.name.toLowerCase().contains(_patientSearch.toLowerCase()) ||
           p.email.toLowerCase().contains(_patientSearch.toLowerCase()) ||
@@ -803,7 +1129,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
   // MODULE 4: DENTIST & CLINIC DIRECTORY
   // ==========================================
   Widget _buildDentistsModule() {
-    final doctors = _service.allDoctors.where((d) {
+    final doctors = _service.getDentistsForCurrentRole().where((d) {
       final match = _dentistSearch.isEmpty ||
           d.name.toLowerCase().contains(_dentistSearch.toLowerCase()) ||
           d.specialty.toLowerCase().contains(_dentistSearch.toLowerCase()) ||
@@ -923,14 +1249,45 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
   // MODULE 5: APPOINTMENTS
   // ==========================================
   Widget _buildAppointmentsModule() {
+    if (!_service.hasPermission(AppPermissions.appointmentView)) {
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: _buildEmptyCard('Your role does not include viewing appointments.', Icons.lock_outline_rounded),
+      );
+    }
+    final canViewPhone = _service.hasPermission(AppPermissions.patientView);
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          _buildEmptyCard('Appointment schedules and status monitoring are active.', Icons.calendar_month_outlined),
-        ],
-      ),
+      child: _overviewAppointments.isEmpty
+          ? _buildEmptyCard('No appointments yet.', Icons.calendar_month_outlined)
+          : Column(
+              children: _overviewAppointments
+                  .map(
+                    (a) => Card(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      child: ListTile(
+                        title: Text(a.patientName, style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.gsNavy)),
+                        subtitle: Text(
+                          [
+                            if (a.dateRaw.isNotEmpty) a.dateRaw,
+                            if (a.timeSlot.isNotEmpty) a.timeSlot,
+                            if (a.dentistName.isNotEmpty) a.dentistName,
+                            if (canViewPhone && a.phone.isNotEmpty) a.phone,
+                          ].join(' · '),
+                        ),
+                        trailing: Text(a.status.toUpperCase(), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.gsNavy)),
+                        onTap: () => showAdminAppointmentDetailsSheet(
+                          context,
+                          a,
+                          canViewPhone: canViewPhone,
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(),
+            ),
     );
   }
 
@@ -938,10 +1295,13 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
   // MODULE 6: REPORTS & OVERVIEW
   // ==========================================
   Widget _buildReportsModule() {
-    final totalPatients = _service.allPatients.length;
-    final totalDoctors = _service.allDoctors.length;
-    final totalRequests = _service.requests.length;
-    final assignedCount = _service.requests.where((r) => r.assignedDoctorId != null && r.assignedDoctorId!.isNotEmpty).length;
+    final rolePatients = _service.getPatientsForCurrentRole();
+    final roleDoctors = _service.getDentistsForCurrentRole();
+    final roleRequests = _service.getRequestsForCurrentRole();
+    final totalPatients = rolePatients.length;
+    final totalDoctors = roleDoctors.length;
+    final totalRequests = roleRequests.length;
+    final assignedCount = roleRequests.where((r) => r.assignedDoctorId != null && r.assignedDoctorId!.isNotEmpty).length;
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
