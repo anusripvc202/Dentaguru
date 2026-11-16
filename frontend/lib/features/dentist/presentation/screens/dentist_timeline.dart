@@ -17,6 +17,7 @@ import '../../../../core/models/prescription_template_model.dart';
 import '../../../admin/presentation/widgets/doctor_slot_management_dialog.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'doctor_patient_record_screen.dart';
+import 'doctor_profile_screen.dart';
 
 typedef DentistTimeline = DentistTimelineScreen;
 
@@ -1361,7 +1362,9 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                     // Profile Button
                     InkWell(
                       key: const Key('dentist_profile_button'),
-                      onTap: () => _showDentistProfileSheet(context),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const DoctorProfileScreen()),
+                      ),
                       borderRadius: BorderRadius.circular(24),
                       child: Container(
                         width: 44,
@@ -1863,164 +1866,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   }
 
   void _showDentistProfileSheet(BuildContext context) {
-    final doc = _resolveCurrentDoctor();
-    final authUser = _safeAuthUser;
-    final docName = (doc?.name.isNotEmpty == true)
-        ? doc!.name
-        : ((authUser?.userMetadata?['name'] ?? 'Dentist').toString());
-    final docSpec = (doc?.specialty.isNotEmpty == true) ? doc!.specialty : 'Dental Specialist';
-    final docClinic = (doc?.clinicName.isNotEmpty == true) ? doc!.clinicName : 'GS HEALTH Care Center';
-    final docPhone = (doc?.phone.isNotEmpty == true) ? doc!.phone : '';
-    final docEmail = (doc?.email.isNotEmpty == true) ? doc!.email : (authUser?.email ?? '');
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (sheetCtx) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 42,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFCBD5E1),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Container(
-                  width: 68,
-                  height: 68,
-                  decoration: BoxDecoration(
-                    color: AppTheme.gsNavy,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Center(
-                    child: Icon(Icons.person_rounded, color: Colors.white, size: 34),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  docName,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF0F172A),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '$docSpec · $docClinic',
-                  style: const TextStyle(
-                    fontSize: 13.5,
-                    color: Color(0xFF64748B),
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                if (docPhone.isNotEmpty || docEmail.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    [if (docPhone.isNotEmpty) docPhone, if (docEmail.isNotEmpty) docEmail].join(' · '),
-                    style: const TextStyle(fontSize: 12.5, color: Color(0xFF64748B)),
-                  ),
-                ],
-                const SizedBox(height: 20),
-                ListTile(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  tileColor: const Color(0xFFF8FAFC),
-                  leading: const Icon(Icons.edit_calendar_rounded, color: AppTheme.gsNavy),
-                  title: const Text(
-                    'Edit Profile, Specialty & Fee',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-                  ),
-                  trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () {
-                    Navigator.of(sheetCtx).pop();
-                    _showUpdateMyFeeAndSlotsDialog(context);
-                  },
-                ),
-                const SizedBox(height: 8),
-                ListTile(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  tileColor: const Color(0xFFF8FAFC),
-                  leading: const Icon(Icons.schedule_rounded, color: AppTheme.gsNavy),
-                  title: const Text(
-                    'Manage Working Days & Slots',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-                  ),
-                  trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () {
-                    Navigator.of(sheetCtx).pop();
-                    DoctorSlotManagementDialog.show(
-                      context,
-                      initialDoctor: doc,
-                      isDoctorSelfManage: true,
-                    );
-                  },
-                ),
-                const SizedBox(height: 8),
-                ListTile(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  tileColor: const Color(0xFFF8FAFC),
-                  leading: const Icon(Icons.person_add_alt_1_rounded, color: AppTheme.gsNavy),
-                  title: const Text(
-                    'Add Colleague Dentist',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-                  ),
-                  trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () {
-                    Navigator.of(sheetCtx).pop();
-                    _showAddDentistDialog(context);
-                  },
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: OutlinedButton.icon(
-                    key: const Key('dentist_logout_button'),
-                    onPressed: () async {
-                      Navigator.of(sheetCtx).pop();
-                      await SessionService().clearSession();
-                      await _patientService.clearAllDataAndStorage();
-                      if (!mounted || !context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Logged out of Dentist workspace.'),
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
-                      context.go('/login');
-                    },
-                    icon: const Icon(Icons.logout_rounded, color: AppTheme.gsRed, size: 18),
-                    label: const Text(
-                      'Log out',
-                      style: TextStyle(
-                        color: AppTheme.gsRed,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 14.5,
-                      ),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: AppTheme.gsRed.withValues(alpha: 0.35)),
-                      backgroundColor: AppTheme.gsRed.withValues(alpha: 0.06),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const DoctorProfileScreen()),
     );
   }
 

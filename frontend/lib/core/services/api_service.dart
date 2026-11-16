@@ -5731,9 +5731,21 @@ class ApiService {
         if (updates['city'] != null) 'city': updates['city'],
         if (updates['pincode'] != null) 'pincode': updates['pincode'],
         if (updates['state'] != null) 'state': updates['state'],
+        if (updates['clinicName'] != null) 'clinic_name': updates['clinicName'],
+        if (updates['clinicAddress'] != null) 'clinic_address': updates['clinicAddress'],
+        if (updates['languages'] != null) 'languages': updates['languages'],
       };
       if (dbUpdates.isNotEmpty) {
         await client.from('dentists').update(dbUpdates).or('id.eq.$doctorId,user_id.eq.$doctorId');
+      }
+
+      if (updates['name'] != null || updates['phone'] != null) {
+        try {
+          await client.from('users').update({
+            if (updates['name'] != null) 'name': updates['name'],
+            if (updates['phone'] != null) 'phone': updates['phone'],
+          }).or('id.eq.$doctorId,user_id.eq.$doctorId');
+        } catch (_) {}
       }
       return true;
     } catch (e) {

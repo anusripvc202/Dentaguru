@@ -9,6 +9,7 @@ import '../../features/patient/presentation/screens/talk_to_dentist_now_screen.d
 import '../../features/patient/presentation/screens/ai_triage_screen.dart';
 import '../../features/dentist/presentation/screens/dentist_timeline.dart';
 import '../../features/dentist/presentation/screens/doctor_patient_record_screen.dart';
+import '../../features/dentist/presentation/screens/doctor_profile_screen.dart';
 import '../../features/clinic/presentation/screens/clinic_dashboard.dart';
 import '../../features/admin/presentation/screens/admin_dashboard.dart';
 import '../../features/admin/presentation/screens/sub_admin_dashboard.dart';
@@ -128,6 +129,10 @@ final GoRouter appRouter = GoRouter(
             : PatientProblemService().currentPatient;
         return DoctorPatientRecordScreen(patient: patient);
       },
+    ),
+    GoRoute(
+      path: '/dentist/profile',
+      builder: (context, state) => const DoctorProfileScreen(),
     ),
     GoRoute(
       path: '/clinic',

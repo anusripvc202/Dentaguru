@@ -3734,6 +3734,37 @@ class PatientProblemService extends ChangeNotifier {
     };
   }
 
+  /// Permanently delete currently logged-in Doctor account across Supabase & Express
+  Future<Map<String, dynamic>> deleteCurrentDoctorAccount() async {
+    final doc = currentDoctor;
+    final dId = doc?.id.trim() ?? '';
+    final uId = doc?.userId.trim() ?? '';
+    final dEmail = doc?.email.trim() ?? '';
+    final dPhone = doc?.phone.trim() ?? '';
+
+    if (dId.isNotEmpty) {
+      await ApiService().deleteDoctor(dId);
+    } else if (uId.isNotEmpty) {
+      await ApiService().deleteDoctor(uId);
+    }
+
+    try {
+      if (dEmail.isNotEmpty) {
+        await Supabase.instance.client.from('dentists').delete().ilike('email', dEmail);
+        await Supabase.instance.client.from('users').delete().ilike('email', dEmail);
+      } else if (dPhone.isNotEmpty) {
+        await Supabase.instance.client.from('dentists').delete().eq('phone', dPhone);
+        await Supabase.instance.client.from('users').delete().eq('phone', dPhone);
+      }
+    } catch (_) {}
+
+    await clearAllDataAndStorage();
+    return {
+      'success': true,
+      'message': 'Doctor account deleted successfully.',
+    };
+  }
+
   Future<void> submitProblem({
     required String problemCategory,
     required String problemDescription,
@@ -5537,10 +5568,12 @@ class PatientProblemService extends ChangeNotifier {
   Future<void> updateDoctorProfessionalProfile({
     required String doctorId,
     String? name,
+    String? phone,
     String? specialty,
     String? qualification,
     int? experienceYears,
     String? clinicName,
+    String? clinicAddress,
     String? consultationFee,
     String? licenseNumber,
     String? status,
@@ -5548,6 +5581,8 @@ class PatientProblemService extends ChangeNotifier {
     String? bio,
     String? city,
     String? pincode,
+    List<String>? languages,
+    Uint8List? photoBytes,
   }) async {
     int idx = _allDoctors.indexWhere((d) => d.id == doctorId || (d.userId.isNotEmpty && d.userId == doctorId));
     DoctorModel? baseDoc = idx != -1 ? _allDoctors[idx] : currentDoctor;
@@ -5563,20 +5598,20 @@ class PatientProblemService extends ChangeNotifier {
       rating: baseDoc.rating,
       reviewCount: baseDoc.reviewCount,
       clinicName: clinicName ?? baseDoc.clinicName,
-      phone: baseDoc.phone,
+      phone: phone ?? baseDoc.phone,
       email: baseDoc.email,
       status: status ?? baseDoc.status,
       verificationStatus: verificationStatus ?? baseDoc.verificationStatus,
       nextAvailableSlots: baseDoc.nextAvailableSlots,
       consultationFee: consultationFee ?? baseDoc.consultationFee,
       licenseNumber: licenseNumber ?? baseDoc.licenseNumber,
-      photoBytes: baseDoc.photoBytes,
-      clinicAddress: baseDoc.clinicAddress,
+      photoBytes: photoBytes ?? baseDoc.photoBytes,
+      clinicAddress: clinicAddress ?? baseDoc.clinicAddress,
       pincode: pincode ?? baseDoc.pincode,
       city: city ?? baseDoc.city,
       state: baseDoc.state,
       bio: bio ?? baseDoc.bio,
-      languages: baseDoc.languages,
+      languages: languages ?? baseDoc.languages,
       latitude: baseDoc.latitude,
       longitude: baseDoc.longitude,
       procedureFees: baseDoc.procedureFees,
@@ -5600,10 +5635,12 @@ class PatientProblemService extends ChangeNotifier {
 
     await ApiService().updateDoctorProfileApi(doctorId, {
       if (name != null) 'name': name,
+      if (phone != null) 'phone': phone,
       if (specialty != null) 'specialty': specialty,
       if (qualification != null) 'qualification': qualification,
       if (experienceYears != null) 'experienceYears': experienceYears,
       if (clinicName != null) 'clinicName': clinicName,
+      if (clinicAddress != null) 'clinicAddress': clinicAddress,
       if (consultationFee != null) 'consultationFee': consultationFee,
       if (licenseNumber != null) 'licenseNumber': licenseNumber,
       if (status != null) 'status': status,
@@ -5611,6 +5648,7 @@ class PatientProblemService extends ChangeNotifier {
       if (bio != null) 'bio': bio,
       if (city != null) 'city': city,
       if (pincode != null) 'pincode': pincode,
+      if (languages != null) 'languages': languages,
     });
   }
 
