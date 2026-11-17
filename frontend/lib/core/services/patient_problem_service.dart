@@ -935,6 +935,19 @@ class PatientProblemService extends ChangeNotifier {
     notifyListeners();
   }
 
+  PatientProfile? _pendingReferralPatient;
+  PatientProfile? get pendingReferralPatient => _pendingReferralPatient;
+
+  void setPendingReferralPatient(PatientProfile? p) {
+    _pendingReferralPatient = p;
+    notifyListeners();
+  }
+
+  void clearPendingReferralPatient() {
+    _pendingReferralPatient = null;
+    notifyListeners();
+  }
+
   // Helper to safely access auth user ID without throwing when uninitialized
   String? get _safeAuthUserId {
     try {
@@ -2865,14 +2878,14 @@ class PatientProblemService extends ChangeNotifier {
   Future<void> syncClinicsFromApi() async {
     try {
       final list = await ApiService().fetchClinics();
-      _allClinics.clear();
       if (list.isNotEmpty) {
+        _allClinics.clear();
         for (final item in list) {
           _allClinics.add(ClinicModel.fromJson(item));
         }
+        _saveToStorage();
+        notifyListeners();
       }
-      _saveToStorage();
-      notifyListeners();
     } catch (e) {
       debugPrint('Sync clinics error: $e');
     }

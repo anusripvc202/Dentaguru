@@ -436,17 +436,13 @@ void main() {
         );
 
         // ==========================================
-        // TAB 3: REFER (Refer a patient)
+        // TAB 3: REFER (Refer to a specialist)
         // ==========================================
         await tester.tap(find.text('Refer').last);
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 300));
 
-        expect(
-          find.text('Share details & files with a specialist or clinic'),
-          findsOneWidget,
-        );
-        expect(find.text('Refer a patient'), findsOneWidget);
+        expect(find.text('Refer to a specialist'), findsOneWidget);
         expect(find.byKey(const Key('refer_history_button')), findsOneWidget);
         expect(find.byKey(const Key('refer_type_specialist_pill')), findsOneWidget);
         expect(find.byKey(const Key('refer_type_clinic_pill')), findsOneWidget);

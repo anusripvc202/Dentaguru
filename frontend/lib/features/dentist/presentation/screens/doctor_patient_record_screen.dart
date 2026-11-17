@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../../../core/theme/app_theme.dart';
+import 'package:go_router/go_router.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/models/prescription_template_model.dart';
@@ -108,12 +108,12 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
       widget.onRefer!();
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Referral flow initiated for ${widget.patient.name}.'),
-        backgroundColor: AppTheme.gsNavy,
-      ),
-    );
+    PatientProblemService().setPendingReferralPatient(widget.patient);
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      context.go('/dentist');
+    }
   }
 
   void _showInternalPrescriptionModal(BuildContext context) {
