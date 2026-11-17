@@ -251,7 +251,7 @@ class _TalkToDentistNowScreenState extends State<TalkToDentistNowScreen> {
             ),
             const SizedBox(height: 14),
             const Text(
-              'No Dentists Online',
+              'No Doctors Online',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -260,7 +260,7 @@ class _TalkToDentistNowScreenState extends State<TalkToDentistNowScreen> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'All dentists are currently offline. You can run AI triage to evaluate your symptoms instantly, or queue your request for the next available dentist.',
+              'All doctors are currently offline. You can run AI triage to evaluate your symptoms instantly, or queue your request for the next available doctor.',
               style: TextStyle(fontSize: 13, color: Color(0xFF64748B), height: 1.4),
               textAlign: TextAlign.center,
             ),
@@ -306,7 +306,7 @@ class _TalkToDentistNowScreenState extends State<TalkToDentistNowScreen> {
                       problemCategory: 'General Consultation',
                       problemDescription: concern,
                       severity: 'Moderate',
-                      symptoms: 'Queued consultation request (no online dentists)',
+                      symptoms: 'Queued consultation request (no online doctors)',
                     );
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -580,7 +580,7 @@ class _TalkToDentistNowScreenState extends State<TalkToDentistNowScreen> {
                 ),
                 const SizedBox(height: 2),
                 const Text(
-                  'Talk to a dentist now',
+                  'Talk to a doctor now',
                   key: Key('talk_to_dentist_title'),
                   style: TextStyle(
                     fontSize: 22,
@@ -636,8 +636,8 @@ class _TalkToDentistNowScreenState extends State<TalkToDentistNowScreen> {
           Expanded(
             child: Text(
               hasOnlineDentists
-                  ? '$onlineCount dentist${onlineCount > 1 ? "s" : ""} online right now'
-                  : 'No dentists online right now',
+                  ? '$onlineCount doctor${onlineCount > 1 ? "s" : ""} online right now'
+                  : 'No doctors online right now',
               key: const Key('talk_to_dentist_availability_text'),
               style: const TextStyle(
                 fontSize: 15,

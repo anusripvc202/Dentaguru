@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/session_service.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../patient/presentation/widgets/referred_patients_sheet.dart';
 import '../widgets/gs_health_clinic_views.dart';
 
@@ -569,7 +570,7 @@ class _ClinicProfileScreenState extends State<ClinicProfileScreen> {
           child: Text(
             'GS HEALTH CLINIC PARTNER TERMS OF SERVICE\n\n'
             '1. Clinic Facilities & Listings\n'
-            'Participating dental clinics must maintain accurate operational hours, doctor associations, and facility disclosures on the GS HEALTH platform.\n\n'
+            'Participating clinics must maintain accurate operational hours, doctor associations, and facility disclosures on the GS HEALTH platform.\n\n'
             '2. Patient Data & E-Prescriptions\n'
             'All patient records, referrals, and diagnostic files received are strictly confidential and governed by Indian Medical Council & Telemedicine Practice Guidelines.\n\n'
             '3. Specialist Referrals & Consultations\n'
@@ -600,9 +601,9 @@ class _ClinicProfileScreenState extends State<ClinicProfileScreen> {
           child: Text(
             'GS HEALTH CLINICAL PRIVACY POLICY\n\n'
             '1. Information Collection\n'
-            'We collect clinic operational information, manager contact credentials, and verified dentist rosters to provide streamlined appointment management and patient referral exchange.\n\n'
+            'We collect clinic operational information, manager contact credentials, and verified doctor rosters to provide streamlined appointment management and patient referral exchange.\n\n'
             '2. Storage & Encryption\n'
-            'All medical records, patient consultation requests, and dental scans are protected with end-to-end encryption in compliance with healthcare data protection standards.\n\n'
+            'All medical records, patient consultation requests, and diagnostic scans are protected with end-to-end encryption in compliance with healthcare data protection standards.\n\n'
             '3. Third-Party Sharing\n'
             'Clinical data is never sold or shared with non-authorized commercial entities.',
             style: TextStyle(fontSize: 13.5, color: Color(0xFF334155), height: 1.5),
@@ -1061,7 +1062,7 @@ class _ClinicProfileScreenState extends State<ClinicProfileScreen> {
                     InkWell(
                       onTap: _callHelpline,
                       child: const Text(
-                        'Call our 24/7 clinical care helpline for dental emergencies, appointments and consultations.',
+                        'Call our 24/7 clinical care helpline for medical emergencies, appointments and consultations.',
                         style: TextStyle(
                           fontSize: 14,
                           color: Color(0xFF475569),
@@ -1176,34 +1177,11 @@ class _ClinicProfileScreenState extends State<ClinicProfileScreen> {
               ),
               const SizedBox(height: 24),
 
-              // ── 6. DentaGuru Footer Logo ──
-              Center(
-                child: Image.asset(
-                  'assets/dentaguru_logo.png',
-                  height: 26,
-                  errorBuilder: (_, __, ___) => const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.health_and_safety_rounded, color: Color(0xFF0284C7), size: 22),
-                      SizedBox(width: 4),
-                      Text(
-                        'Denta',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFF0369A1),
-                        ),
-                      ),
-                      Text(
-                        'Guru',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFFF97316),
-                        ),
-                      ),
-                    ],
-                  ),
+              // ── 6. GS HEALTH Footer Logo ──
+              const Center(
+                child: GsHealthLogo(
+                  height: 32,
+                  alignment: Alignment.center,
                 ),
               ),
               const SizedBox(height: 24),

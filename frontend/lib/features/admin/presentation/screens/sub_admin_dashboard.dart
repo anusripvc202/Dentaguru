@@ -163,7 +163,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
     if (_service.hasPermission(AppPermissions.dentistView)) {
       list.add(const _NavModule(
         key: 'dentists',
-        label: 'Dentists & Clinics',
+        label: 'Doctors & Clinics',
         icon: Icons.medical_services_rounded,
       ));
     }
@@ -448,7 +448,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
             _switchToModuleKey(tabs, 'problems', 'requests & inquiry pool');
           }
         } else if (index == 2) {
-          _switchToModuleKey(tabs, 'dentists', 'dentists directory');
+          _switchToModuleKey(tabs, 'dentists', 'doctors directory');
         } else if (index == 3) {
           _switchToModuleKey(tabs, 'patients', 'patients directory');
         }
@@ -467,7 +467,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
         BottomNavigationBarItem(
           icon: Icon(Icons.medical_services_outlined),
           activeIcon: Icon(Icons.medical_services_rounded),
-          label: 'Dentists',
+          label: 'Doctors',
         ),
         BottomNavigationBarItem(
           icon: Icon(Icons.people_outline_rounded),
@@ -533,14 +533,14 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
         ),
         AdminStatCardData(
           id: 'pending_doctors',
-          label: 'Dentists pending verification',
+          label: 'Doctors pending verification',
           value: canDentistView ? pendingDocs.length : null,
           restricted: !canDentistView,
           icon: Icons.verified_user_outlined,
           accentRed: pendingDocs.isNotEmpty,
           onTap: () => canDentistView
-              ? _switchToModuleKey(tabs, 'dentists', 'dentists directory')
-              : _showRestrictedMessage('dentists directory'),
+              ? _switchToModuleKey(tabs, 'dentists', 'doctors directory')
+              : _showRestrictedMessage('doctors directory'),
         ),
         AdminStatCardData(
           id: 'patients',
@@ -554,13 +554,13 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
         ),
         AdminStatCardData(
           id: 'dentists',
-          label: 'Dentists',
+          label: 'Doctors',
           value: canDentistView ? filteredDoctors.length : null,
           restricted: !canDentistView,
           icon: Icons.medical_services_outlined,
           onTap: () => canDentistView
-              ? _switchToModuleKey(tabs, 'dentists', 'dentists directory')
-              : _showRestrictedMessage('dentists directory'),
+              ? _switchToModuleKey(tabs, 'dentists', 'doctors directory')
+              : _showRestrictedMessage('doctors directory'),
         ),
         AdminStatCardData(
           id: 'clinics',
@@ -571,7 +571,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
           accentRed: true,
           onTap: () {
             if (canDentistView) {
-              _switchToModuleKey(tabs, 'dentists', 'dentists & clinics');
+              _switchToModuleKey(tabs, 'dentists', 'doctors & clinics');
             } else if (canReportView) {
               _switchToModuleKey(tabs, 'reports', 'reports');
             } else {
@@ -596,7 +596,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
         icon: Icons.star_border_rounded,
         restricted: !canDentistView,
         onTap: () => canDentistView
-            ? _switchToModuleKey(tabs, 'dentists', 'clinics & dentists')
+            ? _switchToModuleKey(tabs, 'dentists', 'clinics & doctors')
             : _showRestrictedMessage('clinics & owners'),
       ),
       referralsAction: AdminQuickActionData(
@@ -902,7 +902,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
-                                      'Assigned Doctor: ${req.assignedDoctorName ?? "Specialist"} (${req.assignedDoctorSpecialty ?? "Dentistry"})',
+                                      'Assigned Doctor: ${req.assignedDoctorName ?? "Specialist"} (${req.assignedDoctorSpecialty ?? "General Medicine"})',
                                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
                                     ),
                                   ),
@@ -1148,7 +1148,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
             style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
             cursorColor: AppTheme.primaryBlue,
             decoration: InputDecoration(
-              hintText: 'Search dentists by name, specialty, clinic, city...',
+              hintText: 'Search doctors by name, specialty, clinic, city...',
               prefixIcon: const Icon(Icons.search_rounded, size: 18),
               filled: true,
               fillColor: Colors.white,
@@ -1158,7 +1158,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
           ),
           const SizedBox(height: 14),
           if (doctors.isEmpty)
-            _buildEmptyCard('No dentists found.', Icons.medical_services_outlined)
+            _buildEmptyCard('No doctors found.', Icons.medical_services_outlined)
           else
             ListView.separated(
               shrinkWrap: true,
@@ -1431,7 +1431,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
     DoctorModel? selectedDoctor = _service.allDoctors.isNotEmpty ? _service.allDoctors.first : null;
     String searchKeyword = '';
     String pincodeFilter = req.getDisplayPincode(_service.allPatients);
-    final notesCtrl = TextEditingController(text: 'Assigned for specialized dental evaluation.');
+    final notesCtrl = TextEditingController(text: 'Assigned for specialized medical evaluation.');
     bool isSubmitting = false;
 
     showDialog(
@@ -1649,7 +1649,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                                       rawPhone = '91$rawPhone';
                                     }
 
-                                    final smsText = "GS HEALTH: Hello ${req.patientName}, your dental consultation request for ${req.problemCategory} has been assigned to ${selectedDoctor!.name} (${selectedDoctor!.specialty}) at ${selectedDoctor!.clinicName}. Phone: ${selectedDoctor!.phone}";
+                                    final smsText = "GS HEALTH: Hello ${req.patientName}, your medical consultation request for ${req.problemCategory} has been assigned to ${selectedDoctor!.name} (${selectedDoctor!.specialty}) at ${selectedDoctor!.clinicName}. Phone: ${selectedDoctor!.phone}";
                                     final smsUrl = Uri.parse(rawPhone.isNotEmpty
                                         ? "sms:$rawPhone?body=${Uri.encodeComponent(smsText)}"
                                         : "sms:?body=${Uri.encodeComponent(smsText)}");

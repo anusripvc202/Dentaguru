@@ -979,7 +979,7 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
           _buildContactRow(
             icon: Icons.business_rounded,
             label: 'Clinic Name',
-            value: doc.clinicName.trim().isNotEmpty ? doc.clinicName.trim() : 'Independent Dental Practice',
+            value: doc.clinicName.trim().isNotEmpty ? doc.clinicName.trim() : 'Independent Healthcare Practice',
           ),
           if (doc.clinicAddress.trim().isNotEmpty) ...[
             const SizedBox(height: 10),

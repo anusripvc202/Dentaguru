@@ -70,7 +70,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
           patientName: widget.patient.name.isNotEmpty ? widget.patient.name : 'Patient',
           patientPhone: widget.patient.phone.isNotEmpty ? widget.patient.phone : 'Not provided',
           problemCategory: 'General Consultation',
-          problemDescription: 'Specialist dental consultation assigned by Administrator.',
+          problemDescription: 'Specialist medical consultation assigned by Administrator.',
           severity: 'Moderate',
           city: widget.patient.city,
           state: widget.patient.state,
@@ -78,7 +78,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
           submittedAt: DateTime.now(),
         );
 
-    final notesController = TextEditingController(text: 'Assigned for specialist dental consultation.');
+    final notesController = TextEditingController(text: 'Assigned for specialist medical consultation.');
 
     final shouldAssign = await showDialog<bool>(
       context: context,
@@ -261,7 +261,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
               onPressed: () => Navigator.of(context).pop(),
             ),
             title: const Text(
-              'Patient & Dentist Directory',
+              'Patient & Doctor Directory',
               style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.bold, color: AppTheme.textDark),
             ),
             actions: [
@@ -269,7 +269,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                 icon: _isRefreshing
                     ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primaryBlue))
                     : const Icon(Icons.refresh_rounded, color: AppTheme.primaryBlue),
-                tooltip: 'Refresh Patient & Dentists',
+                tooltip: 'Refresh Patient & Doctors',
                 onPressed: _isRefreshing ? null : _refreshData,
               ),
               const SizedBox(width: 8),
@@ -685,7 +685,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
               const SizedBox(width: 8),
               const Expanded(
                 child: Text(
-                  'Currently Assigned Dentist',
+                  'Currently Assigned Doctor',
                   style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, color: AppTheme.textDark),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -823,7 +823,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                 doc.languages.isNotEmpty ? doc.languages.join(', ') : 'English, Telugu, Hindi',
               ),
               _buildDetailRow(Icons.event_available_rounded, 'Availability Status', doc.status),
-              _buildDetailRow(Icons.verified_user_rounded, 'Dentist Status', doc.verificationStatus),
+              _buildDetailRow(Icons.verified_user_rounded, 'Doctor Status', doc.verificationStatus),
               if (req?.submittedAt != null)
                 _buildDetailRow(
                   Icons.calendar_today_rounded,
@@ -847,12 +847,12 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                   Icon(Icons.person_off_outlined, size: 30, color: Color(0xFF94A3B8)),
                   SizedBox(height: 6),
                   Text(
-                    'No Dentist Currently Assigned',
+                    'No Doctor Currently Assigned',
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
                   ),
                   SizedBox(height: 3),
                   Text(
-                    'Search or select a matching dentist from the list below to assign.',
+                    'Search or select a matching doctor from the list below to assign.',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
                   ),
@@ -903,7 +903,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
               const SizedBox(width: 8),
               const Expanded(
                 child: Text(
-                  'Search & Available Dentists Directory',
+                  'Search & Available Doctors Directory',
                   style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, color: AppTheme.textDark),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -930,7 +930,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
             style: const TextStyle(fontSize: 12.5, color: AppTheme.textDark, fontWeight: FontWeight.w500),
             cursorColor: AppTheme.primaryBlue,
             decoration: InputDecoration(
-              hintText: 'Search by phone, city/location, pincode, dentist name...',
+              hintText: 'Search by phone, city/location, pincode, doctor name...',
               hintStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
               prefixIcon: const Icon(Icons.search_rounded, size: 18, color: AppTheme.primaryBlue),
               suffixIcon: _doctorSearchQuery.isNotEmpty
@@ -966,7 +966,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                _buildFilterChip(0, 'All Platform Dentists (${allDocs.length})'),
+                _buildFilterChip(0, 'All Platform Doctors (${allDocs.length})'),
                 const SizedBox(width: 6),
                 _buildFilterChip(1, '📍 Location & PIN Matches (${locationMatches.length})'),
                 const SizedBox(width: 6),
@@ -991,8 +991,8 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                   const SizedBox(height: 6),
                   Text(
                     _doctorSearchQuery.isNotEmpty
-                        ? 'No dentists found matching "$_doctorSearchQuery"'
-                        : 'No dentists match this filter.',
+                        ? 'No doctors found matching "$_doctorSearchQuery"'
+                        : 'No doctors match this filter.',
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                     textAlign: TextAlign.center,
                   ),
@@ -1005,7 +1005,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                         _selectedDoctorFilterIndex = 0;
                       });
                     },
-                    child: const Text('Show All Available Dentists', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                    child: const Text('Show All Available Doctors', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
@@ -1413,7 +1413,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
               const SizedBox(width: 8),
               const Expanded(
                 child: Text(
-                  'Reported Problem / Dental Complaint',
+                  'Reported Problem / Health Concern',
                   style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, color: AppTheme.textDark),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1438,7 +1438,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
           const SizedBox(height: 10),
 
           if (req != null) ...[
-            _buildDetailRow(Icons.category_rounded, 'Problem Category', req.problemCategory.isNotEmpty ? req.problemCategory : 'General Dental Checkup'),
+            _buildDetailRow(Icons.category_rounded, 'Problem Category', req.problemCategory.isNotEmpty ? req.problemCategory : 'General Medical Consultation'),
             _buildDetailRow(Icons.description_outlined, 'Problem Description', req.problemDescription.isNotEmpty ? req.problemDescription : 'Regular consultation requested.'),
             if (req.symptoms.isNotEmpty)
               _buildDetailRow(Icons.sick_outlined, 'Symptoms', req.symptoms),

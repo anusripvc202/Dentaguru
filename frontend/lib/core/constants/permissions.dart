@@ -58,17 +58,17 @@ class AppPermissions {
     PermissionGroup(
       title: 'Doctor Management',
       icon: '🩺',
-      description: 'Access dentist profiles, credentials, clinics, and verification',
+      description: 'Access doctor profiles, credentials, clinics, and verification',
       permissions: [
-        PermissionItem(key: dentistView, label: 'View Dentists & Availability', isDefault: false),
-        PermissionItem(key: dentistVerify, label: 'Verify Dentist License & Credentials', isDefault: false),
+        PermissionItem(key: dentistView, label: 'View Doctors & Availability', isDefault: false),
+        PermissionItem(key: dentistVerify, label: 'Verify Doctor License & Credentials', isDefault: false),
         PermissionItem(key: dentistManage, label: 'Manage Doctor Profiles & Status', isDefault: false),
       ],
     ),
     PermissionGroup(
       title: 'Patient Assignment',
       icon: '🤝',
-      description: 'Coordinate patient inquiries with verified local dental specialists',
+      description: 'Coordinate patient inquiries with verified local medical specialists',
       permissions: [
         PermissionItem(key: assignmentView, label: 'View Patient Requests & Assigned Doctors', isDefault: false),
         PermissionItem(key: assignmentCreate, label: 'Assign & Reassign Patients to Doctors', isDefault: false),
@@ -105,7 +105,7 @@ class AppPermissions {
     PermissionGroup(
       title: 'Problem & Inquiry Pool',
       icon: '💬',
-      description: 'Track incoming dental symptoms and triage consultation requests',
+      description: 'Track incoming medical symptoms and triage consultation requests',
       permissions: [
         PermissionItem(key: problemView, label: 'View Patient Problem Requests', isDefault: false),
         PermissionItem(key: problemUpdate, label: 'Update Problem Status & Clinical Notes', isDefault: false),
@@ -137,8 +137,8 @@ class AppPermissions {
       }
     }
     if (k == 'PATIENT_ADD') return 'Register New Patients';
-    if (k == 'DENTIST_CREATE') return 'Register / Add New Dentists';
-    if (k == 'DENTIST_EDIT') return 'Edit Dentist Info';
+    if (k == 'DENTIST_CREATE') return 'Register / Add New Doctors';
+    if (k == 'DENTIST_EDIT') return 'Edit Doctor Info';
     return key;
   }
 }

@@ -42,7 +42,7 @@ class _ReferFriendDialogState extends State<ReferFriendDialog> {
   }
 
   String _getReferralMessage(String code, String link) {
-    return 'Join GS HEALTH to easily connect with verified dentists and specialists, book consultations, manage appointments, and access your dental care digitally.\n\n👉 Register here: $link\nUse Referral Code: $code';
+    return 'Join GS HEALTH to easily connect with verified doctors and specialists, book consultations, manage appointments, and access your healthcare digitally.\n\n👉 Register here: $link\nUse Referral Code: $code';
   }
 
   Future<void> _shareViaWhatsApp(String code, String link) async {
@@ -103,7 +103,7 @@ class _ReferFriendDialogState extends State<ReferFriendDialog> {
     final screenWidth = MediaQuery.of(context).size.width;
 
     final referralCode = widget.patientService.myReferralCode;
-    final referralLink = 'https://dentaguru.app/register?ref=$referralCode';
+    final referralLink = 'https://gshealth.app/register?ref=$referralCode';
     final stats = widget.patientService.myReferralStats;
     final referralsList = widget.patientService.myReferrals;
 
@@ -155,7 +155,7 @@ class _ReferFriendDialogState extends State<ReferFriendDialog> {
                         overflow: TextOverflow.ellipsis,
                       ),
                       Text(
-                        'Invite friends to access verified dental specialists',
+                        'Invite friends to access verified medical specialists',
                         style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
                         overflow: TextOverflow.ellipsis,
                       ),

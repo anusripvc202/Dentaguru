@@ -52,7 +52,7 @@ class UserSession {
   String get displayRole {
     final normalized = role.trim().toLowerCase();
     if (normalized.contains('dentist') || normalized.contains('doctor')) {
-      return 'Dentist';
+      return 'Doctor';
     }
     if (normalized.contains('clinic')) {
       return 'Clinic';

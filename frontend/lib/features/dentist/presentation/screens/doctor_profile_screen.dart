@@ -877,7 +877,7 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                         border: Border.all(color: const Color(0xFFE2E8F0)),
                       ),
                       child: const Text(
-                        'Dentist',
+                        'Doctor',
                         style: TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w700,
@@ -1205,7 +1205,7 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Call our 24/7 clinical care helpline for dental emergencies, appointments and consultations.',
+                        'Call our 24/7 clinical care helpline for medical emergencies, appointments and consultations.',
                         style: TextStyle(
                           fontSize: 13.5,
                           color: Color(0xFF334155),

@@ -50,7 +50,7 @@ exports.getClinicDentists = async (req, res) => {
         const dentists = await Dentist.find({ clinic_id: clinicId });
         res.json({ success: true, count: dentists.length, dentists });
     } catch (err) {
-        res.status(500).json({ success: false, message: 'Failed to fetch clinic dentists.' });
+        res.status(500).json({ success: false, message: 'Failed to fetch clinic doctors.' });
     }
 };
 
@@ -235,8 +235,8 @@ exports.getAllDentists = async (req, res) => {
 
         res.json({ success: true, count: formattedDentists.length, dentists: formattedDentists, doctors: formattedDentists });
     } catch (err) {
-        console.error('Get All Dentists Error:', err.message);
-        res.status(500).json({ success: false, message: 'Failed to fetch all dentists.' });
+        console.error('Get All Doctors Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to fetch all doctors.' });
     }
 };
 

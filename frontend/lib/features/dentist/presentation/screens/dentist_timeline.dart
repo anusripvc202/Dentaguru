@@ -804,11 +804,11 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                               'patientName': pName,
                               'type': 'prescription',
                               'title': diagnosis.isNotEmpty ? diagnosis : 'Digital Prescription Slips',
-                              'diagnosis': diagnosis.isNotEmpty ? diagnosis : 'Dental Care',
-                              'subtitle': 'Diagnosis: ${diagnosis.isNotEmpty ? diagnosis : "Dental Care"} (${medName.isNotEmpty ? medName : "Medication"})',
+                              'diagnosis': diagnosis.isNotEmpty ? diagnosis : 'Medical Care',
+                              'subtitle': 'Diagnosis: ${diagnosis.isNotEmpty ? diagnosis : "Medical Care"} (${medName.isNotEmpty ? medName : "Medication"})',
                               'doctorId': _patientService.currentDoctor?.id ?? '',
-                              'doctorName': _patientService.currentDoctor?.name ?? 'Attending Dentist',
-                              'clinicName': _patientService.currentDoctor?.clinicName ?? 'GS HEALTH Dental Clinic',
+                              'doctorName': _patientService.currentDoctor?.name ?? 'Attending Doctor',
+                              'clinicName': _patientService.currentDoctor?.clinicName ?? 'GS HEALTH Clinic',
                               'date': DateTime.now().toString().split(' ').first,
                               'instructions': notes,
                               'items': [
@@ -829,9 +829,9 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                               patientId: pName,
                               type: 'prescription',
                               title: 'Digital Prescription Slips',
-                              subtitle: 'Diagnosis: ${diagnosis.isNotEmpty ? diagnosis : "Dental Care"} (${medName.isNotEmpty ? medName : "Medication"})',
-                              doctorName: _patientService.currentDoctor?.name ?? 'Attending Dentist',
-                              clinicName: _patientService.currentDoctor?.clinicName ?? 'GS HEALTH Dental Clinic',
+                              subtitle: 'Diagnosis: ${diagnosis.isNotEmpty ? diagnosis : "Medical Care"} (${medName.isNotEmpty ? medName : "Medication"})',
+                              doctorName: _patientService.currentDoctor?.name ?? 'Attending Doctor',
+                              clinicName: _patientService.currentDoctor?.clinicName ?? 'GS HEALTH Clinic',
                               items: [
                                 {
                                   'name': medName.isNotEmpty ? medName : 'Amoxicillin 500mg',
@@ -849,7 +849,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                               recipientRole: 'Patient',
                               recipientId: pName,
                               title: '💊 New E-Prescription Issued!',
-                              message: 'Dr. ${_patientService.currentDoctor?.name ?? "Attending Dentist"} has issued an E-Prescription for $diagnosis.',
+                              message: 'Dr. ${_patientService.currentDoctor?.name ?? "Attending Doctor"} has issued an E-Prescription for $diagnosis.',
                             );
 
                             if (context.mounted) {
@@ -1306,7 +1306,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text(
-                            'Dentist workspace',
+                            'Doctor workspace',
                             style: TextStyle(
                               fontSize: 13.5,
                               fontWeight: FontWeight.w500,
@@ -2342,7 +2342,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         'phone': p.phone,
         'age': '${p.age.isNotEmpty ? p.age : "28"} Yrs',
         'blood': p.bloodGroup.isNotEmpty ? p.bloodGroup : 'O+',
-        'issue': 'General Dental Care',
+        'issue': 'General Healthcare',
         'patientId': p.id,
         'city': p.city,
       });
@@ -2401,7 +2401,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               'phone': matchP?.phone ?? '',
               'age': '${(matchP?.age.isNotEmpty == true) ? matchP!.age : '28'} Yrs',
               'blood': (matchP?.bloodGroup.isNotEmpty == true) ? matchP!.bloodGroup : 'O+',
-              'issue': 'Shared Dental Record (${recCopy['category'] ?? 'Record'})',
+              'issue': 'Shared Health Record (${recCopy['category'] ?? 'Record'})',
               'patientId': recPid,
             };
           }
@@ -2737,9 +2737,9 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     required String doctorUserId,
     required String doctorEmail,
   }) {
-    final title = (record['title'] ?? 'Dental Record').toString();
+    final title = (record['title'] ?? 'Health Record').toString();
     final patientName = (record['patientName'] ?? 'Patient').toString();
-    final category = (record['category'] ?? 'Dental Report').toString();
+    final category = (record['category'] ?? 'Medical Report').toString();
     final date = (record['date'] ?? '').toString();
     final fileType = (record['fileType'] ?? 'PDF').toString().toUpperCase();
     final description = (record['description'] ?? '').toString().trim();
@@ -2941,9 +2941,9 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     required String doctorEmail,
   }) {
     final recId = (record['id'] ?? '').toString();
-    final title = (record['title'] ?? 'Shared Dental Record').toString();
+    final title = (record['title'] ?? 'Shared Health Record').toString();
     final patientName = (record['patientName'] ?? 'Patient').toString();
-    final category = (record['category'] ?? 'Dental Report').toString();
+    final category = (record['category'] ?? 'Medical Report').toString();
     final date = (record['date'] ?? '').toString();
     final description = (record['description'] ?? '').toString();
     final fileName = (record['fileName'] ?? '').toString();
@@ -3322,7 +3322,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
 
     final assignedDocName = (req.assignedDoctorName != null && req.assignedDoctorName!.trim().isNotEmpty)
         ? req.assignedDoctorName!.trim()
-        : ((doc?.name.isNotEmpty == true) ? doc!.name : 'Assigned Dentist');
+        : ((doc?.name.isNotEmpty == true) ? doc!.name : 'Assigned Doctor');
 
     final formattedDate = _formatShortDayMonth(req.submittedAt);
 
@@ -3846,7 +3846,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                             ),
                           ),
                           child: Text(
-                            'Specialist dentist',
+                            'Specialist doctor',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w700,
@@ -4101,7 +4101,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                     decoration: _buildGsReferInputDecoration(
                       _referToClinic
                           ? 'Search clinic by name, location...'
-                          : 'Search dentist by name, specialit...',
+                          : 'Search doctor by name, specialty...',
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -4118,7 +4118,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                           border: Border.all(color: const Color(0xFFE2E8F0)),
                         ),
                         child: const Text(
-                          'No matching dentists found.',
+                          'No matching doctors found.',
                           style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
                           textAlign: TextAlign.center,
                         ),
@@ -4534,7 +4534,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      subtitle.isNotEmpty ? subtitle : 'Verified Dental Clinic',
+                      subtitle.isNotEmpty ? subtitle : 'Verified Clinic',
                       style: const TextStyle(
                         fontSize: 13,
                         color: Color(0xFF64748B),
@@ -4789,7 +4789,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     if (!_referToClinic && targetDoc == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please select a specialist dentist to refer to.'),
+          content: Text('Please select a specialist doctor to refer to.'),
           backgroundColor: AppTheme.gsRed,
         ),
       );
@@ -4835,7 +4835,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
             ? notes
             : 'Impacted 38, pain for 2 weeks. Please evaluate for extraction',
         doctorId: targetDoc?.id ?? (targetClinic?.id ?? ''),
-        doctorName: targetDoc?.name ?? (targetClinic?.clinicName ?? 'Specialist Dentist'),
+        doctorName: targetDoc?.name ?? (targetClinic?.clinicName ?? 'Specialist Doctor'),
         doctorClinicName: targetClinic?.clinicName ?? (targetDoc?.clinicName ?? 'GS HEALTH Clinic'),
         doctorLocation: targetClinic?.location ?? (targetDoc?.clinicAddress ?? ''),
         doctorCity: targetDoc?.city ?? 'Mumbai',
@@ -5126,7 +5126,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         .trim();
     final displayTitle = diagnosisHeadline.isNotEmpty
         ? diagnosisHeadline
-        : 'Dental E-Prescription';
+        : 'Medical E-Prescription';
 
     final patientName = (rec['patientName'] ?? rec['patient_name'] ?? '').toString().trim();
     final displayPatient = patientName.isNotEmpty
@@ -5416,7 +5416,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Add New Dentist',
+                                'Add New Doctor',
                                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textDark),
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -5453,7 +5453,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                               cursorColor: AppTheme.primaryBlue,
                               decoration: InputDecoration(
-                                labelText: 'Dentist Full Name *',
+                                labelText: 'Doctor Full Name *',
                                 hintText: 'e.g. Dr. Rajesh Sharma',
                                 labelStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
                                 prefixIcon: const Icon(Icons.person_outline_rounded, size: 18, color: AppTheme.primaryBlue),
@@ -5580,8 +5580,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                                     cursorColor: AppTheme.primaryBlue,
                                     decoration: InputDecoration(
-                                      labelText: 'Dental License #',
-                                      hintText: 'DCI-10294',
+                                      labelText: 'Medical License #',
+                                      hintText: 'MCI-10294',
                                       labelStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
                                       filled: true,
                                       fillColor: const Color(0xFFF8FAFC),
@@ -5802,7 +5802,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                     final phone = phoneCtrl.text.replaceAll(RegExp(r'[^0-9]'), '').trim();
                                     if (name.isEmpty) {
                                       ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('⚠️ Please enter dentist name'), backgroundColor: Color(0xFFEF4444)),
+                                        const SnackBar(content: Text('⚠️ Please enter doctor name'), backgroundColor: Color(0xFFEF4444)),
                                       );
                                       return;
                                     }
@@ -5829,7 +5829,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                         phone: phone,
                                         licenseNumber: licenseCtrl.text.trim(),
                                         specialty: selectedSpecialty,
-                                        clinicName: clinicCtrl.text.trim().isNotEmpty ? clinicCtrl.text.trim() : 'GS HEALTH Partner Dental Clinic',
+                                        clinicName: clinicCtrl.text.trim().isNotEmpty ? clinicCtrl.text.trim() : 'GS HEALTH Partner Clinic',
                                         experienceYears: cleanExp,
                                         qualification: qualCtrl.text.trim().isNotEmpty ? qualCtrl.text.trim() : 'BDS, MDS',
                                         consultationFee: cleanFee,
@@ -5878,7 +5878,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                       setModalState(() => isSubmitting = false);
                                       if (!context.mounted) return;
                                       ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('Error registering dentist: $e'), backgroundColor: const Color(0xFFEF4444)),
+                                        SnackBar(content: Text('Error registering doctor: $e'), backgroundColor: const Color(0xFFEF4444)),
                                       );
                                     }
                                   },
@@ -5886,7 +5886,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                 ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                                 : const Icon(Icons.person_add_rounded, size: 18),
                             label: Text(
-                              isSubmitting ? 'Registering...' : 'Add Dentist',
+                              isSubmitting ? 'Registering...' : 'Add Doctor',
                               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                             ),
                             style: ElevatedButton.styleFrom(

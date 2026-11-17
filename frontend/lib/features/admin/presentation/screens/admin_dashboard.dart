@@ -1469,7 +1469,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     BottomNavigationBarItem(
                       icon: Icon(Icons.medical_services_outlined),
                       activeIcon: Icon(Icons.medical_services_rounded),
-                      label: 'Dentists',
+                      label: 'Doctors',
                     ),
                     BottomNavigationBarItem(
                       icon: Icon(Icons.people_outline_rounded),
@@ -2262,7 +2262,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
         ),
         AdminStatCardData(
           id: 'pending_doctors',
-          label: 'Dentists pending verification',
+          label: 'Doctors pending verification',
           value: pendingDocs.length,
           icon: Icons.verified_user_outlined,
           accentRed: pendingDocs.isNotEmpty,
@@ -2280,7 +2280,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
         ),
         AdminStatCardData(
           id: 'dentists',
-          label: 'Dentists',
+          label: 'Doctors',
           value: _problemService.allDoctors.length,
           icon: Icons.medical_services_outlined,
           onTap: () => setState(() {
@@ -2540,9 +2540,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               if (isDoc && !fromName.toLowerCase().startsWith('dr')) {
                                 fromName = 'Dr. $fromName';
                               }
-                              final String fromRole = isDoc ? 'Dentist' : 'Patient';
+                              final String fromRole = isDoc ? 'Doctor' : 'Patient';
                               final String toName = isDoc ? patientName : doctorName;
-                              final String toRole = isDoc ? 'Patient' : 'Dentist';
+                              final String toRole = isDoc ? 'Patient' : 'Doctor';
 
                               final time = msg['created_at'] != null ? DateTime.tryParse(msg['created_at'].toString()) : null;
                               final timeStr = time != null 
@@ -2695,7 +2695,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         final log = logs[i];
                         final action = log['action'] ?? 'ACCESS';
                         final target = log['target_resource'] ?? 'ROOM';
-                        final email = log['user_email'] ?? 'admin@dentaguru.com';
+                        final email = log['user_email'] ?? 'admin@gshealth.com';
                         final ip = log['ip_address'] ?? '127.0.0.1';
                         final time = log['created_at'] != null ? DateTime.tryParse(log['created_at'].toString()) : null;
                         final dateStr = time != null ? '${time.day}/${time.month}/${time.year} ${time.hour}:${time.minute.toString().padLeft(2, '0')}' : '';
@@ -2974,7 +2974,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     final conv = filtered[i];
                     final roomId = (conv['roomId'] ?? 'GENERAL-CHAT').toString();
                     final patientName = (conv['patientName'] ?? 'Patient').toString();
-                    final doctorName = (conv['doctorName'] ?? 'Attending Dentist').toString();
+                    final doctorName = (conv['doctorName'] ?? 'Attending Doctor').toString();
                     final lastMsg = (conv['lastMessage'] ?? '').toString();
                     final totalMsgs = conv['totalMessages'] ?? 0;
                     final time = conv['lastMessageTime'] != null ? DateTime.tryParse(conv['lastMessageTime'].toString()) : null;
@@ -3220,7 +3220,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                       ),
                       const SizedBox(height: 6),
                       const Text(
-                        'Create sub-admins and assign granular permissions for patients, dentists, doctor assignments, appointments, problems, and reports.',
+                        'Create sub-admins and assign granular permissions for patients, doctors, specialist assignments, appointments, problems, and reports.',
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 12, color: AppTheme.textMuted, height: 1.5),
                       ),
@@ -4966,7 +4966,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         ),
                         const SizedBox(height: 8),
                         if (clinic.services.isEmpty)
-                          const Text('General dentistry and routine checkups.', style: TextStyle(fontSize: 12, color: AppTheme.textMuted))
+                          const Text('General healthcare and routine consultations.', style: TextStyle(fontSize: 12, color: AppTheme.textMuted))
                         else
                           Wrap(
                             spacing: 8,
@@ -5052,7 +5052,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    'No dental specialists are currently mapped to this clinic practice.',
+                                    'No medical specialists are currently mapped to this clinic practice.',
                                     style: TextStyle(fontSize: 11.5, color: Color(0xFF92400E)),
                                   ),
                                 ),
@@ -5213,7 +5213,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   void _showRegisterClinicModal(BuildContext context) {
     final nameCtrl = TextEditingController();
     final locationCtrl = TextEditingController();
-    final servicesCtrl = TextEditingController(text: 'General Dentistry, Teeth Cleaning, Root Canal, Orthodontics, Dental Implants');
+    final servicesCtrl = TextEditingController(text: 'General Medicine, Specialized Consultations, Diagnostics, Preventative Care');
     bool isSaving = false;
 
     showDialog(
@@ -5261,7 +5261,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         cursorColor: AppTheme.primaryBlue,
                         decoration: InputDecoration(
                           labelText: 'Clinic Name *',
-                          hintText: 'e.g. City Dental Care Center',
+                          hintText: 'e.g. City Healthcare Center',
                           filled: true,
                           fillColor: const Color(0xFFF8FAFC),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -5763,7 +5763,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     cursorColor: AppTheme.primaryBlue,
                                     decoration: InputDecoration(
                                       labelText: 'Practice / Clinic Name (Optional)',
-                                      hintText: 'e.g. Apex Care Dental',
+                                      hintText: 'e.g. Apex Care Clinic',
                                       prefixIcon: const Icon(Icons.storefront_outlined, size: 16),
                                       filled: true,
                                       fillColor: const Color(0xFFF8FAFC),
@@ -6244,8 +6244,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
                       ),
                       SizedBox(height: 3),
-                      Text(
-                        'All multi-specialty medical & dental specialists registered on GS HEALTH • Tap any doctor to view profile & availability',
+                      const Text(
+                        'All multi-specialty medical specialists registered on GS HEALTH • Tap any doctor to view profile & availability',
                         style: TextStyle(color: Colors.white70, fontSize: 11),
                       ),
                     ],
@@ -6416,7 +6416,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Dentists pending verification (${pendingList.length})',
+                              'Doctors pending verification (${pendingList.length})',
                               style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: AppTheme.gsNavy),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -6431,7 +6431,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         const Padding(
                           padding: EdgeInsets.only(top: 6),
                           child: Text(
-                            'No dentists currently pending verification.',
+                            'No doctors currently pending verification.',
                             style: TextStyle(fontSize: 12.5, color: AppTheme.textMedium),
                           ),
                         )
@@ -6789,9 +6789,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     icon: Icons.people_alt_rounded,
                   ),
                   _KpiCard(
-                    title: 'Total Dentists',
+                    title: 'Total Doctors',
                     value: '${_problemService.allDoctors.length}',
-                    growth: 'Verified Dentists',
+                    growth: 'Verified Doctors',
                     accentColor: const Color(0xFF10B981),
                     icon: Icons.medical_services_rounded,
                   ),
@@ -6897,7 +6897,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         SizedBox(height: 8),
                         Text('No patient consultation requests found.', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark)),
                         SizedBox(height: 4),
-                        Text('New dental requests raised by patients will appear here for admin review.', style: TextStyle(fontSize: 11, color: AppTheme.textMuted), textAlign: TextAlign.center),
+                        const Text('New patient consultation requests raised by patients will appear here for admin review.', style: TextStyle(fontSize: 11, color: AppTheme.textMuted), textAlign: TextAlign.center),
                       ],
                     ),
                   )

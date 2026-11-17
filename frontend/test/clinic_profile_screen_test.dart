@@ -194,7 +194,7 @@ void main() {
       expect(find.byKey(const Key('clinic_helpline_card')), findsOneWidget);
       expect(find.text('NEED HELP?'), findsOneWidget);
       expect(
-        find.text('Call our 24/7 clinical care helpline for dental emergencies, appointments and consultations.'),
+        find.text('Call our 24/7 clinical care helpline for medical emergencies, appointments and consultations.'),
         findsOneWidget,
       );
 

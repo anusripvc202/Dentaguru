@@ -41,8 +41,8 @@ class ProductsDropdownMenu extends StatelessWidget {
       },
     }[productName] ?? {
       'icon': Icons.inventory_2_rounded,
-      'tag': 'Dental Product',
-      'desc': 'High precision dental implant product.',
+      'tag': 'Medical Product',
+      'desc': 'High precision clinical healthcare product.',
       'features': ['Clinical Grade', 'CE Certified'],
       'price': '\$150',
       'color': AppTheme.primaryBlue,

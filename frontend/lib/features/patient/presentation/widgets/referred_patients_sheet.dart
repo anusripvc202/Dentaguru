@@ -77,7 +77,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
 
     final specialty = (doc?.specialty.isNotEmpty == true && doc!.specialty != 'General Dentistry')
         ? doc.specialty
-        : (ref.requiredSpecialist.isNotEmpty ? ref.requiredSpecialist : (doc?.specialty ?? 'Dental Specialist'));
+        : (ref.requiredSpecialist.isNotEmpty ? ref.requiredSpecialist : (doc?.specialty ?? 'Medical Specialist'));
     final qual = (doc?.qualification.isNotEmpty == true && doc!.qualification != 'BDS, MDS') ? ' (${doc.qualification})' : '';
     final clinic = (doc?.clinicName.isNotEmpty == true && doc!.clinicName != 'GS HEALTH Partner Clinic' && doc.clinicName != 'DentaGuru Partner Clinic')
         ? doc.clinicName
@@ -113,7 +113,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
     final buffer = StringBuffer();
     buffer.writeln('Hi ${ref.referredPatientName},');
     buffer.writeln();
-    buffer.writeln('I have referred you to *$docName*$qual on GS HEALTH for your dental care.');
+    buffer.writeln('I have referred you to *$docName*$qual on GS HEALTH for your healthcare consultation.');
     buffer.writeln();
     buffer.writeln('👨‍⚕️ *Doctor & Clinic Details:*');
     buffer.writeln('• *Doctor:* $docName');
@@ -128,7 +128,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
       buffer.writeln('📋 *Clinical Reason / Diagnosis:* ${ref.clinicalComplaint}');
     }
     buffer.writeln();
-    buffer.writeln('You can reach out directly to the clinic or doctor to schedule your appointment. Wishing you the best dental care!');
+    buffer.writeln('You can reach out directly to the clinic or doctor to schedule your appointment. Wishing you the best of health!');
 
     return buffer.toString();
   }
@@ -293,7 +293,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'All patients referred to specialized dental care',
+                            'All patients referred to specialized healthcare',
                             style: TextStyle(
                               fontSize: 12,
                               color: isDark ? Colors.white60 : Colors.black54,
@@ -454,7 +454,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
                               Text(
                                 _searchQuery.isNotEmpty
                                     ? 'Try checking for typos or clear your search query.'
-                                    : 'You haven\'t referred any patients yet. Help a friend or family member get connected to expert dentists.',
+                                    : 'You haven\'t referred any patients yet. Help a friend or family member get connected to expert doctors.',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   fontSize: 12,

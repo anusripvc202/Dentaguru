@@ -166,7 +166,7 @@ exports.getPatientRecords = async (req, res) => {
         if (!targetId) {
             return res.status(400).json({
                 success: false,
-                message: 'patientId is required to fetch dental health records.'
+                message: 'patientId is required to fetch health records.'
             });
         }
 
@@ -176,7 +176,7 @@ exports.getPatientRecords = async (req, res) => {
             if (resolvedCallerUuid && resolvedTargetUuid && resolvedCallerUuid !== resolvedTargetUuid) {
                 return res.status(403).json({
                     success: false,
-                    message: 'Access Denied: You can only view your own dental health records.'
+                    message: 'Access Denied: You can only view your own health records.'
                 });
             }
         }
@@ -264,7 +264,7 @@ exports.createRecord = async (req, res) => {
         if (!effectivePatientId) {
             return res.status(400).json({
                 success: false,
-                message: 'patientId is required to create a dental health record.'
+                message: 'patientId is required to create a health record.'
             });
         }
 
@@ -383,7 +383,7 @@ exports.createRecord = async (req, res) => {
 
         res.status(201).json({
             success: true,
-            message: 'Dental health record saved successfully.',
+            message: 'Health record saved successfully.',
             record: formatRecord(created)
         });
     } catch (err) {
@@ -400,7 +400,7 @@ exports.updateRecord = async (req, res) => {
     try {
         const existing = await MedicalRecord.findById(id);
         if (!existing) {
-            return res.status(404).json({ success: false, message: 'Dental health record not found.' });
+            return res.status(404).json({ success: false, message: 'Health record not found.' });
         }
 
         const callerId = patientId || req.user?.id || req.headers['x-user-id'];
@@ -457,7 +457,7 @@ exports.deleteRecord = async (req, res) => {
     try {
         const existing = await MedicalRecord.findById(id);
         if (!existing) {
-            return res.status(404).json({ success: false, message: 'Dental health record not found.' });
+            return res.status(404).json({ success: false, message: 'Health record not found.' });
         }
 
         const resolvedCallerUuid = patientId ? await resolveUserUuid(patientId) : null;
@@ -483,11 +483,11 @@ exports.deleteRecord = async (req, res) => {
 
         res.json({
             success: true,
-            message: 'Dental health record deleted permanently.'
+            message: 'Health record deleted permanently.'
         });
     } catch (err) {
         console.error('Delete Medical Record Error:', err.message);
-        res.status(500).json({ success: false, message: 'Failed to delete dental health record.' });
+        res.status(500).json({ success: false, message: 'Failed to delete health record.' });
     }
 };
 
@@ -526,7 +526,7 @@ exports.shareRecordsWithDoctor = async (req, res) => {
         if (!resolvedCallerUuid) {
             return res.status(401).json({
                 success: false,
-                message: 'Authentication required to share dental records.'
+                message: 'Authentication required to share health records.'
             });
         }
 
@@ -549,7 +549,7 @@ exports.shareRecordsWithDoctor = async (req, res) => {
             if (String(existing.patient_id) !== String(resolvedCallerUuid)) {
                 return res.status(403).json({
                     success: false,
-                    message: 'Access Denied: You can only share your own dental health records.'
+                    message: 'Access Denied: You can only share your own health records.'
                 });
             }
 
@@ -595,8 +595,8 @@ exports.shareRecordsWithDoctor = async (req, res) => {
                 await Notification.create({
                     recipient_role: 'Dentist',
                     recipient_id: String(targetNotifId),
-                    title: 'New Dental Records Shared',
-                    message: `${resolvedPatientName || 'A patient'} shared ${updatedRecords.length} dental health record(s) with you.`,
+                    title: 'New Health Records Shared',
+                    message: `${resolvedPatientName || 'A patient'} shared ${updatedRecords.length} health record(s) with you.`,
                     type: 'RECORD_SHARED'
                 });
             } catch (_) {}
@@ -626,7 +626,7 @@ exports.revokeRecordShare = async (req, res) => {
     try {
         const existing = await MedicalRecord.findById(id);
         if (!existing) {
-            return res.status(404).json({ success: false, message: 'Dental health record not found.' });
+            return res.status(404).json({ success: false, message: 'Health record not found.' });
         }
 
         const resolvedCallerUuid = patientId ? await resolveUserUuid(patientId) : null;
@@ -678,7 +678,7 @@ exports.getRecordFileAccess = async (req, res) => {
     try {
         const existing = await MedicalRecord.findById(id);
         if (!existing) {
-            return res.status(404).json({ success: false, message: 'Dental health record not found.' });
+            return res.status(404).json({ success: false, message: 'Health record not found.' });
         }
 
         const formatted = formatRecord(existing);
@@ -713,7 +713,7 @@ exports.getRecordFileAccess = async (req, res) => {
             return res.status(403).json({
                 success: false,
                 authorized: false,
-                message: 'Access Denied: You do not have permission to view or download this dental record.'
+                message: 'Access Denied: You do not have permission to view or download this health record.'
             });
         }
 

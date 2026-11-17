@@ -132,9 +132,9 @@ const sendNewReferralWhatsApp = async ({
         ? cleanDoc
         : `Dr. ${cleanDoc}`;
 
-    const cleanComplaint = clinicalComplaint || 'General Dental Consultation';
-    const cleanClinic = doctorClinic && doctorClinic !== 'GS HEALTH Partner Dental Clinic' && doctorClinic !== 'DentaGuru Partner Dental Clinic' ? doctorClinic : (doctorClinic || 'GS HEALTH Partner Dental Clinic');
-    const cleanSpecialty = doctorSpecialty || 'Specialized Dental Care';
+    const cleanComplaint = clinicalComplaint || 'General Medical Consultation';
+    const cleanClinic = doctorClinic && doctorClinic !== 'GS HEALTH Partner Clinic' && doctorClinic !== 'GS HEALTH Partner Dental Clinic' ? doctorClinic : (doctorClinic || 'GS HEALTH Partner Clinic');
+    const cleanSpecialty = doctorSpecialty || 'Specialized Healthcare';
 
     const locationParts = [
         doctorAddress,
@@ -144,7 +144,7 @@ const sendNewReferralWhatsApp = async ({
     const fullAddress = locationParts.join(', ');
 
     const mapQueryParts = [
-        cleanClinic && cleanClinic !== 'GS HEALTH Partner Dental Clinic' && cleanClinic !== 'DentaGuru Partner Dental Clinic' ? cleanClinic : '',
+        cleanClinic && cleanClinic !== 'GS HEALTH Partner Clinic' && cleanClinic !== 'GS HEALTH Partner Dental Clinic' ? cleanClinic : '',
         doctorAddress,
         doctorCity,
         doctorPincode
@@ -155,7 +155,7 @@ const sendNewReferralWhatsApp = async ({
     const lines = [];
     lines.push(`Hi ${referredPatientName || 'Patient'},`);
     lines.push('');
-    lines.push(`I have referred you to *${formattedDoctor}* on GS HEALTH for your dental care.`);
+    lines.push(`I have referred you to *${formattedDoctor}* on GS HEALTH for your healthcare consultation.`);
     lines.push('');
     lines.push('👨‍⚕️ *Doctor & Clinic Details:*');
     lines.push(`• *Doctor:* ${formattedDoctor}`);
@@ -178,7 +178,7 @@ const sendNewReferralWhatsApp = async ({
         lines.push(`📋 *Clinical Reason / Diagnosis:* ${cleanComplaint}`);
     }
     lines.push('');
-    lines.push('You can reach out directly to the clinic or doctor to schedule your appointment. Wishing you the best dental care!');
+    lines.push('You can reach out directly to the clinic or doctor to schedule your appointment. Wishing you the best of health!');
 
     const message = lines.join('\n');
 
@@ -201,8 +201,8 @@ const sendReferralAcceptedWhatsApp = async ({
     confirmedTimeSlot
 }) => {
     const formattedDoctor = doctorName.startsWith('Dr.') ? doctorName : `Dr. ${doctorName}`;
-    const cleanClinic = doctorClinic || 'GS HEALTH Partner Dental Clinic';
-    const cleanSpecialty = doctorSpecialty || 'Dental Care';
+    const cleanClinic = doctorClinic || 'GS HEALTH Partner Clinic';
+    const cleanSpecialty = doctorSpecialty || 'Healthcare';
     const slotInfo = confirmedTimeSlot ? `\n\nScheduled Slot:\n${confirmedTimeSlot}` : '';
 
     const message = `Hello ${referredPatientName || 'Patient'},\n\nYour referral to ${formattedDoctor} has been accepted.${slotInfo}\n\nDoctor:\n${formattedDoctor}\n\nSpecialty:\n${cleanSpecialty}\n\nClinic:\n${cleanClinic}\n\nYou can now continue with GS HEALTH for further consultation.\n\nThank you,\nGS HEALTH`;

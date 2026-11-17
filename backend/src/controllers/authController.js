@@ -503,7 +503,7 @@ exports.login = async (req, res) => {
                 return res.status(403).json({ success: false, message: `Role Mismatch: Your account is registered as '${user.role}'. Cannot log into Admin Portal.` });
             }
             if (isReqDentist && !isUserDentist) {
-                return res.status(403).json({ success: false, message: `Role Mismatch: Your account is registered as '${user.role}'. Cannot log into Dentist Portal.` });
+                return res.status(403).json({ success: false, message: `Role Mismatch: Your account is registered as '${user.role}'. Cannot log into Doctor Portal.` });
             }
             if (isReqPatient && !isUserPatient) {
                 return res.status(403).json({ success: false, message: `Role Mismatch: Your account is registered as '${user.role}'. Cannot log into Patient Portal.` });

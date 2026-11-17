@@ -90,7 +90,7 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
           lower.contains('bleed')) {
         urgency = 'Immediate Care Recommended (< 24 hrs)';
         urgencyColor = AppTheme.gsRed;
-        condition = 'Acute Dental Emergency / Severe Inflammation';
+        condition = 'Acute Medical Emergency / Severe Inflammation';
         specialist = 'Endodontist or Oral Surgeon';
         homeCare = 'Apply cold compress externally. Do not place hot compresses or aspirin on gums.';
         warning = 'If you experience difficulty swallowing, breathing, or rapid facial swelling, visit urgent care immediately.';
@@ -685,7 +685,7 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
                 ),
                 SizedBox(height: 2),
                 Text(
-                  'AI Dental Triage',
+                  'AI Health Triage',
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w800,

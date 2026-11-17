@@ -359,7 +359,7 @@ class GsHealthRegistrationView extends StatelessWidget {
             child: _buildRoleCard(
               cardKey: const Key('reg_role_dentist'),
               role: UserRole.dentist,
-              title: 'Dentist',
+              title: 'Doctor',
               subtitle: 'Manage your patients',
               icon: Icons.medical_services_rounded,
               unselectedTint: AppTheme.gsRed,
@@ -776,7 +776,7 @@ class GsHealthRegistrationView extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'New dentist profiles are reviewed by GS HEALTH before they appear to patients.',
+              'New doctor profiles are reviewed by GS HEALTH before they appear to patients.',
               style: GoogleFonts.plusJakartaSans(
                 fontSize: 13,
                 height: 1.45,

@@ -1536,7 +1536,7 @@ class ApiService {
 
     final rawType = (parsedNotes['type'] ?? row['type'] ?? '').toString();
     final category = (parsedNotes['category'] ?? row['category'] ?? (rawType == 'xray' ? 'Dental X-ray' : rawType == 'prescription' ? 'Prescription' : 'Other')).toString();
-    final title = (parsedNotes['title'] ?? row['title'] ?? row['diagnosis'] ?? 'Dental Health Record').toString();
+    final title = (parsedNotes['title'] ?? row['title'] ?? row['diagnosis'] ?? 'Health Record').toString();
     final description = (parsedNotes['description'] ?? row['description'] ?? parsedNotes['subtitle'] ?? row['subtitle'] ?? '').toString();
     final fileName = (parsedNotes['fileName'] ?? row['fileName'] ?? '').toString();
     final fileType = (parsedNotes['fileType'] ?? row['fileType'] ?? '').toString().toUpperCase();
@@ -1939,7 +1939,7 @@ class ApiService {
       _fallbackMedicalRecords.insert(0, formatted);
       return {
         'success': true,
-        'message': 'Dental health record uploaded successfully.',
+        'message': 'Health record uploaded successfully.',
         'record': formatted,
       };
     } catch (supaErr) {
@@ -1978,7 +1978,7 @@ class ApiService {
           _fallbackMedicalRecords.insert(0, formatted);
           return {
             'success': true,
-            'message': 'Dental health record uploaded successfully.',
+            'message': 'Health record uploaded successfully.',
             'record': formatted,
           };
         }
@@ -2000,7 +2000,7 @@ class ApiService {
     onProgress?.call(1.0);
     return {
       'success': true,
-      'message': 'Dental health record uploaded successfully.',
+      'message': 'Health record uploaded successfully.',
       'record': fallbackRow,
     };
   }
@@ -2130,7 +2130,7 @@ class ApiService {
         }
         await client.from('medical_records').delete().eq('id', recordId);
         _fallbackMedicalRecords.removeWhere((r) => r['id']?.toString() == recordId);
-        return {'success': true, 'message': 'Dental health record deleted.'};
+        return {'success': true, 'message': 'Health record deleted.'};
       }
     } catch (e) {
       debugPrint('Supabase direct delete medical_record notice: $e');
@@ -2153,7 +2153,7 @@ class ApiService {
         _recordBytesCache.remove(storageKey);
       }
       _fallbackMedicalRecords.removeAt(idx);
-      return {'success': true, 'message': 'Dental health record deleted.'};
+      return {'success': true, 'message': 'Health record deleted.'};
     }
 
     return {'success': false, 'message': 'Record not found.'};
@@ -2220,7 +2220,7 @@ class ApiService {
             return {
               'success': false,
               'statusCode': 403,
-              'message': 'Access Denied: You can only share your own dental records.',
+              'message': 'Access Denied: You can only share your own health records.',
             };
           }
           final notesMeta = _parseNotesJson(existing['notes']);
@@ -2271,7 +2271,7 @@ class ApiService {
             return {
               'success': false,
               'statusCode': 403,
-              'message': 'Access Denied: You can only share your own dental records.',
+              'message': 'Access Denied: You can only share your own health records.',
             };
           }
           final updated = Map<String, dynamic>.from(existing);
@@ -2303,8 +2303,8 @@ class ApiService {
       createInAppNotification(
         recipientRole: 'Dentist',
         recipientId: effectiveDocId.isNotEmpty ? effectiveDocId : effectiveDocUserId,
-        title: 'New Dental Records Shared',
-        message: '${patientName.trim().isNotEmpty ? patientName.trim() : "A patient"} shared ${updatedList.length} dental record(s) with you.',
+        title: 'New Health Records Shared',
+        message: '${patientName.trim().isNotEmpty ? patientName.trim() : "A patient"} shared ${updatedList.length} health record(s) with you.',
         type: 'RECORD_SHARED',
       );
     }
@@ -2482,7 +2482,7 @@ class ApiService {
         'success': false,
         'authorized': false,
         'statusCode': 404,
-        'message': 'Dental health record not found.',
+        'message': 'Health record not found.',
       };
     }
 
@@ -2531,7 +2531,7 @@ class ApiService {
         'success': false,
         'authorized': false,
         'statusCode': 403,
-        'message': 'Access Denied: You do not have permission to view or download this dental record.',
+        'message': 'Access Denied: You do not have permission to view or download this health record.',
       };
     }
 
@@ -3901,7 +3901,7 @@ class ApiService {
       );
       return jsonDecode(response.body);
     } catch (e) {
-      return {'success': false, 'message': 'Failed to suggest dentist.'};
+      return {'success': false, 'message': 'Failed to suggest doctor.'};
     }
   }
 
@@ -4069,7 +4069,7 @@ class ApiService {
       );
       return jsonDecode(response.body);
     } catch (e) {
-      return {'success': false, 'message': 'Failed to update dentist verification status.'};
+      return {'success': false, 'message': 'Failed to update doctor verification status.'};
     }
   }
 

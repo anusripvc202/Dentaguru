@@ -770,7 +770,7 @@ class _AdminProfileScreenState extends State<AdminProfileScreen> {
                     InkWell(
                       onTap: _callHelpline,
                       child: const Text(
-                        'Call our 24/7 clinical care helpline for dental emergencies, appointments and consultations.',
+                        'Call our 24/7 clinical care helpline for medical emergencies, appointments and consultations.',
                         style: TextStyle(
                           fontSize: 14,
                           color: Color(0xFF475569),

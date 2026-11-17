@@ -742,7 +742,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           setState(() => _isLoggingIn = false);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('🎉 Welcome back, Dr. $docName! Opening Dentist Workspace...'),
+              content: Text('🎉 Welcome back, Dr. $docName! Opening Doctor Workspace...'),
               backgroundColor: AppTheme.gsNavy,
             ),
           );
@@ -2436,7 +2436,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           const SizedBox(width: 5),
           _buildLoginRoleOption(
             UserRole.dentist,
-            'Dentist',
+            'Doctor',
             Icons.medical_services_rounded,
             AppTheme.gsNavy,
           ),

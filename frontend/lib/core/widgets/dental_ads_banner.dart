@@ -35,8 +35,8 @@ class DentalAd {
 const List<DentalAd> _patientAds = [
   DentalAd(
     brand: 'GS HEALTH',
-    tagline: 'Comprehensive Dental Care Platform',
-    description: 'Instant AI dental triage, certified specialist consultations, clinic appointments & digital e-prescriptions.',
+    tagline: 'Comprehensive Healthcare Platform',
+    description: 'Instant AI triage, certified specialist consultations, clinic appointments & digital e-prescriptions.',
     badgeLabel: 'Featured Platform',
     website: 'https://dentaguru.in',
     ctaText: 'Explore GS HEALTH',
@@ -119,7 +119,7 @@ List<DentalAd> sponsoredAdsForClinic() {
 const List<DentalAd> _dentistAds = [
   DentalAd(
     brand: 'GS HEALTH Pro',
-    tagline: 'Next-Gen Dental Practice Platform',
+    tagline: 'Next-Gen Clinical Practice Platform',
     description: 'Streamline specialist referrals, digital case sheets, revenue analytics, and instant multi-clinic consultations.',
     badgeLabel: 'Featured Platform',
     website: 'https://dentaguru.in',
@@ -357,8 +357,8 @@ class _DentalAdsBannerState extends State<DentalAdsBanner> {
 
     final headerTitle = widget.customTitle ??
         (widget.remainingSlidesOnly
-            ? (widget.isDentist ? 'Supply & Equipment Partners' : 'Recommended Dental Products')
-            : (widget.isDentist ? 'Dental Supply Partners' : 'Featured Dental Products'));
+            ? (widget.isDentist ? 'Supply & Equipment Partners' : 'Recommended Healthcare Products')
+            : (widget.isDentist ? 'Medical Supply Partners' : 'Featured Products'));
 
     const headerIcon = '📢';
     const headerIconBg = Color(0xFFFFF7ED);
@@ -909,7 +909,7 @@ class _DentaGuruPlatformSheet extends StatelessWidget {
                       Text(
                         isDentist
                             ? 'Smart Practice Management & Specialist Network'
-                            : 'AI Dental Triage, Consultations & Verified Clinics',
+                            : 'AI Triage, Consultations & Verified Clinics',
                         style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -934,7 +934,7 @@ class _DentaGuruPlatformSheet extends StatelessWidget {
               children: [
                 _buildFeatureCard(
                   icon: Icons.psychology_rounded,
-                  title: 'AI Dental Diagnostic Triage',
+                  title: 'AI Diagnostic Triage',
                   desc: 'Instant tooth-by-tooth AI symptom assessment, emergency urgency scoring & visual risk grading.',
                   color: const Color(0xFF3B82F6),
                 ),

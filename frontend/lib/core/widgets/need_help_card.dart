@@ -76,7 +76,7 @@ class NeedHelpCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Call our 24/7 clinical care helpline for dental emergencies, appointments, and consultations:',
+              'Call our 24/7 clinical care helpline for medical emergencies, appointments, and consultations:',
               style: TextStyle(fontSize: 13, color: AppTheme.textMedium, height: 1.4),
             ),
             const SizedBox(height: 16),
@@ -149,7 +149,7 @@ class NeedHelpCard extends StatelessWidget {
   Future<void> _chatOnWhatsApp(BuildContext context) async {
     final cleanPhone = _cleanNumber(whatsappNumber);
     final msg = customMessage ??
-        'Hello GS HEALTH Support Team! 👋\nI need assistance regarding dental consultations, appointments, or services.';
+        'Hello GS HEALTH Support Team! 👋\nI need assistance regarding medical consultations, appointments, or services.';
 
     final waUrl = Uri.parse('https://wa.me/$cleanPhone?text=${Uri.encodeComponent(msg)}');
     final intentUrl = Uri.parse('whatsapp://send?phone=$cleanPhone&text=${Uri.encodeComponent(msg)}');
@@ -320,7 +320,7 @@ class NeedHelpCard extends StatelessWidget {
                           ),
                           const SizedBox(height: 3),
                           const Text(
-                            'Our dental care team is here to assist with consultations, emergency care & queries.',
+                            'Our healthcare team is here to assist with consultations, emergency care & queries.',
                             style: TextStyle(
                               fontSize: 12,
                               color: AppTheme.textMedium,

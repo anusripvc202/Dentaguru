@@ -223,7 +223,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                 Text(
                                   preselectedDoctor != null
                                       ? '${preselectedDoctor.specialty} • ${preselectedDoctor.clinicName.isNotEmpty ? preselectedDoctor.clinicName : "GS HEALTH Clinic"}'
-                                      : 'Explore doctors and connect with a specialized dentist.',
+                                      : 'Explore doctors and connect with a specialized doctor.',
                                   style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                 ),
                               ],
@@ -280,7 +280,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                         initialValue: selectedCategory,
                         isExpanded: true,
                         decoration: InputDecoration(
-                          labelText: 'Dental Issue Category',
+                          labelText: 'Health Concern Category',
                           filled: true,
                           fillColor: const Color(0xFFF8FAFC),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -437,7 +437,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                         content: Text(
                                           preselectedDoctor != null
                                               ? '✅ Appointment requested with ${preselectedDoctor.name}!'
-                                              : '✅ Dental problem submitted! Admin will recommend a specialist shortly.',
+                                              : '✅ Health concern submitted! Admin will recommend a specialist shortly.',
                                         ),
                                         backgroundColor: const Color(0xFF10B981),
                                         duration: const Duration(seconds: 3),
@@ -949,7 +949,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                               : (nextVisit?.assignedDoctorName != null && nextVisit!.assignedDoctorName!.isNotEmpty && nextVisit.assignedDoctorName != 'null'
                                   ? 'With Dr. ${nextVisit.assignedDoctorName}'
                                   : 'Pending specialist assignment & confirmation.'))
-                          : 'Book a verified dentist near you in under a minute.',
+                          : 'Book a verified doctor near you in under a minute.',
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: 0.92),
                         fontSize: 12.5,
@@ -1109,7 +1109,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Talk to a dentist now',
+                    'Talk to a doctor now',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
@@ -1120,7 +1120,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                   ),
                   SizedBox(height: 3),
                   Text(
-                    'Get matched with an online dentist who speaks your language.',
+                    'Get matched with an online doctor who speaks your language.',
                     style: TextStyle(
                       fontSize: 11.5,
                       color: AppTheme.textMedium,
@@ -1292,7 +1292,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
           children: [
             const Expanded(
               child: Text(
-                'My favourite dentists',
+                'My favourite doctors',
                 style: TextStyle(
                   fontSize: 17,
                   fontWeight: FontWeight.bold,
@@ -1385,7 +1385,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                         ),
                         SizedBox(height: 3),
                         Text(
-                          'Tap ❤️ on a dentist\'s profile to save them here and refer friends to them.',
+                          'Tap ❤️ on a doctor\'s profile to save them here and refer friends to them.',
                           style: TextStyle(
                             fontSize: 11.5,
                             color: AppTheme.textMedium,
@@ -1546,7 +1546,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                   ),
                   SizedBox(height: 3),
                   Text(
-                    'Share a dentist you trust and track the referral.',
+                    'Share a doctor you trust and track the referral.',
                     style: TextStyle(
                       fontSize: 11.5,
                       color: AppTheme.textMedium,
@@ -1627,7 +1627,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
             SizedBox(height: 8),
             Text('No Scheduled Visits', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark)),
             SizedBox(height: 2),
-            Text('Submit a dental problem or report symptoms to schedule a visit.', textAlign: TextAlign.center, style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
+            Text('Submit a health concern or report symptoms to schedule a visit.', textAlign: TextAlign.center, style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
           ],
         ),
       );
@@ -2083,8 +2083,8 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
           const SizedBox(height: 6),
           Text(
             isUpcoming
-                ? 'Book a verified dentist near you in under a minute.'
-                : 'Your completed and cancelled dental visits will appear here.',
+                ? 'Book a verified doctor near you in under a minute.'
+                : 'Your completed and cancelled medical visits will appear here.',
             style: const TextStyle(
               fontSize: 13.5,
               color: Color(0xFF64748B),
@@ -2177,7 +2177,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
             ? req.assignedDoctorName!.trim()
             : (req.preferredDoctorName?.trim().isNotEmpty == true
                 ? req.preferredDoctorName!.trim()
-                : 'Assigned Dentist'));
+                : 'Assigned Doctor'));
 
     final specialty = req.displayDoctorSpecialty.isNotEmpty
         ? req.displayDoctorSpecialty
@@ -2185,7 +2185,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
             ? req.assignedDoctorSpecialty!.trim()
             : (req.problemCategory.trim().isNotEmpty
                 ? req.problemCategory.trim()
-                : 'General Dentist'));
+                : 'General Physician'));
 
     final clinicLocation = req.assignedDoctorClinic?.trim().isNotEmpty == true
         ? req.assignedDoctorClinic!.trim()
@@ -2886,7 +2886,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
             ),
             const SizedBox(height: 6),
             const Text(
-              'Digital e-prescriptions issued by your doctor or dentist after a visit will appear here.',
+              'Digital e-prescriptions issued by your doctor after a visit will appear here.',
               style: TextStyle(
                 fontSize: 13.5,
                 color: Color(0xFF64748B),
@@ -2934,13 +2934,13 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
       }
     }
     if (diagnosisTitle.isEmpty) {
-      diagnosisTitle = (record['title'] ?? 'Dental Prescription').toString().trim();
+      diagnosisTitle = (record['title'] ?? 'Medical Prescription').toString().trim();
     }
 
     final doctorName = (record['doctorName'] ??
             record['doctor_name'] ??
             record['doctor'] ??
-            'Attending Dentist')
+            'Attending Doctor')
         .toString()
         .trim();
     final clinicName = (record['clinicName'] ??
@@ -3301,7 +3301,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
             ),
             const SizedBox(height: 6),
             const Text(
-              'Clinical evaluations, medical history, consultations, and dental/treatment records from your visits will appear here.',
+              'Clinical evaluations, medical history, consultations, and medical/treatment records from your visits will appear here.',
               style: TextStyle(
                 fontSize: 13.5,
                 color: Color(0xFF64748B),
@@ -3328,7 +3328,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
           final shortDate = _formatShortDate(dt);
           final docName = req.displayDoctorName.isNotEmpty
               ? req.displayDoctorName
-              : (req.assignedDoctorName ?? 'Dental Evaluation');
+              : (req.assignedDoctorName ?? 'Medical Evaluation');
           return Container(
             margin: const EdgeInsets.only(bottom: 12),
             padding: const EdgeInsets.all(16),
@@ -3610,8 +3610,8 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   }) {
     final recId = (record['id'] ?? '').toString();
     final type = (record['type'] ?? 'prescription').toString();
-    final title = (record['title'] ?? 'Dental Record').toString();
-    final category = (record['category'] ?? 'Dental Report').toString();
+    final title = (record['title'] ?? 'Health Record').toString();
+    final category = (record['category'] ?? 'Medical Report').toString();
     final description = (record['description'] ?? '').toString().trim();
     final date = (record['date'] ?? '').toString();
     final fileType = (record['fileType'] ?? 'PDF').toString().toUpperCase();
@@ -3993,8 +3993,8 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
       text: isEdit ? (existingRecord['description'] ?? '').toString() : '',
     );
     String selectedCategory = isEdit
-        ? (existingRecord['category'] ?? 'Dental X-ray').toString()
-        : 'Dental X-ray';
+        ? (existingRecord['category'] ?? 'Medical X-ray').toString()
+        : 'Medical X-ray';
     if (!_recordCategories.contains(selectedCategory)) {
       selectedCategory = 'Other';
     }
@@ -4096,8 +4096,8 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                     SnackBar(
                       content: Text(
                         isEdit
-                            ? 'Dental record "$recordName" updated successfully.'
-                            : 'Dental record "$recordName" uploaded securely.',
+                            ? 'Health record "$recordName" updated successfully.'
+                            : 'Health record "$recordName" uploaded securely.',
                       ),
                       backgroundColor: const Color(0xFF10B981),
                     ),
@@ -4106,7 +4106,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               } else {
                 setModalState(() {
                   isSubmitting = false;
-                  errorMessage = (res['message'] ?? 'Failed to save dental record.').toString();
+                  errorMessage = (res['message'] ?? 'Failed to save health record.').toString();
                 });
               }
             }
@@ -4150,7 +4150,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  isEdit ? 'Edit Dental Record' : 'Upload Dental Health Record',
+                                  isEdit ? 'Edit Health Record' : 'Upload Health Record',
                                   style: const TextStyle(
                                     fontSize: 17,
                                     fontWeight: FontWeight.bold,
@@ -4495,7 +4495,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                           label: Text(
                             isSubmitting
                                 ? 'Saving Record...'
-                                : (isEdit ? 'Save Record Changes' : 'Upload Dental Record'),
+                                : (isEdit ? 'Save Record Changes' : 'Upload Health Record'),
                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                           ),
                           style: ElevatedButton.styleFrom(
@@ -4573,7 +4573,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                   content: Text(
-                    'Share ${selectedRecordIds.length} dental ${selectedRecordIds.length == 1 ? 'record' : 'records'} with ${doc.name} (${doc.specialty})?\n\nYou can revoke this permission at any time from your Records tab.',
+                    'Share ${selectedRecordIds.length} health ${selectedRecordIds.length == 1 ? 'record' : 'records'} with ${doc.name} (${doc.specialty})?\n\nYou can revoke this permission at any time from your Records tab.',
                     style: const TextStyle(fontSize: 13, color: AppTheme.textDark),
                   ),
                   actions: [
@@ -4857,8 +4857,8 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
 
                     ...allAvailableRecords.map((rec) {
                       final id = (rec['id'] ?? '').toString();
-                      final title = (rec['title'] ?? 'Dental Record').toString();
-                      final category = (rec['category'] ?? 'Dental Report').toString();
+                      final title = (rec['title'] ?? 'Health Record').toString();
+                      final category = (rec['category'] ?? 'Medical Report').toString();
                       final date = (rec['date'] ?? '').toString();
                       final isChecked = selectedRecordIds.contains(id);
 
@@ -5011,7 +5011,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     Map<String, dynamic> record,
   ) async {
     final recId = (record['id'] ?? '').toString();
-    final title = (record['title'] ?? 'Dental Record').toString();
+    final title = (record['title'] ?? 'Health Record').toString();
     final messenger = ScaffoldMessenger.of(context);
 
     final confirmed = await showDialog<bool>(
@@ -5019,7 +5019,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
       builder: (dCtx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text(
-          'Delete Dental Record?',
+          'Delete Health Record?',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
         ),
         content: Text(
@@ -5380,7 +5380,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                     Text(
                                       bytes != null
                                           ? 'Verified PDF Document • ${RecordFileHelper.formatFileSize(bytes.length)}'
-                                          : 'Encrypted PDF Dental Record',
+                                          : 'Encrypted PDF Health Record',
                                       style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                     ),
                                   ],

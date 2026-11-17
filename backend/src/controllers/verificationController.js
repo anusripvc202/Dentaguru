@@ -16,12 +16,12 @@ exports.getDentistsForVerification = async (req, res) => {
         }
         res.json({ success: true, count: data.length, dentists: data });
     } catch (err) {
-        console.error('Get Dentists Verification Error:', err.message);
-        res.status(500).json({ success: false, message: 'Failed to fetch dentists for verification.' });
+        console.error('Get Doctors Verification Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to fetch doctors for verification.' });
     }
 };
 
-// 2. ADMIN: VERIFY / APPROVE / REJECT / SUSPEND DENTIST
+// 2. ADMIN: VERIFY / APPROVE / REJECT / SUSPEND DOCTOR
 exports.verifyDentist = async (req, res) => {
     const { id } = req.params;
     const { status, notes } = req.body; // 'VERIFIED', 'REJECTED', 'SUSPENDED'
@@ -40,25 +40,25 @@ exports.verifyDentist = async (req, res) => {
 
         if (error) throw error;
 
-        // Create Notification for Dentist
+        // Create Notification for Doctor
         if (data && data.user_id) {
             await Notification.create({
                 recipient_role: 'Dentist',
                 recipient_id: data.user_id,
                 title: `Account Verification Update`,
-                message: `Your dentist verification status is now set to: ${status}. ${notes || ''}`,
+                message: `Your doctor verification status is now set to: ${status}. ${notes || ''}`,
                 type: 'verification'
             });
         }
 
         res.json({
             success: true,
-            message: `Dentist verification status updated to ${status}.`,
+            message: `Doctor verification status updated to ${status}.`,
             dentist: data
         });
     } catch (err) {
-        console.error('Verify Dentist Error:', err.message);
-        res.status(500).json({ success: false, message: 'Failed to update dentist verification status.' });
+        console.error('Verify Doctor Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to update doctor verification status.' });
     }
 };
 

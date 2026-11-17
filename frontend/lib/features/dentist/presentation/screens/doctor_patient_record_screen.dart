@@ -337,11 +337,11 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
                             'patientName': pName,
                             'type': 'prescription',
                             'title': diagnosis.isNotEmpty ? diagnosis : 'Digital Prescription Slips',
-                            'diagnosis': diagnosis.isNotEmpty ? diagnosis : 'Dental Care',
-                            'subtitle': 'Diagnosis: ${diagnosis.isNotEmpty ? diagnosis : "Dental Care"} (${medName.isNotEmpty ? medName : "Medication"})',
+                            'diagnosis': diagnosis.isNotEmpty ? diagnosis : 'Medical Care',
+                            'subtitle': 'Diagnosis: ${diagnosis.isNotEmpty ? diagnosis : "Medical Care"} (${medName.isNotEmpty ? medName : "Medication"})',
                             'doctorId': _patientService.currentDoctor?.id ?? '',
-                            'doctorName': _patientService.currentDoctor?.name ?? 'Attending Dentist',
-                            'clinicName': _patientService.currentDoctor?.clinicName ?? 'GS HEALTH Dental Clinic',
+                            'doctorName': _patientService.currentDoctor?.name ?? 'Attending Doctor',
+                            'clinicName': _patientService.currentDoctor?.clinicName ?? 'GS HEALTH Clinic',
                             'date': DateTime.now().toString().split(' ').first,
                             'instructions': notes,
                             'items': [
@@ -362,9 +362,9 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
                             patientId: widget.patient.id.isNotEmpty ? widget.patient.id : pName,
                             type: 'prescription',
                             title: 'Digital Prescription Slips',
-                            subtitle: 'Diagnosis: ${diagnosis.isNotEmpty ? diagnosis : "Dental Care"} (${medName.isNotEmpty ? medName : "Medication"})',
-                            doctorName: _patientService.currentDoctor?.name ?? 'Attending Dentist',
-                            clinicName: _patientService.currentDoctor?.clinicName ?? 'GS HEALTH Dental Clinic',
+                            subtitle: 'Diagnosis: ${diagnosis.isNotEmpty ? diagnosis : "Medical Care"} (${medName.isNotEmpty ? medName : "Medication"})',
+                            doctorName: _patientService.currentDoctor?.name ?? 'Attending Doctor',
+                            clinicName: _patientService.currentDoctor?.clinicName ?? 'GS HEALTH Clinic',
                             items: [
                               {
                                 'name': medName.isNotEmpty ? medName : 'Amoxicillin 500mg',
@@ -381,7 +381,7 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
                             recipientRole: 'Patient',
                             recipientId: pName,
                             title: '💊 New E-Prescription Issued!',
-                            message: 'Dr. ${_patientService.currentDoctor?.name ?? "Attending Dentist"} has issued an E-Prescription for $diagnosis.',
+                            message: 'Dr. ${_patientService.currentDoctor?.name ?? "Attending Doctor"} has issued an E-Prescription for $diagnosis.',
                           );
 
                           if (context.mounted) {
@@ -1103,7 +1103,7 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
               ),
               const SizedBox(height: 10),
               Text(
-                req.problemCategory.isNotEmpty ? req.problemCategory : 'Dental Consultation',
+                req.problemCategory.isNotEmpty ? req.problemCategory : 'Medical Consultation',
                 style: const TextStyle(
                   fontSize: 13.5,
                   fontWeight: FontWeight.w600,
@@ -1165,7 +1165,7 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
             ),
             const SizedBox(height: 4),
             const Text(
-              'Treatment procedures, prescriptions, and dental reports will appear here.',
+              'Treatment procedures, prescriptions, and health reports will appear here.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 13,
@@ -1181,7 +1181,7 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
       key: const Key('patient_treatments_list'),
       children: records.map((rec) {
         final title = (rec['title'] ?? 'Treatment Procedure').toString();
-        final category = (rec['category'] ?? rec['type'] ?? 'Dental Care').toString();
+        final category = (rec['category'] ?? rec['type'] ?? 'Medical Care').toString();
         final date = (rec['date'] ?? '').toString();
         final description = (rec['subtitle'] ?? rec['instructions'] ?? rec['description'] ?? '').toString();
 

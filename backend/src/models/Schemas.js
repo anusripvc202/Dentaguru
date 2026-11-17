@@ -1250,7 +1250,7 @@ const Appointment = {
 
         const apptDate = appData.date || appData.appointment_date || appData.appointmentDate || new Date().toISOString();
         const timeSlot = appData.time_slot || appData.timeSlot || 'Today, 2:30 PM';
-        const treatmentName = appData.treatment || appData.notes || 'Dental Consultation';
+        const treatmentName = appData.treatment || appData.notes || 'Medical Consultation';
         const statusVal = appData.status || 'PENDING';
 
         const payload = {
@@ -1705,7 +1705,7 @@ const ChatMessage = {
                 }
             }
             if (!resolvedDoc) {
-                resolvedDoc = 'Attending Dentist';
+                resolvedDoc = 'Attending Doctor';
             }
 
             const conversation = {
@@ -1779,7 +1779,7 @@ const PatientProblemRequest = {
             city: reqData.city || null,
             pincode: reqData.pincode || null,
             state: reqData.state || null,
-            problem_category: reqData.problem_category || reqData.problemCategory || 'General Dental Problem',
+            problem_category: reqData.problem_category || reqData.problemCategory || 'General Medical Consultation',
             problem_description: reqData.problem_description || reqData.problemDescription || '',
             symptoms: reqData.symptoms || '',
             preferred_location: reqData.preferred_location || reqData.preferredLocation || null,
@@ -1796,7 +1796,7 @@ const PatientProblemRequest = {
             // Fallback if some columns don't exist in schema
             const safePayload = {
                 patient_id: patientId,
-                problem_category: reqData.problem_category || reqData.problemCategory || 'General Dental Problem',
+                problem_category: reqData.problem_category || reqData.problemCategory || 'General Medical Consultation',
                 problem_description: reqData.problem_description || reqData.problemDescription || '',
                 symptoms: reqData.symptoms || '',
                 preferred_location: reqData.preferred_location || reqData.preferredLocation || null,

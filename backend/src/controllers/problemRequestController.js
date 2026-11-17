@@ -28,14 +28,14 @@ exports.createProblemRequest = async (req, res) => {
             city: realCity,
             pincode: realPincode,
             state: realState,
-            problem_category: problemCategory || 'General Dental Issue',
+            problem_category: problemCategory || 'General Medical Consultation',
             problem_description: problemDescription || '',
             symptoms: symptoms || '',
             preferred_location: preferredLocation || null,
             attachments: attachments || [],
             status: initialStatus,
             suggested_dentist_id: preferredDoctorId || null,
-            admin_notes: isDirectReferral ? `Direct patient referral to ${req.body.preferredDoctorName || 'Dentist'}` : null
+            admin_notes: isDirectReferral ? `Direct patient referral to ${req.body.preferredDoctorName || 'Doctor'}` : null
         });
 
         if (isDirectReferral) {
@@ -45,7 +45,7 @@ exports.createProblemRequest = async (req, res) => {
                     patient_id: patientId,
                     dentist_id: preferredDoctorId,
                     status: 'SUGGESTED',
-                    notes: `Direct referral consultation with ${req.body.preferredDoctorName || 'Dentist'}`
+                    notes: `Direct referral consultation with ${req.body.preferredDoctorName || 'Doctor'}`
                 });
             } catch (_) {}
         }
@@ -54,14 +54,14 @@ exports.createProblemRequest = async (req, res) => {
         await Notification.create({
             recipient_role: isDirectReferral ? 'Dentist' : 'Admin',
             recipient_id: isDirectReferral ? preferredDoctorId : 'ALL',
-            title: isDirectReferral ? '🩺 Direct Referral Consultation' : '🚨 New Dental Problem Request',
+            title: isDirectReferral ? '🩺 Direct Referral Consultation' : '🚨 New Consultation Request',
             message: `Patient (${realName}) consultation request for ${problemCategory}`,
             type: 'problem_request'
         });
 
         res.status(201).json({
             success: true,
-            message: isDirectReferral ? 'Referral submitted directly to doctor.' : 'Dental problem request submitted successfully. Awaiting admin review.',
+            message: isDirectReferral ? 'Referral submitted directly to doctor.' : 'Consultation request submitted successfully. Awaiting admin review.',
             request
         });
     } catch (err) {
@@ -254,7 +254,7 @@ exports.markAdminReviewed = async (req, res) => {
                 recipient_role: 'Patient',
                 recipient_id: problemReq.patient_id || 'ALL',
                 title: '📋 Admin Review Completed',
-                message: 'Admin has reviewed your dental symptoms. A specialized doctor will be assigned shortly.',
+                message: 'Admin has reviewed your symptoms. A specialized doctor will be assigned shortly.',
                 type: 'admin_reviewed'
             });
 
@@ -383,9 +383,9 @@ exports.suggestDentist = async (req, res) => {
         await Notification.create({
             recipient_role: 'Patient',
             recipient_id: problemReq.patient_id || 'ALL',
-            title: '🩺 Dentist Suggested by Admin',
-            message: `Admin has reviewed your dental problem request and suggested ${docName}. Tap to view profile.`,
-            type: 'dentist_suggested'
+            title: '🩺 Doctor Suggested by Admin',
+            message: `Admin has reviewed your consultation request and suggested ${docName}. Tap to view profile.`,
+            type: 'doctor_suggested'
         });
 
         if (dentist || resolvedDentistUserId) {
@@ -400,24 +400,24 @@ exports.suggestDentist = async (req, res) => {
 
         res.json({
             success: true,
-            message: 'Dentist details successfully suggested to patient.',
+            message: 'Doctor details successfully suggested to patient.',
             request: updatedReq
         });
     } catch (err) {
-        console.error('Suggest Dentist Error:', err.message);
-        res.status(500).json({ success: false, message: 'Failed to suggest dentist.' });
+        console.error('Suggest Doctor Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to suggest doctor.' });
     }
 };
 
-// 5. PATIENT: GET SUGGESTED DENTISTS FOR MY REQUESTS
+// 5. PATIENT: GET SUGGESTED DOCTORS FOR MY REQUESTS
 exports.getSuggestedDentists = async (req, res) => {
     try {
         const patientId = req.user ? req.user.id : req.query.patientId;
         const suggestions = await DentistSuggestion.find({ patient_id: patientId });
         res.json({ success: true, count: suggestions.length, suggestions });
     } catch (err) {
-        console.error('Get Suggested Dentists Error:', err.message);
-        res.status(500).json({ success: false, message: 'Failed to fetch suggested dentists.' });
+        console.error('Get Suggested Doctors Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to fetch suggested doctors.' });
     }
 };
 

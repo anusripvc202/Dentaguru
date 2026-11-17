@@ -26,9 +26,9 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
   final List<Map<String, dynamic>> _slides = [
     {
       'badge': '✨ What is GS HEALTH?',
-      'title': 'Your Smart Digital Dental Healthcare Platform',
+      'title': 'Your Smart Digital Healthcare Platform',
       'description':
-          'GS HEALTH connects you with accredited dental clinics and specialists. Report symptoms, get instant e-prescriptions, and manage your oral health with complete peace of mind.',
+          'GS HEALTH connects you with accredited clinics and medical specialists. Report symptoms, get instant e-prescriptions, and manage your health with complete peace of mind.',
       'chips': ['🏥 Verified Clinics', '⚡ Fast Diagnosis', '🛡️ Safe Care'],
       'gradient': [const Color(0xFF0F172A), const Color(0xFF0052CC)],
       'icon': Icons.health_and_safety_rounded,
@@ -38,10 +38,10 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
     },
     {
       'badge': '🧑‍⚕️ Specialized Care',
-      'title': 'Connect with Top Verified Dental Specialists',
+      'title': 'Connect with Top Verified Medical Specialists',
       'description':
-          'From root canal therapy & aligners to implants and smile designing, get paired with the right experienced dental surgeon in your area.',
-      'chips': ['🦷 Root Canal (Endo)', '💎 Braces & Aligners', '⚙️ Implants'],
+          'From routine consultations to advanced multi-specialty care, get paired with the right experienced doctor in your area.',
+      'chips': ['🩺 General Medicine', '💎 Cardiology', '⚙️ Specialized Care'],
       'gradient': [const Color(0xFF0F766E), const Color(0xFF0284C7)],
       'icon': Icons.verified_user_rounded,
       'ctaText': 'Book a Specialist',
@@ -170,7 +170,7 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
                                 ),
                                 const SizedBox(height: 3),
                                 Text(
-                                  'India\'s Integrated Digital Dental Care Network',
+                                  'India\'s Integrated Digital Healthcare Network',
                                   style: TextStyle(fontSize: 11.5, color: Colors.white.withValues(alpha: 0.85)),
                                 ),
                               ],
@@ -183,7 +183,7 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
 
                     // Intro Paragraph
                     const Text(
-                      'GS HEALTH is designed to simplify oral healthcare for patients. We bridge the gap between patients, verified dental clinics, and specialized practitioners — providing quick symptom diagnosis, transparent treatment tracking, and certified e-prescriptions.',
+                      'GS HEALTH is designed to simplify healthcare for patients. We bridge the gap between patients, verified clinics, and specialized practitioners — providing quick symptom diagnosis, transparent treatment tracking, and certified e-prescriptions.',
                       style: TextStyle(fontSize: 13, height: 1.5, color: Color(0xFF334155), fontWeight: FontWeight.w400),
                     ),
                     const SizedBox(height: 20),
@@ -197,18 +197,18 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
 
                     _buildStepCard(
                       stepNumber: '1',
-                      title: 'Report Your Dental Concern',
+                      title: 'Report Your Health Concern',
                       description:
-                          'Select your symptoms (toothache, aligners, gums, implant consultation) and optionally attach photos.',
+                          'Select your symptoms and medical concern, and optionally attach reports or photos.',
                       icon: Icons.edit_note_rounded,
                       color: const Color(0xFF0284C7),
                     ),
                     const SizedBox(height: 10),
                     _buildStepCard(
                       stepNumber: '2',
-                      title: 'Matched with Specialized Dentist',
+                      title: 'Matched with Specialized Doctor',
                       description:
-                          'A verified attending dentist evaluates your problem, recommends specialized treatment, or confirms a consultation slot.',
+                          'A verified attending doctor evaluates your problem, recommends specialized treatment, or confirms a consultation slot.',
                       icon: Icons.person_search_rounded,
                       color: const Color(0xFF0D9488),
                     ),
@@ -217,7 +217,7 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
                       stepNumber: '3',
                       title: 'Get Treated & Track Digital Rx',
                       description:
-                          'Visit the accredited clinic, receive digital prescriptions with automated reminders, and maintain your dental history on your phone.',
+                          'Visit the accredited clinic, receive digital prescriptions with automated reminders, and maintain your medical history on your phone.',
                       icon: Icons.verified_rounded,
                       color: const Color(0xFF10B981),
                     ),
@@ -233,7 +233,7 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
                     _buildBenefitItem(
                       icon: Icons.verified_user_rounded,
                       title: 'Verified & Licensed Practitioners',
-                      description: 'All registered dentists are vetted with valid Dental Council license numbers and clinic accreditations.',
+                      description: 'All registered doctors are vetted with valid Medical Council license numbers and clinic accreditations.',
                     ),
                     _buildBenefitItem(
                       icon: Icons.receipt_long_rounded,
@@ -242,20 +242,20 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
                     ),
                     _buildBenefitItem(
                       icon: Icons.history_edu_rounded,
-                      title: 'Lifetime Dental Health Record',
-                      description: 'Keep your past procedures, X-ray evaluations, and check-up timelines securely stored in the cloud.',
+                      title: 'Lifetime Health Record',
+                      description: 'Keep your past procedures, diagnostic evaluations, and check-up timelines securely stored in the cloud.',
                     ),
                     _buildBenefitItem(
                       icon: Icons.card_giftcard_rounded,
                       title: 'Patient Referral Program',
-                      description: 'Invite family and friends to GS HEALTH and unlock special wellness rewards and dental care coins.',
+                      description: 'Invite family and friends to GS HEALTH and unlock special wellness rewards and healthcare coins.',
                     ),
                     const SizedBox(height: 24),
 
                     // CTA Button
                     ElevatedButton.icon(
                       icon: const Icon(Icons.calendar_month_rounded, size: 18),
-                      label: const Text('Book a Dental Consultation Now', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      label: const Text('Book a Medical Consultation Now', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.primaryBlue,
                         foregroundColor: Colors.white,

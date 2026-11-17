@@ -463,7 +463,7 @@ class _PatientConsultationDetailsScreenState extends State<PatientConsultationDe
                                 'patientName': widget.patientName,
                                 'type': 'prescription',
                                 'title': 'Digital Prescription Slips',
-                                'subtitle': 'Diagnosis: ${diagnosis.isNotEmpty ? diagnosis : "Dental Care"} (${medName.isNotEmpty ? medName : "Medication"})',
+                                'subtitle': 'Diagnosis: ${diagnosis.isNotEmpty ? diagnosis : "Medical Care"} (${medName.isNotEmpty ? medName : "Medication"})',
                                 'diagnosis': diagnosis,
                                 'medication': '$medName ($dosage, $freq, $duration)',
                                 'duration': duration,
@@ -487,9 +487,9 @@ class _PatientConsultationDetailsScreenState extends State<PatientConsultationDe
                                 patientId: widget.patientName,
                                 type: 'prescription',
                                 title: 'Digital Prescription Slips',
-                                subtitle: 'Diagnosis: ${diagnosis.isNotEmpty ? diagnosis : "Dental Care"} (${medName.isNotEmpty ? medName : "Medication"})',
-                                doctorName: 'Attending Dentist',
-                                clinicName: 'GS HEALTH Dental Clinic',
+                                subtitle: 'Diagnosis: ${diagnosis.isNotEmpty ? diagnosis : "Medical Care"} (${medName.isNotEmpty ? medName : "Medication"})',
+                                doctorName: 'Attending Doctor',
+                                clinicName: 'GS HEALTH Clinic',
                                 items: [
                                   {
                                     'name': medName.isNotEmpty ? medName : 'Amoxicillin 500mg',
@@ -506,7 +506,7 @@ class _PatientConsultationDetailsScreenState extends State<PatientConsultationDe
                                 recipientRole: 'Patient',
                                 recipientId: widget.patientName,
                                 title: '📝 New E-Prescription Issued',
-                                message: 'Your doctor issued an E-Prescription for ${diagnosis.isNotEmpty ? diagnosis : "your dental treatment"}. Check Medical Records.',
+                                message: 'Your doctor issued an E-Prescription for ${diagnosis.isNotEmpty ? diagnosis : "your medical treatment"}. Check Medical Records.',
                               );
 
                               Navigator.pop(dialogCtx);
@@ -620,7 +620,7 @@ class _PatientConsultationDetailsScreenState extends State<PatientConsultationDe
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Dental Problem Details', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark)),
+                  const Text('Medical Consultation Details', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark)),
                   const Divider(height: 20),
                   _buildDetailRow(Icons.category_rounded, 'Category', widget.category),
                   _buildDetailRow(Icons.description_rounded, 'Symptoms', widget.symptoms),

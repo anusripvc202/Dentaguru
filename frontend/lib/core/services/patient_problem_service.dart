@@ -444,7 +444,8 @@ class PatientConsultationRequest {
     if (assignedDoctorSpecialty != null &&
         assignedDoctorSpecialty!.trim().isNotEmpty &&
         assignedDoctorSpecialty != 'null' &&
-        assignedDoctorSpecialty != 'Dental Specialist') {
+        assignedDoctorSpecialty != 'Dental Specialist' &&
+        assignedDoctorSpecialty != 'Medical Specialist') {
       return assignedDoctorSpecialty!;
     }
     if (assignedDoctorId != null && assignedDoctorId!.isNotEmpty) {
@@ -2487,7 +2488,7 @@ class PatientProblemService extends ChangeNotifier {
             continue;
           }
         }
-        final category = (pr['problem_category'] ?? pr['problemCategory'] ?? 'Dental Issue').toString();
+        final category = (pr['problem_category'] ?? pr['problemCategory'] ?? 'Medical Consultation').toString();
         final desc = (pr['problem_description'] ?? pr['problemDescription'] ?? '').toString();
         final rawStatus = (pr['status'] ?? 'SUBMITTED').toString();
         final severity = (pr['severity'] ?? 'Moderate').toString();
@@ -2684,7 +2685,7 @@ class PatientProblemService extends ChangeNotifier {
             patientName: (r.patientName.isNotEmpty && r.patientName != 'Patient' && r.patientName != 'Patient Consultation') ? r.patientName : existing.patientName,
             patientPhone: r.patientPhone.isNotEmpty ? r.patientPhone : existing.patientPhone,
             problemCategory: r.problemCategory.isNotEmpty ? r.problemCategory : existing.problemCategory,
-            problemDescription: (r.problemDescription.isNotEmpty && r.problemDescription != 'Scheduled dental consultation') ? r.problemDescription : existing.problemDescription,
+            problemDescription: (r.problemDescription.isNotEmpty && r.problemDescription != 'Scheduled dental consultation' && r.problemDescription != 'Scheduled medical consultation') ? r.problemDescription : existing.problemDescription,
             symptoms: r.symptoms.isNotEmpty ? r.symptoms : existing.symptoms,
             preferredLocation: r.preferredLocation.isNotEmpty ? r.preferredLocation : existing.preferredLocation,
             severity: r.severity.isNotEmpty ? r.severity : existing.severity,
@@ -2738,7 +2739,7 @@ class PatientProblemService extends ChangeNotifier {
         final prId = (pr['_id'] ?? pr['id'] ?? '').toString();
         if (prId.isEmpty) continue;
         final reqPatientId = (pr['patient_id'] ?? pr['patientId'] ?? pr['patient']?['id'])?.toString() ?? '';
-        final category = (pr['problem_category'] ?? pr['problemCategory'] ?? 'Dental Issue').toString();
+        final category = (pr['problem_category'] ?? pr['problemCategory'] ?? 'Medical Consultation').toString();
         final desc = (pr['problem_description'] ?? pr['problemDescription'] ?? '').toString();
         final rawStatus = (pr['status'] ?? 'SUBMITTED').toString();
         final severity = (pr['severity'] ?? 'Moderate').toString();
@@ -3134,7 +3135,7 @@ class PatientProblemService extends ChangeNotifier {
       
       if (list.isEmpty) {
         if (_isDentistMode) {
-          _requests.removeWhere((r) => r.problemDescription == 'Scheduled dental consultation');
+          _requests.removeWhere((r) => r.problemDescription == 'Scheduled dental consultation' || r.problemDescription == 'Scheduled medical consultation');
           _saveToStorage();
           notifyListeners();
         }
@@ -3183,7 +3184,7 @@ class PatientProblemService extends ChangeNotifier {
 
         final clinicObj = item['clinic'] ?? {};
         final clinic = (clinicObj['clinic_name'] ?? clinicObj['name'] ?? item['clinic_name'] ?? item['clinicName'] ?? '').toString();
-        final treatment = item['treatment'] ?? 'Dental Consultation';
+        final treatment = item['treatment'] ?? 'Medical Consultation';
         final slot = item['time_slot'] ?? item['timeSlot'];
         final rawDate = (item['date'] ?? item['appointment_date'] ?? item['appointmentDate'])?.toString();
         final statusStr = (item['status'] ?? 'CONFIRMED').toString();
@@ -3225,13 +3226,13 @@ class PatientProblemService extends ChangeNotifier {
               patientName: pName,
               patientPhone: pPhone,
               problemCategory: treatment.toString(),
-              problemDescription: 'Scheduled dental consultation',
+              problemDescription: 'Scheduled medical consultation',
               severity: 'Moderate',
               submittedAt: item['created_at'] != null ? DateTime.tryParse(item['created_at'].toString()) ?? DateTime.now() : DateTime.now(),
               status: statusStr,
               assignedDoctorId: itemDentistId ?? dId,
               assignedDoctorName: assignedDocName,
-              assignedDoctorSpecialty: 'Dental Specialist',
+              assignedDoctorSpecialty: 'Medical Specialist',
               assignedDoctorClinic: clinic.isNotEmpty ? clinic : null,
               confirmedTimeSlot: slot?.toString(),
               confirmedDate: rawDate,
@@ -3268,7 +3269,7 @@ class PatientProblemService extends ChangeNotifier {
             patientName: (r.patientName.isNotEmpty && r.patientName != 'Patient' && r.patientName != 'Patient Consultation') ? r.patientName : existing.patientName,
             patientPhone: r.patientPhone.isNotEmpty ? r.patientPhone : existing.patientPhone,
             problemCategory: r.problemCategory.isNotEmpty ? r.problemCategory : existing.problemCategory,
-            problemDescription: (r.problemDescription.isNotEmpty && r.problemDescription != 'Scheduled dental consultation') ? r.problemDescription : existing.problemDescription,
+            problemDescription: (r.problemDescription.isNotEmpty && r.problemDescription != 'Scheduled dental consultation' && r.problemDescription != 'Scheduled medical consultation') ? r.problemDescription : existing.problemDescription,
             symptoms: r.symptoms.isNotEmpty ? r.symptoms : existing.symptoms,
             preferredLocation: r.preferredLocation.isNotEmpty ? r.preferredLocation : existing.preferredLocation,
             severity: r.severity.isNotEmpty ? r.severity : existing.severity,
@@ -3390,15 +3391,15 @@ class PatientProblemService extends ChangeNotifier {
       patientId: pId.isNotEmpty ? pId : null,
       patientName: pName,
       patientPhone: currentPatient.phone,
-      problemCategory: treatment.trim().isNotEmpty ? treatment.trim() : 'Dental Consultation',
-      problemDescription: symptoms.trim().isNotEmpty ? symptoms.trim() : 'Scheduled dental consultation',
+      problemCategory: treatment.trim().isNotEmpty ? treatment.trim() : 'Medical Consultation',
+      problemDescription: symptoms.trim().isNotEmpty ? symptoms.trim() : 'Scheduled medical consultation',
       symptoms: symptoms.trim(),
       severity: 'Moderate',
       submittedAt: DateTime.now(),
       status: 'Confirmed',
       assignedDoctorId: matchedDoc.id.isNotEmpty ? matchedDoc.id : dentistId,
       assignedDoctorName: matchedDoc.name.isNotEmpty ? matchedDoc.name : null,
-      assignedDoctorSpecialty: matchedDoc.specialty.isNotEmpty ? matchedDoc.specialty : 'Dental Specialist',
+      assignedDoctorSpecialty: matchedDoc.specialty.isNotEmpty ? matchedDoc.specialty : 'Medical Specialist',
       assignedDoctorClinic: matchedDoc.clinicName.isNotEmpty ? matchedDoc.clinicName : (clinicId.isNotEmpty ? clinicId : null),
       assignedDoctorPhone: matchedDoc.phone,
       assignedDoctorFee: matchedDoc.consultationFee,
@@ -4147,7 +4148,7 @@ class PatientProblemService extends ChangeNotifier {
     final reqObj = index != -1 ? _requests[index] : (assignedIndex != -1 ? _dentistAssignedRequests[assignedIndex] : null);
     final reqName = reqObj?.patientName ?? 'Patient';
     final docName = reqObj?.assignedDoctorName ?? 'Your Doctor';
-    final category = reqObj?.problemCategory ?? 'Dental Issue';
+    final category = reqObj?.problemCategory ?? 'Medical Consultation';
 
     addNotification(
       recipientRole: 'Patient',

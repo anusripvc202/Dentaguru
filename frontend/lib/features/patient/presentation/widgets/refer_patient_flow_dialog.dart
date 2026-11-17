@@ -212,7 +212,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
           : _requiredSpecialist,
       clinicalComplaint: _complaintController.text.trim().isNotEmpty
           ? _complaintController.text.trim()
-          : 'Specialist consultation and dental evaluation',
+          : 'Specialist consultation and medical evaluation',
       doctorId: _selectedDoctor!.id,
       referrerPatientId: referrerId,
       doctorName: _selectedDoctor?.name,
@@ -297,7 +297,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        widget.isDentistMode ? 'Dentist Referral Portal' : 'Refer a Patient',
+                        widget.isDentistMode ? 'Doctor Referral Portal' : 'Refer a Patient',
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
@@ -308,7 +308,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                       ),
                       Text(
                         widget.isDentistMode
-                            ? 'Refer your patient to a verified dental specialist'
+                            ? 'Refer your patient to a verified medical specialist'
                             : 'Connect a patient with a specialized doctor',
                         style: TextStyle(
                           fontSize: 12,
@@ -1299,7 +1299,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                                                 borderRadius: BorderRadius.circular(8),
                                               ),
                                               child: Text(
-                                                doc.specialty.isNotEmpty ? doc.specialty : 'Dentist',
+                                                doc.specialty.isNotEmpty ? doc.specialty : 'Doctor',
                                                 style: TextStyle(
                                                   fontSize: 11,
                                                   fontWeight: FontWeight.bold,
@@ -1752,7 +1752,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                     style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
                     cursorColor: primaryColor,
                     maxLines: 3,
-                    decoration: _inputDecoration('Describe the dental problem, pain, symptoms or reason for referral...', isDark),
+                    decoration: _inputDecoration('Describe the health concern, symptoms or reason for referral...', isDark),
                     validator: (val) {
                       if (val == null || val.trim().isEmpty) return 'Please describe the problem';
                       return null;
@@ -1957,7 +1957,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                     {'label': 'Mobile Number', 'value': '+91 ${_mobileController.text.trim()}'},
                     {'label': 'Age & Gender', 'value': '${_ageController.text.trim()} Years • $_gender'},
                     {'label': 'City', 'value': _cityController.text.trim()},
-                    {'label': 'Problem', 'value': _complaintController.text.trim().isNotEmpty ? _complaintController.text.trim() : 'General dental examination'},
+                    {'label': 'Reason', 'value': _complaintController.text.trim().isNotEmpty ? _complaintController.text.trim() : 'Medical consultation & referral'},
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -2044,9 +2044,9 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
     final currentDoc = _patientService.currentDoctor;
     final docName = (currentDoc != null && currentDoc.name.isNotEmpty)
         ? (currentDoc.name.startsWith('Dr.') ? currentDoc.name : 'Dr. ${currentDoc.name}')
-        : 'Attending Dentist';
+        : 'Attending Doctor';
     final clinicName = (currentDoc != null && currentDoc.clinicName.isNotEmpty) ? currentDoc.clinicName : 'Registered Clinic';
-    final docSpecialty = (currentDoc != null && currentDoc.specialty.isNotEmpty) ? currentDoc.specialty : 'Dental Practitioner';
+    final docSpecialty = (currentDoc != null && currentDoc.specialty.isNotEmpty) ? currentDoc.specialty : 'Medical Practitioner';
 
     return Column(
       children: [
@@ -2113,7 +2113,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
               children: [
                 // Section 1: Referring Doctor (You)
                 _buildSummaryCard(
-                  title: '1. REFERRING DENTIST (You)',
+                  title: '1. REFERRING DOCTOR (You)',
                   icon: Icons.person_pin_rounded,
                   color: const Color(0xFF6366F1),
                   isDark: isDark,
@@ -2410,7 +2410,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                 const SizedBox(height: 8),
                 _buildSuccessRow('Receiving Doctor', doctorName, isDark),
                 const SizedBox(height: 8),
-                _buildSuccessRow('Problem', _complaintController.text.trim().isNotEmpty ? _complaintController.text.trim() : 'General dental examination', isDark),
+                _buildSuccessRow('Reason', _complaintController.text.trim().isNotEmpty ? _complaintController.text.trim() : 'Medical consultation & referral', isDark),
                 const SizedBox(height: 8),
                 _buildSuccessRow('Status', 'Pending Review', isDark, isBadge: true, badgeColor: const Color(0xFFF59E0B)),
               ],
@@ -2533,9 +2533,9 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                 buffer.writeln('Hi $patientName,');
                 buffer.writeln();
                 if (widget.isDentistMode && referringDocName != null) {
-                  buffer.writeln('This is $referringDocName from GS HEALTH. I have referred you to *$docName*$qual for specialized dental care.');
+                  buffer.writeln('This is $referringDocName from GS HEALTH. I have referred you to *$docName*$qual for specialized medical care.');
                 } else {
-                  buffer.writeln('I have referred you to *$docName*$qual on GS HEALTH for your dental care.');
+                  buffer.writeln('I have referred you to *$docName*$qual on GS HEALTH for your healthcare consultation.');
                 }
                 buffer.writeln();
                 buffer.writeln('👨‍⚕️ *Doctor & Clinic Details:*');
@@ -2551,7 +2551,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                   buffer.writeln('📋 *Clinical Reason / Diagnosis:* ${_complaintController.text.trim()}');
                 }
                 buffer.writeln();
-                buffer.writeln('You can reach out directly to the clinic or doctor to schedule your appointment. Wishing you the best dental care!');
+                buffer.writeln('You can reach out directly to the clinic or doctor to schedule your appointment. Wishing you the best of health!');
 
                 String rawPhone = patientMobile.replaceAll(RegExp(r'[^0-9]'), '');
                 if (rawPhone.startsWith('0') && rawPhone.length == 11) {

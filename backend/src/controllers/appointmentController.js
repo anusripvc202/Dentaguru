@@ -84,7 +84,7 @@ exports.bookAppointment = async (req, res) => {
             request_id: requestId || null,
             date: date ? new Date(date).toISOString() : new Date().toISOString(),
             time_slot: timeSlot || 'Today, 2:30 PM',
-            treatment: treatment || 'Dental Consultation',
+            treatment: treatment || 'Medical Consultation',
             status: 'PENDING',
             qr_code_string: `DENTAGURU-${targetPatientId || 'PATIENT'}-${Date.now()}`
         });
@@ -296,7 +296,7 @@ exports.rejectAppointment = async (req, res) => {
             recipient_role: 'Patient',
             recipient_id: appointment.patient_id || 'ALL',
             title: '❌ Appointment Request Declined',
-            message: `Dentist was unable to accept appointment. ${reason || 'Please select an alternate date or doctor.'}`,
+            message: `Doctor was unable to accept appointment. ${reason || 'Please select an alternate date or doctor.'}`,
             type: 'appointment_rejected'
         });
 
@@ -484,7 +484,7 @@ exports.completeConsultation = async (req, res) => {
             patient_id: appointment.patient_id,
             dentist_id: appointment.dentist_id,
             appointment_id: id,
-            diagnosis: diagnosis || appointment.treatment || 'Dental Consultation',
+            diagnosis: diagnosis || appointment.treatment || 'Medical Consultation',
             symptoms: symptoms || '',
             treatment: treatmentPlan || treatmentNotes || appointment.treatment,
             notes: treatmentNotes || '',

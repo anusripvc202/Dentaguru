@@ -253,7 +253,7 @@ class _ReferAFriendScreenState extends State<ReferAFriendScreen> {
 
     if (_selectedDoctor == null) {
       setState(() {
-        _errorMessage = 'Please select a dentist to refer your friend to.';
+        _errorMessage = 'Please select a doctor to refer your friend to.';
       });
       return;
     }
@@ -297,7 +297,7 @@ class _ReferAFriendScreenState extends State<ReferAFriendScreen> {
               patientId: patientId.isNotEmpty ? patientId : 'patient_${DateTime.now().millisecondsSinceEpoch}',
               patientName: friendName,
               title: 'Referral Document: ${att.name}',
-              category: att.isPdf ? 'Dental Report' : 'Dental X-ray',
+              category: att.isPdf ? 'Medical Report' : 'Medical X-ray',
               description: 'Attachment for referral to ${selectedDoc.name}. Note: $note',
               fileName: att.name,
               fileType: att.extension,
@@ -448,7 +448,7 @@ class _ReferAFriendScreenState extends State<ReferAFriendScreen> {
                     children: [
                       // Subtitle Description
                       const Text(
-                        'Share a dentist you trust. We\'ll keep track of the referral for you.',
+                        'Share a doctor you trust. We\'ll keep track of the referral for you.',
                         style: TextStyle(
                           fontSize: 14,
                           color: Color(0xFF64748B),
@@ -526,7 +526,7 @@ class _ReferAFriendScreenState extends State<ReferAFriendScreen> {
                           color: Color(0xFF0F172A),
                         ),
                         decoration: _inputDecoration(
-                          hintText: 'Search dentist by name, specialty...',
+                          hintText: 'Search doctor by name, specialty...',
                           prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF94A3B8), size: 20),
                           suffixIcon: _searchController.text.isNotEmpty
                               ? IconButton(
@@ -538,7 +538,7 @@ class _ReferAFriendScreenState extends State<ReferAFriendScreen> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Showing your favourite and visited dentists. Search to find others.',
+                        'Showing your favourite and visited doctors. Search to find others.',
                         style: TextStyle(
                           fontSize: 13,
                           color: Color(0xFF64748B),
@@ -559,7 +559,7 @@ class _ReferAFriendScreenState extends State<ReferAFriendScreen> {
                           ),
                           child: const Center(
                             child: Text(
-                              'No dentists found matching your search.',
+                              'No doctors found matching your search.',
                               style: TextStyle(color: Color(0xFF64748B), fontSize: 13),
                             ),
                           ),

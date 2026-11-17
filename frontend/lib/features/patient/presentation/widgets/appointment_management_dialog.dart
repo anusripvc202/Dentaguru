@@ -231,7 +231,7 @@ class _AppointmentManagementDialogState extends State<AppointmentManagementDialo
         _buildDetailItem(Icons.access_time_rounded, 'Time Slot', req.confirmedTimeSlot ?? 'Pending Confirmation'),
         const SizedBox(height: 10),
         _buildDetailItem(Icons.medical_services_rounded, 'Treatment / Problem', req.problemCategory),
-        if (req.problemDescription.isNotEmpty && req.problemDescription != 'Scheduled dental consultation') ...[
+        if (req.problemDescription.isNotEmpty && req.problemDescription != 'Scheduled dental consultation' && req.problemDescription != 'Scheduled medical consultation') ...[
           const SizedBox(height: 10),
           _buildDetailItem(Icons.notes_rounded, 'Symptoms / Notes', req.problemDescription),
         ],

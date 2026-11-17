@@ -198,7 +198,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     SizedBox(width: 6),
                     Flexible(
                       child: Text(
-                        'Next-Gen Dental Healthcare Platform',
+                        'Next-Gen Healthcare Platform',
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.center,
                         style: TextStyle(
@@ -215,7 +215,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             const SizedBox(height: 16),
 
             const Text(
-              'Modern Dental Care,\nSimplified for Everyone.',
+              'Modern Healthcare,\nSimplified for Everyone.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: Colors.white,
@@ -228,7 +228,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             const SizedBox(height: 12),
 
             const Text(
-              'GS HEALTH connects patients, specialized dentists, and clinic teams into one intelligent platform. Experience AI dental triage, 1-tap booking, digital prescriptions, and 3D dental tracking.',
+              'GS HEALTH connects patients, specialized doctors, and clinic teams into one intelligent platform. Experience AI symptom triage, 1-tap booking, digital prescriptions, and health tracking.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: Color(0xFF94A3B8),
@@ -316,7 +316,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
           const SizedBox(height: 6),
           const Text(
-            'Discover how GS HEALTH revolutionizes oral healthcare for patients, dentists, and clinic staff.',
+            'Discover how GS HEALTH revolutionizes healthcare for patients, doctors, and clinic staff.',
             style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
           ),
           const SizedBox(height: 18),
@@ -334,7 +334,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               const SizedBox(height: 8),
               Row(
                 children: [
-                  Expanded(child: _buildRolePillChip(index: 2, label: 'For Dentists', icon: Icons.medical_services_rounded)),
+                  Expanded(child: _buildRolePillChip(index: 2, label: 'For Doctors', icon: Icons.medical_services_rounded)),
                   const SizedBox(width: 8),
                   Expanded(child: _buildRolePillChip(index: 3, label: 'AI Screening', icon: Icons.psychology_rounded)),
                 ],
@@ -414,13 +414,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         return _buildAboutDetailBody(
           badgeText: 'PATIENT EXPERIENCE',
           badgeColor: AppTheme.primaryBlue,
-          title: 'Seamless Patient Dental Care',
-          description: 'Patients enjoy effortless access to top dental care from their smartphones with 1-click appointment booking, instant AI teeth screening, and digital prescriptions.',
+          title: 'Seamless Patient Healthcare',
+          description: 'Patients enjoy effortless access to top healthcare from their smartphones with 1-click appointment booking, instant AI symptom screening, and digital prescriptions.',
           bullets: [
-            'Find & book top-rated local dental specialists',
-            'Scan teeth photos with AI for instant pre-checks',
-            'Store X-rays, prescriptions & dental history safely',
-            'Receive automated check-up & cleaning reminders',
+            'Find & book top-rated local medical specialists',
+            'Scan symptoms with AI for instant pre-checks',
+            'Store X-rays, prescriptions & health history safely',
+            'Receive automated check-up & consultation reminders',
           ],
           icon: Icons.person_search_rounded,
         );
@@ -428,10 +428,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         return _buildAboutDetailBody(
           badgeText: 'PRACTITIONER WORKSPACE',
           badgeColor: const Color(0xFF0284C7),
-          title: 'Dentist Digital Workspace & Timeline',
-          description: 'Dentists get an interactive digital workspace to view daily patient queues, record dental charting, generate E-prescriptions, and track treatment progress over time.',
+          title: 'Doctor Digital Workspace & Timeline',
+          description: 'Doctors get an interactive digital workspace to view daily patient queues, record clinical notes, generate E-prescriptions, and track treatment progress over time.',
           bullets: [
-            'Interactive teeth charting & procedure logger',
+            'Interactive clinical notes & procedure logger',
             'Instant patient history & allergies inspection',
             '1-Tap E-prescription & home care advice generator',
             'Patient follow-up timeline & recovery tracking',
@@ -442,13 +442,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         return _buildAboutDetailBody(
           badgeText: 'AI CLINICAL TRIAGE',
           badgeColor: const Color(0xFF8B5CF6),
-          title: 'AI Smart Dental Photo Screening',
-          description: 'Powered by advanced vision models, GS HEALTH AI pre-screens dental photos for potential cavities, plaque, or gum inflammation before the clinic visit.',
+          title: 'AI Smart Health Screening',
+          description: 'Powered by advanced vision & clinical models, GS HEALTH AI pre-screens symptoms and health records before the clinic visit.',
           bullets: [
-            'Fast photo analysis & risk score calculation',
-            'Pre-visit summary generated for attending dentist',
-            'Emergency triage indicator for acute dental pain',
-            'Educational insights on personal oral hygiene',
+            'Fast symptom analysis & risk score calculation',
+            'Pre-visit summary generated for attending doctor',
+            'Emergency triage indicator for acute medical pain',
+            'Educational insights on personal wellness & care',
           ],
           icon: Icons.psychology_rounded,
         );
@@ -457,12 +457,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         return _buildAboutDetailBody(
           badgeText: 'PLATFORM OVERVIEW',
           badgeColor: AppTheme.brandOrange,
-          title: 'Comprehensive Dental Platform',
-          description: 'GS HEALTH bridges the gap between patients, specialists, and dental clinic managers with real-time synchronization, cloud dental records, and AI workflow assistance.',
+          title: 'Comprehensive Healthcare Platform',
+          description: 'GS HEALTH bridges the gap between patients, specialists, and clinic managers with real-time synchronization, cloud medical records, and AI workflow assistance.',
           bullets: [
-            'Unified access for Patients, Dentists, and Clinic Admins',
+            'Unified access for Patients, Doctors, and Clinic Admins',
             'Real-time appointment scheduling & slot locking',
-            'Cloud-based electronic dental records (EDR)',
+            'Cloud-based electronic health records (EHR)',
             'Multi-branch clinic administration & billing',
           ],
           icon: Icons.hub_rounded,
@@ -616,8 +616,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 color: Color(0xFF8B5CF6),
               ),
               _AnimatedFeatureTile(
-                title: '24/7 Tele-Dentistry',
-                subtitle: 'HD video consultations with certified dentists anytime',
+                title: '24/7 Tele-Consultation',
+                subtitle: 'HD video consultations with certified doctors anytime',
                 icon: Icons.videocam_rounded,
                 color: Color(0xFF0284C7),
               ),
@@ -628,8 +628,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 color: AppTheme.primaryBlue,
               ),
               _AnimatedFeatureTile(
-                title: '3D Dental Chart',
-                subtitle: 'Interactive dental map tracking fillings & crowns',
+                title: 'Medical Timeline',
+                subtitle: 'Interactive health map tracking visits & treatments',
                 icon: Icons.view_in_ar_rounded,
                 color: AppTheme.brandOrange,
               ),
@@ -697,7 +697,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
           _buildModuleRow(
             icon: Icons.family_restroom_rounded,
-            title: 'Family Dental Profile Locker',
+            title: 'Family Health Profile Locker',
             subtitle: 'Manage appointments and treatment histories for your whole family in 1 account.',
             color: AppTheme.primaryBlue,
           ),
@@ -711,15 +711,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           const Divider(height: 20, color: Color(0xFFF1F5F9)),
           _buildModuleRow(
             icon: Icons.notifications_active_rounded,
-            title: 'Smart Reminders & Cleaning Alerts',
-            subtitle: 'Automated notifications for biannual cleanings, aligner swaps & prescriptions.',
+            title: 'Smart Reminders & Health Alerts',
+            subtitle: 'Automated notifications for upcoming check-ups, follow-ups & prescriptions.',
             color: AppTheme.brandOrange,
           ),
           const Divider(height: 20, color: Color(0xFFF1F5F9)),
           _buildModuleRow(
             icon: Icons.folder_zip_rounded,
-            title: 'Digital X-Ray & DICOM Viewer',
-            subtitle: 'Access high-resolution dental X-rays and 3D scans anytime from your device.',
+            title: 'Digital Records & Diagnostics Viewer',
+            subtitle: 'Access high-resolution X-rays and medical records anytime from your device.',
             color: const Color(0xFF8B5CF6),
           ),
         ],
@@ -858,7 +858,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
           const SizedBox(height: 4),
           const Text(
-            '3 easy steps to access complete dental healthcare',
+            '3 easy steps to access complete healthcare',
             style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
           ),
           const SizedBox(height: 14),
@@ -866,21 +866,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           _buildStepCard(
             stepNumber: '01',
             title: 'Tap Login & Select Your Portal',
-            subtitle: 'Use top-right Login to access Patient, Dentist, or Admin accounts.',
+            subtitle: 'Use top-right Login to access Patient, Doctor, or Admin accounts.',
             icon: Icons.touch_app_rounded,
           ),
           const SizedBox(height: 10),
           _buildStepCard(
             stepNumber: '02',
-            title: 'Book Consultations & AI Scan',
-            subtitle: 'Schedule appointments in 1-tap or run instant AI teeth pre-screening.',
+            title: 'Book Consultations & AI Screening',
+            subtitle: 'Schedule appointments in 1-tap or run instant AI health pre-screening.',
             icon: Icons.calendar_month_rounded,
           ),
           const SizedBox(height: 10),
           _buildStepCard(
             stepNumber: '03',
-            title: 'Track Dental Records & Care Timeline',
-            subtitle: 'Access digital prescriptions, treatment plans, and oral hygiene reminders.',
+            title: 'Track Health Records & Care Timeline',
+            subtitle: 'Access digital prescriptions, treatment plans, and wellness reminders.',
             icon: Icons.health_and_safety_rounded,
           ),
         ],
@@ -1023,7 +1023,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     ),
                     const SizedBox(height: 8),
                     const Text(
-                      '"GS HEALTH has streamlined our dental clinic queue management and digital prescription history. Patients love the instant booking and AI pre-screening features!"',
+                      '"GS HEALTH has streamlined our clinic queue management and digital prescription history. Patients love the instant booking and AI pre-screening features!"',
                       style: TextStyle(fontSize: 12, color: AppTheme.textMedium, fontStyle: FontStyle.italic, height: 1.3),
                     ),
                   ],

@@ -400,7 +400,7 @@ class _GsHealthClinicOverviewState extends State<GsHealthClinicOverview> {
                       borderColor: _kBorder,
                       title: 'Patient referrals',
                       subtitle:
-                          'Patients referred to you by dentists, with their files',
+                          'Patients referred to you by doctors, with their files',
                       badgeCount: widget.referralsCount,
                       onTap: widget.onOpenReferrals,
                     ),
@@ -415,7 +415,7 @@ class _GsHealthClinicOverviewState extends State<GsHealthClinicOverview> {
                       borderColor: _kSoftBorder,
                       title: 'Advertise on GS HEALTH',
                       subtitle:
-                          'Request a sponsored banner for patients and dentists',
+                          'Request a sponsored banner for patients and doctors',
                       onTap: widget.onOpenAdvertise,
                     ),
                     const SizedBox(height: 18),
@@ -838,7 +838,7 @@ class _ClinicFeaturedCard extends StatelessWidget {
         ? (featuredPlan.trim().isNotEmpty
             ? 'Active plan: ${featuredPlan.trim()} · Tap to manage'
             : 'Manage or renew your Featured plan')
-        : 'Stand out in GS HEALTH patient & dentist searches';
+        : 'Stand out in GS HEALTH patient & doctor searches';
 
     return Material(
       color: bgColor,
@@ -2604,7 +2604,7 @@ Future<void> showAdvertiseOnGsHealthSheet({
 }) {
   final headlineCtrl = TextEditingController();
   final notesCtrl = TextEditingController();
-  String audience = 'Patients & Dentists';
+  String audience = 'Patients & Doctors';
   bool submitting = false;
 
   return showModalBottomSheet<void>(
@@ -2692,7 +2692,7 @@ Future<void> showAdvertiseOnGsHealthSheet({
               const SizedBox(height: 6),
               Wrap(
                 spacing: 8,
-                children: ['Patients', 'Dentists', 'Patients & Dentists'].map((a) {
+                children: ['Patients', 'Doctors', 'Patients & Doctors'].map((a) {
                   final sel = audience == a;
                   return ChoiceChip(
                     label: Text(a),
@@ -2825,7 +2825,7 @@ Future<void> showClinicReferralsSheet({
                         Text(
                           clinicName.trim().isNotEmpty
                               ? 'Referred to $clinicName'
-                              : 'Patients referred by dentists',
+                              : 'Patients referred by doctors',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -2857,7 +2857,7 @@ Future<void> showClinicReferralsSheet({
                   icon: Icons.medical_information_outlined,
                   title: 'No referrals received yet',
                   subtitle:
-                      'When dentists refer patients to your doctors or clinic, their notes and case details will appear here.',
+                      'When doctors refer patients to your clinic, their notes and case details will appear here.',
                 )
               else
                 Flexible(

@@ -417,7 +417,7 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
                   ),
                   const SizedBox(height: 2),
                   const Text(
-                    'Find a dentist',
+                    'Find a doctor',
                     style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.w800,
@@ -522,7 +522,7 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
                       ? '$count verified ${_selectedSpecialty.trim()} specialist${count == 1 ? "" : "s"} • Select a doctor to view complete profile & availability'
                       : (count > 0
                           ? '$count verified doctors across ${_patientService.activeSpecialties.length} medical specialties • Tap a doctor to view profile'
-                          : 'Browse verified medical & dental specialists and book appointments online'),
+                          : 'Browse verified medical specialists and book appointments online'),
                   style: TextStyle(
                     fontSize: 12,
                     color: Colors.white.withValues(alpha: 0.9),
@@ -692,7 +692,7 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
         const SizedBox(width: 10),
         const Expanded(
           child: Text(
-            'Only used to find nearby dentists',
+            'Only used to find nearby doctors',
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w500,
@@ -996,7 +996,7 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
           Text(
             _doctorTabFilter == 1
                 ? 'No Favourite Doctors Yet'
-                : (hasActiveFilters ? 'No Matching Doctors Found' : 'Search to find a dentist'),
+                : (hasActiveFilters ? 'No Matching Doctors Found' : 'Search to find a doctor'),
             style: const TextStyle(
               fontWeight: FontWeight.w800,
               fontSize: 17,
@@ -1007,7 +1007,7 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
           Text(
             _doctorTabFilter == 1
                 ? 'Switch to "All Doctors" and open a doctor profile to add your preferred specialists.'
-                : 'Type a name, speciality, city or pincode, or tap "Use my location" to see dentists near you.',
+                : 'Type a name, speciality, city or pincode, or tap "Use my location" to see doctors near you.',
             textAlign: TextAlign.center,
             style: const TextStyle(color: AppTheme.textMedium, fontSize: 13.5, height: 1.4),
           ),

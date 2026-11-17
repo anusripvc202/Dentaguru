@@ -50,7 +50,7 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
   bool _isLoadingSlots = false;
 
   // Step 3: Reason & Symptoms
-  String _selectedCategory = 'Routine Dental Checkup';
+  String _selectedCategory = 'Routine Medical Checkup';
   final TextEditingController _symptomsController = TextEditingController();
   String _selectedSeverity = 'Mild';
 
@@ -70,7 +70,7 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
   ];
 
   static const List<String> _categories = [
-    'Routine Dental Checkup',
+    'Routine Medical Checkup',
     'Toothache & Cold Sensitivity',
     'Teeth Cleaning & Whitening',
     'Bleeding Gums & Swelling',
@@ -79,7 +79,7 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
     'Aligners & Braces Adjustment',
     'Root Canal Treatment',
     'Dental Implants Consultation',
-    'Other Dental Problem',
+    'Other Medical Concern',
   ];
 
   @override
@@ -186,7 +186,7 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
             title: Text(
               _currentStep == 5
                   ? 'Booking Confirmed'
-                  : 'Book Dental Visit ($_currentStep/4)',
+                  : 'Book Consultation ($_currentStep/4)',
               style: const TextStyle(
                 color: AppTheme.textDark,
                 fontSize: 16,
@@ -779,7 +779,7 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Dental Issue / Consultation Reason', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark)),
+          const Text('Consultation Reason / Symptoms', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark)),
           const SizedBox(height: 8),
 
           DropdownButtonFormField<String>(
@@ -1070,7 +1070,7 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Your appointment with ${_selectedDoctor?.name ?? "your dentist"} is scheduled for ${_formatDate(_selectedDate)} at ${_selectedTimeSlot ?? ""}.',
+              'Your appointment with ${_selectedDoctor?.name ?? "your doctor"} is scheduled for ${_formatDate(_selectedDate)} at ${_selectedTimeSlot ?? ""}.',
               style: const TextStyle(fontSize: 13, color: AppTheme.textMuted, height: 1.4),
               textAlign: TextAlign.center,
             ),
