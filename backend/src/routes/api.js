@@ -116,6 +116,7 @@ router.post('/clinics', optionalAuth, clinics.registerClinicProfile);
 router.get('/clinics', optionalAuth, clinics.getClinics);
 router.put('/clinics/:id', optionalAuth, clinics.updateClinicDepartments);
 router.patch('/clinics/:id/departments', optionalAuth, clinics.updateClinicDepartments);
+router.delete('/clinics/:id', optionalAuth, clinics.deleteClinic);
 router.get('/clinics/:clinicId/dentists', optionalAuth, clinics.getClinicDentists);
 router.get('/clinics/:clinicId/doctors', optionalAuth, clinics.getClinicDentists);
 router.post('/clinics/:clinicId/doctors/associate', optionalAuth, clinics.associateClinicDoctor);

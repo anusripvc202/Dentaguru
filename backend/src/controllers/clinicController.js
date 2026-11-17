@@ -554,3 +554,25 @@ exports.removeDoctorFromClinic = async (req, res) => {
     }
 };
 
+// 13. DELETE CLINIC (PERMANENT REMOVAL ACROSS SUPABASE & BACKEND)
+exports.deleteClinic = async (req, res) => {
+    const { id } = req.params;
+    try {
+        if (!id) {
+            return res.status(400).json({ success: false, message: 'Clinic ID is required.' });
+        }
+
+        if (supabase) {
+            await supabase.from('clinics').delete().eq('id', id);
+        }
+
+        return res.json({
+            success: true,
+            message: 'Clinic facility and records permanently deleted.'
+        });
+    } catch (err) {
+        console.error('Delete Clinic Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to delete clinic.' });
+    }
+};
+

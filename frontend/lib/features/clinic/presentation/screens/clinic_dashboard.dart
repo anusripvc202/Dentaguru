@@ -10,6 +10,7 @@ import '../../../admin/presentation/widgets/doctor_slot_management_dialog.dart';
 import '../../../patient/presentation/screens/doctor_profile_screen.dart';
 import '../../../patient/presentation/widgets/referred_patients_sheet.dart';
 import '../widgets/gs_health_clinic_views.dart';
+import 'clinic_profile_screen.dart';
 import 'package:go_router/go_router.dart';
 
 class ClinicDashboardScreen extends StatefulWidget {
@@ -357,40 +358,8 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
     }
 
     void openProfile() {
-      final session = SessionService().currentSession;
-      final phone = (clinic?.phone.trim().isNotEmpty == true)
-          ? clinic!.phone.trim()
-          : _problemService.authenticatedClinicPhone.trim().isNotEmpty
-              ? _problemService.authenticatedClinicPhone.trim()
-              : (session?.phone ?? '');
-      final email = _problemService.authenticatedClinicEmail.trim().isNotEmpty
-          ? _problemService.authenticatedClinicEmail.trim()
-          : (session?.email ?? '');
-      showClinicProfileSheet(
-        context: context,
-        clinicName: clinicName,
-        location: clinicLocation,
-        phone: phone,
-        email: email,
-        doctorCount: attachedDoctors.length,
-        bookingsCount: bookings.length,
-        onEditDetails: openEditDetails,
-        onOpenDepartments: () => _openDepartmentsSheet(context, theme),
-        onOpenProcedureRates: () => _openProcedureRatesSheet(context, theme),
-        onOpenFeaturedPlan: openFeaturedPlan,
-        onSignOut: () async {
-          await _problemService.clearClinicSession();
-          await SessionService().clearSession();
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Signed out from Clinic dashboard.'),
-                backgroundColor: AppTheme.gsNavy,
-              ),
-            );
-            context.go('/');
-          }
-        },
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const ClinicProfileScreen()),
       );
     }
 
@@ -2264,7 +2233,6 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
     final feeCtrl = TextEditingController(text: doc.consultationFee);
     final licenseCtrl = TextEditingController(text: doc.licenseNumber);
     final bioCtrl = TextEditingController(text: doc.bio);
-    final cityCtrl = TextEditingController(text: doc.city);
     String selectedSpecialty = doc.specialty;
     String selectedStatus = doc.status;
 

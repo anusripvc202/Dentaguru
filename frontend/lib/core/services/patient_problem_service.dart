@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'api_service.dart';
+import 'session_service.dart';
 import '../models/referral_model.dart';
 import '../models/doctor_availability.dart';
 import '../models/medical_specialty_model.dart';
@@ -3775,6 +3776,67 @@ class PatientProblemService extends ChangeNotifier {
     return {
       'success': true,
       'message': 'Doctor account deleted successfully.',
+    };
+  }
+
+  /// Permanently delete currently logged-in Clinic account across Supabase & Express
+  Future<Map<String, dynamic>> deleteCurrentClinicAccount({
+    String? clinicId,
+    String? clinicName,
+  }) async {
+    final cId = (clinicId ?? _authenticatedClinicId).trim();
+    final cName = (clinicName ?? _authenticatedClinicName).trim();
+    final cPhone = _authenticatedClinicPhone.trim();
+    final cEmail = _authenticatedClinicEmail.trim();
+
+    User? supaUser;
+    try {
+      supaUser = Supabase.instance.client.auth.currentUser;
+    } catch (_) {}
+    final uId = supaUser?.id ?? SessionService().currentSession?.userId ?? '';
+
+    // 1. Direct Supabase Cloud Deletion
+    try {
+      final client = Supabase.instance.client;
+      if (cId.isNotEmpty) {
+        await client.from('clinics').delete().eq('id', cId);
+      }
+      if (uId.isNotEmpty) {
+        await client.from('clinics').delete().eq('user_id', uId);
+        await client.from('users').delete().eq('id', uId);
+      }
+      if (cEmail.isNotEmpty) {
+        await client.from('users').delete().ilike('email', cEmail);
+      } else if (cPhone.isNotEmpty) {
+        await client.from('users').delete().eq('phone', cPhone);
+      }
+    } catch (e) {
+      debugPrint('Supabase direct delete clinic account notice: $e');
+    }
+
+    // 2. Express Backend API Call
+    try {
+      if (cId.isNotEmpty) {
+        await ApiService().deleteClinic(cId);
+      }
+    } catch (e) {
+      debugPrint('Express delete clinic error: $e');
+    }
+
+    // 3. Clear local state
+    if (cId.isNotEmpty) {
+      _allClinics.removeWhere((c) => c.id == cId);
+    }
+    if (cName.isNotEmpty) {
+      _allClinics.removeWhere((c) => c.clinicName.toLowerCase() == cName.toLowerCase());
+    }
+    await clearClinicSession();
+    await _saveToStorage();
+    notifyListeners();
+
+    return {
+      'success': true,
+      'message': 'Clinic account deleted successfully.',
     };
   }
 

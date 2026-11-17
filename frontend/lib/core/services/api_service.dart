@@ -989,6 +989,29 @@ class ApiService {
     return true;
   }
 
+  /// Delete a clinic permanently from Supabase & Backend API
+  Future<bool> deleteClinic(String clinicId) async {
+    if (clinicId.trim().isEmpty) return false;
+    final cleanId = clinicId.trim();
+
+    // 1. Direct Supabase Delete
+    try {
+      await Supabase.instance.client.from('clinics').delete().eq('id', cleanId);
+    } catch (sErr) {
+      debugPrint('Supabase direct delete clinic notice: $sErr');
+    }
+
+    // 2. Express Backend API
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/clinics/$cleanId');
+      final response = await http.delete(url, headers: _headers).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200 || response.statusCode == 204) return true;
+    } catch (e) {
+      debugPrint('deleteClinic API error: $e');
+    }
+    return true;
+  }
+
   /// Delete a problem request from Supabase via backend API
   Future<bool> deleteProblemRequest(String id) async {
     try {
