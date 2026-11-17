@@ -22,16 +22,19 @@ import '../widgets/gs_health_sub_admin_district_dialog.dart';
 import '../../../patient/presentation/screens/find_doctors_screen.dart';
 import '../../../patient/presentation/screens/doctor_profile_screen.dart';
 import '../../../clinic/presentation/screens/clinic_dashboard.dart';
+import 'admin_profile_screen.dart';
+import 'admin_referrals_screen.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
-  const AdminDashboardScreen({super.key});
+  final int initialTab;
+  const AdminDashboardScreen({super.key, this.initialTab = 0});
 
   @override
   State<AdminDashboardScreen> createState() => _AdminDashboardScreenState();
 }
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> with TickerProviderStateMixin {
-  int _selectedNavIndex = 0; // 0: Overview, 1: Clinics, 2: Dentists, 3: Patients, 4: Appointments, 5: Revenue, 6: Reports, 7: Reviews, 8: Settings, 9: Sub-Admins, 13: Requests
+  late int _selectedNavIndex = widget.initialTab; // 0: Overview, 1: Clinics, 2: Dentists, 3: Patients, 4: Appointments, 5: Revenue, 6: Reports, 7: Reviews, 8: Settings, 9: Sub-Admins, 13: Requests
   final PatientProblemService _problemService = PatientProblemService();
 
   bool _isOverviewLoading = false;
@@ -1572,7 +1575,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
       title: 'GS HEALTH',
       unreadCount: unreadCount,
       onNotifications: () => _showNotificationsModal(context, 'Admin'),
-      onProfile: () => _showAdminProfileSheet(context),
+      onProfile: () => _openAdminProfile(context),
+    );
+  }
+
+  void _openAdminProfile(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const AdminProfileScreen()),
     );
   }
 

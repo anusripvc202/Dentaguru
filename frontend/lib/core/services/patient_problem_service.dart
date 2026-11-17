@@ -2178,6 +2178,7 @@ class PatientProblemService extends ChangeNotifier {
     _medicalRecords.clear();
     _doctorSharedRecords.clear();
     _allPatients.clear();
+    _adminPatientReferrals.clear();
     _allDoctors.clear();
     _allClinics.clear();
     _appNotifications.clear();
@@ -4529,6 +4530,11 @@ class PatientProblemService extends ChangeNotifier {
   List<ReferralItem> get adminReferrals => _adminReferrals;
   List<PatientReferral> get adminPatientReferrals => List.unmodifiable(_adminPatientReferrals);
   AdminReferralAnalytics get adminReferralAnalytics => _adminReferralAnalytics;
+
+  void addTestAdminPatientReferral(PatientReferral ref) {
+    _adminPatientReferrals.add(ref);
+    notifyListeners();
+  }
 
   List<PatientReferral> get myCreatedPatientReferrals => List.unmodifiable(_myCreatedPatientReferrals);
   List<PatientReferral> get doctorReceivedPatientReferrals => List.unmodifiable(_doctorReceivedPatientReferrals);

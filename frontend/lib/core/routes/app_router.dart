@@ -13,6 +13,8 @@ import '../../features/dentist/presentation/screens/doctor_profile_screen.dart';
 import '../../features/clinic/presentation/screens/clinic_dashboard.dart';
 import '../../features/clinic/presentation/screens/clinic_profile_screen.dart';
 import '../../features/admin/presentation/screens/admin_dashboard.dart';
+import '../../features/admin/presentation/screens/admin_profile_screen.dart';
+import '../../features/admin/presentation/screens/admin_referrals_screen.dart';
 import '../../features/admin/presentation/screens/sub_admin_dashboard.dart';
 import '../../features/auth/presentation/screens/auth_screen.dart';
 
@@ -146,6 +148,14 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: '/admin',
       builder: (context, state) => const AdminDashboardScreen(),
+    ),
+    GoRoute(
+      path: '/admin/profile',
+      builder: (context, state) => const AdminProfileScreen(),
+    ),
+    GoRoute(
+      path: '/admin/referrals',
+      builder: (context, state) => const AdminReferralsScreen(),
     ),
     GoRoute(
       path: '/sub-admin',
