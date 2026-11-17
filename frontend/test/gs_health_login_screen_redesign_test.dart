@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:dentaguru/features/auth/presentation/screens/auth_screen.dart';
+import 'package:dentaguru/core/services/api_service.dart';
 import 'package:dentaguru/core/widgets/denta_guru_logo.dart';
 import 'package:dentaguru/core/widgets/gs_health_hero_banner.dart';
 
@@ -13,6 +14,24 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     FlutterSecureStorage.setMockInitialValues({});
+    ApiService.debugRequestOtpOverride = ({required String phone, String email = ''}) async {
+      return {
+        'success': true,
+        'message': 'OTP sent successfully to your mobile number.',
+        'isAdmin': false,
+      };
+    };
+    ApiService.debugVerifyOtpOverride = ({required String phone, String email = '', required String code}) async {
+      return {
+        'success': true,
+        'message': 'OTP verified successfully.',
+      };
+    };
+  });
+
+  tearDown(() {
+    ApiService.debugRequestOtpOverride = null;
+    ApiService.debugVerifyOtpOverride = null;
   });
 
   group('GS HEALTH Premium Mobile Login & OTP Experience Tests', () {
@@ -57,7 +76,7 @@ void main() {
       expect(find.byKey(const Key('signin_role_clinic')), findsOneWidget);
       expect(find.byKey(const Key('signin_role_admin')), findsNothing);
       expect(find.text('Admin & Staff Portal'), findsNothing);
-      expect(find.text('Doctor'), findsNothing);
+      expect(find.text('Doctor'), findsOneWidget);
 
       // Tapping Clinic role pill keeps OTP flow intact without overflow
       await tester.tap(find.byKey(const Key('signin_role_clinic')));
@@ -99,8 +118,8 @@ void main() {
       expect(find.text('Enter your code'), findsOneWidget);
       expect(find.text('Sent to +91 90636 *****'), findsOneWidget);
 
-      // 2. 4-digit OTP input boxes present
-      expect(find.byType(TextFormField), findsNWidgets(4));
+      // 2. 6-digit OTP input boxes present
+      expect(find.byType(TextFormField), findsNWidgets(6));
 
       // 3. Resend timer and edit mobile options present
       expect(find.text('← Edit mobile number'), findsOneWidget);
@@ -108,10 +127,6 @@ void main() {
 
       // 4. Action button text is "Verify & continue"
       expect(find.widgetWithText(ElevatedButton, 'Verify & continue'), findsOneWidget);
-
-      // 5. On-Screen OTP banner displayed when SMS is off (Reference Screenshot 2)
-      expect(find.textContaining('Demo mode: SMS is off. Use code'), findsOneWidget);
-      expect(find.text('Fill'), findsOneWidget);
     });
 
     testWidgets('Renders Responsive Two-Column Layout on Desktop Viewport (>900px)', (WidgetTester tester) async {

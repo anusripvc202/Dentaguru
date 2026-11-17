@@ -629,13 +629,10 @@ class ApiService {
     }
   }
 
-  static String? _lastGeneratedOtp;
-  static String? get lastGeneratedOtp => _lastGeneratedOtp;
-
   @visibleForTesting
   static Future<Map<String, dynamic>> Function({required String phone, String email})? debugRequestOtpOverride;
 
-  /// Request Mobile & Email OTP Code
+  /// Request Mobile OTP Code via Real SMS
   Future<Map<String, dynamic>> requestOtp({required String phone, String email = ''}) async {
     if (debugRequestOtpOverride != null) {
       return debugRequestOtpOverride!(phone: phone, email: email);
@@ -648,79 +645,39 @@ class ApiService {
         url,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'phone': phone, 'email': email}),
-      ).timeout(const Duration(seconds: 50));
+      ).timeout(const Duration(seconds: 40));
 
       final data = jsonDecode(response.body);
       if (response.statusCode == 200 && data['success'] == true) {
-        if (data['otp'] != null) {
-          _lastGeneratedOtp = data['otp'].toString();
-        }
-        String msg = data['message'] ?? 'One-time code sent';
-        if (msg.contains('Warning:') || msg.contains('(Test OTP:')) {
-          msg = 'One-time verification code dispatched to ${email.isNotEmpty ? email : phone}. Check your SMS.';
-        }
         return {
           'success': true,
-          'message': msg,
-          'otp': data['otp'],
+          'message': data['message'] ?? 'OTP sent successfully to your mobile number.',
           'isAdmin': data['isAdmin'] == true,
         };
       } else {
-        String msg = data['message'] ?? 'Failed to send OTP.';
-        if (msg.contains('Warning:') || msg.contains('ENETUNREACH') || msg.contains('(Test OTP:')) {
-          msg = 'One-time verification code dispatched to ${email.isNotEmpty ? email : phone}. Check your SMS.';
-        }
         return {
-          'success': true,
-          'message': msg,
-          'otp': data['otp'],
+          'success': false,
+          'status': response.statusCode,
+          'message': data['message'] ?? 'Failed to send OTP SMS. Please check your mobile number.',
           'isAdmin': data['isAdmin'] == true,
         };
       }
     } catch (e) {
-      debugPrint('⚠️ requestOtp error ($e). Activating mobile fallback OTP...');
+      debugPrint('⚠️ requestOtp network error: $e');
+      return {
+        'success': false,
+        'message': 'Unable to connect to SMS verification server. Please try again.',
+      };
     }
-
-    // Dynamic 4-digit fallback OTP generator for offline/cold-start mobile testing
-    final randomOtp = (1000 + (DateTime.now().millisecondsSinceEpoch % 9000)).toString();
-    _lastGeneratedOtp = randomOtp;
-    debugPrint('🔑 Instant Mobile Fallback OTP generated');
-
-    bool isFallbackAdmin = false;
-    try {
-      final cleanDigits = phone.replaceAll(RegExp(r'[^0-9]'), '');
-      final p10 = cleanDigits.length > 10 ? cleanDigits.substring(cleanDigits.length - 10) : cleanDigits;
-      final adminCheck = await Supabase.instance.client
-          .from('users')
-          .select('id, role')
-          .or('phone.eq.$p10,phone.eq.+91$p10')
-          .eq('role', 'Admin')
-          .limit(1)
-          .maybeSingle();
-      if (adminCheck != null) {
-        isFallbackAdmin = true;
-      }
-    } catch (_) {}
-
-    return {
-      'success': true,
-      'message': 'One-time verification code dispatched to ${email.isNotEmpty ? email : phone}. Check your SMS.',
-      'otp': randomOtp,
-      'isAdmin': isFallbackAdmin,
-    };
   }
 
   @visibleForTesting
   static Future<Map<String, dynamic>> Function({required String phone, String email, required String code})? debugVerifyOtpOverride;
 
-  /// Verify Mobile & Email OTP Code
+  /// Verify 6-Digit Mobile & Email OTP Code via Backend
   Future<Map<String, dynamic>> verifyOtp({required String phone, String email = '', required String code}) async {
     if (debugVerifyOtpOverride != null) {
       return debugVerifyOtpOverride!(phone: phone, email: email, code: code);
-    }
-    // 1. Check local fallback OTP first
-    if (_lastGeneratedOtp != null && code.trim() == _lastGeneratedOtp!.trim()) {
-      return {'success': true, 'message': '4-Digit OTP Verified successfully.'};
     }
 
     try {
@@ -728,17 +685,32 @@ class ApiService {
       final response = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'phone': phone, 'email': email, 'code': code}),
-      ).timeout(const Duration(seconds: 10));
+        body: jsonEncode({'phone': phone, 'email': email, 'code': code.trim()}),
+      ).timeout(const Duration(seconds: 40));
 
       final data = jsonDecode(response.body);
-      return {'success': response.statusCode == 200 && data['success'] == true, 'message': data['message'] ?? 'OTP Verified'};
-    } catch (e) {
-      // Fallback check
-      if (code.trim().length == 4 || code.trim().length == 6) {
-        return {'success': true, 'message': 'OTP Verified.'};
+      if (response.statusCode == 200 && data['success'] == true) {
+        return {
+          'success': true,
+          'message': data['message'] ?? 'OTP verified successfully.',
+          'user': data['user'],
+          'accessToken': data['accessToken'],
+          'refreshToken': data['refreshToken'],
+          'isAdmin': data['isAdmin'] == true,
+        };
+      } else {
+        return {
+          'success': false,
+          'status': response.statusCode,
+          'message': data['message'] ?? 'Invalid or expired OTP code. Please request a new OTP.',
+        };
       }
-      return {'success': false, 'message': 'Failed to verify OTP code. Please try again.'};
+    } catch (e) {
+      debugPrint('⚠️ verifyOtp network error: $e');
+      return {
+        'success': false,
+        'message': 'Failed to verify OTP code due to connection error. Please try again.',
+      };
     }
   }
 

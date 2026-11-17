@@ -164,8 +164,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     _tabController.addListener(() {
       setState(() {});
     });
-    _otpDigitControllers = List.generate(4, (_) => TextEditingController());
-    _otpDigitFocusNodes = List.generate(4, (_) => FocusNode());
+    _otpDigitControllers = List.generate(6, (_) => TextEditingController());
+    _otpDigitFocusNodes = List.generate(6, (_) => FocusNode());
 
     final rawInitialVerified = widget.initialVerifiedPhone;
     if (rawInitialVerified != null && rawInitialVerified.trim().isNotEmpty) {
@@ -310,23 +310,23 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   void _handleOtpDigitChange(String val, int index) {
     if (val.length > 1) {
       final digits = val.replaceAll(RegExp(r'[^0-9]'), '');
-      for (int i = 0; i < 4; i++) {
+      for (int i = 0; i < 6; i++) {
         if (i < digits.length) {
           _otpDigitControllers[i].text = digits[i];
         }
       }
-      final nextIdx = digits.length >= 4 ? 3 : digits.length;
+      final nextIdx = digits.length >= 6 ? 5 : digits.length;
       _otpDigitFocusNodes[nextIdx].requestFocus();
-      if (digits.length >= 4) {
+      if (digits.length >= 6) {
         _handleVerifyLoginCode();
       }
       return;
     }
 
-    if (val.isNotEmpty && index < 3) {
+    if (val.isNotEmpty && index < 5) {
       _otpDigitFocusNodes[index + 1].requestFocus();
     }
-    if (_getEnteredOtp().length == 4) {
+    if (_getEnteredOtp().length == 6) {
       _handleVerifyLoginCode();
     }
   }
@@ -341,7 +341,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         _otpDigitControllers[i].clear();
       }
     }
-    if (digits.length >= 4) {
+    if (digits.length >= 6) {
       _handleVerifyLoginCode();
     }
   }
@@ -396,16 +396,18 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     );
   }
 
-  Widget _buildFourDigitOtpInput() {
+  Widget _buildSixDigitOtpInput() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final boxWidth = ((constraints.maxWidth - 42) / 4).clamp(54.0, 72.0);
+        final totalWidth = constraints.maxWidth;
+        final spacing = (totalWidth < 360) ? 5.0 : 8.0;
+        final boxWidth = ((totalWidth - (spacing * 5)) / 6).clamp(36.0, 56.0);
         return Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: List.generate(4, (index) {
+          children: List.generate(6, (index) {
             return SizedBox(
               width: boxWidth,
-              height: 56,
+              height: 54,
               child: Focus(
                 onKeyEvent: (node, event) {
                   if (event is KeyDownEvent &&
@@ -419,18 +421,19 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   return KeyEventResult.ignored;
                 },
                 child: TextFormField(
+                  key: Key('login_otp_box_$index'),
                   controller: _otpDigitControllers[index],
                   focusNode: _otpDigitFocusNodes[index],
                   keyboardType: TextInputType.number,
                   textAlign: TextAlign.center,
                   inputFormatters: [
                     FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(4),
+                    LengthLimitingTextInputFormatter(6),
                   ],
-                  style: const TextStyle(
-                    fontSize: 24,
+                  style: TextStyle(
+                    fontSize: (totalWidth < 360) ? 18 : 22,
                     fontWeight: FontWeight.w800,
-                    color: Color(0xFF1E293B),
+                    color: const Color(0xFF1E293B),
                   ),
                   decoration: InputDecoration(
                     counterText: '',
@@ -438,15 +441,15 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     filled: true,
                     fillColor: const Color(0xFFF8FAFC),
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(10),
                       borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(10),
                       borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(10),
                       borderSide: const BorderSide(color: AppTheme.gsNavy, width: 2),
                     ),
                   ),
@@ -500,11 +503,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       });
 
       if (res['success'] == true) {
-        final generatedCode = (res['otp'] ?? '123456').toString();
         final bool isAuthorizedAdminMatch = res['isAdmin'] == true;
         setState(() {
           _isLoginOtpSent = true;
-          _currentLoginOtp = generatedCode;
+          _currentLoginOtp = null;
           if (isAuthorizedAdminMatch) {
             _isAdminMode = true;
             _selectedRole = UserRole.admin;
@@ -525,9 +527,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('One-time code sent to +91 $normalized. (OTP: $generatedCode)'),
+            content: Text(res['message']?.toString() ?? 'OTP sent successfully to your mobile number.'),
             backgroundColor: AppTheme.gsNavy,
-            duration: const Duration(seconds: 6),
+            duration: const Duration(seconds: 4),
           ),
         );
       } else {
@@ -555,9 +557,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
   Future<void> _handleVerifyLoginCode() async {
     final code = _getEnteredOtp();
-    if (code.length < 4) {
+    if (code.length < 6) {
       setState(() {
-        _loginOtpErrorMessage = 'Please enter all 4 digits of the verification code.';
+        _loginOtpErrorMessage = 'Please enter all 6 digits of the verification code.';
       });
       return;
     }
@@ -1285,9 +1287,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       sendSuccess = backendRes['success'] == true;
 
       if (sendSuccess) {
-        final generatedCode = (backendRes['otp'] ?? '123456').toString();
-        _currentRegistrationOtp = generatedCode;
-        successMsg = 'OTP code $generatedCode dispatched to mobile $phone.';
+        successMsg = backendRes['message']?.toString() ?? 'OTP sent successfully to your mobile number.';
+      } else {
+        _otpErrorMessage = backendRes['message']?.toString() ?? 'Failed to send OTP SMS. Please check your mobile number.';
       }
     }
 
@@ -1331,8 +1333,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
   Future<void> _handleVerifyOtp() async {
     final code = _otpController.text.trim();
-    if (code.isEmpty) {
-      setState(() => _otpErrorMessage = 'Please enter the OTP code');
+    if (code.length != 6) {
+      setState(() => _otpErrorMessage = 'Please enter the 6-digit OTP code.');
       return;
     }
 
@@ -1364,17 +1366,24 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     });
 
     bool verified = false;
+    String? errorReason;
 
     // 1. Mobile Phone SMS OTP verification via Backend API
     if (phone.isNotEmpty) {
       final res = await ApiService().verifyOtp(phone: phone, email: email, code: code);
       verified = res['success'] == true;
+      if (!verified) {
+        errorReason = res['message']?.toString();
+      }
     }
 
     // 2. Email OTP verification via Supabase Auth
     if (!verified && email.isNotEmpty) {
       final supabaseVerify = await SupabaseService().verifyEmailOtp(email: email, token: code);
       verified = supabaseVerify['success'] == true;
+      if (!verified && errorReason == null) {
+        errorReason = supabaseVerify['message']?.toString();
+      }
     }
 
     if (!mounted) return;
@@ -1395,7 +1404,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         ),
       );
     } else {
-      setState(() => _otpErrorMessage = 'Invalid or expired OTP code.');
+      setState(() => _otpErrorMessage = errorReason ?? 'Invalid or expired OTP code.');
     }
   }
 
@@ -1519,40 +1528,6 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               ),
             ],
           ] else if (!_isOtpVerified && _isOtpSent) ...[
-            Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                color: const Color(0xFFEFF4FA),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppTheme.gsNavy.withValues(alpha: 0.25)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.info_outline_rounded, color: AppTheme.gsNavy, size: 16),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'Demo mode: SMS is off. Use code ${_currentRegistrationOtp ?? "1234"}.',
-                      style: const TextStyle(fontSize: 12, color: AppTheme.gsNavy, fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                  InkWell(
-                    onTap: () {
-                      _otpController.text = _currentRegistrationOtp ?? '1234';
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppTheme.gsRed,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: const Text('Fill', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
             Row(
               children: [
                 Expanded(
@@ -1561,11 +1536,13 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     key: const Key('reg_otp_code_field'),
                     controller: _otpController,
                     keyboardType: TextInputType.number,
-                    maxLength: 8,
+                    maxLength: 6,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                     scrollPadding: const EdgeInsets.only(bottom: 120),
-                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 14, fontWeight: FontWeight.w600),
+                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 16, fontWeight: FontWeight.w700, letterSpacing: 3),
                     decoration: InputDecoration(
-                      hintText: 'Enter OTP code',
+                      hintText: '6-digit OTP code',
+                      hintStyle: const TextStyle(letterSpacing: 0, fontSize: 13, color: AppTheme.textMuted),
                       counterText: '',
                       filled: true,
                       fillColor: Colors.white,
@@ -2055,54 +2032,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               ),
             ],
 
-            _buildFourDigitOtpInput(),
-
-            // On-Screen OTP Display Card matching UI Reference Screenshot
-            if (_currentLoginOtp != null) ...[
-              Container(
-                margin: const EdgeInsets.only(top: 12),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE8F1F5),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFCFDEE5)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.info_outline_rounded, size: 20, color: Color(0xFF335C6D)),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Demo mode: SMS is off. Use code $_currentLoginOtp.',
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF1E3A47),
-                        ),
-                      ),
-                    ),
-                    InkWell(
-                      onTap: () => _fillLoginOtp(_currentLoginOtp),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF335C6D),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: const Text(
-                          'Fill',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+            _buildSixDigitOtpInput(),
 
             const SizedBox(height: 10),
             Row(
