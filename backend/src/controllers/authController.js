@@ -1239,7 +1239,7 @@ exports.getSubAdminAssignmentHistory = async (req, res) => {
     }
 };
 
-// Production-safe shared OTP storage service (Redis with In-memory dev/test fallback)
+// Production-safe shared OTP storage service (Supabase PostgreSQL RPC with In-memory dev/test fallback)
 const { otpStoreService, generateRandomOtp, hashOtp, normalizeKey } = require('../services/otpStoreService');
 
 async function checkOtpRateLimit(identifier) {

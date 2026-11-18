@@ -571,6 +571,24 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
 
+      ApiService.debugRequestOtpOverride = ({required String phone, String email = ''}) async {
+        return {
+          'success': true,
+          'message': 'OTP sent successfully to your mobile number.',
+          'isAdmin': false,
+        };
+      };
+      ApiService.debugVerifyOtpOverride = ({required String phone, String email = '', required String code}) async {
+        return {
+          'success': code == '739104',
+          'message': code == '739104' ? 'OTP verified successfully.' : 'Invalid OTP',
+        };
+      };
+      addTearDown(() {
+        ApiService.debugRequestOtpOverride = null;
+        ApiService.debugVerifyOtpOverride = null;
+      });
+
       ApiService.debugLoginOverride = ({
         String? email,
         String? otp,
@@ -578,6 +596,8 @@ void main() {
         String? phone,
         String? role,
       }) async {
+        // OTP was already verified once by verifyOtp; login must NOT re-send it for double verification
+        expect(otp, isNull);
         return {
           'success': false,
           'message': 'Invalid credentials. User not registered in system.',
@@ -603,7 +623,13 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Enter your code'), findsOneWidget);
-      await tester.tap(find.text('Fill'));
+      final otpFields = find.byType(TextFormField);
+      expect(otpFields, findsNWidgets(6));
+      const digits = ['7', '3', '9', '1', '0', '4'];
+      for (int i = 0; i < digits.length; i++) {
+        await tester.enterText(otpFields.at(i), digits[i]);
+        await tester.pump();
+      }
       await tester.pumpAndSettle();
 
       final verifyBtn = find.widgetWithText(ElevatedButton, 'Verify & continue');

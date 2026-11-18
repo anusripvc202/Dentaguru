@@ -44,4 +44,3 @@ class ApiConstants {
   static String get allReferralsAdmin => '$baseUrl/referrals/all';
   static String get referralAnalytics => '$baseUrl/referrals/analytics';
 }
-

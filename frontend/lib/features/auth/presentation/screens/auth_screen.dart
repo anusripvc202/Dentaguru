@@ -584,7 +584,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       setState(() => _isVerifyingLoginCode = false);
 
       if (verified) {
-        await _handleLogin(verifiedOtpCode: code);
+        await _handleLogin(verifiedOtpCode: code, otpAlreadyVerified: true);
       } else {
         setState(() {
           _loginOtpErrorMessage = res['message']?.toString() ?? 'Invalid or expired OTP code.';
@@ -599,7 +599,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     }
   }
 
-  Future<void> _handleLogin({String? verifiedOtpCode}) async {
+  Future<void> _handleLogin({String? verifiedOtpCode, bool otpAlreadyVerified = false}) async {
     if (_isLoggingIn) return;
 
     final String otpToUse = (verifiedOtpCode ?? _getEnteredOtp()).trim();
@@ -621,7 +621,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       final res = await ApiService().loginUser(
         email: identifier,
         phone: identifier,
-        otp: otpToUse.isNotEmpty ? otpToUse : null,
+        otp: otpAlreadyVerified ? null : (otpToUse.isNotEmpty ? otpToUse : null),
         role: _isAdminMode
             ? 'Admin'
             : (_selectedRole == UserRole.clinic ? 'Clinic' : null),
