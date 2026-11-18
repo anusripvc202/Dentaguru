@@ -437,11 +437,13 @@ exports.login = async (req, res) => {
 
         // 1. Passwordless Mobile OTP Login Verification (if provided)
         if (otpCode.length >= 4) {
-            const otpCheck = verifyStoredOtp(identifier, otpCode).valid ||
-                             (user.phone && verifyStoredOtp(user.phone, otpCode).valid) ||
-                             (user.email && verifyStoredOtp(user.email, otpCode).valid);
-            if (!otpCheck) {
-                return res.status(400).json({ success: false, message: 'Invalid or expired OTP. Please request a new OTP.' });
+            const otpTargetKey = normalizeKey(identifier) || normalizeKey(user.phone) || normalizeKey(user.email);
+            const otpVerification = await verifyStoredOtp(otpTargetKey, otpCode);
+            if (!otpVerification.valid) {
+                return res.status(400).json({
+                    success: false,
+                    message: otpVerification.message || 'Invalid or expired OTP. Please request a new OTP.'
+                });
             }
         } else if (password) {
             // 2. Password Login Verification (if password provided)
@@ -1237,165 +1239,19 @@ exports.getSubAdminAssignmentHistory = async (req, res) => {
     }
 };
 
-// 13. SUPABASE SYNC, BIOMETRIC, FCM TOKEN STUBS
-exports.supabaseAuthSync = async (req, res) => {
-    res.json({ success: true, message: 'Supabase sync completed.' });
-};
-exports.saveBiometric = async (req, res) => {
-    res.json({ success: true, message: 'Biometric token saved.' });
-};
-exports.updateFcmToken = async (req, res) => {
-    res.json({ success: true, message: 'FCM token updated.' });
-};
+// Production-safe shared OTP storage service (Redis with In-memory dev/test fallback)
+const { otpStoreService, generateRandomOtp, hashOtp, normalizeKey } = require('../services/otpStoreService');
 
-// In-memory store for real active OTPs (Key: normalized phone or email, Value: { hashedCode, expiresAt, attempts, lastRequestedAt, requestCount, windowStart, used })
-const activeOtpStore = new Map();
-const OTP_SALT = process.env.OTP_SALT || process.env.JWT_SECRET || 'gs_health_otp_salt_2026';
-const OTP_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes expiration
-const OTP_COOLDOWN_MS = 30 * 1000; // 30-second resend cooldown
-const OTP_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15-minute rate limit window
-const OTP_MAX_REQUESTS_PER_WINDOW = 5; // Max 5 requests per 15 minutes
-const OTP_MAX_ATTEMPTS = 5; // Max 5 incorrect attempts
-
-function generateRandomOtp() {
-    // Cryptographically secure 6-digit numeric OTP (100000 - 999999)
-    return crypto.randomInt(100000, 1000000).toString();
+async function checkOtpRateLimit(identifier) {
+    return otpStoreService.checkRateLimit(identifier);
 }
 
-function hashOtp(code) {
-    return crypto.createHmac('sha256', OTP_SALT).update(String(code).trim()).digest('hex');
+async function storeOtp(identifier, code) {
+    return otpStoreService.storeOtp(identifier, code);
 }
 
-function normalizeKey(identifier) {
-    if (!identifier) return '';
-    const str = String(identifier).trim().toLowerCase();
-    if (str.includes('@')) return str;
-    const digits = str.replace(/\D/g, '');
-    return digits.length >= 10 ? digits.slice(-10) : digits;
-}
-
-function checkOtpRateLimit(identifier) {
-    const cleanKey = normalizeKey(identifier);
-    if (!cleanKey) return { allowed: true };
-
-    const now = Date.now();
-    const existing = activeOtpStore.get(cleanKey);
-    if (!existing) return { allowed: true };
-
-    // 1. Cooldown check (30 seconds)
-    if (existing.lastRequestedAt && (now - existing.lastRequestedAt < OTP_COOLDOWN_MS)) {
-        const remainingSec = Math.ceil((OTP_COOLDOWN_MS - (now - existing.lastRequestedAt)) / 1000);
-        return {
-            allowed: false,
-            status: 429,
-            message: `Please wait ${remainingSec} seconds before requesting a new OTP.`
-        };
-    }
-
-    // 2. Sliding window abuse protection (max 5 per 15 min)
-    if (existing.windowStart && (now - existing.windowStart < OTP_RATE_LIMIT_WINDOW_MS)) {
-        if (existing.requestCount >= OTP_MAX_REQUESTS_PER_WINDOW) {
-            return {
-                allowed: false,
-                status: 429,
-                message: 'Too many OTP requests. Please wait 15 minutes before requesting again.'
-            };
-        }
-    }
-
-    return { allowed: true };
-}
-
-function storeOtp(identifier, code) {
-    if (!identifier) return;
-    const cleanKey = normalizeKey(identifier);
-    if (!cleanKey) return;
-
-    const now = Date.now();
-    const existing = activeOtpStore.get(cleanKey);
-
-    let windowStart = now;
-    let requestCount = 1;
-
-    if (existing && existing.windowStart && (now - existing.windowStart < OTP_RATE_LIMIT_WINDOW_MS)) {
-        windowStart = existing.windowStart;
-        requestCount = (existing.requestCount || 0) + 1;
-    }
-
-    activeOtpStore.set(cleanKey, {
-        hashedCode: hashOtp(code),
-        createdAt: now,
-        expiresAt: now + OTP_EXPIRY_MS, // 5 minutes validity
-        lastRequestedAt: now,
-        attempts: 0,
-        requestCount: requestCount,
-        windowStart: windowStart,
-        used: false
-    });
-}
-
-function verifyStoredOtp(identifier, code) {
-    if (!code) {
-        return { valid: false, message: 'Please enter the 6-digit OTP code.' };
-    }
-    const cleanCode = String(code).trim();
-    if (cleanCode.length !== 6 && cleanCode.length !== 4) {
-        return { valid: false, message: 'Please enter a valid 6-digit OTP code.' };
-    }
-
-    const cleanKey = normalizeKey(identifier);
-    let entry = cleanKey ? activeOtpStore.get(cleanKey) : null;
-
-    // Fallback check if cleanKey not directly found (e.g. searching across active store)
-    if (!entry && identifier) {
-        for (const [k, v] of activeOtpStore.entries()) {
-            if (cleanKey && (k.endsWith(cleanKey) || cleanKey.endsWith(k))) {
-                entry = v;
-                break;
-            }
-        }
-    }
-
-    if (!entry || entry.used) {
-        return { valid: false, message: 'Invalid or expired OTP. Please request a new OTP.' };
-    }
-
-    const now = Date.now();
-    if (now > entry.expiresAt) {
-        activeOtpStore.delete(cleanKey);
-        return { valid: false, message: 'OTP has expired. Please request a new OTP.' };
-    }
-
-    if (entry.attempts >= OTP_MAX_ATTEMPTS) {
-        activeOtpStore.delete(cleanKey);
-        return {
-            valid: false,
-            message: 'Maximum incorrect attempts exceeded. This OTP has been invalidated. Please request a new OTP.'
-        };
-    }
-
-    const incomingHash = hashOtp(cleanCode);
-    if (incomingHash !== entry.hashedCode) {
-        entry.attempts += 1;
-        const remaining = OTP_MAX_ATTEMPTS - entry.attempts;
-        if (remaining <= 0) {
-            activeOtpStore.delete(cleanKey);
-            return {
-                valid: false,
-                message: 'Invalid OTP code. Maximum attempts exceeded. Please request a new OTP.'
-            };
-        }
-        return {
-            valid: false,
-            message: `Invalid OTP code. ${remaining} attempt(s) remaining.`
-        };
-    }
-
-    // OTP is valid! Invalidate immediately to prevent reuse
-    entry.used = true;
-    if (cleanKey) activeOtpStore.delete(cleanKey);
-
-    return { valid: true, message: 'OTP verified successfully.' };
+async function verifyStoredOtp(identifier, code) {
+    return otpStoreService.verifyOtp(identifier, code);
 }
 
 // 3. OTP VERIFICATION SERVICE (Mobile SMS - Email OTP handled directly by Supabase Auth with Resend SMTP)
@@ -1411,28 +1267,38 @@ exports.requestOTP = async (req, res) => {
             });
         }
 
+        const phoneValidation = normalizePhoneNumber(pNum);
+        if (!phoneValidation.isValid) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid mobile phone number format. Minimum 10 digits required.'
+            });
+        }
+
         const normalizedPhone = normalizeAdminPhone(pNum);
         const authorizedAdminPhone = await getAuthorizedAdminPhone();
         const isAdmin = Boolean(authorizedAdminPhone && normalizedPhone === authorizedAdminPhone);
 
-        // Rate limiting & cooldown check
-        const rateCheck = checkOtpRateLimit(pNum);
-        if (!rateCheck.allowed) {
-            return res.status(rateCheck.status).json({
+        const realOtp = generateRandomOtp();
+
+        // Atomically enforce cooldown + rate limits and store HMAC-hashed OTP before SMS dispatch
+        const storeResult = await otpStoreService.requestAndStoreOtp(pNum, realOtp);
+        if (!storeResult.allowed) {
+            return res.status(storeResult.status || 429).json({
                 success: false,
-                message: rateCheck.message
+                message: storeResult.message
             });
         }
 
-        const realOtp = generateRandomOtp();
-        storeOtp(pNum, realOtp);
-        if (normalizedPhone && normalizedPhone !== pNum) {
-            storeOtp(normalizedPhone, realOtp);
-        }
-
-        // Send Real Mobile SMS via Fast2SMS / Twilio
-        if (pNum.length >= 10) {
-            sendRealSmsOtp(pNum, realOtp).catch(e => console.error('SMS send warning:', e));
+        // Send Real Mobile SMS via Fast2SMS / Twilio and await carrier response
+        const smsResult = await sendRealSmsOtp(pNum, realOtp);
+        if (!smsResult.success && !smsResult.simulated) {
+            // Safely invalidate stored OTP challenge & roll back cooldown on carrier dispatch failure
+            await otpStoreService.invalidateOtp(pNum, true).catch(() => {});
+            return res.status(502).json({
+                success: false,
+                message: smsResult.error || 'SMS carrier gateway failed to dispatch verification code.'
+            });
         }
 
         // Return confirmation message without exposing OTP value in response
@@ -1453,9 +1319,11 @@ exports.verifyOTP = async (req, res) => {
         const eMail = email ? email.trim() : '';
 
         const normalizedPhone = normalizeAdminPhone(pNum);
-        const verification = pNum
-            ? (verifyStoredOtp(pNum, code).valid ? { valid: true } : verifyStoredOtp(normalizedPhone, code))
-            : (eMail ? verifyStoredOtp(eMail, code) : { valid: false, message: 'Phone number or email is required.' });
+        const otpTargetKey = normalizeKey(pNum || eMail);
+        let verification = { valid: false, message: 'Phone number or email is required.' };
+        if (otpTargetKey) {
+            verification = await verifyStoredOtp(otpTargetKey, code);
+        }
 
         if (!verification.valid) {
             return res.status(400).json({
@@ -1531,20 +1399,49 @@ exports.forgotPassword = async (req, res) => {
         }
 
         const realOtp = generateRandomOtp();
-        storeOtp(user.email, realOtp);
-        storeOtp(user.phone, realOtp);
-
         if (user.phone && user.phone.length >= 10) {
-            sendRealSmsOtp(user.phone, realOtp).catch(e => console.error('Password reset SMS warning:', e));
+            const pStore = await otpStoreService.requestAndStoreOtp(user.phone, realOtp);
+            if (!pStore.allowed) {
+                return res.status(pStore.status || 429).json({ success: false, message: pStore.message });
+            }
+        }
+        if (user.email && !user.email.endsWith('@dentaguru.internal')) {
+            const eStore = await otpStoreService.requestAndStoreOtp(user.email, realOtp);
+            if (!eStore.allowed && (!user.phone || user.phone.length < 10)) {
+                return res.status(eStore.status || 429).json({ success: false, message: eStore.message });
+            }
         }
 
-        if (user.email && user.email.includes('@')) {
-            await sendOtpEmail(user.email, realOtp, true).catch(e => console.error('Password reset email warning:', e));
+        let smsSent = false;
+        let smsError = null;
+        if (user.phone && user.phone.length >= 10) {
+            const smsResult = await sendRealSmsOtp(user.phone, realOtp);
+            smsSent = Boolean(smsResult.success || smsResult.simulated);
+            if (!smsSent) smsError = smsResult.error;
+        }
+
+        let emailSent = false;
+        if (user.email && user.email.includes('@') && !user.email.endsWith('@dentaguru.internal')) {
+            try {
+                await sendOtpEmail(user.email, realOtp, true);
+                emailSent = true;
+            } catch (e) {
+                console.error('Password reset email warning:', e.message);
+            }
+        }
+
+        if (!smsSent && !emailSent) {
+            if (user.phone) await otpStoreService.invalidateOtp(user.phone, true).catch(() => {});
+            if (user.email) await otpStoreService.invalidateOtp(user.email, true).catch(() => {});
+            return res.status(502).json({
+                success: false,
+                message: smsError || 'Failed to dispatch password reset verification code.'
+            });
         }
 
         res.json({
             success: true,
-            message: `Password reset verification code sent to ${user.email || user.phone}. Please check your SMS/email.`
+            message: 'Password reset verification code sent. Please check your SMS/email.'
         });
     } catch (err) {
         console.error('Forgot Password Error:', err.message);
@@ -1564,9 +1461,13 @@ exports.resetPassword = async (req, res) => {
             return res.status(400).json({ success: false, message: 'New password must be at least 6 characters.' });
         }
 
-        const isValid = verifyStoredOtp(identifier, code).valid || (email && verifyStoredOtp(email, code).valid) || (phone && verifyStoredOtp(phone, code).valid);
-        if (!isValid) {
-            return res.status(400).json({ success: false, message: 'Invalid or expired reset OTP code.' });
+        const otpTargetKey = normalizeKey(phone || email);
+        const otpVerification = await verifyStoredOtp(otpTargetKey, code);
+        if (!otpVerification.valid) {
+            return res.status(400).json({
+                success: false,
+                message: otpVerification.message || 'Invalid or expired reset OTP code.'
+            });
         }
 
         let user = await User.findOne({ email: identifier });
