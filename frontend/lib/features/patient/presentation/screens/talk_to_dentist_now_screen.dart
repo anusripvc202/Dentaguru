@@ -157,12 +157,12 @@ class _TalkToDentistNowScreenState extends State<TalkToDentistNowScreen> {
               width: 58,
               height: 58,
               decoration: BoxDecoration(
-                color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                color: const Color(0xFF012A58).withValues(alpha: 0.12),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
                 Icons.bolt_rounded,
-                color: Color(0xFF10B981),
+                color: Color(0xFF012A58),
                 size: 34,
               ),
             ),
@@ -312,7 +312,7 @@ class _TalkToDentistNowScreenState extends State<TalkToDentistNowScreen> {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
                           content: Text('Your request has been queued. Our clinical team will reach out promptly.'),
-                          backgroundColor: Color(0xFF10B981),
+                          backgroundColor: Color(0xFF012A58),
                         ),
                       );
                       Navigator.of(context).pop();
@@ -349,7 +349,7 @@ class _TalkToDentistNowScreenState extends State<TalkToDentistNowScreen> {
         final hasOnlineDentists = onlineDentists.isNotEmpty;
 
         return Scaffold(
-          backgroundColor: const Color(0xFFFBFBFB),
+          backgroundColor: const Color(0xFFF8FAFC),
           body: SafeArea(
             child: Column(
               children: [
@@ -384,7 +384,7 @@ class _TalkToDentistNowScreenState extends State<TalkToDentistNowScreen> {
                         // Multiline text input
                         Container(
                           decoration: BoxDecoration(
-                            color: const Color(0xFFF4F6F4),
+                            color: const Color(0xFFF8FAFC),
                             borderRadius: BorderRadius.circular(16),
                           ),
                           child: TextField(
@@ -619,12 +619,12 @@ class _TalkToDentistNowScreenState extends State<TalkToDentistNowScreen> {
             width: 8,
             height: 8,
             decoration: BoxDecoration(
-              color: hasOnlineDentists ? const Color(0xFF10B981) : const Color(0xFF64748B),
+              color: hasOnlineDentists ? const Color(0xFF012A58) : const Color(0xFF64748B),
               shape: BoxShape.circle,
               boxShadow: hasOnlineDentists
                   ? [
                       BoxShadow(
-                        color: const Color(0xFF10B981).withValues(alpha: 0.45),
+                        color: const Color(0xFF012A58).withValues(alpha: 0.45),
                         blurRadius: 4,
                         spreadRadius: 1,
                       ),

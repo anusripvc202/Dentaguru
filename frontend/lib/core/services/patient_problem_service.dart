@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'api_service.dart';
 import 'session_service.dart';
+import 'supabase_service.dart';
 import '../models/referral_model.dart';
 import '../models/doctor_availability.dart';
 import '../models/medical_specialty_model.dart';
@@ -75,6 +76,21 @@ class DoctorModel {
         };
 
   bool get verified => verificationStatus.trim().toUpperCase() == 'VERIFIED';
+
+  /// Returns true when the doctor's availability toggle is ON and the account is not suspended.
+  bool get isAvailable {
+    if (verificationStatus.trim().toUpperCase() == 'SUSPENDED') return false;
+    final s = status.trim().toLowerCase();
+    return s != 'offline' &&
+        s != 'unavailable' &&
+        s != 'inactive' &&
+        s != 'on leave' &&
+        s != 'on_leave' &&
+        s != 'off' &&
+        s != 'false' &&
+        s != 'disabled' &&
+        s != 'suspended';
+  }
 
   String getFeeForCategory(String category) {
     if (procedureFees.containsKey(category)) {
@@ -897,6 +913,10 @@ class PatientProblemService extends ChangeNotifier {
 
   List<DoctorModel> get allDoctors => List.unmodifiable(_allDoctors);
 
+  /// Patient-facing available doctors only (excludes doctors whose availability is OFF or suspended).
+  List<DoctorModel> get availableDoctors =>
+      List.unmodifiable(_allDoctors.where((d) => d.isAvailable));
+
   void addTestDoctor(DoctorModel doc) {
     _allDoctors.add(doc);
     notifyListeners();
@@ -952,20 +972,12 @@ class PatientProblemService extends ChangeNotifier {
 
   // Helper to safely access auth user ID without throwing when uninitialized
   String? get _safeAuthUserId {
-    try {
-      return Supabase.instance.client.auth.currentUser?.id;
-    } catch (_) {
-      return null;
-    }
+    return SupabaseService.safeCurrentUser?.id;
   }
 
   // Helper to safely access auth user email without throwing when uninitialized
   String? get _safeAuthUserEmail {
-    try {
-      return Supabase.instance.client.auth.currentUser?.email?.trim().toLowerCase();
-    } catch (_) {
-      return null;
-    }
+    return SupabaseService.safeCurrentUser?.email?.trim().toLowerCase();
   }
 
   // Scoped "My Doctors" saved by the currently logged-in patient
@@ -1389,6 +1401,20 @@ class PatientProblemService extends ChangeNotifier {
         final List list = jsonDecode(medStr);
         _medicalRecords.clear();
         _medicalRecords.addAll(List<Map<String, dynamic>>.from(list));
+      }
+
+      // 4b. Load In-App Notifications
+      final notifStr = prefs.getString('dentaguru_app_notifications');
+      if (notifStr != null && notifStr.isNotEmpty) {
+        try {
+          final List list = jsonDecode(notifStr);
+          _appNotifications.clear();
+          for (final item in list) {
+            if (item is Map) {
+              _appNotifications.add(AppNotificationModel.fromJson(Map<String, dynamic>.from(item)));
+            }
+          }
+        } catch (_) {}
       }
 
       // 5. Load Master Patients List
@@ -2286,8 +2312,20 @@ class PatientProblemService extends ChangeNotifier {
           );
           _allPatients.add(pProfile);
 
-          final authEmail = Supabase.instance.client.auth.currentUser?.email;
-          final isCurrentPatientMatch = (authEmail != null && authEmail.isNotEmpty && authEmail.toLowerCase() == email.toLowerCase()) ||
+          final authEmail = _safeAuthUserEmail;
+          final sess = SessionService().currentSession;
+          final sessPhoneDigits = (sess?.phone ?? '').replaceAll(RegExp(r'\D'), '');
+          final itemPhoneDigits = phone.replaceAll(RegExp(r'\D'), '');
+          final sessPhone10 = sessPhoneDigits.length >= 10
+              ? sessPhoneDigits.substring(sessPhoneDigits.length - 10)
+              : sessPhoneDigits;
+          final itemPhone10 = itemPhoneDigits.length >= 10
+              ? itemPhoneDigits.substring(itemPhoneDigits.length - 10)
+              : itemPhoneDigits;
+          final isCurrentPatientMatch =
+              (authEmail != null && authEmail.isNotEmpty && authEmail.toLowerCase() == email.toLowerCase()) ||
+              (sess != null && sess.role.toLowerCase() == 'patient' && sess.userId.isNotEmpty && sess.userId == id) ||
+              (sessPhone10.isNotEmpty && itemPhone10.isNotEmpty && sessPhone10 == itemPhone10) ||
               (currentPatient.email.isNotEmpty && currentPatient.email.toLowerCase() == email.toLowerCase()) ||
               (currentPatient.id.isNotEmpty && currentPatient.id == id);
 
@@ -2425,7 +2463,7 @@ class PatientProblemService extends ChangeNotifier {
 
   Future<void> syncProblemRequestsFromApi() async {
     try {
-      final authUser = Supabase.instance.client.auth.currentUser;
+      final authUser = SupabaseService.safeCurrentUser;
       final pId = currentPatient.id.isNotEmpty ? currentPatient.id : authUser?.id;
       final pEmail = currentPatient.email.isNotEmpty ? currentPatient.email : authUser?.email;
       final currentPName = currentPatient.name;
@@ -2722,8 +2760,8 @@ class PatientProblemService extends ChangeNotifier {
         targetDocId = currentDoctor!.id.isNotEmpty
             ? currentDoctor!.id
             : (currentDoctor!.userId.isNotEmpty ? currentDoctor!.userId : currentDoctor!.email);
-      } else if (Supabase.instance.client.auth.currentUser?.id != null) {
-        targetDocId = Supabase.instance.client.auth.currentUser!.id;
+      } else if (_safeAuthUserId != null) {
+        targetDocId = _safeAuthUserId!;
       } else if (_allDoctors.isNotEmpty) {
         targetDocId = _allDoctors.first.id;
       }
@@ -2914,10 +2952,57 @@ class PatientProblemService extends ChangeNotifier {
     return false;
   }
 
-  Future<void> syncDoctorsFromApi() async {
+  static List<String> _parseLangRawList(dynamic rawLangs) {
+    final List<String> result = [];
+    final Set<String> seen = {};
+    Iterable<String> items = const [];
+    if (rawLangs is List) {
+      items = rawLangs.map((e) => e.toString().trim());
+    } else if (rawLangs is String && rawLangs.trim().isNotEmpty) {
+      items = rawLangs.split(',').map((e) => e.trim());
+    }
+    for (final item in items) {
+      if (item.isNotEmpty && seen.add(item.toLowerCase())) {
+        result.add(item);
+      }
+    }
+    return result;
+  }
+
+  static List<String> _extractDoctorLanguages(Map<dynamic, dynamic> dMap, Map<dynamic, dynamic> userObj) {
+    final dLangs = _parseLangRawList(dMap['languages']);
+    final uLangs = _parseLangRawList(userObj['languages']);
+    List<String> metaLangs = [];
+    final devToken = userObj['device_token']?.toString() ?? '';
+    if (devToken.startsWith('{')) {
+      try {
+        final meta = jsonDecode(devToken);
+        if (meta is Map && meta['languages'] != null) {
+          metaLangs = _parseLangRawList(meta['languages']);
+        }
+      } catch (_) {}
+    }
+
+    if (dLangs.length > 1 || (dLangs.length == 1 && dLangs.first.toLowerCase() != 'english')) {
+      return dLangs;
+    }
+    if (uLangs.length > 1 || (uLangs.length == 1 && uLangs.first.toLowerCase() != 'english')) {
+      return uLangs;
+    }
+    if (metaLangs.isNotEmpty) {
+      return metaLangs;
+    }
+    if (dLangs.isNotEmpty) return dLangs;
+    if (uLangs.isNotEmpty) return uLangs;
+    return const ['English'];
+  }
+
+  Future<void> syncDoctorsFromApi({bool? includeUnavailable}) async {
     try {
-      final apiDentists = await ApiService().fetchDentists();
-      if (apiDentists.isNotEmpty) {
+      final shouldIncludeUnavailable = includeUnavailable ?? _isDentistMode;
+      final api = ApiService();
+      final apiDentists = await api.fetchDentists(includeUnavailable: shouldIncludeUnavailable);
+      if (apiDentists.isNotEmpty || api.lastFetchDentistsSucceeded) {
         _allDoctors.clear();
         for (final dMap in apiDentists) {
           final id = dMap['id']?.toString() ?? dMap['_id']?.toString() ?? '';
@@ -2948,26 +3033,10 @@ class PatientProblemService extends ChangeNotifier {
           final lat = (dMap['latitude'] ?? userObj['latitude']) != null ? double.tryParse((dMap['latitude'] ?? userObj['latitude']).toString()) : null;
           final lng = (dMap['longitude'] ?? userObj['longitude']) != null ? double.tryParse((dMap['longitude'] ?? userObj['longitude']).toString()) : null;
 
-          List<String> doctorLangs = ['English'];
-          final rawLangs = dMap['languages'] ?? userObj['languages'];
-          if (rawLangs != null) {
-            if (rawLangs is List) {
-              doctorLangs = rawLangs.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
-            } else if (rawLangs is String && rawLangs.trim().isNotEmpty) {
-              doctorLangs = rawLangs.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
-            }
-          }
-          if (doctorLangs.isEmpty) {
-            if (userObj['device_token'] != null && userObj['device_token'].toString().startsWith('{')) {
-              try {
-                final meta = jsonDecode(userObj['device_token'].toString());
-                if (meta['languages'] is List) {
-                  doctorLangs = List<String>.from((meta['languages'] as List).map((e) => e.toString().trim()).where((e) => e.isNotEmpty));
-                }
-              } catch (_) {}
-            }
-          }
-          if (doctorLangs.isEmpty) doctorLangs = ['English'];
+          final List<String> doctorLangs = _extractDoctorLanguages(
+            dMap is Map ? dMap : <String, dynamic>{},
+            userObj is Map ? userObj : <String, dynamic>{},
+          );
 
           final doctorUserId = (dMap['user_id'] ?? userObj['id'] ?? '').toString();
 
@@ -3013,7 +3082,7 @@ class PatientProblemService extends ChangeNotifier {
           ));
         }
       }
-      final authUser = Supabase.instance.client.auth.currentUser;
+      final authUser = SupabaseService.safeCurrentUser;
       if (authUser != null && authUser.email != null && authUser.email!.isNotEmpty) {
         final authEmailLower = authUser.email!.toLowerCase();
         final authName = (authUser.userMetadata?['name'] ?? '').toString().toLowerCase();
@@ -3049,9 +3118,9 @@ class PatientProblemService extends ChangeNotifier {
 
   /// Fetch doctors from API filtered by state, city, pincode, specialty, availability, language.
   /// Returns filtered list without modifying the global [_allDoctors] cache.
-  Future<List<DoctorModel>> fetchDoctorsFiltered({String? state, String? city, String? pincode, String? specialty, String? availability, String? language}) async {
+  Future<List<DoctorModel>> fetchDoctorsFiltered({String? state, String? city, String? pincode, String? specialty, String? availability, String? language, List<String>? languages}) async {
     try {
-      final apiDentists = await ApiService().fetchDentists(state: state, city: city, pincode: pincode, specialty: specialty, availability: availability, language: language);
+      final apiDentists = await ApiService().fetchDentists(state: state, city: city, pincode: pincode, specialty: specialty, availability: availability, language: language, languages: languages);
       final filtered = <DoctorModel>[];
       for (final dMap in apiDentists) {
         final id = dMap['id']?.toString() ?? dMap['_id']?.toString() ?? '';
@@ -3070,26 +3139,10 @@ class PatientProblemService extends ChangeNotifier {
         final lat = (dMap['latitude'] ?? userObj['latitude']) != null ? double.tryParse((dMap['latitude'] ?? userObj['latitude']).toString()) : null;
         final lng = (dMap['longitude'] ?? userObj['longitude']) != null ? double.tryParse((dMap['longitude'] ?? userObj['longitude']).toString()) : null;
 
-        List<String> doctorLangs = ['English'];
-        final rawLangs = dMap['languages'] ?? userObj['languages'];
-        if (rawLangs != null) {
-          if (rawLangs is List) {
-            doctorLangs = rawLangs.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
-          } else if (rawLangs is String && rawLangs.trim().isNotEmpty) {
-            doctorLangs = rawLangs.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
-          }
-        }
-        if (doctorLangs.isEmpty) {
-          if (userObj['device_token'] != null && userObj['device_token'].toString().startsWith('{')) {
-            try {
-              final meta = jsonDecode(userObj['device_token'].toString());
-              if (meta['languages'] is List) {
-                doctorLangs = List<String>.from((meta['languages'] as List).map((e) => e.toString().trim()).where((e) => e.isNotEmpty));
-              }
-            } catch (_) {}
-          }
-        }
-        if (doctorLangs.isEmpty) doctorLangs = ['English'];
+        final List<String> doctorLangs = _extractDoctorLanguages(
+          dMap is Map ? dMap : <String, dynamic>{},
+          userObj is Map ? userObj : <String, dynamic>{},
+        );
 
         final formattedName = name.startsWith('Dr.') ? name : 'Dr. $name';
 
@@ -3126,16 +3179,88 @@ class PatientProblemService extends ChangeNotifier {
 
   Future<void> syncAppointmentsFromApi() async {
     try {
-      final pId = currentPatient.id.isNotEmpty ? currentPatient.id : null;
-      final dId = currentDoctor?.id.isNotEmpty == true ? currentDoctor!.id : (currentDoctor?.userId.isNotEmpty == true ? currentDoctor!.userId : null);
-      
+      final sess = SessionService().currentSession;
+      final sessRoleLower = (sess?.role ?? '').trim().toLowerCase();
+      final pId = currentPatient.id.isNotEmpty
+          ? currentPatient.id
+          : (sessRoleLower == 'patient' && (sess?.userId.isNotEmpty ?? false)
+              ? sess!.userId
+              : _safeAuthUserId);
+
+      // Build complete set of doctor identifiers (both dentists.id and users.id) for the logged-in doctor
+      final myDoctorIds = <String>{};
+      if (currentDoctor != null) {
+        if (currentDoctor!.id.isNotEmpty) myDoctorIds.add(currentDoctor!.id);
+        if (currentDoctor!.userId.isNotEmpty) myDoctorIds.add(currentDoctor!.userId);
+      }
+      if ((_isDentistMode || sessRoleLower == 'dentist' || sessRoleLower == 'doctor') &&
+          (sess?.userId.isNotEmpty ?? false)) {
+        myDoctorIds.add(sess!.userId);
+      }
+      if (_isDentistMode && (_safeAuthUserId?.isNotEmpty ?? false)) {
+        myDoctorIds.add(_safeAuthUserId!);
+      }
+      for (final d in _allDoctors) {
+        final emailMatches = currentDoctor != null &&
+            currentDoctor!.email.isNotEmpty &&
+            d.email.isNotEmpty &&
+            d.email.toLowerCase() == currentDoctor!.email.toLowerCase();
+        final phoneMatches = currentDoctor != null &&
+            currentDoctor!.phone.isNotEmpty &&
+            d.phone.isNotEmpty &&
+            d.phone.replaceAll(RegExp(r'\D'), '') ==
+                currentDoctor!.phone.replaceAll(RegExp(r'\D'), '');
+        final idMatches = myDoctorIds.contains(d.id) ||
+            (d.userId.isNotEmpty && myDoctorIds.contains(d.userId));
+        if (idMatches || emailMatches || phoneMatches) {
+          if (d.id.isNotEmpty) myDoctorIds.add(d.id);
+          if (d.userId.isNotEmpty) myDoctorIds.add(d.userId);
+          // Upgrade currentDoctor.id to dentists.id if it was set to users.id at login
+          if (currentDoctor != null && d.id.isNotEmpty && currentDoctor!.id != d.id) {
+            currentDoctor = DoctorModel(
+              id: d.id,
+              userId: d.userId.isNotEmpty ? d.userId : currentDoctor!.id,
+              name: currentDoctor!.name.isNotEmpty ? currentDoctor!.name : d.name,
+              specialty: currentDoctor!.specialty.isNotEmpty ? currentDoctor!.specialty : d.specialty,
+              qualification: currentDoctor!.qualification.isNotEmpty ? currentDoctor!.qualification : d.qualification,
+              experienceYears: currentDoctor!.experienceYears,
+              rating: currentDoctor!.rating,
+              reviewCount: currentDoctor!.reviewCount,
+              clinicName: currentDoctor!.clinicName.isNotEmpty ? currentDoctor!.clinicName : d.clinicName,
+              phone: currentDoctor!.phone.isNotEmpty ? currentDoctor!.phone : d.phone,
+              email: currentDoctor!.email.isNotEmpty ? currentDoctor!.email : d.email,
+              status: d.status.isNotEmpty ? d.status : currentDoctor!.status,
+              verificationStatus: d.verificationStatus,
+              nextAvailableSlots: currentDoctor!.nextAvailableSlots,
+              consultationFee: currentDoctor!.consultationFee,
+              licenseNumber: currentDoctor!.licenseNumber,
+              photoBytes: currentDoctor!.photoBytes ?? d.photoBytes,
+              clinicAddress: currentDoctor!.clinicAddress.isNotEmpty ? currentDoctor!.clinicAddress : d.clinicAddress,
+              pincode: currentDoctor!.pincode.isNotEmpty ? currentDoctor!.pincode : d.pincode,
+              city: currentDoctor!.city.isNotEmpty ? currentDoctor!.city : d.city,
+              state: currentDoctor!.state.isNotEmpty ? currentDoctor!.state : d.state,
+              bio: currentDoctor!.bio.isNotEmpty ? currentDoctor!.bio : d.bio,
+              languages: currentDoctor!.languages.isNotEmpty ? currentDoctor!.languages : d.languages,
+            );
+          }
+        }
+      }
+
+      final String? dId = currentDoctor?.id.isNotEmpty == true
+          ? currentDoctor!.id
+          : (currentDoctor?.userId.isNotEmpty == true
+              ? currentDoctor!.userId
+              : (myDoctorIds.isNotEmpty ? myDoctorIds.first : null));
+
       final list = _isDentistMode
-          ? (dId != null ? await ApiService().fetchAppointments(dentistId: dId) : <dynamic>[])
-          : (pId != null ? await ApiService().fetchAppointments(patientId: pId) : <dynamic>[]);
-      
+          ? (dId != null ? await _api.fetchAppointments(dentistId: dId) : <dynamic>[])
+          : (pId != null ? await _api.fetchAppointments(patientId: pId) : <dynamic>[]);
+
       if (list.isEmpty) {
         if (_isDentistMode) {
-          _requests.removeWhere((r) => r.problemDescription == 'Scheduled dental consultation' || r.problemDescription == 'Scheduled medical consultation');
+          _requests.removeWhere((r) =>
+              r.problemDescription == 'Scheduled dental consultation' ||
+              r.problemDescription == 'Scheduled medical consultation');
           _saveToStorage();
           notifyListeners();
         }
@@ -3143,57 +3268,154 @@ class PatientProblemService extends ChangeNotifier {
       }
 
       for (final item in list) {
+        if (item is! Map) continue;
         final itemPatientId = (item['patient_id'] ?? item['patientId'] ?? item['patient']?['id'])?.toString();
-        final itemDentistId = (item['dentist_id'] ?? item['dentistId'])?.toString();
-        final authUser = Supabase.instance.client.auth.currentUser;
-        final isAdmin = (authUser?.email != null && authUser!.email!.toLowerCase().contains('admin')) ||
-                        currentPatient.email.toLowerCase().contains('admin');
+        final selectedDocMap = item['selectedDoctor'] is Map ? Map<String, dynamic>.from(item['selectedDoctor']) : <String, dynamic>{};
+        final dentistMap = item['dentist'] is Map ? Map<String, dynamic>.from(item['dentist']) : <String, dynamic>{};
+        final dentistUserMap = dentistMap['users'] is Map ? Map<String, dynamic>.from(dentistMap['users']) : <String, dynamic>{};
+        final dentistClinicMap = dentistMap['clinics'] is Map ? Map<String, dynamic>.from(dentistMap['clinics']) : <String, dynamic>{};
+        final itemDentistId = (item['dentist_id'] ?? item['dentistId'] ?? selectedDocMap['id'] ?? dentistMap['id'])?.toString();
+        final itemDentistUserId = (selectedDocMap['user_id'] ?? dentistMap['user_id'] ?? dentistUserMap['id'])?.toString();
 
-        if (_isDentistMode) {
-          final myId = currentDoctor?.id ?? '';
-          final myUserId = currentDoctor?.userId ?? '';
-          if (itemDentistId != null && itemDentistId.isNotEmpty && itemDentistId != myId && itemDentistId != myUserId) {
-            continue; // Skip appointments for other dentists!
+        final authUser = SupabaseService.safeCurrentUser;
+        final isAdmin = _isAdminMode ||
+            _isSubAdminMode ||
+            (authUser?.email != null && authUser!.email!.toLowerCase().contains('admin')) ||
+            currentPatient.email.toLowerCase().contains('admin');
+
+        if (_isDentistMode && myDoctorIds.isNotEmpty) {
+          final matchesId = (itemDentistId != null && itemDentistId.isNotEmpty && myDoctorIds.contains(itemDentistId)) ||
+              (itemDentistUserId != null && itemDentistUserId.isNotEmpty && myDoctorIds.contains(itemDentistUserId));
+          if (!matchesId && itemDentistId != null && itemDentistId.isNotEmpty) {
+            continue; // Skip appointments for other doctors
           }
         }
 
-        if (!isAdmin && !_isDentistMode && pId != null && pId.isNotEmpty && itemPatientId != null && itemPatientId.isNotEmpty && itemPatientId != pId && !itemPatientId.contains(pId)) {
-          continue; // Skip appointments belonging to another patient!
+        if (!isAdmin &&
+            !_isDentistMode &&
+            pId != null &&
+            pId.isNotEmpty &&
+            itemPatientId != null &&
+            itemPatientId.isNotEmpty &&
+            itemPatientId != pId &&
+            !itemPatientId.contains(pId)) {
+          continue; // Skip appointments belonging to another patient
         }
 
         final reqId = (item['_id'] ?? item['id'] ?? 'REQ-${item['patient_id']}-${DateTime.now().millisecondsSinceEpoch}').toString();
-        
-        final patientObj = item['patient'] ?? item['users'] ?? {};
-        final String rawPName = (patientObj['name'] ?? item['patient_name'] ?? item['patientName'] ?? '').toString();
-        final String pName = (rawPName.isNotEmpty && rawPName != 'Patient') 
-            ? rawPName 
+
+        final patientObj = item['patient'] is Map
+            ? Map<String, dynamic>.from(item['patient'])
+            : (item['users'] is Map ? Map<String, dynamic>.from(item['users']) : <String, dynamic>{});
+        final String rawPName = (patientObj['name'] ?? item['patient_name'] ?? item['patientName'] ?? '').toString().trim();
+        final String pName = (rawPName.isNotEmpty && rawPName != 'Patient')
+            ? rawPName
             : (currentPatient.name.isNotEmpty ? currentPatient.name : 'Patient Consultation');
 
-        final String pPhone = (patientObj['phone'] ?? item['phone'] ?? (currentPatient.phone.isNotEmpty ? currentPatient.phone : '')).toString();
+        final String pPhone = (patientObj['phone'] ?? item['patient_phone'] ?? item['phone'] ?? (currentPatient.phone.isNotEmpty ? currentPatient.phone : '')).toString().trim();
+        final String pEmail = (patientObj['email'] ?? item['patient_email'] ?? '').toString().trim();
+        final String pCity = (patientObj['city'] ?? item['patient_city'] ?? currentPatient.city).toString().trim();
+        final String pPincode = (patientObj['pincode'] ?? item['patient_pincode'] ?? currentPatient.pincode).toString().trim();
+        final String pAge = (patientObj['age'] ?? item['patient_age'] ?? '').toString().trim();
+        final String pGender = (patientObj['gender'] ?? item['patient_gender'] ?? '').toString().trim();
+        final String pBloodGroup = (patientObj['bloodGroup'] ?? patientObj['blood_group'] ?? '').toString().trim();
 
-        final rawD = (item['dentist_name'] ?? item['dentistName'] ?? item['dentist_id'] ?? '').toString();
-        String? assignedDocName;
-        if (rawD.isNotEmpty && !rawD.contains('-')) {
-          assignedDocName = rawD;
-        } else if (rawD.isNotEmpty) {
-          final matchedDoc = _allDoctors.firstWhere((d) => d.id == rawD || d.userId == rawD, orElse: () => DoctorModel(id: '', name: '', specialty: '', qualification: '', experienceYears: 0, rating: 0, reviewCount: 0, clinicName: '', phone: '', email: '', status: '', nextAvailableSlots: [], consultationFee: ''));
-          if (matchedDoc.name.isNotEmpty) {
-            assignedDocName = matchedDoc.name;
+        if ((itemPatientId != null && itemPatientId.isNotEmpty) || (pName.isNotEmpty && pName != 'Patient Consultation')) {
+          final existingPatIdx = _allPatients.indexWhere(
+            (p) =>
+                (itemPatientId != null && itemPatientId.isNotEmpty && p.id == itemPatientId) ||
+                (pPhone.isNotEmpty && p.phone == pPhone) ||
+                (pName.isNotEmpty && p.name.trim().toLowerCase() == pName.trim().toLowerCase()),
+          );
+          if (existingPatIdx != -1) {
+            final ep = _allPatients[existingPatIdx];
+            if (pPhone.isNotEmpty && ep.phone.isEmpty) ep.phone = pPhone;
+            if (pEmail.isNotEmpty && ep.email.isEmpty) ep.email = pEmail;
+            if (pCity.isNotEmpty && ep.city.isEmpty) ep.city = pCity;
+            if (pPincode.isNotEmpty && ep.pincode.isEmpty) ep.pincode = pPincode;
+            if (pAge.isNotEmpty && ep.age.isEmpty) ep.age = pAge;
+            if (pGender.isNotEmpty && ep.gender.isEmpty) ep.gender = pGender;
+            if (pBloodGroup.isNotEmpty && ep.bloodGroup.isEmpty) ep.bloodGroup = pBloodGroup;
+          } else {
+            _allPatients.add(
+              PatientProfile(
+                id: itemPatientId ?? 'pat_${pName.hashCode}',
+                name: pName,
+                phone: pPhone,
+                email: pEmail,
+                city: pCity,
+                pincode: pPincode,
+                age: pAge,
+                gender: pGender.isNotEmpty ? pGender : 'Female',
+                bloodGroup: pBloodGroup.isNotEmpty ? pBloodGroup : 'O Positive (O+)',
+              ),
+            );
           }
         }
 
-        final clinicObj = item['clinic'] ?? {};
-        final clinic = (clinicObj['clinic_name'] ?? clinicObj['name'] ?? item['clinic_name'] ?? item['clinicName'] ?? '').toString();
-        final treatment = item['treatment'] ?? 'Medical Consultation';
+        DoctorModel? matchedDoc;
+        if (itemDentistId != null && itemDentistId.isNotEmpty) {
+          matchedDoc = _allDoctors
+              .where((d) =>
+                  d.id == itemDentistId ||
+                  d.userId == itemDentistId ||
+                  (itemDentistUserId != null && (d.id == itemDentistUserId || d.userId == itemDentistUserId)))
+              .firstOrNull;
+        }
+
+        String rawDocName = (
+          selectedDocMap['name'] ??
+          item['dentist_name'] ??
+          item['dentistName'] ??
+          dentistUserMap['name'] ??
+          dentistMap['name'] ??
+          matchedDoc?.name ??
+          ''
+        ).toString().trim();
+        String? assignedDocName;
+        if (rawDocName.isNotEmpty && rawDocName != 'null') {
+          assignedDocName = (rawDocName.toLowerCase().startsWith('dr.') || rawDocName.toLowerCase().startsWith('dr '))
+              ? rawDocName
+              : 'Dr. $rawDocName';
+        }
+
+        final String resolvedSpecialty = (
+          selectedDocMap['specialty'] ??
+          item['doctor_specialty'] ??
+          dentistMap['speciality'] ??
+          dentistMap['specialty'] ??
+          matchedDoc?.specialty ??
+          ''
+        ).toString().trim();
+
+        final clinicObj = item['clinic'] is Map ? Map<String, dynamic>.from(item['clinic']) : <String, dynamic>{};
+        final clinic = (
+          selectedDocMap['clinicName'] ??
+          clinicObj['clinic_name'] ??
+          clinicObj['name'] ??
+          dentistClinicMap['clinic_name'] ??
+          dentistClinicMap['name'] ??
+          item['clinic_name'] ??
+          item['clinicName'] ??
+          matchedDoc?.clinicName ??
+          ''
+        ).toString().trim();
+
+        final treatment = (item['treatment'] ?? 'Medical Consultation').toString().trim();
         final slot = item['time_slot'] ?? item['timeSlot'];
         final rawDate = (item['date'] ?? item['appointment_date'] ?? item['appointmentDate'])?.toString();
-        final statusStr = (item['status'] ?? 'CONFIRMED').toString();
+        final statusStr = (item['status'] ?? 'PENDING').toString();
+        final rawCreatedAt = (item['booking_created_at'] ?? item['created_at'])?.toString();
+        final parsedCreatedAt = rawCreatedAt != null ? DateTime.tryParse(rawCreatedAt) : null;
 
         final existingIndex = _requests.indexWhere((r) =>
             r.id == reqId ||
-            (itemPatientId != null && itemPatientId.isNotEmpty && r.patientId != null && r.patientId == itemPatientId && r.problemCategory.trim().toLowerCase() == treatment.toString().trim().toLowerCase() && r.confirmedTimeSlot == slot?.toString()) ||
-            (pName.isNotEmpty && pName.toLowerCase() != 'patient' && r.patientName.trim().toLowerCase() == pName.trim().toLowerCase() && r.problemCategory.trim().toLowerCase() == treatment.toString().trim().toLowerCase() && r.confirmedTimeSlot == slot?.toString()) ||
-            (r.patientName == pName && r.assignedDoctorName != null && r.confirmedTimeSlot == slot?.toString()));
+            (itemPatientId != null &&
+                itemPatientId.isNotEmpty &&
+                r.patientId != null &&
+                r.patientId == itemPatientId &&
+                r.problemCategory.trim().toLowerCase() == treatment.toLowerCase() &&
+                r.confirmedTimeSlot == slot?.toString()));
 
         if (existingIndex != -1) {
           if (pName != 'Patient Consultation' && pName != 'Patient') {
@@ -3211,6 +3433,9 @@ class PatientProblemService extends ChangeNotifier {
           if (assignedDocName != null && assignedDocName.isNotEmpty && assignedDocName != 'null') {
             _requests[existingIndex].assignedDoctorName = assignedDocName;
           }
+          if (resolvedSpecialty.isNotEmpty) {
+            _requests[existingIndex].assignedDoctorSpecialty = resolvedSpecialty;
+          }
           if (itemDentistId != null && itemDentistId.isNotEmpty) {
             _requests[existingIndex].assignedDoctorId = itemDentistId;
           }
@@ -3225,17 +3450,19 @@ class PatientProblemService extends ChangeNotifier {
               patientId: itemPatientId,
               patientName: pName,
               patientPhone: pPhone,
-              problemCategory: treatment.toString(),
+              problemCategory: treatment,
               problemDescription: 'Scheduled medical consultation',
               severity: 'Moderate',
-              submittedAt: item['created_at'] != null ? DateTime.tryParse(item['created_at'].toString()) ?? DateTime.now() : DateTime.now(),
+              submittedAt: parsedCreatedAt ?? DateTime.now(),
               status: statusStr,
               assignedDoctorId: itemDentistId ?? dId,
               assignedDoctorName: assignedDocName,
-              assignedDoctorSpecialty: 'Medical Specialist',
-              assignedDoctorClinic: clinic.isNotEmpty ? clinic : null,
+              assignedDoctorSpecialty: resolvedSpecialty.isNotEmpty ? resolvedSpecialty : 'General Dentistry',
+              assignedDoctorClinic: clinic.isNotEmpty ? clinic : 'GS HEALTH Practice',
               confirmedTimeSlot: slot?.toString(),
               confirmedDate: rawDate,
+              city: pCity,
+              pincode: pPincode,
               adminNotes: 'Consultation record',
               whatsappNotificationSent: true,
             ),
@@ -3371,10 +3598,18 @@ class PatientProblemService extends ChangeNotifier {
       treatment: treatment,
     );
 
+    final msgLower = (res['message']?.toString() ?? '').toLowerCase();
     final isExplicitSlotConflict = res['success'] == false &&
-        (res['message']?.toString().toLowerCase().contains('already booked') == true ||
-         res['message']?.toString().toLowerCase().contains('blocked') == true ||
-         res['message']?.toString().toLowerCase().contains('unavailable') == true);
+        (msgLower.contains('already booked') ||
+         msgLower.contains('blocked') ||
+         msgLower.contains('unavailable') ||
+         msgLower.contains('working day') ||
+         msgLower.contains('does not consult') ||
+         msgLower.contains('lunch break') ||
+         msgLower.contains('published slot') ||
+         msgLower.contains('past dates') ||
+         res['isBlocked'] == true ||
+         res['unavailable'] == true);
 
     if (isExplicitSlotConflict) {
       return res;
@@ -3508,6 +3743,7 @@ class PatientProblemService extends ChangeNotifier {
       await prefs.setString('dentaguru_all_doctors', jsonEncode(_allDoctors.map((d) => d.toJson()).toList()));
       await prefs.setString('dentaguru_all_patients', jsonEncode(_allPatients.map((p) => p.toJson()).toList()));
       await prefs.setString('dentaguru_medical_records', jsonEncode(_medicalRecords));
+      await prefs.setString('dentaguru_app_notifications', jsonEncode(_appNotifications.map((n) => n.toJson()).toList()));
       await prefs.setString('dentaguru_medical_specialties', jsonEncode(_specialties.map((s) => s.toJson()).toList()));
       await prefs.setString('dentaguru_clinic_departments', jsonEncode(_clinicDepartments));
 
@@ -3599,6 +3835,9 @@ class PatientProblemService extends ChangeNotifier {
       _clinicCoverUrlByKey.clear();
       _clinicFeaturedByKey.clear();
       _clinicFeaturedPlanByKey.clear();
+      _availabilityCache.clear();
+      _doctorScheduleCache.clear();
+      _blockedDatesCache.clear();
       notifyListeners();
     } catch (e) {
       debugPrint('Error clearing all local data: $e');
@@ -3791,10 +4030,7 @@ class PatientProblemService extends ChangeNotifier {
     final cPhone = _authenticatedClinicPhone.trim();
     final cEmail = _authenticatedClinicEmail.trim();
 
-    User? supaUser;
-    try {
-      supaUser = Supabase.instance.client.auth.currentUser;
-    } catch (_) {}
+    final supaUser = SupabaseService.safeCurrentUser;
     final uId = supaUser?.id ?? SessionService().currentSession?.userId ?? '';
 
     // 1. Direct Supabase Cloud Deletion
@@ -3891,7 +4127,7 @@ class PatientProblemService extends ChangeNotifier {
 
     // Insert a temp record immediately for optimistic UI feedback
     final tempId = 'PR-${DateTime.now().millisecondsSinceEpoch}';
-    final pId = currentPatient.id.isNotEmpty ? currentPatient.id : Supabase.instance.client.auth.currentUser?.id;
+    final pId = currentPatient.id.isNotEmpty ? currentPatient.id : _safeAuthUserId;
     final newReq = PatientConsultationRequest(
       id: tempId,
       patientId: pId,
@@ -4190,20 +4426,30 @@ class PatientProblemService extends ChangeNotifier {
     } catch (_) {}
 
     // 2. Call backend API to persist acceptance to Supabase PostgreSQL and trigger notifications
+    bool acceptedAppointment = false;
     try {
-      await ApiService().acceptProblemRequest(
-        requestId: requestId,
-        timeSlot: slotText,
-        date: date,
-      );
-    } catch (e) {
-      debugPrint('Backend API acceptProblemRequest notice: $e');
+      final apptRes = await ApiService().acceptAppointment(requestId);
+      if (apptRes['success'] == true) {
+        acceptedAppointment = true;
+      }
+    } catch (_) {}
+
+    if (!acceptedAppointment) {
+      try {
+        await ApiService().acceptProblemRequest(
+          requestId: requestId,
+          timeSlot: slotText,
+          date: date,
+        );
+      } catch (e) {
+        debugPrint('Backend API acceptProblemRequest notice: $e');
+      }
     }
 
-    // 3. Create & Persist Appointment in Supabase DB asynchronously in background
-    if (reqObj != null) {
+    // 3. Only create a new appointment if this was a triage problem request (not an existing appointment record)
+    if (!acceptedAppointment && reqObj != null && requestId.startsWith('PR-')) {
       ApiService().createAppointment(
-        patientId: reqObj.patientName,
+        patientId: reqObj.patientId ?? reqObj.patientName,
         dentistId: reqObj.assignedDoctorId ?? '',
         clinicId: reqObj.assignedDoctorClinic ?? '',
         date: date ?? DateTime.now().toIso8601String(),
@@ -4212,7 +4458,125 @@ class PatientProblemService extends ChangeNotifier {
       ).then((_) => syncAppointmentsFromApi()).catchError((e) {
         debugPrint('Error persisting appointment in acceptReferralByDentist: $e');
       });
+    } else {
+      syncAppointmentsFromApi();
+      syncNotificationsFromApi(role: 'Dentist');
     }
+  }
+
+  /// Doctor: Accept / Confirm a Pending Appointment directly from the Doctor Dashboard
+  Future<Map<String, dynamic>> acceptAppointmentByDoctor(String appointmentId) async {
+    final index = _requests.indexWhere((r) => r.id == appointmentId);
+    final assignedIndex = _dentistAssignedRequests.indexWhere((r) => r.id == appointmentId);
+
+    String patientName = 'Patient';
+    String patientId = '';
+    String? slot;
+    String? dateStr;
+
+    if (index != -1) {
+      _requests[index].status = 'CONFIRMED';
+      patientName = _requests[index].patientName;
+      patientId = _requests[index].patientId ?? '';
+      slot = _requests[index].confirmedTimeSlot;
+      dateStr = _requests[index].confirmedDate;
+    }
+    if (assignedIndex != -1) {
+      _dentistAssignedRequests[assignedIndex].status = 'CONFIRMED';
+      patientName = _dentistAssignedRequests[assignedIndex].patientName;
+      patientId = _dentistAssignedRequests[assignedIndex].patientId ?? patientId;
+      slot ??= _dentistAssignedRequests[assignedIndex].confirmedTimeSlot;
+      dateStr ??= _dentistAssignedRequests[assignedIndex].confirmedDate;
+    }
+
+    await _saveToStorage();
+    notifyListeners();
+
+    Map<String, dynamic> res = {'success': false};
+    try {
+      res = await _api.acceptAppointment(appointmentId);
+      if (res['success'] != true) {
+        final prRes = await _api.acceptProblemRequest(
+          requestId: appointmentId,
+          timeSlot: slot,
+          date: dateStr,
+        );
+        if (prRes['success'] == true) {
+          res = {'success': true, 'message': 'Appointment confirmed successfully.'};
+        }
+      }
+    } catch (e) {
+      debugPrint('acceptAppointmentByDoctor API notice: $e');
+    }
+
+    addNotification(
+      recipientRole: 'Patient',
+      recipientId: patientId.isNotEmpty ? patientId : patientName,
+      title: '🎉 Appointment Confirmed',
+      message: 'Your appointment with ${currentDoctor?.name ?? "your doctor"} has been confirmed.',
+    );
+
+    await syncAppointmentsFromApi();
+    await syncNotificationsFromApi(role: 'Dentist');
+    await _saveToStorage();
+    notifyListeners();
+
+    return {
+      'success': true,
+      'message': res['message']?.toString() ?? 'Appointment confirmed for $patientName!',
+    };
+  }
+
+  /// Doctor: Decline / Reject a Pending Appointment from the Doctor Dashboard
+  Future<Map<String, dynamic>> rejectAppointmentByDoctor(
+    String appointmentId, {
+    String? reason,
+  }) async {
+    final index = _requests.indexWhere((r) => r.id == appointmentId);
+    final assignedIndex = _dentistAssignedRequests.indexWhere((r) => r.id == appointmentId);
+
+    String patientName = 'Patient';
+    String patientId = '';
+
+    if (index != -1) {
+      _requests[index].status = 'REJECTED';
+      patientName = _requests[index].patientName;
+      patientId = _requests[index].patientId ?? '';
+    }
+    if (assignedIndex != -1) {
+      _dentistAssignedRequests[assignedIndex].status = 'REJECTED';
+      patientName = _dentistAssignedRequests[assignedIndex].patientName;
+      patientId = _dentistAssignedRequests[assignedIndex].patientId ?? patientId;
+    }
+
+    await _saveToStorage();
+    notifyListeners();
+
+    Map<String, dynamic> res = {'success': false};
+    try {
+      res = await _api.rejectAppointment(appointmentId, reason: reason);
+    } catch (e) {
+      debugPrint('rejectAppointmentByDoctor API notice: $e');
+    }
+
+    addNotification(
+      recipientRole: 'Patient',
+      recipientId: patientId.isNotEmpty ? patientId : patientName,
+      title: '❌ Appointment Declined',
+      message: reason != null && reason.trim().isNotEmpty
+          ? 'Your appointment request was declined: $reason'
+          : 'Your appointment request was declined by the doctor.',
+    );
+
+    await syncAppointmentsFromApi();
+    await syncNotificationsFromApi(role: 'Dentist');
+    await _saveToStorage();
+    notifyListeners();
+
+    return {
+      'success': true,
+      'message': res['message']?.toString() ?? 'Appointment declined for $patientName.',
+    };
   }
 
   void declineReferralByDentist(String requestId) {
@@ -4301,6 +4665,7 @@ class PatientProblemService extends ChangeNotifier {
 
   DoctorModel registerDoctor({
     String id = '',
+    String userId = '',
     required String name,
     required String email,
     required String phone,
@@ -4311,6 +4676,7 @@ class PatientProblemService extends ChangeNotifier {
     String password = 'Password123!',
     String qualification = 'BDS, MDS',
     String consultationFee = '\$75',
+    String status = 'Available',
     Uint8List? photoBytes,
     String clinicAddress = '',
     String state = '',
@@ -4319,6 +4685,7 @@ class PatientProblemService extends ChangeNotifier {
     double? latitude,
     double? longitude,
     List<String>? languages,
+    bool skipApiRegister = false,
   }) {
     if (photoBytes != null) {
       _userPhotoCache[email.trim().toLowerCase()] = photoBytes;
@@ -4335,15 +4702,20 @@ class PatientProblemService extends ChangeNotifier {
     final doctorLangs = (languages != null && languages.isNotEmpty) ? languages : const ['English'];
 
     final existingDoc = _allDoctors.firstWhere(
-      (d) => d.email.trim().toLowerCase() == email.trim().toLowerCase() || (d.userId.isNotEmpty && d.userId == id) || (d.id.isNotEmpty && d.id == id),
+      (d) =>
+          (email.trim().isNotEmpty && d.email.trim().toLowerCase() == email.trim().toLowerCase()) ||
+          (userId.trim().isNotEmpty && (d.userId == userId.trim() || d.id == userId.trim())) ||
+          (id.trim().isNotEmpty && (d.id == id.trim() || d.userId == id.trim())),
       orElse: () => DoctorModel(id: '', name: '', specialty: '', qualification: '', experienceYears: 0, rating: 0, reviewCount: 0, clinicName: '', phone: '', email: '', status: '', nextAvailableSlots: [], consultationFee: ''),
     );
     final doctorId = existingDoc.id.isNotEmpty
         ? existingDoc.id
-        : (id.trim().isNotEmpty ? id.trim() : (Supabase.instance.client.auth.currentUser?.id ?? 'DOC-${100 + _allDoctors.length + 1}'));
-    final doctorUserId = existingDoc.userId.isNotEmpty
-        ? existingDoc.userId
-        : (id.trim().isNotEmpty ? id.trim() : (Supabase.instance.client.auth.currentUser?.id ?? ''));
+        : (id.trim().isNotEmpty ? id.trim() : (_safeAuthUserId ?? 'DOC-${100 + _allDoctors.length + 1}'));
+    final doctorUserId = userId.trim().isNotEmpty
+        ? userId.trim()
+        : (existingDoc.userId.isNotEmpty
+            ? existingDoc.userId
+            : (id.trim().isNotEmpty ? id.trim() : (_safeAuthUserId ?? '')));
 
     final newDoctor = DoctorModel(
       id: doctorId,
@@ -4357,7 +4729,7 @@ class PatientProblemService extends ChangeNotifier {
       clinicName: cleanClinic.isEmpty ? 'Independent Practice' : cleanClinic,
       phone: phone.trim().isEmpty ? '+1 202 555 0100' : phone.trim(),
       email: email.trim().isEmpty ? 'doctor@dentaguru.com' : email.trim(),
-      status: 'Available',
+      status: status.trim().isNotEmpty ? status.trim() : (existingDoc.status.isNotEmpty ? existingDoc.status : 'Available'),
       nextAvailableSlots: ['Today, 2:00 PM', 'Tomorrow, 10:00 AM'],
       consultationFee: consultationFee.trim().isEmpty ? '\$75' : consultationFee.trim(),
       licenseNumber: cleanLicense,
@@ -4370,10 +4742,10 @@ class PatientProblemService extends ChangeNotifier {
       languages: doctorLangs,
     );
 
-    if (!_allDoctors.any((d) => d.email.toLowerCase() == newDoctor.email.toLowerCase())) {
+    if (!_allDoctors.any((d) => d.id == newDoctor.id || d.email.toLowerCase() == newDoctor.email.toLowerCase())) {
       _allDoctors.insert(0, newDoctor);
     } else {
-      final idx = _allDoctors.indexWhere((d) => d.email.toLowerCase() == newDoctor.email.toLowerCase());
+      final idx = _allDoctors.indexWhere((d) => d.id == newDoctor.id || d.email.toLowerCase() == newDoctor.email.toLowerCase());
       if (idx != -1) _allDoctors[idx] = newDoctor;
     }
 
@@ -4400,30 +4772,32 @@ class PatientProblemService extends ChangeNotifier {
     notifyListeners();
 
     // End-to-end Real-Time Persistence into Supabase ('users', 'clinics', 'dentists')
-    ApiService().registerUser(
-      name: formattedName,
-      email: email.trim().isEmpty ? 'doctor_${DateTime.now().millisecondsSinceEpoch}@dentaguru.com' : email.trim(),
-      password: password.trim().isEmpty ? 'Password123!' : password.trim(),
-      phone: phone.trim().isEmpty ? '+91${DateTime.now().millisecondsSinceEpoch.toString().substring(3)}' : phone.trim(),
-      role: 'Dentist',
-      specialty: cleanSpecialty,
-      licenseNumber: cleanLicense,
-      clinicName: cleanClinic,
-      clinicAddress: cleanAddress,
-      location: cleanAddress,
-      city: cleanCity,
-      pincode: cleanPincode,
-      qualification: qualification.trim().isEmpty ? 'BDS, MDS' : qualification.trim(),
-      experienceYears: experienceYears <= 0 ? 5 : experienceYears,
-      languages: doctorLangs,
-    ).then((res) {
-      if (res['success'] == true) {
-        syncClinicsFromApi();
-        syncDoctorsFromApi();
-      }
-    }).catchError((e) {
-      debugPrint('Error syncing registered doctor/clinic to Supabase: $e');
-    });
+    if (!skipApiRegister) {
+      ApiService().registerUser(
+        name: formattedName,
+        email: email.trim().isEmpty ? 'doctor_${DateTime.now().millisecondsSinceEpoch}@dentaguru.com' : email.trim(),
+        password: password.trim().isEmpty ? 'Password123!' : password.trim(),
+        phone: phone.trim().isEmpty ? '+91${DateTime.now().millisecondsSinceEpoch.toString().substring(3)}' : phone.trim(),
+        role: 'Dentist',
+        specialty: cleanSpecialty,
+        licenseNumber: cleanLicense,
+        clinicName: cleanClinic,
+        clinicAddress: cleanAddress,
+        location: cleanAddress,
+        city: cleanCity,
+        pincode: cleanPincode,
+        qualification: qualification.trim().isEmpty ? 'BDS, MDS' : qualification.trim(),
+        experienceYears: experienceYears <= 0 ? 5 : experienceYears,
+        languages: doctorLangs,
+      ).then((res) {
+        if (res['success'] == true) {
+          syncClinicsFromApi();
+          syncDoctorsFromApi();
+        }
+      }).catchError((e) {
+        debugPrint('Error syncing registered doctor/clinic to Supabase: $e');
+      });
+    }
 
     return newDoctor;
   }
@@ -4533,7 +4907,25 @@ class PatientProblemService extends ChangeNotifier {
   AdminReferralAnalytics get adminReferralAnalytics => _adminReferralAnalytics;
 
   void addTestAdminPatientReferral(PatientReferral ref) {
+    _adminPatientReferrals.removeWhere((r) => r.id == ref.id);
     _adminPatientReferrals.add(ref);
+    notifyListeners();
+  }
+
+  void addTestDoctorReceivedReferral(PatientReferral ref) {
+    _doctorReceivedPatientReferrals.removeWhere((r) => r.id == ref.id);
+    _doctorReceivedPatientReferrals.add(ref);
+    notifyListeners();
+  }
+
+  void addTestPatientReferral(PatientReferral ref, {bool asReceived = true}) {
+    if (asReceived) {
+      _receivedForMePatientReferrals.removeWhere((r) => r.id == ref.id);
+      _receivedForMePatientReferrals.add(ref);
+    } else {
+      _myCreatedPatientReferrals.removeWhere((r) => r.id == ref.id);
+      _myCreatedPatientReferrals.add(ref);
+    }
     notifyListeners();
   }
 
@@ -4541,16 +4933,25 @@ class PatientProblemService extends ChangeNotifier {
   List<PatientReferral> get doctorReceivedPatientReferrals => List.unmodifiable(_doctorReceivedPatientReferrals);
   List<PatientReferral> get receivedForMePatientReferrals => List.unmodifiable(_receivedForMePatientReferrals);
 
-  /// Sync Patient Referrals created by the logged-in patient or dentist
+  /// Sync Patient Referrals created by or received for the logged-in user
   Future<void> syncReferralsFromApi({String? overrideUserId}) async {
     try {
-      final authUser = Supabase.instance.client.auth.currentUser;
+      final authUser = SupabaseService.safeCurrentUser;
+      final sess = SessionService().currentSession;
       final doc = currentDoctor;
       final userId = overrideUserId ??
-          (doc != null && doc.id.isNotEmpty
-              ? (doc.userId.isNotEmpty ? doc.userId : doc.id)
-              : (currentPatient.id.isNotEmpty ? currentPatient.id : authUser?.id));
-      final phone = (doc != null && doc.phone.isNotEmpty) ? doc.phone : (currentPatient.phone.isNotEmpty ? currentPatient.phone : '');
+          (sess != null && sess.userId.trim().isNotEmpty
+              ? sess.userId.trim()
+              : (doc != null && doc.userId.isNotEmpty
+                  ? doc.userId
+                  : (currentPatient.id.isNotEmpty
+                      ? currentPatient.id
+                      : (doc != null && doc.id.isNotEmpty ? doc.id : authUser?.id))));
+      final phone = currentPatient.phone.isNotEmpty
+          ? currentPatient.phone
+          : (doc != null && doc.phone.isNotEmpty
+              ? doc.phone
+              : (sess?.phone ?? ''));
       final code = myReferralCode;
 
       // 1. Fetch organic invites
@@ -4569,22 +4970,36 @@ class PatientProblemService extends ChangeNotifier {
         }
       }
 
-      // 2. Fetch Patient Referrals (Patient A -> Patient B -> Doctor C or Doctor A -> Doctor B)
+      // 2. Fetch Patient Referrals created by this user
       final rawPatientRefs = await ApiService().fetchMyPatientReferrals(userId: userId);
-      _myCreatedPatientReferrals.clear();
+      final Map<String, PatientReferral> createdMap = {};
       for (final r in rawPatientRefs) {
         try {
-          _myCreatedPatientReferrals.add(PatientReferral.fromJson(Map<String, dynamic>.from(r)));
+          final pref = PatientReferral.fromJson(Map<String, dynamic>.from(r));
+          final key = pref.id.isNotEmpty ? pref.id : '${pref.referredPatientMobile}_${pref.doctorId}';
+          createdMap[key] = pref;
         } catch (_) {}
+      }
+      if (rawPatientRefs.isNotEmpty) {
+        _myCreatedPatientReferrals
+          ..clear()
+          ..addAll(createdMap.values);
       }
 
       // 3. Fetch referrals where this user is the referred patient
       final rawReceived = await ApiService().fetchReceivedPatientReferrals(patientId: userId, patientPhone: phone);
-      _receivedForMePatientReferrals.clear();
+      final Map<String, PatientReferral> receivedMap = {};
       for (final r in rawReceived) {
         try {
-          _receivedForMePatientReferrals.add(PatientReferral.fromJson(Map<String, dynamic>.from(r)));
+          final pref = PatientReferral.fromJson(Map<String, dynamic>.from(r));
+          final key = pref.id.isNotEmpty ? pref.id : '${pref.referredPatientMobile}_${pref.doctorId}';
+          receivedMap[key] = pref;
         } catch (_) {}
+      }
+      if (rawReceived.isNotEmpty) {
+        _receivedForMePatientReferrals
+          ..clear()
+          ..addAll(receivedMap.values);
       }
 
       notifyListeners();
@@ -4596,16 +5011,17 @@ class PatientProblemService extends ChangeNotifier {
   /// Sync Referrals received by Doctor (Doctor isolation)
   Future<void> syncDoctorReferralsFromApi({String? doctorId}) async {
     try {
-      final authUser = Supabase.instance.client.auth.currentUser;
-      final authEmail = authUser?.email?.trim().toLowerCase();
-      final authName = (authUser?.userMetadata?['name'] ?? '').toString().toLowerCase();
+      final authUser = SupabaseService.safeCurrentUser;
+      final sess = SessionService().currentSession;
+      final authEmail = (authUser?.email ?? sess?.email ?? '').trim().toLowerCase();
+      final authName = (authUser?.userMetadata?['name'] ?? sess?.name ?? '').toString().toLowerCase();
 
       // Auto-resolve currentDoctor if needed
-      if (currentDoctor == null && authEmail != null && authEmail.isNotEmpty) {
+      if (currentDoctor == null && (authEmail.isNotEmpty || (sess?.userId.isNotEmpty == true))) {
         final match = allDoctors.where((d) =>
-          d.email.toLowerCase() == authEmail ||
-          (d.id.isNotEmpty && d.id == authUser?.id) ||
-          (d.userId.isNotEmpty && d.userId == authUser?.id) ||
+          (authEmail.isNotEmpty && d.email.toLowerCase() == authEmail) ||
+          (d.id.isNotEmpty && (d.id == authUser?.id || d.id == sess?.userId || d.id == sess?.metadata['dentistId'])) ||
+          (d.userId.isNotEmpty && (d.userId == authUser?.id || d.userId == sess?.userId)) ||
           (authName.isNotEmpty && d.name.toLowerCase().contains(authName))
         ).firstOrNull;
         if (match != null) {
@@ -4621,9 +5037,12 @@ class PatientProblemService extends ChangeNotifier {
         if (doctorId != null && doctorId.isNotEmpty) doctorId,
         if (doc?.id != null && doc!.id.isNotEmpty) doc.id,
         if (doc?.userId != null && doc!.userId.isNotEmpty) doc.userId,
+        if (sess?.metadata['dentistId'] != null && sess!.metadata['dentistId'].toString().trim().isNotEmpty)
+          sess.metadata['dentistId'].toString().trim(),
+        if (sess?.userId != null && sess!.userId.isNotEmpty) sess.userId,
         if (authUser?.id != null && authUser!.id.isNotEmpty) authUser.id,
         if (doc?.email != null && doc!.email.isNotEmpty) doc.email.toLowerCase(),
-        if (authEmail != null && authEmail.isNotEmpty) authEmail,
+        if (authEmail.isNotEmpty) authEmail,
       };
 
       for (final d in allDoctors) {
@@ -4636,16 +5055,24 @@ class PatientProblemService extends ChangeNotifier {
 
       final Map<String, PatientReferral> resultMap = {};
 
-      // 1. Primary doctor referrals fetch from ApiService
-      try {
-        final raw = await ApiService().fetchDoctorPatientReferrals(doctorId: doctorIds.firstOrNull);
-        for (final r in raw) {
-          try {
-            final pref = PatientReferral.fromJson(Map<String, dynamic>.from(r));
-            if (pref.id.isNotEmpty) resultMap[pref.id] = pref;
-          } catch (_) {}
-        }
-      } catch (_) {}
+      // 1. Primary doctor referrals fetch from ApiService (try canonical UUIDs)
+      final uuidPattern = RegExp(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$');
+      final queryIds = doctorIds.where((id) => uuidPattern.hasMatch(id)).take(2).toList();
+      if (queryIds.isEmpty && doctorIds.isNotEmpty) {
+        queryIds.add(doctorIds.first);
+      }
+      for (final qId in queryIds) {
+        try {
+          final raw = await ApiService().fetchDoctorPatientReferrals(doctorId: qId);
+          for (final r in raw) {
+            try {
+              final pref = PatientReferral.fromJson(Map<String, dynamic>.from(r));
+              if (pref.id.isNotEmpty) resultMap[pref.id] = pref;
+            } catch (_) {}
+          }
+          if (resultMap.isNotEmpty) break;
+        } catch (_) {}
+      }
 
       // 2. Cross-reference adminPatientReferrals pool
       for (final ref in _adminPatientReferrals) {
@@ -4664,9 +5091,12 @@ class PatientProblemService extends ChangeNotifier {
         }
       }
 
-      _doctorReceivedPatientReferrals.clear();
-      _doctorReceivedPatientReferrals.addAll(resultMap.values);
-      notifyListeners();
+      if (resultMap.isNotEmpty || _doctorReceivedPatientReferrals.isEmpty) {
+        _doctorReceivedPatientReferrals
+          ..clear()
+          ..addAll(resultMap.values);
+        notifyListeners();
+      }
     } catch (e) {
       debugPrint('Error in syncDoctorReferralsFromApi: $e');
     }
@@ -4675,10 +5105,7 @@ class PatientProblemService extends ChangeNotifier {
   /// Get patients associated with the currently logged-in dentist (excluding unrelated patients)
   List<PatientProfile> getDentistAssociatedPatients() {
     var doc = currentDoctor;
-    User? authUser;
-    try {
-      authUser = Supabase.instance.client.auth.currentUser;
-    } catch (_) {}
+    final authUser = SupabaseService.safeCurrentUser;
     final authEmail = authUser?.email?.trim().toLowerCase();
     final authName = (authUser?.userMetadata?['name'] ?? '').toString().toLowerCase();
 
@@ -4810,15 +5237,18 @@ class PatientProblemService extends ChangeNotifier {
     String? doctorPhone,
   }) async {
     try {
-      User? authUser;
-      try {
-        authUser = Supabase.instance.client.auth.currentUser;
-      } catch (_) {}
+      final authUser = SupabaseService.safeCurrentUser;
+      final sess = SessionService().currentSession;
       final doc = currentDoctor;
-      final referrerId = referrerPatientId ??
-          (doc != null && doc.id.isNotEmpty
-              ? (doc.userId.isNotEmpty ? doc.userId : doc.id)
-              : (currentPatient.id.isNotEmpty ? currentPatient.id : authUser?.id));
+      final referrerId = (referrerPatientId != null && referrerPatientId.isNotEmpty)
+          ? referrerPatientId
+          : ((doc != null && doc.userId.isNotEmpty)
+              ? doc.userId
+              : ((sess != null && sess.userId.isNotEmpty)
+                  ? sess.userId
+                  : (currentPatient.id.isNotEmpty
+                      ? currentPatient.id
+                      : (doc != null && doc.id.isNotEmpty ? doc.id : authUser?.id))));
 
       final res = await ApiService().createPatientReferral(
         referredPatientName: referredPatientName,
@@ -4843,7 +5273,14 @@ class PatientProblemService extends ChangeNotifier {
       if (res['success'] == true && res['referral'] != null) {
         try {
           final newRef = PatientReferral.fromJson(Map<String, dynamic>.from(res['referral']));
+          _myCreatedPatientReferrals.removeWhere((r) => r.id == newRef.id);
           _myCreatedPatientReferrals.insert(0, newRef);
+          _adminPatientReferrals.removeWhere((r) => r.id == newRef.id);
+          _adminPatientReferrals.insert(0, newRef);
+          if (doc != null && (newRef.doctorId == doc.id || newRef.doctorId == doc.userId)) {
+            _doctorReceivedPatientReferrals.removeWhere((r) => r.id == newRef.id);
+            _doctorReceivedPatientReferrals.insert(0, newRef);
+          }
 
           // Add referred patient to _allPatients if not present
           final cleanPhone = referredPatientMobile.replaceAll(RegExp(r'[^0-9]'), '');
@@ -5013,26 +5450,109 @@ class PatientProblemService extends ChangeNotifier {
     }
   }
 
+  /// Returns notifications filtered for the given role & currently logged-in user
+  List<AppNotificationModel> getNotificationsForRole(String role) {
+    final normRole = role.trim().toLowerCase();
+    final isAdminRole = normRole == 'admin' || normRole == 'sub-admin' || normRole == 'subadmin';
+    final isDoctorRole = normRole == 'dentist' || normRole == 'doctor';
+    final isPatientRole = normRole == 'patient';
+
+    final sess = SessionService().currentSession;
+    final candidateIds = <String>{
+      if (sess != null && sess.userId.trim().isNotEmpty) sess.userId.trim(),
+      if (_safeAuthUserId != null && _safeAuthUserId!.trim().isNotEmpty) _safeAuthUserId!.trim(),
+    };
+
+    if (isDoctorRole) {
+      if (currentDoctor != null) {
+        if (currentDoctor!.id.isNotEmpty) candidateIds.add(currentDoctor!.id);
+        if (currentDoctor!.userId.isNotEmpty) candidateIds.add(currentDoctor!.userId);
+        if (currentDoctor!.name.isNotEmpty) candidateIds.add(currentDoctor!.name);
+      }
+      for (final d in _allDoctors) {
+        if (candidateIds.contains(d.id) || (d.userId.isNotEmpty && candidateIds.contains(d.userId))) {
+          if (d.id.isNotEmpty) candidateIds.add(d.id);
+          if (d.userId.isNotEmpty) candidateIds.add(d.userId);
+        }
+      }
+    } else if (isPatientRole) {
+      if (currentPatient.id.isNotEmpty) candidateIds.add(currentPatient.id);
+      if (currentPatient.name.isNotEmpty) candidateIds.add(currentPatient.name);
+    } else if (isAdminRole) {
+      if (_subAdminId.isNotEmpty) candidateIds.add(_subAdminId);
+      candidateIds.add('ALL_ADMINS');
+    }
+
+    return _appNotifications.where((n) {
+      final nRole = n.recipientRole.trim().toLowerCase();
+      final nRec = n.recipientId.trim();
+      final nRecUpper = nRec.toUpperCase();
+
+      if (isAdminRole) {
+        return nRole == 'admin' ||
+            nRole == 'sub-admin' ||
+            nRecUpper == 'ALL_ADMINS' ||
+            (nRole == 'all' && (nRecUpper == 'ALL' || nRecUpper == 'ALL_ADMINS'));
+      }
+      if (isDoctorRole) {
+        final roleMatch = nRole == 'dentist' || nRole == 'doctor' || nRole == 'all';
+        if (!roleMatch) return false;
+        if (nRecUpper == 'ALL' || candidateIds.isEmpty) return true;
+        return candidateIds.contains(nRec);
+      }
+      if (isPatientRole) {
+        final roleMatch = nRole == 'patient' || nRole == 'all';
+        if (!roleMatch) return false;
+        if (nRecUpper == 'ALL' || candidateIds.isEmpty) return true;
+        return candidateIds.contains(nRec);
+      }
+      return nRole == normRole || candidateIds.contains(nRec);
+    }).toList();
+  }
+
   /// Sync In-App Notifications from DB & synthesize dynamic consultation/referral alerts
   Future<void> syncNotificationsFromApi({String? role, String? userId}) async {
     try {
-      final authUser = Supabase.instance.client.auth.currentUser;
-      final effectiveRole = role ?? (currentDoctor != null ? 'Dentist' : 'Patient');
-      final effectiveUserId = userId ?? (effectiveRole == 'Dentist' ? (currentDoctor?.id ?? authUser?.id) : (currentPatient.id.isNotEmpty ? currentPatient.id : authUser?.id));
+      final authUser = SupabaseService.safeCurrentUser;
+      final sess = SessionService().currentSession;
+      final sessRole = (sess?.role ?? '').trim();
 
-      final rawList = await ApiService().fetchNotifications(
+      final effectiveRole = (role != null && role.trim().isNotEmpty)
+          ? role.trim()
+          : (_isAdminMode || _isSubAdminMode || sessRole.toLowerCase().contains('admin')
+              ? 'Admin'
+              : ((_isDentistMode || currentDoctor != null || sessRole.toLowerCase() == 'dentist' || sessRole.toLowerCase() == 'doctor')
+                  ? 'Dentist'
+                  : 'Patient'));
+
+      String? effectiveUserId = userId;
+      if (effectiveUserId == null || effectiveUserId.trim().isEmpty) {
+        if (effectiveRole == 'Dentist' || effectiveRole == 'Doctor') {
+          effectiveUserId = (currentDoctor?.id.isNotEmpty == true)
+              ? currentDoctor!.id
+              : ((currentDoctor?.userId.isNotEmpty == true)
+                  ? currentDoctor!.userId
+                  : (sess?.userId ?? authUser?.id));
+        } else if (effectiveRole == 'Admin' || effectiveRole == 'Sub-Admin') {
+          effectiveUserId = _subAdminId.isNotEmpty ? _subAdminId : (sess?.userId ?? authUser?.id);
+        } else {
+          effectiveUserId = currentPatient.id.isNotEmpty ? currentPatient.id : (sess?.userId ?? authUser?.id);
+        }
+      }
+
+      final rawList = await _api.fetchNotifications(
         role: effectiveRole,
         userId: effectiveUserId,
       );
 
       final Map<String, AppNotificationModel> notifMap = {};
 
-      // 1. Add existing local in-app notifications
+      // 1. Keep notifications belonging to other roles/sessions or local-only alerts
       for (final n in _appNotifications) {
         if (n.id.isNotEmpty) notifMap[n.id] = n;
       }
 
-      // 2. Add API notifications from DB
+      // 2. Add/update API notifications from DB (authoritative read status from Supabase)
       for (final item in rawList) {
         try {
           final id = item['id']?.toString() ?? 'NOTIF-${DateTime.now().millisecondsSinceEpoch}';
@@ -5041,7 +5561,9 @@ class PatientProblemService extends ChangeNotifier {
           final title = item['title']?.toString() ?? 'GS HEALTH Notification';
           final message = item['message']?.toString() ?? '';
           final isRead = item['read'] == true || item['is_read'] == true;
-          final ts = item['created_at'] != null ? (DateTime.tryParse(item['created_at'].toString()) ?? DateTime.now()) : DateTime.now();
+          final ts = item['created_at'] != null
+              ? (DateTime.tryParse(item['created_at'].toString()) ?? DateTime.now())
+              : DateTime.now();
 
           notifMap[id] = AppNotificationModel(
             id: id,
@@ -5091,7 +5613,16 @@ class PatientProblemService extends ChangeNotifier {
       _appNotifications.clear();
       final sortedList = notifMap.values.toList()
         ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
-      _appNotifications.addAll(sortedList);
+      // Deduplicate notifications with identical role, recipient, title, and message within the same minute
+      final seenKeys = <String>{};
+      for (final n in sortedList) {
+        final minuteBucket = n.timestamp.toIso8601String().substring(0, 16);
+        final key = '${n.recipientRole}|${n.recipientId}|${n.title}|${n.message}|$minuteBucket';
+        if (seenKeys.contains(key)) continue;
+        seenKeys.add(key);
+        _appNotifications.add(n);
+      }
+      _saveToStorage();
       notifyListeners();
     } catch (e) {
       debugPrint('Error in syncNotificationsFromApi: $e');
@@ -5105,29 +5636,68 @@ class PatientProblemService extends ChangeNotifier {
       _appNotifications[idx].isRead = true;
       notifyListeners();
       _saveToStorage();
-      await ApiService().markNotificationAsRead(notifId);
+      await _api.markNotificationAsRead(notifId);
     }
   }
 
-  /// Mark all notifications as read
+  /// Mark all notifications as read for a given role
   Future<void> markAllNotificationsRead(String role) async {
-    for (final n in _appNotifications) {
-      if (n.recipientRole == role || n.recipientRole == 'ALL') {
+    final targetNotifs = getNotificationsForRole(role);
+    for (final n in targetNotifs) {
+      if (!n.isRead) {
         n.isRead = true;
-        ApiService().markNotificationAsRead(n.id);
+        _api.markNotificationAsRead(n.id);
       }
     }
     notifyListeners();
     _saveToStorage();
+
+    final sess = SessionService().currentSession;
+    String? effectiveUserId;
+    if (role.toLowerCase() == 'dentist' || role.toLowerCase() == 'doctor') {
+      effectiveUserId = currentDoctor?.id.isNotEmpty == true
+          ? currentDoctor!.id
+          : (currentDoctor?.userId.isNotEmpty == true ? currentDoctor!.userId : sess?.userId);
+    } else if (role.toLowerCase().contains('admin')) {
+      effectiveUserId = _subAdminId.isNotEmpty ? _subAdminId : sess?.userId;
+    } else {
+      effectiveUserId = currentPatient.id.isNotEmpty ? currentPatient.id : sess?.userId;
+    }
+    await _api.markAllNotificationsAsRead(role: role, userId: effectiveUserId);
   }
 
   // ─────────────────────────────────────────────
   // DOCTOR AVAILABILITY STATE & API INTEGRATION
   // ─────────────────────────────────────────────
   final Map<String, DoctorAvailabilityModel> _availabilityCache = {};
+  final Map<String, DoctorScheduleModel> _doctorScheduleCache = {};
+  final Map<String, List<DoctorAvailabilityModel>> _blockedDatesCache = {};
 
   DoctorAvailabilityModel? getCachedAvailability(String doctorId, String dateStr) {
     return _availabilityCache['${doctorId}_$dateStr'];
+  }
+
+  DoctorScheduleModel? getCachedDoctorSchedule(String doctorId) {
+    return _doctorScheduleCache[doctorId];
+  }
+
+  List<DoctorAvailabilityModel> getCachedBlockedDates(String doctorId) {
+    return List.unmodifiable(_blockedDatesCache[doctorId] ?? const []);
+  }
+
+  /// Test hook: inject/seed availability record in widget tests without live backend
+  @visibleForTesting
+  void setTestAvailability(String doctorId, DoctorAvailabilityModel avail) {
+    final dStr = avail.date.contains('T') ? avail.date.split('T').first : avail.date;
+    _availabilityCache['${doctorId}_$dStr'] = avail;
+    final current = List<DoctorAvailabilityModel>.from(_blockedDatesCache[doctorId] ?? const []);
+    current.removeWhere((b) => b.date == dStr);
+    if (avail.isBlocked) {
+      current.add(avail);
+      current.sort((a, b) => a.date.compareTo(b.date));
+    }
+    _blockedDatesCache[doctorId] = current;
+    notifyListeners();
   }
 
   /// Helper: Generate time slots given start, end, duration and break period
@@ -5164,9 +5734,10 @@ class PatientProblemService extends ChangeNotifier {
     final duration = durationMinutes < 15 ? 30 : durationMinutes;
     if (start >= end) return [];
 
-    final hasBreak = breakStartTime != null && breakEndTime != null && breakStartTime.trim().isNotEmpty && breakEndTime.trim().isNotEmpty;
-    final breakStart = hasBreak ? timeToMinutes(breakStartTime) : -1;
-    final breakEnd = hasBreak ? timeToMinutes(breakEndTime) : -1;
+    final hasBreakRaw = breakStartTime != null && breakEndTime != null && breakStartTime.trim().isNotEmpty && breakEndTime.trim().isNotEmpty;
+    final breakStart = hasBreakRaw ? timeToMinutes(breakStartTime) : -1;
+    final breakEnd = hasBreakRaw ? timeToMinutes(breakEndTime) : -1;
+    final hasBreak = hasBreakRaw && breakEnd > breakStart;
 
     final slots = <String>[];
     int current = start;
@@ -5186,25 +5757,104 @@ class PatientProblemService extends ChangeNotifier {
     return slots;
   }
 
+  String _formatYmdLocal(DateTime date) {
+    return '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
+  /// Fetch persisted weekly schedule + blocked dates for a doctor
+  Future<DoctorScheduleModel> getDoctorSchedule(String doctorId) async {
+    if (doctorId.trim().isEmpty) return const DoctorScheduleModel();
+    try {
+      final res = await _api.fetchDoctorSchedule(dentistId: doctorId);
+      if (res['success'] == true) {
+        if (res['blockedDates'] is List) {
+          final parsedBlocked = <DoctorAvailabilityModel>[];
+          final seenDates = <String>{};
+          for (final item in (res['blockedDates'] as List)) {
+            if (item is Map) {
+              final model = DoctorAvailabilityModel.fromJson(Map<String, dynamic>.from(item));
+              final dKey = model.date.split('T').first;
+              if (dKey.isNotEmpty && !seenDates.contains(dKey)) {
+                seenDates.add(dKey);
+                parsedBlocked.add(model.copyWith(date: dKey, isBlocked: true));
+              }
+            }
+          }
+          parsedBlocked.sort((a, b) => a.date.compareTo(b.date));
+          _blockedDatesCache[doctorId] = parsedBlocked;
+        }
+        if (res['schedule'] is Map) {
+          final schedule = DoctorScheduleModel.fromJson(Map<String, dynamic>.from(res['schedule'] as Map));
+          _doctorScheduleCache[doctorId] = schedule;
+          notifyListeners();
+          return schedule;
+        }
+      }
+    } catch (e) {
+      debugPrint('getDoctorSchedule notice: $e');
+    }
+    return _doctorScheduleCache[doctorId] ?? const DoctorScheduleModel();
+  }
+
+  /// Fetch all blocked dates / holidays for a doctor
+  Future<List<DoctorAvailabilityModel>> getBlockedDates(String doctorId) async {
+    if (doctorId.trim().isEmpty) return const [];
+    try {
+      final res = await _api.fetchBlockedDates(dentistId: doctorId);
+      if (res['success'] == true && res['blockedDates'] is List) {
+        final out = <DoctorAvailabilityModel>[];
+        final seen = <String>{};
+        for (final item in (res['blockedDates'] as List)) {
+          if (item is Map) {
+            final model = DoctorAvailabilityModel.fromJson(Map<String, dynamic>.from(item));
+            final cleanDate = model.date.split('T').first;
+            if (cleanDate.isNotEmpty && !seen.contains(cleanDate)) {
+              seen.add(cleanDate);
+              out.add(model.copyWith(date: cleanDate, isBlocked: true));
+              _availabilityCache['${doctorId}_$cleanDate'] = model.copyWith(
+                date: cleanDate,
+                isBlocked: true,
+                availableSlots: const [],
+              );
+            }
+          }
+        }
+        out.sort((a, b) => a.date.compareTo(b.date));
+        _blockedDatesCache[doctorId] = out;
+        notifyListeners();
+        return out;
+      }
+    } catch (e) {
+      debugPrint('getBlockedDates notice: $e');
+    }
+    return _blockedDatesCache[doctorId] ?? const [];
+  }
+
   /// Fetch all configured availability records for a doctor across dates
   Future<List<DoctorAvailabilityModel>> getDoctorConfiguredAvailabilities(String doctorId) async {
     try {
       final res = await _api.fetchDoctorAvailability(dentistId: doctorId);
-      if (res['success'] == true && res['availabilities'] is List) {
-        final list = <DoctorAvailabilityModel>[];
-        for (final item in (res['availabilities'] as List)) {
-          if (item is Map) {
-            final map = Map<String, dynamic>.from(item);
-            final rawSlots = map['slots'] ?? map['allSlots'] ?? [];
-            final allSlots = rawSlots is List
-                ? rawSlots.map((e) => e.toString().trim()).where((s) => s.isNotEmpty).toList()
-                : <String>[];
-            final isBlocked = map['is_blocked'] == true || map['isBlocked'] == true;
-            list.add(
-              DoctorAvailabilityModel(
+      if (res['success'] == true) {
+        if (res['schedule'] is Map) {
+          _doctorScheduleCache[doctorId] = DoctorScheduleModel.fromJson(Map<String, dynamic>.from(res['schedule'] as Map));
+        }
+        if (res['availabilities'] is List) {
+          final list = <DoctorAvailabilityModel>[];
+          final blockedList = <DoctorAvailabilityModel>[];
+          final seenBlocked = <String>{};
+          for (final item in (res['availabilities'] as List)) {
+            if (item is Map) {
+              final map = Map<String, dynamic>.from(item);
+              final rawSlots = map['slots'] ?? map['allSlots'] ?? [];
+              final allSlots = rawSlots is List
+                  ? rawSlots.map((e) => e.toString().trim()).where((s) => s.isNotEmpty).toList()
+                  : <String>[];
+              final isBlocked = map['is_blocked'] == true || map['isBlocked'] == true;
+              final cleanDate = (map['date'] ?? '').toString().split('T').first;
+              final model = DoctorAvailabilityModel(
                 id: (map['id'] ?? '').toString(),
                 dentistId: (map['dentist_id'] ?? map['dentistId'] ?? doctorId).toString(),
-                date: (map['date'] ?? '').toString().split('T').first,
+                date: cleanDate,
                 dayOfWeek: (map['day_of_week'] ?? map['dayOfWeek'] ?? '').toString(),
                 startTime: (map['start_time'] ?? map['startTime'] ?? '09:00 AM').toString(),
                 endTime: (map['end_time'] ?? map['endTime'] ?? '05:00 PM').toString(),
@@ -5214,11 +5864,20 @@ class PatientProblemService extends ChangeNotifier {
                 availableSlots: isBlocked ? const [] : allSlots,
                 isBlocked: isBlocked,
                 blockedReason: (map['blocked_reason'] ?? map['blockedReason'])?.toString(),
-              ),
-            );
+              );
+              list.add(model);
+              if (cleanDate.isNotEmpty) {
+                if (isBlocked && !seenBlocked.contains(cleanDate)) {
+                  seenBlocked.add(cleanDate);
+                  blockedList.add(model);
+                }
+              }
+            }
           }
+          blockedList.sort((a, b) => a.date.compareTo(b.date));
+          _blockedDatesCache[doctorId] = blockedList;
+          return list;
         }
-        return list;
       }
     } catch (e) {
       debugPrint('getDoctorConfiguredAvailabilities notice: $e');
@@ -5226,9 +5885,9 @@ class PatientProblemService extends ChangeNotifier {
     return [];
   }
 
-  /// Get Doctor Availability for a specific date (reads backend, fallback to doctor default slots)
+  /// Get Doctor Availability for a specific date (DB / API is source of truth)
   Future<DoctorAvailabilityModel> getDoctorAvailability(String doctorId, DateTime date) async {
-    final dateStr = '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    final dateStr = _formatYmdLocal(date);
     final cacheKey = '${doctorId}_$dateStr';
 
     final doctor = _allDoctors.firstWhere(
@@ -5260,7 +5919,7 @@ class PatientProblemService extends ChangeNotifier {
       if (matchesDoc) {
         final s = req.status.toUpperCase();
         if (s != 'CANCELLED' && s != 'REJECTED') {
-          final rDate = req.confirmedDate?.split('T').first ?? req.submittedAt.toIso8601String().split('T').first;
+          final rDate = req.confirmedDate?.split('T').first ?? _formatYmdLocal(req.submittedAt);
           if (rDate == dateStr) {
             final slot = req.confirmedTimeSlot?.trim() ?? '';
             if (slot.isNotEmpty && !localBooked.any((b) => b.toLowerCase() == slot.toLowerCase())) {
@@ -5271,11 +5930,13 @@ class PatientProblemService extends ChangeNotifier {
       }
     }
 
-    DoctorAvailabilityModel? apiModel;
     try {
       final res = await _api.fetchDoctorAvailability(dentistId: doctorId, date: dateStr);
+      if (res['schedule'] is Map) {
+        _doctorScheduleCache[doctorId] = DoctorScheduleModel.fromJson(Map<String, dynamic>.from(res['schedule'] as Map));
+      }
       if (res['success'] == true && res['availability'] != null) {
-        apiModel = DoctorAvailabilityModel.fromJson(Map<String, dynamic>.from(res['availability']));
+        final apiModel = DoctorAvailabilityModel.fromJson(Map<String, dynamic>.from(res['availability']));
         // Merge local booked slots with API booked slots
         final mergedBooked = <String>[...apiModel.bookedSlots];
         for (final lb in localBooked) {
@@ -5283,48 +5944,57 @@ class PatientProblemService extends ChangeNotifier {
             mergedBooked.add(lb);
           }
         }
-        if (apiModel.isBlocked || apiModel.allSlots.isNotEmpty) {
-          final available = apiModel.isBlocked
-              ? <String>[]
-              : apiModel.allSlots.where((s) => !mergedBooked.any((b) => b.toLowerCase() == s.toLowerCase())).toList();
-          final resolved = apiModel.copyWith(
-            bookedSlots: mergedBooked,
-            availableSlots: available,
+
+        // Database is the source of truth when API responds cleanly:
+        // If blocked OR non-working day, slots are strictly empty.
+        // If unblocked working day with custom or generated slots, compute availableSlots.
+        List<String> resolvedAll = List<String>.from(apiModel.allSlots);
+        if (!apiModel.isBlocked && apiModel.isWorkingDay && resolvedAll.isEmpty && res['hasCustomRecord'] != true) {
+          // Direct Supabase fallback without record: generate using saved schedule if available
+          final sched = _doctorScheduleCache[doctorId];
+          final bStart = apiModel.breakStartTime ?? sched?.breakStartTime;
+          final bEnd = apiModel.breakEndTime ?? sched?.breakEndTime;
+          resolvedAll = generateTimeSlots(
+            startTime: apiModel.startTime,
+            endTime: apiModel.endTime,
+            durationMinutes: apiModel.slotDurationMinutes,
+            breakStartTime: apiModel.hasBreak ? bStart : null,
+            breakEndTime: apiModel.hasBreak ? bEnd : null,
           );
-          _availabilityCache[cacheKey] = resolved;
-          notifyListeners();
-          return resolved;
         }
-        apiModel = apiModel.copyWith(bookedSlots: mergedBooked);
+
+        final available = (apiModel.isBlocked || !apiModel.isWorkingDay)
+            ? <String>[]
+            : resolvedAll.where((s) => !mergedBooked.any((b) => b.toLowerCase() == s.toLowerCase())).toList();
+
+        final resolved = apiModel.copyWith(
+          allSlots: resolvedAll,
+          bookedSlots: mergedBooked,
+          availableSlots: available,
+        );
+        _availabilityCache[cacheKey] = resolved;
+        notifyListeners();
+        return resolved;
       }
     } catch (e) {
       debugPrint('getDoctorAvailability api fetch notice: $e');
     }
 
-    // Check if we have a cached model with configured slots or blocked state
+    // Check if we have a cached model when network/API was unreachable
     if (_availabilityCache.containsKey(cacheKey)) {
       final cached = _availabilityCache[cacheKey]!;
-      if (cached.isBlocked || cached.allSlots.isNotEmpty) {
-        final mergedBooked = <String>[...cached.bookedSlots];
-        if (apiModel != null) {
-          for (final ab in apiModel.bookedSlots) {
-            if (!mergedBooked.any((b) => b.toLowerCase() == ab.toLowerCase())) {
-              mergedBooked.add(ab);
-            }
-          }
+      final mergedBooked = <String>[...cached.bookedSlots];
+      for (final lb in localBooked) {
+        if (!mergedBooked.any((b) => b.toLowerCase() == lb.toLowerCase())) {
+          mergedBooked.add(lb);
         }
-        for (final lb in localBooked) {
-          if (!mergedBooked.any((b) => b.toLowerCase() == lb.toLowerCase())) {
-            mergedBooked.add(lb);
-          }
-        }
-        final available = cached.isBlocked
-            ? <String>[]
-            : cached.allSlots.where((s) => !mergedBooked.any((b) => b.toLowerCase() == s.toLowerCase())).toList();
-        final updated = cached.copyWith(bookedSlots: mergedBooked, availableSlots: available);
-        _availabilityCache[cacheKey] = updated;
-        return updated;
       }
+      final available = (cached.isBlocked || !cached.isWorkingDay)
+          ? <String>[]
+          : cached.allSlots.where((s) => !mergedBooked.any((b) => b.toLowerCase() == s.toLowerCase())).toList();
+      final updated = cached.copyWith(bookedSlots: mergedBooked, availableSlots: available);
+      _availabilityCache[cacheKey] = updated;
+      return updated;
     }
 
     final isDoctorOnLeave = doctor.status.trim().toLowerCase() == 'on leave' ||
@@ -5346,7 +6016,7 @@ class PatientProblemService extends ChangeNotifier {
       return blockedModel;
     }
 
-    // Use doctor's valid time slots or standard working hours minus booked appointments
+    final sched = _doctorScheduleCache[doctorId];
     final timePattern = RegExp(r'^\d{1,2}:\d{2}\s*(AM|PM)$', caseSensitive: false);
     final validCustomSlots = doctor.nextAvailableSlots
         .map((s) => s.trim())
@@ -5356,36 +6026,80 @@ class PatientProblemService extends ChangeNotifier {
     final List<String> defaultSlots = validCustomSlots.isNotEmpty
         ? validCustomSlots
         : generateTimeSlots(
-            startTime: apiModel?.startTime ?? '09:00 AM',
-            endTime: apiModel?.endTime ?? '05:00 PM',
-            durationMinutes: apiModel?.slotDurationMinutes ?? 30,
+            startTime: sched?.startTime ?? '09:00 AM',
+            endTime: sched?.endTime ?? '05:00 PM',
+            durationMinutes: sched?.slotDurationMinutes ?? 30,
+            breakStartTime: (sched?.hasBreak ?? true) ? (sched?.breakStartTime ?? '01:00 PM') : null,
+            breakEndTime: (sched?.hasBreak ?? true) ? (sched?.breakEndTime ?? '02:00 PM') : null,
           );
 
-    final booked = <String>[
-      if (apiModel != null) ...apiModel.bookedSlots,
-    ];
-    for (final lb in localBooked) {
-      if (!booked.any((b) => b.toLowerCase() == lb.toLowerCase())) {
-        booked.add(lb);
-      }
-    }
-
-    final available = defaultSlots.where((s) => !booked.any((b) => b.toLowerCase() == s.toLowerCase())).toList();
+    final available = defaultSlots.where((s) => !localBooked.any((b) => b.toLowerCase() == s.toLowerCase())).toList();
 
     final fallbackModel = DoctorAvailabilityModel(
       dentistId: doctorId,
       date: dateStr,
-      startTime: apiModel?.startTime ?? '09:00 AM',
-      endTime: apiModel?.endTime ?? '05:00 PM',
-      slotDurationMinutes: apiModel?.slotDurationMinutes ?? 30,
+      startTime: sched?.startTime ?? '09:00 AM',
+      endTime: sched?.endTime ?? '05:00 PM',
+      slotDurationMinutes: sched?.slotDurationMinutes ?? 30,
+      hasBreak: sched?.hasBreak ?? true,
+      breakStartTime: sched?.breakStartTime,
+      breakEndTime: sched?.breakEndTime,
+      workingDays: sched?.workingDays ?? const ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
       allSlots: defaultSlots,
-      bookedSlots: booked,
+      bookedSlots: localBooked,
       availableSlots: available,
       isBlocked: false,
     );
 
     _availabilityCache[cacheKey] = fallbackModel;
     return fallbackModel;
+  }
+
+  /// Update persisted weekly schedule (working days, hours, lunch break, duration)
+  Future<Map<String, dynamic>> saveDoctorSchedule({
+    required String doctorId,
+    required List<String> workingDays,
+    required String startTime,
+    required String endTime,
+    required int slotDurationMinutes,
+    required bool hasBreak,
+    String? breakStartTime,
+    String? breakEndTime,
+    List<String>? slots,
+    bool applyToUpcomingDays = true,
+  }) async {
+    final res = await _api.updateDoctorSchedule(
+      dentistId: doctorId,
+      workingDays: workingDays,
+      startTime: startTime,
+      endTime: endTime,
+      slotDurationMinutes: slotDurationMinutes,
+      hasBreak: hasBreak,
+      breakStartTime: breakStartTime,
+      breakEndTime: breakEndTime,
+      slots: slots,
+      applyToUpcomingDays: applyToUpcomingDays,
+    );
+    if (res['success'] == true) {
+      if (res['schedule'] is Map) {
+        _doctorScheduleCache[doctorId] = DoctorScheduleModel.fromJson(Map<String, dynamic>.from(res['schedule'] as Map));
+      } else {
+        _doctorScheduleCache[doctorId] = DoctorScheduleModel(
+          workingDays: workingDays,
+          startTime: startTime,
+          endTime: endTime,
+          slotDurationMinutes: slotDurationMinutes,
+          hasBreak: hasBreak,
+          breakStartTime: hasBreak ? breakStartTime : null,
+          breakEndTime: hasBreak ? breakEndTime : null,
+          isConfigured: true,
+        );
+      }
+      // Invalidate date caches so Patient & Doctor screens re-read updated slots
+      _availabilityCache.removeWhere((k, _) => k.startsWith('${doctorId}_'));
+      notifyListeners();
+    }
+    return res;
   }
 
   /// Admin, Clinic Admin or Doctor publishes/saves availability slots
@@ -5397,6 +6111,7 @@ class PatientProblemService extends ChangeNotifier {
     String startTime = '09:00 AM',
     String endTime = '05:00 PM',
     int slotDurationMinutes = 30,
+    bool hasBreak = true,
     String? breakStartTime,
     String? breakEndTime,
     List<String>? workingDays,
@@ -5404,10 +6119,8 @@ class PatientProblemService extends ChangeNotifier {
     String? blockedReason,
     String dayOfWeek = '',
   }) async {
-    final dateStr = '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-    final formattedBatchDates = batchDates?.map((d) =>
-      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}'
-    ).toList();
+    final dateStr = _formatYmdLocal(date);
+    final formattedBatchDates = batchDates?.map(_formatYmdLocal).toList();
 
     final res = await _api.saveDoctorAvailability(
       dentistId: doctorId,
@@ -5417,6 +6130,7 @@ class PatientProblemService extends ChangeNotifier {
       startTime: startTime,
       endTime: endTime,
       slotDurationMinutes: slotDurationMinutes,
+      hasBreak: hasBreak,
       breakStartTime: breakStartTime,
       breakEndTime: breakEndTime,
       workingDays: workingDays,
@@ -5426,45 +6140,102 @@ class PatientProblemService extends ChangeNotifier {
     );
 
     if (res['success'] == true) {
-      // Invalidate and refresh cached model for primary date and batch dates
-      _availabilityCache.remove('${doctorId}_$dateStr');
-      await getDoctorAvailability(doctorId, date);
-      if (batchDates != null) {
-        for (final bDate in batchDates) {
-          final bDateStr = '${bDate.year.toString().padLeft(4, '0')}-${bDate.month.toString().padLeft(2, '0')}-${bDate.day.toString().padLeft(2, '0')}';
-          _availabilityCache.remove('${doctorId}_$bDateStr');
-        }
+      if (res['schedule'] is Map) {
+        _doctorScheduleCache[doctorId] = DoctorScheduleModel.fromJson(Map<String, dynamic>.from(res['schedule'] as Map));
       }
+      _availabilityCache.removeWhere((k, _) => k.startsWith('${doctorId}_'));
+      await getDoctorAvailability(doctorId, date);
+      await getBlockedDates(doctorId);
       notifyListeners();
       return true;
     }
     return false;
   }
 
-  /// Block a doctor date
+  /// Toggle Date Blocked ON / OFF (Immediate DB Persistence + Multi-Date Support)
+  Future<Map<String, dynamic>> toggleBlockedDate({
+    required String doctorId,
+    required DateTime date,
+    List<DateTime>? dates,
+    required bool isBlocked,
+    String reason = 'Doctor on Leave / Clinic Closed',
+  }) async {
+    final dateStr = _formatYmdLocal(date);
+    final extraDates = dates?.map(_formatYmdLocal).toList();
+
+    final res = await _api.blockDoctorDate(
+      dentistId: doctorId,
+      date: dateStr,
+      dates: extraDates,
+      reason: reason,
+      isBlocked: isBlocked,
+    );
+
+    if (res['success'] == true) {
+      final targets = (extraDates != null && extraDates.isNotEmpty) ? extraDates : [dateStr];
+      final currentBlocked = List<DoctorAvailabilityModel>.from(_blockedDatesCache[doctorId] ?? const []);
+
+      for (final dStr in targets) {
+        _availabilityCache.remove('${doctorId}_$dStr');
+        currentBlocked.removeWhere((b) => b.date == dStr);
+        if (isBlocked) {
+          currentBlocked.add(DoctorAvailabilityModel(
+            dentistId: doctorId,
+            date: dStr,
+            isBlocked: true,
+            blockedReason: reason,
+            allSlots: const [],
+            availableSlots: const [],
+          ));
+        }
+      }
+      currentBlocked.sort((a, b) => a.date.compareTo(b.date));
+      _blockedDatesCache[doctorId] = currentBlocked;
+
+      if (res['blockedDates'] is List) {
+        final serverBlocked = <DoctorAvailabilityModel>[];
+        final seen = <String>{};
+        for (final item in (res['blockedDates'] as List)) {
+          if (item is Map) {
+            final m = DoctorAvailabilityModel.fromJson(Map<String, dynamic>.from(item));
+            final cd = m.date.split('T').first;
+            if (cd.isNotEmpty && !seen.contains(cd)) {
+              seen.add(cd);
+              serverBlocked.add(m.copyWith(date: cd, isBlocked: true));
+            }
+          }
+        }
+        serverBlocked.sort((a, b) => a.date.compareTo(b.date));
+        _blockedDatesCache[doctorId] = serverBlocked;
+      }
+
+      await getDoctorAvailability(doctorId, date);
+      notifyListeners();
+    }
+    return res;
+  }
+
+  /// Remove / Unblock a previously blocked date
+  Future<Map<String, dynamic>> unblockDoctorDate({
+    required String doctorId,
+    required DateTime date,
+  }) async {
+    return toggleBlockedDate(doctorId: doctorId, date: date, isBlocked: false);
+  }
+
+  /// Block a doctor date (Backwards-compatible wrapper)
   Future<bool> blockDoctorDate({
     required String doctorId,
     required DateTime date,
     String reason = 'Doctor on Leave / Clinic Closed',
   }) async {
-    final dateStr = '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-    final cacheKey = '${doctorId}_$dateStr';
-
-    final res = await _api.blockDoctorDate(
-      dentistId: doctorId,
-      date: dateStr,
+    final res = await toggleBlockedDate(
+      doctorId: doctorId,
+      date: date,
+      isBlocked: true,
       reason: reason,
     );
-
-    if (res['success'] == true) {
-      final existing = _availabilityCache[cacheKey];
-      if (existing != null) {
-        _availabilityCache[cacheKey] = existing.copyWith(isBlocked: true, blockedReason: reason, availableSlots: []);
-      }
-      notifyListeners();
-      return true;
-    }
-    return false;
+    return res['success'] == true;
   }
 
   // =========================================================================
@@ -5732,6 +6503,74 @@ class PatientProblemService extends ChangeNotifier {
       if (pincode != null) 'pincode': pincode,
       if (languages != null) 'languages': languages,
     });
+  }
+
+  /// Toggle Doctor Availability ON/OFF persistently and update local + patient-facing state immediately.
+  Future<Map<String, dynamic>> setDoctorAvailability({
+    required String doctorId,
+    required bool isAvailable,
+  }) async {
+    final newStatus = isAvailable ? 'Available' : 'Unavailable';
+    final int idx = _allDoctors.indexWhere((d) => d.id == doctorId || (d.userId.isNotEmpty && d.userId == doctorId));
+    final DoctorModel? previousDoc = idx != -1 ? _allDoctors[idx] : currentDoctor;
+    final String? previousStatus = previousDoc?.status;
+
+    void applyStatusLocally(String statusToApply) {
+      if (previousDoc == null) return;
+      final updated = DoctorModel(
+        id: previousDoc.id,
+        userId: previousDoc.userId,
+        name: previousDoc.name,
+        specialty: previousDoc.specialty,
+        qualification: previousDoc.qualification,
+        experienceYears: previousDoc.experienceYears,
+        rating: previousDoc.rating,
+        reviewCount: previousDoc.reviewCount,
+        clinicName: previousDoc.clinicName,
+        phone: previousDoc.phone,
+        email: previousDoc.email,
+        status: statusToApply,
+        verificationStatus: previousDoc.verificationStatus,
+        nextAvailableSlots: previousDoc.nextAvailableSlots,
+        consultationFee: previousDoc.consultationFee,
+        licenseNumber: previousDoc.licenseNumber,
+        photoBytes: previousDoc.photoBytes,
+        clinicAddress: previousDoc.clinicAddress,
+        pincode: previousDoc.pincode,
+        city: previousDoc.city,
+        state: previousDoc.state,
+        bio: previousDoc.bio,
+        languages: previousDoc.languages,
+        latitude: previousDoc.latitude,
+        longitude: previousDoc.longitude,
+        procedureFees: previousDoc.procedureFees,
+      );
+      if (idx != -1) {
+        _allDoctors[idx] = updated;
+      }
+      if (currentDoctor != null &&
+          (currentDoctor!.id == doctorId ||
+              currentDoctor!.userId == doctorId ||
+              currentDoctor!.email.toLowerCase() == updated.email.toLowerCase())) {
+        currentDoctor = updated;
+      }
+      _saveToStorage();
+      notifyListeners();
+    }
+
+    // Optimistic local state update so UI reflects immediately
+    applyStatusLocally(newStatus);
+
+    final res = await ApiService().updateDoctorAvailability(doctorId, isAvailable);
+    if (res['success'] != true) {
+      // Revert local state on backend failure
+      if (previousStatus != null) {
+        applyStatusLocally(previousStatus);
+      }
+      return res;
+    }
+
+    return res;
   }
 
   /// Compute specialty-based analytics report across all active & registered specialties

@@ -89,7 +89,7 @@ class _SessionGateScreenState extends State<SessionGateScreen> with SingleTicker
               height: 260,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFF0052CC).withValues(alpha: 0.22),
+                color: const Color(0xFF012A58).withValues(alpha: 0.35),
               ),
             ),
           ),
@@ -101,7 +101,7 @@ class _SessionGateScreenState extends State<SessionGateScreen> with SingleTicker
               height: 240,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFF10B981).withValues(alpha: 0.18),
+                color: const Color(0xFFFE3434).withValues(alpha: 0.22),
               ),
             ),
           ),
@@ -156,7 +156,7 @@ class _SessionGateScreenState extends State<SessionGateScreen> with SingleTicker
                     child: CircularProgressIndicator(
                       strokeWidth: 2.5,
                       valueColor: AlwaysStoppedAnimation<Color>(
-                        const Color(0xFF0052CC).withValues(alpha: 0.9),
+                        const Color(0xFFFE3434).withValues(alpha: 0.9),
                       ),
                     ),
                   ),

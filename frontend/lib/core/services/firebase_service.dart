@@ -322,7 +322,7 @@ class FirebaseService {
           importance: Importance.max,
           priority: Priority.high,
           ticker: 'GS HEALTH Notification',
-          color: const Color(0xFF0B41CD),
+          color: const Color(0xFF012A58),
           icon: android?.smallIcon ?? '@mipmap/ic_launcher',
           channelShowBadge: true,
           visibility: NotificationVisibility.public,

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/constants/api_constants.dart';
 import '../../../../core/models/medical_specialty_model.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/widgets/gs_health_hero_banner.dart';
@@ -469,7 +470,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('⚠️ Please enter your 10-digit mobile number.'),
-          backgroundColor: Colors.orange,
+          backgroundColor: Color(0xFFFE3434),
         ),
       );
       return;
@@ -480,7 +481,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('⚠️ Please enter a valid 10-digit mobile number.'),
-          backgroundColor: Colors.orange,
+          backgroundColor: Color(0xFFFE3434),
         ),
       );
       return;
@@ -504,9 +505,14 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
       if (res['success'] == true) {
         final bool isAuthorizedAdminMatch = res['isAdmin'] == true;
+        final bool canShowOnScreenOtp = ApiConstants.allowOnScreenOtpDisplay &&
+            res['deliveryMode'] == 'on_screen';
+        final String? returnedOtp = canShowOnScreenOtp ? res['otp']?.toString().trim() : null;
         setState(() {
           _isLoginOtpSent = true;
-          _currentLoginOtp = null;
+          _currentLoginOtp = (returnedOtp != null && RegExp(r'^\d{6}$').hasMatch(returnedOtp))
+              ? returnedOtp
+              : null;
           if (isAuthorizedAdminMatch) {
             _isAdminMode = true;
             _selectedRole = UserRole.admin;
@@ -527,7 +533,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(res['message']?.toString() ?? 'OTP sent successfully to your mobile number.'),
+            content: Text(
+              _currentLoginOtp != null
+                  ? 'Test verification code: $_currentLoginOtp'
+                  : (res['message']?.toString() ?? 'OTP sent successfully to your mobile number.'),
+            ),
             backgroundColor: AppTheme.gsNavy,
             duration: const Duration(seconds: 4),
           ),
@@ -536,7 +546,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(res['message'] ?? 'Failed to send OTP SMS. Please check your mobile number.'),
-            backgroundColor: const Color(0xFFEF4444),
+            backgroundColor: const Color(0xFFFE3434),
             duration: const Duration(seconds: 5),
           ),
         );
@@ -549,7 +559,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error dispatching OTP: $e'),
-          backgroundColor: const Color(0xFFEF4444),
+          backgroundColor: const Color(0xFFFE3434),
         ),
       );
     }
@@ -652,7 +662,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             : (!identifier.contains('@') && identifier.isNotEmpty ? identifier : '');
 
         final String effectiveToken = (responseData['accessToken'] ?? res['accessToken'] ?? res['token'] ?? 'sb_session_${userData['id'] ?? DateTime.now().millisecondsSinceEpoch}').toString();
-        final String effectiveUserId = (userData['id'] ?? Supabase.instance.client.auth.currentUser?.id ?? 'user_${DateTime.now().millisecondsSinceEpoch}').toString();
+        final String effectiveUserId = (userData['id'] ?? SupabaseService.safeCurrentUser?.id ?? 'user_${DateTime.now().millisecondsSinceEpoch}').toString();
         final String effectiveEmail = userData['email'] ?? (identifier.contains('@') ? identifier : '');
         final String effectiveName = (userData['name'] != null && userData['name'].toString().trim().isNotEmpty)
             ? userData['name'].toString().trim()
@@ -707,15 +717,18 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           final docName = (userData['name'] != null && userData['name'].toString().trim().isNotEmpty)
               ? userData['name'].toString().trim()
               : (userData['email'] != null ? userData['email'].toString() : identifier);
-          final docId = (userData['id'] ?? Supabase.instance.client.auth.currentUser?.id ?? '').toString();
+          final docUserId = (userData['userId'] ?? userData['id'] ?? SupabaseService.safeCurrentUser?.id ?? '').toString();
+          final docDentistId = (userData['dentistId'] ?? userData['id'] ?? docUserId).toString();
           final returnedSpec = (userData['specialty'] ?? userData['speciality'] ?? '').toString().trim();
           final effectiveSpec = returnedSpec.isNotEmpty ? returnedSpec : 'General Dentistry';
           final returnedQual = (userData['qualification'] ?? userData['qualifications'] ?? '').toString().trim();
           final effectiveQual = returnedQual.isNotEmpty ? returnedQual : 'BDS, MDS';
           final returnedExp = int.tryParse((userData['experienceYears'] ?? userData['experience_years'] ?? '').toString()) ?? 5;
+          final returnedStatus = (userData['availability_status'] ?? userData['status'] ?? 'Available').toString();
 
           PatientProblemService().registerDoctor(
-            id: docId,
+            id: docDentistId,
+            userId: docUserId,
             name: docName,
             email: userData['email'] ?? (identifier.contains('@') ? identifier : ''),
             phone: userPhone,
@@ -724,17 +737,21 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             qualification: effectiveQual,
             clinicName: userData['clinicName'] ?? '',
             experienceYears: returnedExp,
+            status: returnedStatus,
             photoBytes: photoBytes,
+            skipApiRegister: true,
           );
           await SessionService().saveSession(
             token: effectiveToken,
             role: 'Dentist',
-            userId: docId,
+            userId: docDentistId,
             email: effectiveEmail,
             phone: userPhone,
             name: docName,
             metadata: {
               ...userData,
+              'dentistId': docDentistId,
+              'userId': docUserId,
               'clinicName': userData['clinicName'] ?? '',
               'specialty': effectiveSpec,
               'qualification': effectiveQual,
@@ -809,7 +826,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             } catch (_) {}
           }
 
-          final authMeta = Supabase.instance.client.auth.currentUser?.userMetadata ?? {};
+          final authMeta = SupabaseService.safeCurrentUser?.userMetadata ?? {};
           final String loginAge = (userData['age'] ?? dbProfileMeta['age'] ?? cachedMap['age'] ?? authMeta['age'] ?? authMeta['patient_age'] ?? '').toString();
           final String loginGender = (userData['gender'] ?? dbProfileMeta['gender'] ?? cachedMap['gender'] ?? authMeta['gender'] ?? 'Female').toString();
           final String loginBloodGroup = (userData['bloodGroup'] ?? userData['blood_group'] ?? dbProfileMeta['bloodGroup'] ?? cachedMap['bloodGroup'] ?? authMeta['bloodGroup'] ?? 'O Positive (O+)').toString();
@@ -1053,12 +1070,12 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('❌ Registration Error: Server did not issue a valid session token.'),
-              backgroundColor: Color(0xFFEF4444),
+              backgroundColor: Color(0xFFFE3434),
             ),
           );
           return;
         }
-        final String regUserId = (regUser['id'] ?? Supabase.instance.client.auth.currentUser?.id ?? 'user_${DateTime.now().millisecondsSinceEpoch}').toString();
+        final String regUserId = (regUser['id'] ?? SupabaseService.safeCurrentUser?.id ?? 'user_${DateTime.now().millisecondsSinceEpoch}').toString();
 
         if (_selectedRole == UserRole.patient) {
           PatientProblemService().updatePatientProfile(
@@ -1102,9 +1119,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           final effectiveQual = _qualificationController.text.trim().isNotEmpty
               ? _qualificationController.text.trim()
               : MedicalSpecialtyModel.getDefaultQualificationForSpecialty(effectiveSpec);
-          final docId = (res['user']?['id'] ?? Supabase.instance.client.auth.currentUser?.id ?? '').toString();
+          final docUserId = (regUser['userId'] ?? regUser['id'] ?? res['user']?['id'] ?? SupabaseService.safeCurrentUser?.id ?? regUserId).toString();
+          final docDentistId = (regUser['dentistId'] ?? res['user']?['dentistId'] ?? docUserId).toString();
           PatientProblemService().registerDoctor(
-            id: docId,
+            id: docDentistId,
+            userId: docUserId,
             name: name,
             email: email,
             phone: phone,
@@ -1120,11 +1139,12 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             experienceYears: exp,
             photoBytes: _pickedImageBytes,
             languages: selectedLangs,
+            skipApiRegister: true,
           );
           await SessionService().saveSession(
             token: regToken,
             role: 'Dentist',
-            userId: docId,
+            userId: docDentistId,
             email: email,
             phone: phone,
             name: name,
@@ -1236,7 +1256,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('❌ ${res['message'] ?? 'Could not register user.'}'),
-            backgroundColor: const Color(0xFFEF4444),
+            backgroundColor: const Color(0xFFFE3434),
           ),
         );
       }
@@ -1246,7 +1266,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('❌ Registration Error: $e'),
-          backgroundColor: const Color(0xFFEF4444),
+          backgroundColor: const Color(0xFFFE3434),
         ),
       );
     }
@@ -1264,7 +1284,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('⚠️ Please enter a valid 10-digit Mobile Phone Number to receive OTP.'),
-          backgroundColor: Colors.orange,
+          backgroundColor: Color(0xFFFE3434),
         ),
       );
       return;
@@ -1280,14 +1300,23 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
     bool sendSuccess = false;
     String successMsg = '';
+    String? receivedOtp;
 
-    // 1. Mobile Phone SMS OTP via Backend SMS Gateway & Supabase
+    // 1. Mobile Phone SMS OTP via Backend SMS Gateway & Supabase (or testing-only on-screen mode)
     if (phone.isNotEmpty) {
       final backendRes = await ApiService().requestOtp(phone: phone, email: email);
       sendSuccess = backendRes['success'] == true;
 
       if (sendSuccess) {
-        successMsg = backendRes['message']?.toString() ?? 'OTP sent successfully to your mobile number.';
+        final bool canShowOnScreenOtp = ApiConstants.allowOnScreenOtpDisplay &&
+            backendRes['deliveryMode'] == 'on_screen';
+        final rawCode = canShowOnScreenOtp ? backendRes['otp']?.toString().trim() : null;
+        if (rawCode != null && RegExp(r'^\d{6}$').hasMatch(rawCode)) {
+          receivedOtp = rawCode;
+        }
+        successMsg = receivedOtp != null
+            ? 'Test verification code: $receivedOtp'
+            : (backendRes['message']?.toString() ?? 'OTP sent successfully to your mobile number.');
       } else {
         _otpErrorMessage = backendRes['message']?.toString() ?? 'Failed to send OTP SMS. Please check your mobile number.';
       }
@@ -1312,6 +1341,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       _isSendingOtp = false;
       if (sendSuccess) {
         _isOtpSent = true;
+        _currentRegistrationOtp = receivedOtp;
         _otpController.clear();
       }
     });
@@ -1443,7 +1473,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: _isOtpVerified ? const Color(0xFFEFF4FA) : const Color(0xFFFFF1F2),
+                  color: _isOtpVerified ? const Color(0x14012A58) : const Color(0x14FE3434),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                     color: (_isOtpVerified ? AppTheme.gsNavy : AppTheme.gsRed).withValues(alpha: 0.25),
@@ -1528,6 +1558,62 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               ),
             ],
           ] else if (!_isOtpVerified && _isOtpSent) ...[
+            if (ApiConstants.allowOnScreenOtpDisplay &&
+                _currentRegistrationOtp != null &&
+                _currentRegistrationOtp!.isNotEmpty) ...[
+              Container(
+                key: const Key('reg_onscreen_otp_banner'),
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0x14012A58),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.pin_outlined, size: 18, color: Color(0xFF012A58)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Your verification code: $_currentRegistrationOtp',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF012A58),
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      key: const Key('reg_otp_fill_button'),
+                      onTap: () {
+                        setState(() {
+                          _otpController.text = _currentRegistrationOtp!;
+                        });
+                      },
+                      borderRadius: BorderRadius.circular(6),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: AppTheme.gsNavy,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Text(
+                          'Fill',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             Row(
               children: [
                 Expanded(
@@ -1897,7 +1983,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   height: 52,
                   padding: const EdgeInsets.symmetric(horizontal: 14),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F2),
+                    color: const Color(0xFFF8FAFC),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: const Color(0xFFE2E8F0)),
                   ),
@@ -2013,18 +2099,18 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 margin: const EdgeInsets.only(bottom: 14),
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFEF2F2),
+                  color: const Color(0x14FE3434),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFFCA5A5)),
+                  border: Border.all(color: const Color(0x40FE3434)),
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.error_outline_rounded, color: Color(0xFFDC2626), size: 18),
+                    const Icon(Icons.error_outline_rounded, color: Color(0xFFFE3434), size: 18),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         _loginOtpErrorMessage!,
-                        style: const TextStyle(fontSize: 12.5, color: Color(0xFFB91C1C), fontWeight: FontWeight.w500),
+                        style: const TextStyle(fontSize: 12.5, color: Color(0xFFFE3434), fontWeight: FontWeight.w500),
                       ),
                     ),
                   ],
@@ -2033,6 +2119,59 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ],
 
             _buildSixDigitOtpInput(),
+
+            if (ApiConstants.allowOnScreenOtpDisplay &&
+                _currentLoginOtp != null &&
+                _currentLoginOtp!.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Container(
+                key: const Key('login_onscreen_otp_banner'),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                decoration: BoxDecoration(
+                  color: const Color(0x14012A58),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.pin_outlined, size: 20, color: Color(0xFF012A58)),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Your verification code: $_currentLoginOtp',
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF012A58),
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      key: const Key('login_otp_fill_button'),
+                      onTap: () => _fillLoginOtp(_currentLoginOtp),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: AppTheme.gsNavy,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Text(
+                          'Fill',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
 
             const SizedBox(height: 10),
             Row(
@@ -2044,6 +2183,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                       setState(() {
                         _isLoginOtpSent = false;
                         _loginOtpErrorMessage = null;
+                        _currentLoginOtp = null;
                         for (final c in _otpDigitControllers) {
                           c.clear();
                         }
@@ -2351,7 +2491,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       key: const Key('signin_role_selector'),
       padding: const EdgeInsets.all(5),
       decoration: BoxDecoration(
-        color: const Color(0xFFF1F4F9),
+        color: const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0xFFE2E8F0)),
       ),
@@ -2425,7 +2565,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 padding: const EdgeInsets.all(4.5),
                 decoration: BoxDecoration(
                   color: isSelected
-                      ? const Color(0xFFE9EEF5)
+                      ? const Color(0xFFF1F5F9)
                       : Colors.transparent,
                   borderRadius: BorderRadius.circular(7),
                 ),

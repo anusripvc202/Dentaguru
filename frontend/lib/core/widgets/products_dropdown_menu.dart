@@ -13,7 +13,7 @@ class ProductsDropdownMenu extends StatelessWidget {
         'desc': 'Engineered with a micro-smooth polished collar for minimal marginal bone loss and optimal soft-tissue seal in aesthetic zones.',
         'features': ['Grade 5 Titanium Alloy', 'Micro-grooved Neck', 'Internal Hex Connection', 'Ideal for Anterior Restoration'],
         'price': '\$180 / Unit',
-        'color': const Color(0xFF0284C7),
+        'color': const Color(0xFF012A58),
       },
       'Rough Implant': {
         'icon': Icons.texture_rounded,
@@ -21,7 +21,7 @@ class ProductsDropdownMenu extends StatelessWidget {
         'desc': 'Advanced sand-blasted & acid-etched macro/micro-roughness providing accelerated osseointegration and superior secondary stability.',
         'features': ['SLA Surface Technology', 'Self-Tapping Double Thread', 'Enhanced Bone Contact Ratio', 'High Primary Torque'],
         'price': '\$210 / Unit',
-        'color': const Color(0xFFD97706),
+        'color': const Color(0xFFFE3434),
       },
       'Combi Implant': {
         'icon': Icons.auto_awesome_rounded,
@@ -29,7 +29,7 @@ class ProductsDropdownMenu extends StatelessWidget {
         'desc': 'Combines a 1.5mm smooth machined cervical collar with an SLA rough threaded body for dual soft-tissue and hard-tissue integration.',
         'features': ['Hybrid Dual-Surface', 'Conical Morse Taper Seal', 'Zero Micro-leakage Design', 'Universal Posterior & Anterior'],
         'price': '\$240 / Unit',
-        'color': const Color(0xFF10B981),
+        'color': const Color(0xFF012A58),
       },
       'Implant Surgical Kit': {
         'icon': Icons.home_repair_service_rounded,
@@ -37,7 +37,7 @@ class ProductsDropdownMenu extends StatelessWidget {
         'desc': 'Fully equipped surgical tray with color-coded drill sequence, depth stoppers, torque wrench, and directional indicators.',
         'features': ['Stainless Steel Surgical Drills', 'Integrated Depth Gauge Stopper', 'Ratchet Torque Wrench (15-45 Ncm)', 'Autoclavable Modular Tray'],
         'price': '\$850 / Full Kit',
-        'color': const Color(0xFF8B5CF6),
+        'color': const Color(0xFFFE3434),
       },
     }[productName] ?? {
       'icon': Icons.inventory_2_rounded,
@@ -109,7 +109,7 @@ class ProductsDropdownMenu extends StatelessWidget {
                   padding: const EdgeInsets.only(bottom: 6),
                   child: Row(
                     children: [
-                      const Icon(Icons.check_circle_rounded, size: 14, color: Color(0xFF10B981)),
+                      const Icon(Icons.check_circle_rounded, size: 14, color: Color(0xFF012A58)),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(f, style: const TextStyle(fontSize: 12, color: AppTheme.textDark)),
@@ -145,7 +145,7 @@ class ProductsDropdownMenu extends StatelessWidget {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text('🛍️ Product inquiry for "$productName" sent to sales team!'),
-                          backgroundColor: const Color(0xFF10B981),
+                          backgroundColor: const Color(0xFF012A58),
                         ),
                       );
                     },

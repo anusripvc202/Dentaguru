@@ -424,27 +424,27 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFFEF3C7),
+                              color: const Color(0x14FE3434),
                               borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: const Color(0xFFFDE68A)),
+                              border: Border.all(color: const Color(0x40FE3434)),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.star_rounded, color: Color(0xFFD97706), size: 18),
+                                const Icon(Icons.star_rounded, color: Color(0xFFFE3434), size: 18),
                                 const SizedBox(width: 4),
                                 Text(
                                   doc.rating.toStringAsFixed(1),
                                   style: const TextStyle(
                                     fontWeight: FontWeight.w800,
                                     fontSize: 14,
-                                    color: Color(0xFF92400E),
+                                    color: Color(0xFFFE3434),
                                   ),
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
                                   '(${doc.reviewCount})',
-                                  style: const TextStyle(fontSize: 12, color: Color(0xFFB45309)),
+                                  style: const TextStyle(fontSize: 12, color: Color(0xFFFE3434)),
                                 ),
                               ],
                             ),
@@ -538,7 +538,7 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                   5,
                   (index) => Icon(
                     index < rating ? Icons.star_rounded : Icons.star_outline_rounded,
-                    color: const Color(0xFFF59E0B),
+                    color: const Color(0xFFFE3434),
                     size: 16,
                   ),
                 ),
@@ -956,14 +956,37 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'LANGUAGES YOU CONSULT IN',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF64748B),
-                        letterSpacing: 0.5,
-                      ),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        const Text(
+                          'LANGUAGES YOU CONSULT IN',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF64748B),
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                        Container(
+                          key: const Key('doctor_profile_saved_languages_badge'),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: const Color(0x14012A58),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            'Saved: ${selectedLangs.join(", ")}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.gsNavy,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 14),
                     Wrap(
@@ -1092,15 +1115,40 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 8),
+
+                    // Languages Known Summary Row
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.translate_rounded,
+                          size: 18,
+                          color: Color(0xFF64748B),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Languages Known: ${selectedLangs.join(", ")}',
+                            key: const Key('doctor_profile_languages_summary'),
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF334155),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 14),
 
                     // Verification Badge
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFDCFCE7),
+                        color: const Color(0x14012A58),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFF86EFAC)),
+                        border: Border.all(color: const Color(0x40012A58)),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -1108,7 +1156,7 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                           Icon(
                             doc.verified ? Icons.check_circle_rounded : Icons.shield_outlined,
                             size: 15,
-                            color: const Color(0xFF16A34A),
+                            color: const Color(0xFFFE3434),
                           ),
                           const SizedBox(width: 6),
                           Text(
@@ -1116,7 +1164,7 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                             style: const TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w800,
-                              color: Color(0xFF15803D),
+                              color: Color(0xFF012A58),
                               letterSpacing: 0.5,
                             ),
                           ),

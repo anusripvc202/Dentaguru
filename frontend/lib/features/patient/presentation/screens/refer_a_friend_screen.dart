@@ -54,12 +54,12 @@ class _ReferAFriendScreenState extends State<ReferAFriendScreen> {
     _patientService.syncDoctorsFromApi();
     _patientService.syncMyDoctorsFromApi();
 
-    if (widget.preselectedDoctor != null) {
+    if (widget.preselectedDoctor != null && widget.preselectedDoctor!.isAvailable) {
       _selectedDoctor = widget.preselectedDoctor;
-    } else if (_patientService.myDoctors.isNotEmpty) {
-      _selectedDoctor = _patientService.myDoctors.first;
-    } else if (_patientService.allDoctors.isNotEmpty) {
-      _selectedDoctor = _patientService.allDoctors.first;
+    } else if (_patientService.myDoctors.any((d) => d.isAvailable)) {
+      _selectedDoctor = _patientService.myDoctors.firstWhere((d) => d.isAvailable);
+    } else if (_patientService.availableDoctors.isNotEmpty) {
+      _selectedDoctor = _patientService.availableDoctors.first;
     }
 
     _searchController.addListener(() {
@@ -83,12 +83,12 @@ class _ReferAFriendScreenState extends State<ReferAFriendScreen> {
   }
 
   List<DoctorModel> _getFilteredDoctors() {
-    final allDocs = _patientService.allDoctors;
-    final favDocs = _patientService.myDoctors;
+    final allDocs = _patientService.availableDoctors;
+    final favDocs = _patientService.myDoctors.where((d) => d.isAvailable).toList();
 
     // Prioritize favourite doctors first, then rest
     final orderedDocs = <DoctorModel>[];
-    if (widget.preselectedDoctor != null) {
+    if (widget.preselectedDoctor != null && widget.preselectedDoctor!.isAvailable) {
       orderedDocs.add(widget.preselectedDoctor!);
     }
     for (final doc in favDocs) {
@@ -660,9 +660,9 @@ class _ReferAFriendScreenState extends State<ReferAFriendScreen> {
                           width: double.infinity,
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFFEE2E2),
+                            color: const Color(0x14FE3434),
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFFFCA5A5)),
+                            border: Border.all(color: const Color(0x40FE3434)),
                           ),
                           child: Row(
                             children: [
@@ -671,7 +671,7 @@ class _ReferAFriendScreenState extends State<ReferAFriendScreen> {
                               Expanded(
                                 child: Text(
                                   _errorMessage!,
-                                  style: const TextStyle(color: Color(0xFF991B1B), fontSize: 12.5),
+                                  style: const TextStyle(color: Color(0xFFFE3434), fontSize: 12.5),
                                 ),
                               ),
                             ],

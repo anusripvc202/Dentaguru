@@ -364,7 +364,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F9FC),
+      backgroundColor: const Color(0xFFF8FAFC),
       body: SafeArea(
         bottom: false,
         child: IndexedStack(
@@ -660,9 +660,9 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                          color: const Color(0xFF012A58).withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: const Color(0xFF0D9488).withValues(alpha: 0.2)),
+                          border: Border.all(color: const Color(0xFF012A58).withValues(alpha: 0.2)),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -670,12 +670,12 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                             Flexible(
                               child: Text(
                                 _currentClinicName,
-                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0D9488)),
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF012A58)),
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
                             const SizedBox(width: 4),
-                            const Icon(Icons.arrow_drop_down, size: 16, color: Color(0xFF0D9488)),
+                            const Icon(Icons.arrow_drop_down, size: 16, color: Color(0xFF012A58)),
                           ],
                         ),
                       ),
@@ -683,12 +683,12 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                   : Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                        color: const Color(0xFF012A58).withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
                         _currentClinicName,
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0D9488)),
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF012A58)),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -697,7 +697,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
+            icon: const Icon(Icons.logout_rounded, color: Color(0xFFFE3434)),
             tooltip: 'Log Out',
             onPressed: () async {
               await SessionService().clearSession();
@@ -726,7 +726,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         type: BottomNavigationBarType.fixed,
-        selectedItemColor: const Color(0xFF0D9488),
+        selectedItemColor: const Color(0xFF012A58),
         unselectedItemColor: Colors.grey.shade600,
         selectedFontSize: 11.5,
         unselectedFontSize: 11,
@@ -762,15 +762,15 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
           Row(
             children: [
               Expanded(
-                child: _buildMetricCard('${doctors.length}', 'Attached Doctors', Colors.teal, theme),
+                child: _buildMetricCard('${doctors.length}', 'Attached Doctors', Color(0xFF012A58), theme),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: _buildMetricCard('${_problemService.clinicDepartments.length}', 'Active Departments', Colors.indigo, theme),
+                child: _buildMetricCard('${_problemService.clinicDepartments.length}', 'Active Departments', Color(0xFF012A58), theme),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: _buildMetricCard('${requests.length}', 'Total Bookings', Colors.blue, theme),
+                child: _buildMetricCard('${requests.length}', 'Total Bookings', Color(0xFF012A58), theme),
               ),
             ],
           ),
@@ -785,7 +785,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.watch_later_outlined, color: Color(0xFF0D9488)),
+                      const Icon(Icons.watch_later_outlined, color: Color(0xFF012A58)),
                       const SizedBox(width: 8),
                       Text('Working Hours', style: theme.textTheme.titleMedium),
                     ],
@@ -831,10 +831,10 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
-                      color: Colors.teal.withOpacity(0.2),
+                      color: const Color(0xFFFE3434),
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: const Text('ACTIVE', style: TextStyle(color: Colors.tealAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+                    child: const Text('ACTIVE', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
                   )
                 ],
               ),
@@ -916,7 +916,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
               icon: const Icon(Icons.add, size: 16, color: Colors.white),
               label: const Text('Add Doctor', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF0D9488),
+                backgroundColor: const Color(0xFF012A58),
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
@@ -931,7 +931,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
           onChanged: (val) => setState(() => _searchDoctorQuery = val),
           decoration: InputDecoration(
             hintText: 'Search doctor by name or specialty...',
-            prefixIcon: const Icon(Icons.search, size: 20, color: Color(0xFF0D9488)),
+            prefixIcon: const Icon(Icons.search, size: 20, color: Color(0xFF012A58)),
             suffixIcon: _searchDoctorQuery.isNotEmpty
                 ? IconButton(
                     icon: const Icon(Icons.clear, size: 18),
@@ -964,7 +964,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                 child: ChoiceChip(
                   label: Text(dept, style: TextStyle(fontSize: 11.5, color: selected ? Colors.white : Colors.black87)),
                   selected: selected,
-                  selectedColor: const Color(0xFF0D9488),
+                  selectedColor: const Color(0xFF012A58),
                   onSelected: (_) => setState(() => _selectedDoctorDepartmentFilter = dept),
                 ),
               );
@@ -1016,7 +1016,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
 
   Widget _buildDoctorListRow(DoctorModel doc) {
     final isAvailable = doc.status.toLowerCase() == 'available';
-    final statusColor = isAvailable ? Colors.green : Colors.amber.shade800;
+    final statusColor = isAvailable ? Color(0xFF012A58) : Color(0xFFFE3434);
     final statusText = isAvailable ? 'Active' : (doc.status.isNotEmpty ? doc.status : 'Inactive');
 
     final rawInitial = doc.name.replaceAll(RegExp(r'^Dr\.?\s*', caseSensitive: false), '').trim();
@@ -1048,7 +1048,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                     onTap: () => _openClinicDoctorProfile(doc),
                     child: CircleAvatar(
                       radius: 24,
-                      backgroundColor: const Color(0xFF0D9488).withValues(alpha: 0.12),
+                      backgroundColor: const Color(0xFF012A58).withValues(alpha: 0.12),
                       backgroundImage: doc.photoBytes != null ? MemoryImage(doc.photoBytes!) : null,
                       child: doc.photoBytes == null
                           ? Text(
@@ -1056,7 +1056,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                               style: const TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 18,
-                                color: Color(0xFF0D9488),
+                                color: Color(0xFF012A58),
                               ),
                             )
                           : null,
@@ -1080,7 +1080,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                         const SizedBox(height: 2),
                         Text(
                           doc.specialty,
-                          style: const TextStyle(fontSize: 12, color: Color(0xFF0D9488), fontWeight: FontWeight.w600),
+                          style: const TextStyle(fontSize: 12, color: Color(0xFF012A58), fontWeight: FontWeight.w600),
                           overflow: TextOverflow.ellipsis,
                         ),
                         if (doc.qualification.isNotEmpty)
@@ -1146,10 +1146,10 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                   OutlinedButton.icon(
                     key: Key('clinic_view_profile_${doc.id}'),
                     onPressed: () => _openClinicDoctorProfile(doc),
-                    icon: const Icon(Icons.person_outline_rounded, size: 14, color: Color(0xFF0D9488)),
-                    label: const Text('View Profile', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF0D9488))),
+                    icon: const Icon(Icons.person_outline_rounded, size: 14, color: Color(0xFF012A58)),
+                    label: const Text('View Profile', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF012A58))),
                     style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Color(0xFF0D9488)),
+                      side: const BorderSide(color: Color(0xFF012A58)),
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
@@ -1159,19 +1159,19 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                       IconButton(
                         key: Key('clinic_edit_button_${doc.id}'),
                         tooltip: 'Edit Doctor Details',
-                        icon: const Icon(Icons.edit_outlined, size: 18, color: Colors.blueGrey),
+                        icon: const Icon(Icons.edit_outlined, size: 18, color: Color(0xFF64748B)),
                         onPressed: () => _showEditClinicDoctorDialog(context, doc),
                       ),
                       IconButton(
                         key: Key('clinic_slots_button_${doc.id}'),
                         tooltip: 'Update Availability Slots',
-                        icon: const Icon(Icons.event_available_rounded, size: 18, color: Color(0xFF0D9488)),
+                        icon: const Icon(Icons.event_available_rounded, size: 18, color: Color(0xFF012A58)),
                         onPressed: () => DoctorSlotManagementDialog.show(context, initialDoctor: doc),
                       ),
                       IconButton(
                         key: Key('clinic_remove_button_${doc.id}'),
                         tooltip: 'Remove Doctor from Clinic',
-                        icon: const Icon(Icons.person_remove_outlined, size: 18, color: Colors.redAccent),
+                        icon: const Icon(Icons.person_remove_outlined, size: 18, color: Color(0xFFFE3434)),
                         onPressed: () => _confirmRemoveDoctorFromClinic(context, doc),
                       ),
                     ],
@@ -1206,7 +1206,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
             ElevatedButton.icon(
               icon: const Icon(Icons.add_business_rounded, size: 16, color: Colors.white),
               label: const Text('Add Department', style: TextStyle(color: Colors.white, fontSize: 12)),
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D9488)),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF012A58)),
               onPressed: () {
                 showDialog(
                   context: context,
@@ -1224,7 +1224,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                     actions: [
                       TextButton(onPressed: () => Navigator.of(dialogCtx).pop(), child: const Text('Cancel')),
                       ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D9488)),
+                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF012A58)),
                         onPressed: () async {
                           final val = customDeptCtrl.text.trim();
                           if (val.isNotEmpty) {
@@ -1257,8 +1257,8 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
             child: ListTile(
               leading: CircleAvatar(
-                backgroundColor: const Color(0xFF0D9488).withValues(alpha: 0.12),
-                child: Icon(spec.iconData, color: const Color(0xFF0D9488), size: 20),
+                backgroundColor: const Color(0xFF012A58).withValues(alpha: 0.12),
+                child: Icon(spec.iconData, color: const Color(0xFF012A58), size: 20),
               ),
               title: Text(spec.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
               subtitle: Text(
@@ -1267,7 +1267,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
               ),
               trailing: Switch(
                 value: isEnabled,
-                activeThumbColor: const Color(0xFF0D9488),
+                activeThumbColor: const Color(0xFF012A58),
                 onChanged: (val) {
                   if (val) {
                     _problemService.addClinicDepartment(spec.name);
@@ -1360,13 +1360,13 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
             padding: const EdgeInsets.all(12),
             margin: const EdgeInsets.only(bottom: 14),
             decoration: BoxDecoration(
-              color: const Color(0xFFFEF2F2),
+              color: const Color(0x14FE3434),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFFCA5A5)),
+              border: Border.all(color: const Color(0x40FE3434)),
             ),
             child: const Row(
               children: [
-                Icon(Icons.warning_amber_rounded, color: Colors.red, size: 22),
+                Icon(Icons.warning_amber_rounded, color: Color(0xFFFE3434), size: 22),
                 SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -1374,7 +1374,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                     children: [
                       Text(
                         'Overlapping Slot Alert Detected',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.red),
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFFFE3434)),
                       ),
                       SizedBox(height: 2),
                       Text(
@@ -1405,7 +1405,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                       style: TextStyle(fontSize: 11.5, color: selected ? Colors.white : Colors.black87),
                     ),
                     selected: selected,
-                    selectedColor: const Color(0xFF0D9488),
+                    selectedColor: const Color(0xFF012A58),
                     onSelected: (_) => setState(() => _selectedAppointmentDoctor = docName),
                   ),
                 );
@@ -1448,7 +1448,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
                 side: BorderSide(
-                  color: isConflicted ? Colors.red.shade300 : const Color(0xFFE2E8F0),
+                  color: isConflicted ? Color(0x40FE3434) : const Color(0xFFE2E8F0),
                   width: isConflicted ? 1.5 : 1,
                 ),
               ),
@@ -1463,16 +1463,16 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                       children: [
                         CircleAvatar(
                           backgroundColor: (isConflicted
-                                  ? Colors.red
-                                  : (isConfirmed ? Colors.green : Colors.blue))
+                                  ? Color(0xFFFE3434)
+                                  : (isConfirmed ? Color(0xFF012A58) : Color(0xFF012A58)))
                               .withValues(alpha: 0.12),
                           child: Icon(
                             isConflicted
                                 ? Icons.warning_rounded
                                 : (isConfirmed ? Icons.event_available_rounded : Icons.schedule_rounded),
                             color: isConflicted
-                                ? Colors.red
-                                : (isConfirmed ? Colors.green : Colors.blue),
+                                ? Color(0xFFFE3434)
+                                : (isConfirmed ? Color(0xFF012A58) : Color(0xFF012A58)),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -1487,7 +1487,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                               ),
                               Text(
                                 'Doctor: ${req.displayDoctorName.isNotEmpty ? req.displayDoctorName : "Unassigned"} (${req.displayDoctorSpecialty.isNotEmpty ? req.displayDoctorSpecialty : "General"})',
-                                style: const TextStyle(fontSize: 11.5, color: Color(0xFF0D9488), fontWeight: FontWeight.w600),
+                                style: const TextStyle(fontSize: 11.5, color: Color(0xFF012A58), fontWeight: FontWeight.w600),
                                 overflow: TextOverflow.ellipsis,
                               ),
                               Text(
@@ -1502,7 +1502,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                           decoration: BoxDecoration(
                             color: (isCancelled
                                     ? Colors.grey
-                                    : (isConfirmed ? Colors.green : Colors.orange))
+                                    : (isConfirmed ? Color(0xFF012A58) : Color(0xFFFE3434)))
                                 .withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(8),
                           ),
@@ -1513,7 +1513,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                               fontWeight: FontWeight.bold,
                               color: isCancelled
                                   ? Colors.grey.shade700
-                                  : (isConfirmed ? Colors.green.shade700 : Colors.orange.shade800),
+                                  : (isConfirmed ? Color(0xFF012A58) : Color(0xFFFE3434)),
                             ),
                           ),
                         ),
@@ -1524,18 +1524,18 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color: Colors.red.shade50,
+                          color: Color(0x14FE3434),
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: Colors.red.shade200),
+                          border: Border.all(color: Color(0x40FE3434)),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.error_outline_rounded, size: 14, color: Colors.red.shade700),
+                            Icon(Icons.error_outline_rounded, size: 14, color: Color(0xFFFE3434)),
                             const SizedBox(width: 5),
                             Text(
                               'Overlapping Slot Conflict with another patient',
-                              style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.red.shade700),
+                              style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFFFE3434)),
                             ),
                           ],
                         ),
@@ -1570,7 +1570,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
           content: TextField(
             controller: priceCtrl,
             style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-            cursorColor: const Color(0xFF0D9488),
+            cursorColor: const Color(0xFF012A58),
             decoration: InputDecoration(
               labelText: 'New Procedure Rate',
               filled: true,
@@ -1581,7 +1581,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
           actions: [
             TextButton(onPressed: () => Navigator.of(dialogCtx).pop(), child: const Text('Cancel')),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D9488)),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF012A58)),
               onPressed: () {
                 setState(() {
                   _procedurePrices[service] = priceCtrl.text.trim();
@@ -1615,7 +1615,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
               TextField(
                 controller: nameCtrl,
                 style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                cursorColor: const Color(0xFF0D9488),
+                cursorColor: const Color(0xFF012A58),
                 decoration: InputDecoration(
                   labelText: 'Procedure Name *',
                   filled: true,
@@ -1627,7 +1627,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
               TextField(
                 controller: priceCtrl,
                 style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                cursorColor: const Color(0xFF0D9488),
+                cursorColor: const Color(0xFF012A58),
                 decoration: InputDecoration(
                   labelText: 'Rate *',
                   filled: true,
@@ -1640,7 +1640,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
           actions: [
             TextButton(onPressed: () => Navigator.of(dialogCtx).pop(), child: const Text('Cancel')),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D9488)),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF012A58)),
               onPressed: () {
                 final name = nameCtrl.text.trim();
                 final rate = priceCtrl.text.trim();
@@ -1738,10 +1738,10 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                           Container(
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                              color: const Color(0xFF012A58).withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            child: const Icon(Icons.person_add_alt_1_rounded, color: Color(0xFF0D9488), size: 22),
+                            child: const Icon(Icons.person_add_alt_1_rounded, color: Color(0xFF012A58), size: 22),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
@@ -1777,21 +1777,21 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                           padding: const EdgeInsets.all(12),
                           margin: const EdgeInsets.only(bottom: 12),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFEFF6FF),
+                            color: const Color(0x14012A58),
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFF93C5FD)),
+                            border: Border.all(color: const Color(0x40012A58)),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Row(
                                 children: [
-                                  const Icon(Icons.verified_user_rounded, color: Color(0xFF2563EB), size: 18),
+                                  const Icon(Icons.verified_user_rounded, color: Color(0xFF012A58), size: 18),
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
                                       'Existing GS HEALTH Doctor Found: ${detectedExistingDoctor!.name}',
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: Color(0xFF1E3A8A)),
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: Color(0xFF012A58)),
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
@@ -1800,7 +1800,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                               const SizedBox(height: 4),
                               Text(
                                 'Specialty: ${detectedExistingDoctor!.specialty} • Current: ${detectedExistingDoctor!.clinicName.isNotEmpty ? detectedExistingDoctor!.clinicName : "Independent"}\nAssociate with $_currentClinicName without creating a duplicate account.',
-                                style: const TextStyle(fontSize: 11, color: Color(0xFF1E40AF)),
+                                style: const TextStyle(fontSize: 11, color: Color(0xFF012A58)),
                               ),
                             ],
                           ),
@@ -1818,12 +1818,12 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                                 children: [
                                   CircleAvatar(
                                     radius: 22,
-                                    backgroundColor: const Color(0xFF0D9488).withValues(alpha: 0.15),
+                                    backgroundColor: const Color(0xFF012A58).withValues(alpha: 0.15),
                                     child: Text(
                                       nameCtrl.text.trim().isNotEmpty
                                           ? nameCtrl.text.trim().replaceAll('Dr.', '').trim().characters.first.toUpperCase()
                                           : 'DR',
-                                      style: const TextStyle(color: Color(0xFF0D9488), fontWeight: FontWeight.bold),
+                                      style: const TextStyle(color: Color(0xFF012A58), fontWeight: FontWeight.bold),
                                     ),
                                   ),
                                   const SizedBox(width: 12),
@@ -2059,7 +2059,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                                   return FilterChip(
                                     label: Text(day, style: TextStyle(fontSize: 11, color: isSel ? Colors.white : Colors.black87)),
                                     selected: isSel,
-                                    selectedColor: const Color(0xFF0D9488),
+                                    selectedColor: const Color(0xFF012A58),
                                     checkmarkColor: Colors.white,
                                     onSelected: (val) {
                                       setModalState(() {
@@ -2086,7 +2086,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                                   return FilterChip(
                                     label: Text(slot, style: TextStyle(fontSize: 11, color: isSel ? Colors.white : Colors.black87)),
                                     selected: isSel,
-                                    selectedColor: const Color(0xFF0D9488),
+                                    selectedColor: const Color(0xFF012A58),
                                     checkmarkColor: Colors.white,
                                     onSelected: (val) {
                                       setModalState(() {
@@ -2120,7 +2120,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                               key: const Key('clinic_associate_existing_doctor_button'),
                               icon: const Icon(Icons.link_rounded, size: 16, color: Colors.white),
                               label: const Text('Associate Existing Doctor', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2563EB)),
+                              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF012A58)),
                               onPressed: () async {
                                 await _problemService.associateDoctorWithClinic(
                                   doctorId: detectedExistingDoctor!.id,
@@ -2364,7 +2364,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
               actions: [
                 TextButton(onPressed: () => Navigator.of(dialogCtx).pop(), child: const Text('Cancel')),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D9488)),
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF012A58)),
                   onPressed: () async {
                     final expYears = int.tryParse(expCtrl.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? doc.experienceYears;
                     await _problemService.updateDoctorProfessionalProfile(
@@ -2401,7 +2401,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
-            const Icon(Icons.person_remove_rounded, color: Colors.redAccent, size: 22),
+            const Icon(Icons.person_remove_rounded, color: Color(0xFFFE3434), size: 22),
             const SizedBox(width: 8),
             const Expanded(
               child: Text(
@@ -2424,7 +2424,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
           ElevatedButton(
             key: const Key('confirm_remove_doctor_button'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent,
+              backgroundColor: const Color(0xFFFE3434),
               foregroundColor: Colors.white,
             ),
             onPressed: () async {
@@ -2437,7 +2437,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text('Dr. ${doc.name} was removed from $_currentClinicName. Global account preserved.'),
-                  backgroundColor: Colors.orange.shade800,
+                  backgroundColor: Color(0xFFFE3434),
                 ),
               );
             },
@@ -2457,7 +2457,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
           children: [
             Text('Procedure Price List', style: theme.textTheme.titleMedium),
             IconButton(
-              icon: const Icon(Icons.add_box_outlined, color: Color(0xFF0D9488)),
+              icon: const Icon(Icons.add_box_outlined, color: Color(0xFF012A58)),
               onPressed: () => _showAddProcedureDialog(context),
             )
           ],
@@ -2476,10 +2476,10 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(price, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0D9488), fontSize: 16)),
+            Text(price, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF012A58), fontSize: 16)),
             const SizedBox(width: 8),
             IconButton(
-              icon: const Icon(Icons.edit_outlined, size: 18, color: Color(0xFF0D9488)),
+              icon: const Icon(Icons.edit_outlined, size: 18, color: Color(0xFF012A58)),
               onPressed: () => _showEditPriceDialog(service, price),
             ),
           ],

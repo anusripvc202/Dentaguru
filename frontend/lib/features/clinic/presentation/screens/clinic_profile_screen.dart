@@ -372,7 +372,7 @@ class _ClinicProfileScreenState extends State<ClinicProfileScreen> {
                                   }
                                 },
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF4A6B5D),
+                            backgroundColor: const Color(0xFF012A58),
                             foregroundColor: Colors.white,
                             elevation: 0,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -528,7 +528,7 @@ class _ClinicProfileScreenState extends State<ClinicProfileScreen> {
             key: const Key('confirm_logout_button'),
             onPressed: () => Navigator.of(dialogCtx).pop(true),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
+              backgroundColor: const Color(0xFFFE3434),
               foregroundColor: Colors.white,
               elevation: 0,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -655,7 +655,7 @@ class _ClinicProfileScreenState extends State<ClinicProfileScreen> {
             key: const Key('confirm_delete_clinic_account_button'),
             onPressed: () => Navigator.of(dialogCtx).pop(true),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
+              backgroundColor: const Color(0xFFFE3434),
               foregroundColor: Colors.white,
               elevation: 0,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -778,7 +778,7 @@ class _ClinicProfileScreenState extends State<ClinicProfileScreen> {
                       width: 86,
                       height: 86,
                       decoration: const BoxDecoration(
-                        color: Color(0xFFE2EBE6),
+                        color: Color(0x14012A58),
                         shape: BoxShape.circle,
                       ),
                       child: Center(
@@ -787,7 +787,7 @@ class _ClinicProfileScreenState extends State<ClinicProfileScreen> {
                           style: const TextStyle(
                             fontSize: 26,
                             fontWeight: FontWeight.w800,
-                            color: Color(0xFF2D3E35),
+                            color: Color(0xFF012A58),
                             letterSpacing: 0.5,
                           ),
                         ),
@@ -809,7 +809,7 @@ class _ClinicProfileScreenState extends State<ClinicProfileScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFEAF2EE),
+                        color: const Color(0x14012A58),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: const Text(
@@ -817,7 +817,7 @@ class _ClinicProfileScreenState extends State<ClinicProfileScreen> {
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
-                          color: Color(0xFF2D3E35),
+                          color: Color(0xFF012A58),
                         ),
                       ),
                     ),
@@ -881,9 +881,9 @@ class _ClinicProfileScreenState extends State<ClinicProfileScreen> {
                           ),
                         ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFE8EFEA),
+                          backgroundColor: const Color(0x14012A58),
                           elevation: 0,
-                          side: const BorderSide(color: Color(0xFFD3E0D8)),
+                          side: const BorderSide(color: Color(0x40012A58)),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                         ),
                       ),
@@ -951,21 +951,21 @@ class _ClinicProfileScreenState extends State<ClinicProfileScreen> {
                         key: const Key('clinic_featured_badge'),
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFFFBEB),
+                          color: const Color(0x14FE3434),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: const Color(0xFFFDE68A)),
+                          border: Border.all(color: const Color(0x40FE3434)),
                         ),
                         child: const Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.star_rounded, size: 14, color: Color(0xFFB45309)),
+                            Icon(Icons.star_rounded, size: 14, color: Color(0xFFFE3434)),
                             SizedBox(width: 4),
                             Text(
                               'FEATURED CLINIC',
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w800,
-                                color: Color(0xFFB45309),
+                                color: Color(0xFFFE3434),
                                 letterSpacing: 0.6,
                               ),
                             ),
@@ -1017,7 +1017,7 @@ class _ClinicProfileScreenState extends State<ClinicProfileScreen> {
                   ),
                   child: const Row(
                     children: [
-                      Icon(Icons.alt_route_rounded, color: Color(0xFF4A6B5D), size: 20),
+                      Icon(Icons.alt_route_rounded, color: Color(0xFF012A58), size: 20),
                       SizedBox(width: 14),
                       Expanded(
                         child: Text(
@@ -1084,17 +1084,17 @@ class _ClinicProfileScreenState extends State<ClinicProfileScreen> {
                 child: ElevatedButton.icon(
                   key: const Key('clinic_logout_button'),
                   onPressed: () => _confirmAndSignOut(context),
-                  icon: const Icon(Icons.logout_rounded, color: Color(0xFFDC2626), size: 18),
+                  icon: const Icon(Icons.logout_rounded, color: Color(0xFFFE3434), size: 18),
                   label: const Text(
                     'Log out',
                     style: TextStyle(
-                      color: Color(0xFFDC2626),
+                      color: Color(0xFFFE3434),
                       fontWeight: FontWeight.w700,
                       fontSize: 15,
                     ),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFEECEC),
+                    backgroundColor: const Color(0x14FE3434),
                     elevation: 0,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   ),

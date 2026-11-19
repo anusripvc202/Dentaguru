@@ -8,12 +8,12 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/widgets/dental_ads_banner.dart';
 
-const Color _kSurfaceBg = Color(0xFFF7F9FC);
+const Color _kSurfaceBg = Color(0xFFF8FAFC);
 const Color _kBorder = Color(0xFFE2E8F0);
-const Color _kSoftNavy = Color(0xFFEBF2FE);
-const Color _kSoftBorder = Color(0xFFD4E3FC);
-const Color _kSoftRedBg = Color(0xFFFEF2F2);
-const Color _kSoftRedBorder = Color(0xFFFECACA);
+const Color _kSoftNavy = Color(0x14012A58);
+const Color _kSoftBorder = Color(0x40012A58);
+const Color _kSoftRedBg = Color(0x14FE3434);
+const Color _kSoftRedBorder = Color(0x40FE3434);
 
 // =============================================================================
 // TOP HEADER (SHARED BY OVERVIEW & BOOKINGS? -> HEADER DESIGN MATCHES SCREENSHOTS)
@@ -650,7 +650,7 @@ class _ClinicCoverPlaceholder extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [AppTheme.gsNavy, Color(0xFF0A4380), Color(0xFF143E75)],
+          colors: [AppTheme.gsNavy, Color(0xFF012A58), Color(0xFF012A58)],
         ),
       ),
       padding: const EdgeInsets.all(20),
@@ -737,7 +737,7 @@ class _ClinicAdCard extends StatelessWidget {
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [Color(0xFF0A3D7A), AppTheme.gsNavy, Color(0xFF001B3B)],
+                    colors: [Color(0xFF012A58), AppTheme.gsNavy, Color(0xFF012A58)],
                   ),
                 ),
               ),
@@ -830,7 +830,7 @@ class _ClinicFeaturedCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bgColor = isFeatured ? const Color(0xFFFFF5F5) : Colors.white;
+    final bgColor = isFeatured ? const Color(0x14FE3434) : Colors.white;
     final borderColor = isFeatured ? _kSoftRedBorder : _kBorder;
     final title =
         isFeatured ? "You're a Featured clinic" : 'Promote as a Featured clinic';
@@ -1729,15 +1729,15 @@ class _ClinicBookingCard extends StatelessWidget {
     late final Color statusFg;
     switch (category) {
       case 'Pending':
-        statusBg = const Color(0xFFFEF3C7);
-        statusFg = const Color(0xFF92400E);
+        statusBg = const Color(0x14FE3434);
+        statusFg = const Color(0xFFFE3434);
         break;
       case 'Confirmed':
         statusBg = _kSoftNavy;
         statusFg = AppTheme.gsNavy;
         break;
       case 'Completed':
-        statusBg = const Color(0xFFECFDF5);
+        statusBg = const Color(0x14012A58);
         statusFg = AppTheme.gsNavy;
         break;
       case 'Cancelled':

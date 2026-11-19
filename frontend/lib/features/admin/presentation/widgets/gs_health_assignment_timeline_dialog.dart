@@ -102,16 +102,16 @@ class _GsHealthAssignmentTimelineDialogState extends State<GsHealthAssignmentTim
           ),
         ],
       ),
-      content: SizedBox(
-        width: 480,
-        height: 380,
+      content: Container(
+        width: double.maxFinite,
+        constraints: const BoxConstraints(maxWidth: 480, maxHeight: 380),
         child: _isLoading
             ? const Center(child: CircularProgressIndicator(color: Color(0xFF012A58)))
             : _errorMessage != null
                 ? Center(
                     child: Text(
                       'Error loading timeline: $_errorMessage',
-                      style: const TextStyle(color: Color(0xFFDC2626), fontSize: 12),
+                      style: const TextStyle(color: Color(0xFFFE3434), fontSize: 12),
                     ),
                   )
                 : _timeline.isEmpty
@@ -143,8 +143,8 @@ class _GsHealthAssignmentTimelineDialogState extends State<GsHealthAssignmentTim
                           final prevDentist = (event['previous_dentist_name'] ?? '').toString();
 
                           Color dotColor = const Color(0xFF012A58);
-                          if (source == 'PATIENT_DIRECT_BOOKING') dotColor = const Color(0xFF059669);
-                          if (source == 'SUB_ADMIN_ASSIGNMENT') dotColor = const Color(0xFF7C3AED);
+                          if (source == 'PATIENT_DIRECT_BOOKING') dotColor = const Color(0xFF012A58);
+                          if (source == 'SUB_ADMIN_ASSIGNMENT') dotColor = const Color(0xFFFE3434);
 
                           return IntrinsicHeight(
                             child: Row(
@@ -218,7 +218,7 @@ class _GsHealthAssignmentTimelineDialogState extends State<GsHealthAssignmentTim
                                             const SizedBox(height: 2),
                                             Text(
                                               'Reassigned from: $prevDentist',
-                                              style: const TextStyle(fontSize: 10.5, fontStyle: FontStyle.italic, color: Color(0xFFDC2626)),
+                                              style: const TextStyle(fontSize: 10.5, fontStyle: FontStyle.italic, color: Color(0xFFFE3434)),
                                             ),
                                           ],
                                           const SizedBox(height: 4),

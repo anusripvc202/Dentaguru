@@ -293,7 +293,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             offset: const Offset(0, 4),
           ),
         ],
-        border: Border.all(color: const Color(0xFFEEF2F6)),
+        border: Border.all(color: const Color(0xFFF1F5F9)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -427,7 +427,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       case 2:
         return _buildAboutDetailBody(
           badgeText: 'PRACTITIONER WORKSPACE',
-          badgeColor: const Color(0xFF0284C7),
+          badgeColor: const Color(0xFFFE3434),
           title: 'Doctor Digital Workspace & Timeline',
           description: 'Doctors get an interactive digital workspace to view daily patient queues, record clinical notes, generate E-prescriptions, and track treatment progress over time.',
           bullets: [
@@ -441,7 +441,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       case 3:
         return _buildAboutDetailBody(
           badgeText: 'AI CLINICAL TRIAGE',
-          badgeColor: const Color(0xFF8B5CF6),
+          badgeColor: const Color(0xFFFE3434),
           title: 'AI Smart Health Screening',
           description: 'Powered by advanced vision & clinical models, GS HEALTH AI pre-screens symptoms and health records before the clinic visit.',
           bullets: [
@@ -543,7 +543,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           margin: const EdgeInsets.only(top: 2),
                           padding: const EdgeInsets.all(2),
                           decoration: const BoxDecoration(
-                            color: Color(0xFF10B981),
+                            color: Color(0xFF012A58),
                             shape: BoxShape.circle,
                           ),
                           child: const Icon(Icons.check, size: 10, color: Colors.white),
@@ -613,13 +613,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 title: 'AI Smart Scan',
                 subtitle: 'Photo pre-screening for cavities, plaque & gum health',
                 icon: Icons.auto_fix_high_rounded,
-                color: Color(0xFF8B5CF6),
+                color: Color(0xFFFE3434),
               ),
               _AnimatedFeatureTile(
                 title: '24/7 Tele-Consultation',
                 subtitle: 'HD video consultations with certified doctors anytime',
                 icon: Icons.videocam_rounded,
-                color: Color(0xFF0284C7),
+                color: Color(0xFFFE3434),
               ),
               _AnimatedFeatureTile(
                 title: '1-Tap Booking',
@@ -637,13 +637,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 title: 'E-Prescriptions',
                 subtitle: 'Digital medical slips & pharmacy product ordering',
                 icon: Icons.receipt_long_rounded,
-                color: Color(0xFF10B981),
+                color: Color(0xFF012A58),
               ),
               _AnimatedFeatureTile(
                 title: 'Habit Tracker',
                 subtitle: '2-min brushing timer & daily flossing streak logger',
                 icon: Icons.timer_rounded,
-                color: Color(0xFFEC4899),
+                color: Color(0xFFFE3434),
               ),
             ],
           ),
@@ -706,7 +706,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             icon: Icons.calculate_rounded,
             title: 'Cost Estimator & Insurance Check',
             subtitle: 'View transparent procedure pricing, insurance coverage, and co-pay breakdowns.',
-            color: const Color(0xFF10B981),
+            color: const Color(0xFF012A58),
           ),
           const Divider(height: 20, color: Color(0xFFF1F5F9)),
           _buildModuleRow(
@@ -720,7 +720,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             icon: Icons.folder_zip_rounded,
             title: 'Digital Records & Diagnostics Viewer',
             subtitle: 'Access high-resolution X-rays and medical records anytime from your device.',
-            color: const Color(0xFF8B5CF6),
+            color: const Color(0xFFFE3434),
           ),
         ],
       ),
@@ -816,7 +816,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           textAlign: TextAlign.center,
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(
-            color: Color(0xFF93C5FD),
+            color: Color(0x40012A58),
             fontSize: 11,
             fontWeight: FontWeight.w500,
           ),
@@ -1012,11 +1012,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         const Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 14),
-                            Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 14),
-                            Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 14),
-                            Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 14),
-                            Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 14),
+                            Icon(Icons.star_rounded, color: Color(0xFFFE3434), size: 14),
+                            Icon(Icons.star_rounded, color: Color(0xFFFE3434), size: 14),
+                            Icon(Icons.star_rounded, color: Color(0xFFFE3434), size: 14),
+                            Icon(Icons.star_rounded, color: Color(0xFFFE3434), size: 14),
+                            Icon(Icons.star_rounded, color: Color(0xFFFE3434), size: 14),
                           ],
                         ),
                       ],
@@ -1089,11 +1089,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
-                color: const Color(0xFF38BDF8),
+                color: const Color(0xFFFE3434),
                 letterSpacing: 0.5,
                 shadows: [
                   Shadow(
-                    color: const Color(0xFF38BDF8).withValues(alpha: 0.3),
+                    color: const Color(0xFFFE3434).withValues(alpha: 0.3),
                     blurRadius: 6,
                   ),
                 ],

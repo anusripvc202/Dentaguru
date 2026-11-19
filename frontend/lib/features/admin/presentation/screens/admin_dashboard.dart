@@ -41,6 +41,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   String? _overviewError;
   List<AdminAppointmentItem> _overviewAppointments = const [];
   bool _showPendingVerificationOnly = false;
+  String _adminApptSearchQuery = '';
+  String _adminApptStatusFilter = 'All';
+  final Set<String> _expandedAppointmentIds = {};
 
   Timer? _autoSyncTimer;
   RealtimeChannel? _realtimeChannel;
@@ -58,9 +61,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     _problemService.setAdminMode(true);
     _refreshOverviewData();
 
-    // ⏱️ Auto-sync timer: polls every 4s to catch new requests raised on other devices
+    // ⏱️ Auto-sync timer: polls every 4s to catch new requests & referrals raised on other devices
     _autoSyncTimer = Timer.periodic(const Duration(seconds: 4), (_) {
-      if (mounted) _problemService.syncProblemRequestsFromApi();
+      if (mounted) {
+        _problemService.syncProblemRequestsFromApi();
+        _problemService.syncAdminReferralsFromApi();
+        _problemService.syncNotificationsFromApi(role: 'Admin');
+      }
     });
 
     // ⚡ Supabase Realtime Postgres Changes listener for instant multi-device sync
@@ -74,6 +81,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
             callback: (payload) {
               debugPrint('⚡ Realtime update on patient_problem_requests: ${payload.eventType}');
               if (mounted) _problemService.syncProblemRequestsFromApi();
+            },
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'referrals',
+            callback: (payload) {
+              debugPrint('⚡ Realtime update on referrals: ${payload.eventType}');
+              if (mounted) _problemService.syncAdminReferralsFromApi();
             },
           )
           .subscribe();
@@ -370,7 +386,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                         Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                           decoration: BoxDecoration(
-                                            color: req.severity == 'Severe' ? const Color(0xFFFEE2E2) : const Color(0xFFFEF3C7),
+                                            color: req.severity == 'Severe' ? const Color(0x14FE3434) : const Color(0x14FE3434),
                                             borderRadius: BorderRadius.circular(8),
                                           ),
                                           child: Text(
@@ -378,7 +394,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                             style: TextStyle(
                                               fontSize: 10,
                                               fontWeight: FontWeight.bold,
-                                              color: req.severity == 'Severe' ? const Color(0xFF991B1B) : const Color(0xFF92400E),
+                                              color: req.severity == 'Severe' ? const Color(0xFFFE3434) : const Color(0xFFFE3434),
                                             ),
                                           ),
                                         ),
@@ -402,18 +418,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFFFEF3C7),
+                                    color: const Color(0x14FE3434),
                                     borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(color: const Color(0xFFFDE68A)),
+                                    border: Border.all(color: const Color(0x40FE3434)),
                                   ),
                                   child: Row(
                                     children: [
-                                      const Icon(Icons.recommend_rounded, color: Color(0xFFD97706), size: 20),
+                                      const Icon(Icons.recommend_rounded, color: Color(0xFFFE3434), size: 20),
                                       const SizedBox(width: 8),
                                       Expanded(
                                         child: Text(
                                           '⭐ Patient Referral Preference: ${req.preferredDoctorName}',
-                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF92400E)),
+                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFFFE3434)),
                                         ),
                                       ),
                                     ],
@@ -470,9 +486,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               width: double.infinity,
                               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFEFF6FF),
+                                color: const Color(0x14012A58),
                                 borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: const Color(0xFFBFDBFE)),
+                                border: Border.all(color: const Color(0x40012A58)),
                               ),
                               child: Row(
                                 children: [
@@ -494,10 +510,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFFDBEAFE),
+                                      color: const Color(0x14012A58),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
-                                    child: const Text('Priority Ranked', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8))),
+                                    child: const Text('Priority Ranked', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF012A58))),
                                   ),
                                 ],
                               ),
@@ -611,7 +627,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     if (stateFilterController.text.isNotEmpty || cityFilterController.text.isNotEmpty || pincodeFilterController.text.isNotEmpty || remoteFilteredDoctors != null) ...[
                                       const SizedBox(width: 2),
                                       IconButton(
-                                        icon: const Icon(Icons.clear_rounded, size: 18, color: Color(0xFFEF4444)),
+                                        icon: const Icon(Icons.clear_rounded, size: 18, color: Color(0xFFFE3434)),
                                         tooltip: 'Reset Filters',
                                         onPressed: () => setModalState(() {
                                           stateFilterController.clear();
@@ -682,8 +698,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                       child: ChoiceChip(
                                         label: Text(avail, style: TextStyle(fontSize: 10, fontWeight: isSel ? FontWeight.bold : FontWeight.normal)),
                                         selected: isSel,
-                                        selectedColor: const Color(0xFF10B981).withValues(alpha: 0.2),
-                                        labelStyle: TextStyle(color: isSel ? const Color(0xFF047857) : AppTheme.textDark),
+                                        selectedColor: const Color(0xFF012A58).withValues(alpha: 0.2),
+                                        labelStyle: TextStyle(color: isSel ? const Color(0xFF012A58) : AppTheme.textDark),
                                         onSelected: (val) {
                                           if (val) setModalState(() => selectedAvailabilityFilter = key);
                                         },
@@ -744,18 +760,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                              margin: const EdgeInsets.only(bottom: 8),
                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                                              decoration: BoxDecoration(
-                                               color: const Color(0xFFFEF3C7),
+                                               color: const Color(0x14FE3434),
                                                borderRadius: BorderRadius.circular(10),
-                                               border: Border.all(color: const Color(0xFFFDE68A)),
+                                               border: Border.all(color: const Color(0x40FE3434)),
                                              ),
                                              child: Row(
                                                children: [
-                                                 const Icon(Icons.location_off_rounded, color: Color(0xFFD97706), size: 16),
+                                                 const Icon(Icons.location_off_rounded, color: Color(0xFFFE3434), size: 16),
                                                  const SizedBox(width: 8),
                                                  Expanded(
                                                    child: Text(
                                                      'No doctor found directly in "${searchKeyword.isNotEmpty ? searchKeyword : cityFilterController.text.isNotEmpty ? cityFilterController.text : pincodeFilterController.text}". Showing nearest available doctors:',
-                                                     style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF92400E)),
+                                                     style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFFFE3434)),
                                                    ),
                                                  ),
                                                ],
@@ -775,17 +791,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                Color badgeBg = const Color(0xFFF1F5F9);
                                                Color badgeFg = const Color(0xFF475569);
                                                if (tier == 1) {
-                                                 badgeBg = const Color(0xFFDCFCE7); // Emerald green for Same Pincode
-                                                 badgeFg = const Color(0xFF15803D);
+                                                 badgeBg = const Color(0x14012A58); // Emerald green for Same Pincode
+                                                 badgeFg = const Color(0xFF012A58);
                                                } else if (tier == 2) {
-                                                 badgeBg = const Color(0xFFCCFBF1); // Teal for Nearby Pincode
-                                                 badgeFg = const Color(0xFF0F766E);
+                                                 badgeBg = const Color(0x14012A58); // Teal for Nearby Pincode
+                                                 badgeFg = const Color(0xFF012A58);
                                                } else if (tier == 3) {
-                                                 badgeBg = const Color(0xFFDBEAFE); // Blue for Same City
-                                                 badgeFg = const Color(0xFF1E40AF);
+                                                 badgeBg = const Color(0x14012A58); // Blue for Same City
+                                                 badgeFg = const Color(0xFF012A58);
                                                } else if (tier == 5) {
-                                                 badgeBg = const Color(0xFFE0E7FF); // Indigo for Same State
-                                                 badgeFg = const Color(0xFF3730A3);
+                                                 badgeBg = const Color(0x14FE3434); // Indigo for Same State
+                                                 badgeFg = const Color(0xFF012A58);
                                                }
 
                                                return GestureDetector(
@@ -794,7 +810,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                    margin: const EdgeInsets.only(bottom: 8),
                                                    padding: const EdgeInsets.all(10),
                                                    decoration: BoxDecoration(
-                                                     color: isSelected ? const Color(0xFFEFF6FF) : Colors.white,
+                                                     color: isSelected ? const Color(0x14012A58) : Colors.white,
                                                      borderRadius: BorderRadius.circular(12),
                                                      border: Border.all(
                                                        color: isSelected ? AppTheme.primaryBlue : const Color(0xFFE2E8F0),
@@ -830,7 +846,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                                   Container(
                                                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                                                     decoration: BoxDecoration(
-                                                                      color: doc.status == 'Available' ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
+                                                                      color: doc.status == 'Available' ? const Color(0x14012A58) : const Color(0x14FE3434),
                                                                       borderRadius: BorderRadius.circular(6),
                                                                     ),
                                                                     child: Text(
@@ -838,7 +854,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                                       style: TextStyle(
                                                                         fontSize: 9.5,
                                                                         fontWeight: FontWeight.bold,
-                                                                        color: doc.status == 'Available' ? const Color(0xFF15803D) : const Color(0xFFB45309),
+                                                                        color: doc.status == 'Available' ? const Color(0xFF012A58) : const Color(0xFFFE3434),
                                                                       ),
                                                                     ),
                                                                   ),
@@ -872,11 +888,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                                     Container(
                                                                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                                                       decoration: BoxDecoration(
-                                                                        color: const Color(0xFFFEF3C7),
+                                                                        color: const Color(0x14FE3434),
                                                                         borderRadius: BorderRadius.circular(6),
-                                                                        border: Border.all(color: const Color(0xFFFDE68A)),
+                                                                        border: Border.all(color: const Color(0x40FE3434)),
                                                                       ),
-                                                                      child: const Text('Matched Specialty', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFFB45309))),
+                                                                      child: const Text('Matched Specialty', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFFFE3434))),
                                                                     ),
                                                                 ],
                                                               ),
@@ -956,7 +972,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               Container(
                                 padding: const EdgeInsets.all(12),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFEFF6FF),
+                                  color: const Color(0x14012A58),
                                   borderRadius: BorderRadius.circular(14),
                                   border: Border.all(color: AppTheme.primaryBlue.withValues(alpha: 0.3)),
                                 ),
@@ -1017,9 +1033,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               // WhatsApp Preview Card
                               Container(
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFDCFCE7).withValues(alpha: 0.4),
+                                  color: const Color(0x14012A58).withValues(alpha: 0.4),
                                   borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(color: const Color(0xFF86EFAC)),
+                                  border: Border.all(color: const Color(0x40012A58)),
                                 ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1027,7 +1043,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                       decoration: const BoxDecoration(
-                                        color: Color(0xFF15803D),
+                                        color: Color(0xFF012A58),
                                         borderRadius: BorderRadius.only(
                                           topLeft: Radius.circular(13),
                                           topRight: Radius.circular(13),
@@ -1065,7 +1081,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                       padding: const EdgeInsets.all(12),
                                       child: Text(
                                         waText,
-                                        style: const TextStyle(fontSize: 11.5, color: Color(0xFF14532D), height: 1.45),
+                                        style: const TextStyle(fontSize: 11.5, color: Color(0xFF012A58), height: 1.45),
                                       ),
                                     ),
                                   ],
@@ -1089,7 +1105,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                             maxLines: 1,
                                           ),
                                           style: ElevatedButton.styleFrom(
-                                            backgroundColor: const Color(0xFF10B981),
+                                            backgroundColor: const Color(0xFF012A58),
                                             foregroundColor: Colors.white,
                                             padding: const EdgeInsets.symmetric(vertical: 12),
                                             elevation: 2,
@@ -1124,7 +1140,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                             ScaffoldMessenger.of(context).showSnackBar(
                                               SnackBar(
                                                 content: Text('📱 Recommendation sent via WhatsApp to ${req.patientName}!'),
-                                                backgroundColor: const Color(0xFF10B981),
+                                                backgroundColor: const Color(0xFF012A58),
                                                 duration: const Duration(seconds: 3),
                                               ),
                                             );
@@ -1142,7 +1158,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                             maxLines: 1,
                                           ),
                                           style: ElevatedButton.styleFrom(
-                                            backgroundColor: const Color(0xFF2563EB),
+                                            backgroundColor: const Color(0xFF012A58),
                                             foregroundColor: Colors.white,
                                             padding: const EdgeInsets.symmetric(vertical: 12),
                                             elevation: 2,
@@ -1177,7 +1193,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                             ScaffoldMessenger.of(context).showSnackBar(
                                               SnackBar(
                                                 content: Text('✉️ Recommendation opened in SMS for ${req.patientName}!'),
-                                                backgroundColor: const Color(0xFF2563EB),
+                                                backgroundColor: const Color(0xFF012A58),
                                                 duration: const Duration(seconds: 3),
                                               ),
                                             );
@@ -1219,7 +1235,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                             ScaffoldMessenger.of(context).showSnackBar(
                                               SnackBar(
                                                 content: Text('✅ Doctor ${selectedDoctor?.name} assigned to ${req.patientName}!'),
-                                                backgroundColor: const Color(0xFF10B981),
+                                                backgroundColor: const Color(0xFF012A58),
                                                 duration: const Duration(seconds: 3),
                                               ),
                                             );
@@ -1250,7 +1266,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
       decoration: BoxDecoration(
         color: isActive
             ? AppTheme.primaryBlue.withValues(alpha: 0.1)
-            : (isDone ? const Color(0xFFDCFCE7) : Colors.transparent),
+            : (isDone ? const Color(0x14012A58) : Colors.transparent),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
@@ -1261,7 +1277,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
             height: 20,
             decoration: BoxDecoration(
               color: isDone
-                  ? const Color(0xFF10B981)
+                  ? const Color(0xFF012A58)
                   : isActive
                       ? AppTheme.primaryBlue
                       : const Color(0xFFCBD5E1),
@@ -1282,7 +1298,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: isActive || isDone ? FontWeight.bold : FontWeight.w500,
-                color: isActive ? AppTheme.primaryBlue : (isDone ? const Color(0xFF15803D) : AppTheme.textMuted),
+                color: isActive ? AppTheme.primaryBlue : (isDone ? const Color(0xFF012A58) : AppTheme.textMuted),
               ),
             ),
           ),
@@ -1355,14 +1371,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               children: [
                                 Builder(
                                   builder: (context) {
-                                    final adminNotifs = _problemService.appNotifications
-                                        .where((n) => n.recipientRole == 'Admin' || n.recipientId == 'ALL_ADMINS')
-                                        .toList();
+                                    final adminNotifs = _problemService.getNotificationsForRole('Admin');
                                     final unreadCount = adminNotifs.where((n) => !n.isRead).length;
 
                                     return Stack(
                                       children: [
                                         IconButton(
+                                          key: const Key('admin_desktop_notifications_button'),
                                           icon: const Icon(Icons.notifications_none_rounded, color: AppTheme.textDark, size: 22),
                                           onPressed: () => _showNotificationsModal(context, 'Admin'),
                                         ),
@@ -1370,12 +1385,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                           Positioned(
                                             right: 6,
                                             top: 6,
-                                            child: Container(
-                                              padding: const EdgeInsets.all(4),
-                                              decoration: const BoxDecoration(color: Color(0xFFEF4444), shape: BoxShape.circle),
-                                              child: Text(
-                                                '$unreadCount',
-                                                style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                                            child: IgnorePointer(
+                                              child: Container(
+                                                key: const Key('admin_desktop_unread_notifications_badge'),
+                                                padding: const EdgeInsets.all(4),
+                                                decoration: const BoxDecoration(color: Color(0xFFFE3434), shape: BoxShape.circle),
+                                                child: Text(
+                                                  '$unreadCount',
+                                                  style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                                                ),
                                               ),
                                             ),
                                           ),
@@ -1389,10 +1407,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFFDCFCE7),
+                                      color: const Color(0x14012A58),
                                       borderRadius: BorderRadius.circular(12),
                                     ),
-                                    child: const Text('Admin Mode', style: TextStyle(color: Color(0xFF16A34A), fontWeight: FontWeight.bold, fontSize: 11)),
+                                    child: const Text('Admin Mode', style: TextStyle(color: Color(0xFFFE3434), fontWeight: FontWeight.bold, fontSize: 11)),
                                   ),
                                 ),
                                 const SizedBox(width: 12),
@@ -1512,7 +1530,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
                 decoration: BoxDecoration(
-                  color: isSelected ? Colors.white : const Color(0xFFEF4444),
+                  color: isSelected ? Colors.white : const Color(0xFFFE3434),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
@@ -1540,6 +1558,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     }
     try {
       await _problemService.syncAllDataFromApi();
+      await _problemService.syncDoctorsFromApi(includeUnavailable: true);
+      await _problemService.syncAdminReferralsFromApi();
+      await _problemService.syncNotificationsFromApi(role: 'Admin');
       final rows = await ApiService().fetchAllAppointmentsForAdmin();
       final items = rows
           .whereType<Map>()
@@ -1566,9 +1587,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   }
 
   Widget _buildMobileGsHeader(BuildContext context) {
-    final adminNotifs = _problemService.appNotifications
-        .where((n) => n.recipientRole == 'Admin' || n.recipientId == 'ALL_ADMINS')
-        .toList();
+    final adminNotifs = _problemService.getNotificationsForRole('Admin');
     final unreadCount = adminNotifs.where((n) => !n.isRead).length;
     return GsHealthAdminHeader(
       subtitle: 'Admin console',
@@ -1894,12 +1913,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   }) {
     return Theme(
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: Container(
-        decoration: BoxDecoration(
-          color: const Color(0xFFF8FAFC),
+      child: Material(
+        color: const Color(0xFFF8FAFC),
+        shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0xFFE2E8F0)),
+          side: const BorderSide(color: Color(0xFFE2E8F0)),
         ),
+        clipBehavior: Clip.antiAlias,
         child: ExpansionTile(
           initiallyExpanded: initiallyExpanded,
           tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
@@ -1907,6 +1927,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
           leading: Icon(categoryIcon, size: 18, color: AppTheme.primaryBlue),
           title: Text(
             categoryTitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.bold,
@@ -1922,15 +1944,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   Widget _buildSubNavItem(int index, IconData icon, String title, {int badgeCount = 0}) {
     final isSelected = _selectedNavIndex == index;
 
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      child: Material(
         color: isSelected ? AppTheme.primaryBlue : Colors.transparent,
         borderRadius: BorderRadius.circular(10),
-      ),
-      child: ListTile(
-        dense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+        clipBehavior: Clip.antiAlias,
+        child: ListTile(
+          dense: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
         leading: Icon(
           icon,
           size: 16,
@@ -1949,7 +1971,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
             ? Container(
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
-                  color: isSelected ? Colors.white : const Color(0xFFEF4444),
+                  color: isSelected ? Colors.white : const Color(0xFFFE3434),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
@@ -1967,139 +1989,359 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
             _selectedNavIndex = index;
           });
         },
+        ),
       ),
     );
   }
 
   Widget _buildAppointmentsSchedulePanel() {
     final allDoctors = _problemService.allDoctors;
-    final allAppts = _problemService.requests.where((r) => r.confirmedTimeSlot != null && r.confirmedTimeSlot!.isNotEmpty).toList();
+    final List<AdminAppointmentItem> sourceAppointments = _overviewAppointments;
 
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Top Banner Card
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Row(
+    final filteredAppointments = sourceAppointments.where((a) {
+      if (_adminApptStatusFilter != 'All') {
+        final st = a.status.trim().toLowerCase();
+        final target = _adminApptStatusFilter.toLowerCase();
+        if (!st.contains(target)) return false;
+      }
+      final q = _adminApptSearchQuery.trim().toLowerCase();
+      if (q.isEmpty) return true;
+      return a.patientName.toLowerCase().contains(q) ||
+          a.phone.toLowerCase().contains(q) ||
+          a.dentistName.toLowerCase().contains(q) ||
+          a.doctorSpecialty.toLowerCase().contains(q) ||
+          a.clinicName.toLowerCase().contains(q) ||
+          a.treatment.toLowerCase().contains(q);
+    }).toList();
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double width = constraints.maxWidth;
+        final bool isWideDesktop = width >= 980;
+        final bool isCompactMobile = width < 600;
+        final double hPad = isCompactMobile ? 14 : 24;
+
+        return RefreshIndicator(
+          color: AppTheme.gsNavy,
+          onRefresh: _refreshOverviewData,
+          child: SingleChildScrollView(
+            key: const Key('admin_appointments_panel_scroll'),
+            physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+            padding: EdgeInsets.all(hPad),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // 1. Responsive Top Banner Card
                 Container(
-                  padding: const EdgeInsets.all(12),
+                  width: double.infinity,
+                  padding: EdgeInsets.all(isCompactMobile ? 16 : 20),
                   decoration: BoxDecoration(
-                    color: AppTheme.primaryBlue.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(14),
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(18),
                   ),
-                  child: const Icon(Icons.calendar_month_rounded, color: Colors.white, size: 28),
-                ),
-                const SizedBox(width: 16),
-                const Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Doctor Appointments & Time Slot Schedule',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
-                        overflow: TextOverflow.ellipsis,
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryBlue.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: const Icon(Icons.calendar_month_rounded, color: Colors.white, size: 24),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Booked Appointments & Doctor Schedule',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: isCompactMobile ? 16 : 18,
+                                  ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 4),
+                                const Text(
+                                  'Verified patient bookings showing exact selected doctor, clinic, slot, and schedule controls',
+                                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                      SizedBox(height: 4),
-                      Text(
-                        'Centralized management of doctor working days, consultation hours, and non-overlapping slots',
-                        style: TextStyle(color: Colors.white70, fontSize: 12),
-                        overflow: TextOverflow.ellipsis,
+                      const SizedBox(height: 14),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          ElevatedButton.icon(
+                            onPressed: () => DoctorSlotManagementDialog.show(context),
+                            icon: const Icon(Icons.tune_rounded, size: 16),
+                            label: const Text('Manage Doctor Slots', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.primaryBlue,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: _isOverviewLoading ? null : _refreshOverviewData,
+                            icon: const Icon(Icons.refresh_rounded, size: 16, color: Colors.white),
+                            label: const Text('Refresh Bookings', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12.5)),
+                            style: OutlinedButton.styleFrom(
+                              side: BorderSide(color: Colors.white.withValues(alpha: 0.35)),
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(width: 12),
-                ElevatedButton.icon(
-                  onPressed: () => DoctorSlotManagementDialog.show(context),
-                  icon: const Icon(Icons.tune_rounded, size: 16),
-                  label: const Text('Manage Doctor Slots', style: TextStyle(fontWeight: FontWeight.bold)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primaryBlue,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
+                const SizedBox(height: 22),
 
-          // Doctors List & Slot Controls
-          const Text(
-            'Doctor Working Hours & Availability Roster',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-          ),
-          const SizedBox(height: 12),
-
-          if (allDoctors.isEmpty)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(32),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-              ),
-              child: const Center(
-                child: Text('No registered platform doctors available yet.', style: TextStyle(color: AppTheme.textMuted)),
-              ),
-            )
-          else
-            ...allDoctors.map((doc) {
-              return Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFFE2E8F0)),
-                  boxShadow: [
-                    BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 6, offset: const Offset(0, 2)),
-                  ],
-                ),
-                child: Row(
+                // 2. Booked Appointments Header + Search & Filters
+                Row(
                   children: [
-                    CircleAvatar(
-                      radius: 22,
-                      backgroundColor: AppTheme.primaryBlue.withValues(alpha: 0.1),
+                    const Expanded(
                       child: Text(
-                        doc.name.isNotEmpty ? doc.name.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim()[0].toUpperCase() : 'D',
-                        style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryBlue, fontSize: 16),
+                        'Patient Booked Appointments',
+                        style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800, color: AppTheme.textDark),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    const SizedBox(width: 14),
-                    Expanded(
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0x14012A58),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '${filteredAppointments.length} Total',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppTheme.gsNavy),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+
+                // Search & Status Filter Bar
+                TextField(
+                  key: const Key('admin_appointments_search_field'),
+                  onChanged: (val) => setState(() => _adminApptSearchQuery = val),
+                  decoration: InputDecoration(
+                    hintText: 'Search patient, mobile, selected doctor, specialty, or clinic...',
+                    hintStyle: const TextStyle(fontSize: 13, color: AppTheme.textMuted),
+                    prefixIcon: const Icon(Icons.search_rounded, size: 20, color: AppTheme.gsNavy),
+                    filled: true,
+                    fillColor: Colors.white,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: ['All', 'Pending', 'Confirmed', 'Completed', 'Cancelled'].map((statusOpt) {
+                      final selected = _adminApptStatusFilter == statusOpt;
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: ChoiceChip(
+                          label: Text(statusOpt),
+                          selected: selected,
+                          selectedColor: AppTheme.gsNavy,
+                          backgroundColor: Colors.white,
+                          side: const BorderSide(color: Color(0xFFE2E8F0)),
+                          labelStyle: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: selected ? Colors.white : AppTheme.textDark,
+                          ),
+                          onSelected: (_) => setState(() => _adminApptStatusFilter = statusOpt),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                if (_isOverviewLoading && sourceAppointments.isEmpty)
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(28),
+                      child: CircularProgressIndicator(color: AppTheme.gsNavy),
+                    ),
+                  )
+                else if (filteredAppointments.isEmpty)
+                  Container(
+                    key: const Key('admin_appointments_schedule_empty'),
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.event_busy_rounded, color: AppTheme.textMuted, size: 24),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'No matching patient appointments found.',
+                            style: TextStyle(color: AppTheme.textMuted, fontSize: 13),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else if (isWideDesktop)
+                  _buildDesktopAppointmentsTable(filteredAppointments)
+                else
+                  Column(
+                    children: filteredAppointments
+                        .map((item) => _buildResponsiveAppointmentCard(item))
+                        .toList(),
+                  ),
+
+                const SizedBox(height: 26),
+
+                // 3. Doctor Working Hours & Availability Roster
+                const Text(
+                  'Doctor Working Hours & Availability Roster',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                ),
+                const SizedBox(height: 12),
+
+                if (allDoctors.isEmpty)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(28),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: const Center(
+                      child: Text(
+                        'No registered platform doctors available yet.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: AppTheme.textMuted),
+                      ),
+                    ),
+                  )
+                else
+                  ...allDoctors.map((doc) {
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        boxShadow: [
+                          BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 6, offset: const Offset(0, 2)),
+                        ],
+                      ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            doc.name,
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
-                            overflow: TextOverflow.ellipsis,
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              AdminDoctorAvatar(
+                                doctorName: doc.name,
+                                photoBytes: doc.photoBytes,
+                                radius: 22,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            doc.name,
+                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: doc.isAvailable ? const Color(0x14012A58) : const Color(0xFFF1F5F9),
+                                            borderRadius: BorderRadius.circular(999),
+                                          ),
+                                          child: Text(
+                                            doc.isAvailable ? 'ON' : 'OFF',
+                                            style: TextStyle(
+                                              fontSize: 10.5,
+                                              fontWeight: FontWeight.w800,
+                                              color: doc.isAvailable ? const Color(0xFF012A58) : const Color(0xFF64748B),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      '${doc.specialty} • ${doc.clinicName.isNotEmpty ? doc.clinicName : "Clinic Not Listed"}',
+                                      style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (!isCompactMobile) ...[
+                                const SizedBox(width: 12),
+                                ElevatedButton.icon(
+                                  onPressed: () => DoctorSlotManagementDialog.show(context, initialDoctor: doc),
+                                  icon: const Icon(Icons.edit_calendar_rounded, size: 15),
+                                  label: const Text('Configure Slots', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF0F172A),
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                  ),
+                                ),
+                              ],
+                            ],
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '${doc.specialty} • ${doc.clinicName.isNotEmpty ? doc.clinicName : "GS HEALTH Clinic"}',
-                            style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 8),
                           Wrap(
                             spacing: 6,
+                            runSpacing: 6,
                             children: (doc.nextAvailableSlots.isNotEmpty ? doc.nextAvailableSlots : ['09:00 AM - 05:00 PM (30m)']).take(3).map((s) {
                               return Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -2107,90 +2349,389 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   color: const Color(0xFFF1F5F9),
                                   borderRadius: BorderRadius.circular(6),
                                 ),
-                                child: Text(s, style: const TextStyle(fontSize: 10, color: Color(0xFF475569), fontWeight: FontWeight.w600)),
+                                child: Text(s, style: const TextStyle(fontSize: 10.5, color: Color(0xFF475569), fontWeight: FontWeight.w600)),
                               );
                             }).toList(),
                           ),
+                          if (isCompactMobile) ...[
+                            const SizedBox(height: 10),
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                onPressed: () => DoctorSlotManagementDialog.show(context, initialDoctor: doc),
+                                icon: const Icon(Icons.edit_calendar_rounded, size: 15),
+                                label: const Text('Configure Slots', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF0F172A),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    ElevatedButton.icon(
-                      onPressed: () => DoctorSlotManagementDialog.show(context, initialDoctor: doc),
-                      icon: const Icon(Icons.edit_calendar_rounded, size: 15),
-                      label: const Text('Configure Slots', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0F172A),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }),
-
-          const SizedBox(height: 24),
-          const Text(
-            'Upcoming Booked Appointments',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                    );
+                  }),
+              ],
+            ),
           ),
-          const SizedBox(height: 12),
+        );
+      },
+    );
+  }
 
-          if (allAppts.isEmpty)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.event_busy_rounded, color: AppTheme.textMuted, size: 24),
-                  SizedBox(width: 12),
-                  Text('No upcoming patient appointments booked yet.', style: TextStyle(color: AppTheme.textMuted, fontSize: 13)),
-                ],
-              ),
-            )
-          else
-            ...allAppts.take(10).map((a) {
-              return Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFE2E8F0)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 18),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        '${a.patientName} with ${a.assignedDoctorName ?? "Assigned Doctor"}',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+  Widget _buildDesktopAppointmentsTable(List<AdminAppointmentItem> appointments) {
+    return Container(
+      key: const Key('admin_appointments_desktop_table'),
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          showCheckboxColumn: false,
+          columnSpacing: 18,
+          dataRowMinHeight: 62,
+          dataRowMaxHeight: 78,
+          headingRowColor: WidgetStateProperty.all(const Color(0xFFF8FAFC)),
+          columns: const [
+            DataColumn(label: Text('Patient', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12))),
+            DataColumn(label: Text('Selected Doctor', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12))),
+            DataColumn(label: Text('Clinic', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12))),
+            DataColumn(label: Text('Appt. Date & Time', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12))),
+            DataColumn(label: Text('Booked On', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12))),
+            DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12))),
+            DataColumn(label: Text('Action', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12))),
+          ],
+          rows: appointments.map((item) {
+            final statusColors = adminStatusColors(item.status);
+            final displayDoc = item.dentistName.isNotEmpty ? item.dentistName : 'Doctor Unavailable';
+            final displaySpec = item.doctorSpecialty.isNotEmpty ? item.doctorSpecialty : 'Specialty Not Listed';
+            final displayClinic = item.clinicName.isNotEmpty ? item.clinicName : 'Clinic Not Listed';
+            return DataRow(
+              onSelectChanged: (_) => showAdminAppointmentDetailsSheet(context, item, canViewPhone: true),
+              cells: [
+                DataCell(
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 165),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.patientName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5, color: AppTheme.textDark),
+                        ),
+                        Text(
+                          item.phone.isNotEmpty ? item.phone : 'No mobile',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
+                        ),
+                      ],
                     ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFEFF6FF),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        '${a.confirmedDate ?? a.submittedAt.toIso8601String().split('T').first} • ${a.confirmedTimeSlot}',
-                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
-                      ),
+                  ),
+                ),
+                DataCell(
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 215),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        AdminDoctorAvatar(
+                          doctorName: displayDoc,
+                          photoBytes: item.doctorPhotoBytes,
+                          photoUrl: item.doctorPhotoUrl,
+                          radius: 16,
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                displayDoc,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: AppTheme.gsNavy),
+                              ),
+                              Text(
+                                displaySpec,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                DataCell(
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 150),
+                    child: Text(
+                      displayClinic,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12, color: AppTheme.textDark, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+                DataCell(
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 155),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          formatAdminAppointmentDate(item.dateRaw),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: AppTheme.textDark),
+                        ),
+                        Text(
+                          item.timeSlot.isNotEmpty ? item.timeSlot : 'Time not set',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: AppTheme.primaryBlue),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                DataCell(
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 145),
+                    child: Text(
+                      formatAdminCreatedDateTime(item.createdAtRaw),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
+                    ),
+                  ),
+                ),
+                DataCell(
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: statusColors.bg,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      adminStatusLabel(item.status),
+                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: statusColors.fg),
+                    ),
+                  ),
+                ),
+                DataCell(
+                  TextButton(
+                    onPressed: () => showAdminAppointmentDetailsSheet(context, item, canViewPhone: true),
+                    child: const Text('Details', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+                  ),
+                ),
+              ],
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResponsiveAppointmentCard(AdminAppointmentItem item) {
+    final statusColors = adminStatusColors(item.status);
+    final isExpanded = _expandedAppointmentIds.contains(item.id);
+    final displayDoc = item.dentistName.isNotEmpty ? item.dentistName : 'Doctor Unavailable';
+    final displaySpec = item.doctorSpecialty.isNotEmpty ? item.doctorSpecialty : 'Specialty Not Listed';
+    final displayClinic = item.clinicName.isNotEmpty ? item.clinicName : 'Clinic Not Listed';
+
+    return Container(
+      key: Key('admin_schedule_appointment_card_${item.id}'),
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.025), blurRadius: 8, offset: const Offset(0, 3)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Patient Name + Status Badge
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.patientName,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.textDark),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      item.phone.isNotEmpty ? item.phone : 'Mobile not provided',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12.5, color: AppTheme.textMedium),
                     ),
                   ],
                 ),
-              );
-            }),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: statusColors.bg,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  adminStatusLabel(item.status),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: statusColors.fg),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          // Selected Doctor Tile (Photo + Name + Specialization + Clinic)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Row(
+              children: [
+                AdminDoctorAvatar(
+                  doctorName: displayDoc,
+                  photoBytes: item.doctorPhotoBytes,
+                  photoUrl: item.doctorPhotoUrl,
+                  radius: 19,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        displayDoc,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: AppTheme.gsNavy),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        displaySpec,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12, color: AppTheme.textMedium, fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        displayClinic,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          // Appointment Date & Time + Booking Created Time
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0x14012A58),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '${formatAdminAppointmentDate(item.dateRaw)} • ${item.timeSlot.isNotEmpty ? item.timeSlot : "Time not set"}',
+                  style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: AppTheme.primaryBlue),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Booked: ${formatAdminCreatedDateTime(item.createdAtRaw)}',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
+                ),
+              ),
+            ],
+          ),
+
+          if (isExpanded) ...[
+            const Divider(height: 18, color: Color(0xFFE2E8F0)),
+            if (item.treatment.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  'Treatment: ${item.treatment}',
+                  style: const TextStyle(fontSize: 12, color: AppTheme.textDark, fontWeight: FontWeight.w600),
+                ),
+              ),
+            if (item.notes.isNotEmpty)
+              Text(
+                'Notes: ${item.notes}',
+                style: const TextStyle(fontSize: 12, color: AppTheme.textMedium),
+              ),
+          ],
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton.icon(
+                onPressed: () {
+                  setState(() {
+                    if (isExpanded) {
+                      _expandedAppointmentIds.remove(item.id);
+                    } else {
+                      _expandedAppointmentIds.add(item.id);
+                    }
+                  });
+                },
+                icon: Icon(isExpanded ? Icons.expand_less_rounded : Icons.expand_more_rounded, size: 18),
+                label: Text(isExpanded ? 'Less' : 'More', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+              ),
+              TextButton(
+                onPressed: () => showAdminAppointmentDetailsSheet(context, item, canViewPhone: true),
+                child: const Text('Full Details', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppTheme.gsNavy)),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -2441,23 +2982,23 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFF0284C7).withValues(alpha: 0.25),
+                                      color: const Color(0xFFFE3434).withValues(alpha: 0.25),
                                       borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(color: const Color(0xFF38BDF8), width: 0.8),
+                                      border: Border.all(color: const Color(0xFFFE3434), width: 0.8),
                                     ),
                                     child: Text(
                                       'Doctor: $doctorName',
-                                      style: const TextStyle(color: Color(0xFF38BDF8), fontWeight: FontWeight.bold, fontSize: 13),
+                                      style: const TextStyle(color: Color(0xFFFE3434), fontWeight: FontWeight.bold, fontSize: 13),
                                     ),
                                   ),
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                                      color: const Color(0xFF012A58).withValues(alpha: 0.2),
                                       borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(color: const Color(0xFF10B981), width: 0.8),
+                                      border: Border.all(color: const Color(0xFF012A58), width: 0.8),
                                     ),
-                                    child: const Text('AUDIT LOGGED', style: TextStyle(color: Color(0xFF10B981), fontSize: 9, fontWeight: FontWeight.bold)),
+                                    child: const Text('AUDIT LOGGED', style: TextStyle(color: Color(0xFF012A58), fontSize: 9, fontWeight: FontWeight.bold)),
                                   ),
                                 ],
                               ),
@@ -2467,7 +3008,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           ),
                         ),
                         IconButton(
-                          icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFEF4444), size: 20),
+                          icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFFE3434), size: 20),
                           tooltip: 'Clear Chat History',
                           onPressed: () async {
                             final confirm = await showDialog<bool>(
@@ -2479,7 +3020,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 actions: [
                                   TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Cancel')),
                                   ElevatedButton(
-                                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
+                                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFE3434)),
                                     onPressed: () => Navigator.pop(dCtx, true),
                                     child: const Text('Clear', style: TextStyle(color: Colors.white)),
                                   ),
@@ -2556,13 +3097,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                                   constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.82),
                                   decoration: BoxDecoration(
-                                    color: isDoc ? const Color(0xFFE0F2FE) : const Color(0xFFDCFCE7),
+                                    color: isDoc ? const Color(0x14FE3434) : const Color(0x14012A58),
                                     borderRadius: BorderRadius.circular(14).copyWith(
                                       topRight: isDoc ? const Radius.circular(2) : const Radius.circular(14),
                                       topLeft: isDoc ? const Radius.circular(14) : const Radius.circular(2),
                                     ),
                                     border: Border.all(
-                                      color: isDoc ? const Color(0xFFBAE6FD) : const Color(0xFFBBF7D0),
+                                      color: isDoc ? const Color(0x40FE3434) : const Color(0x40012A58),
                                     ),
                                     boxShadow: [
                                       BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 4, offset: const Offset(0, 2)),
@@ -2579,14 +3120,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                           Icon(
                                             isDoc ? Icons.medical_services_rounded : Icons.person_rounded,
                                             size: 13,
-                                            color: isDoc ? const Color(0xFF0284C7) : const Color(0xFF16A34A),
+                                            color: isDoc ? const Color(0xFFFE3434) : const Color(0xFFFE3434),
                                           ),
                                           Text(
                                             '$fromName ($fromRole)',
                                             style: TextStyle(
                                               fontSize: 11,
                                               fontWeight: FontWeight.bold,
-                                              color: isDoc ? const Color(0xFF0284C7) : const Color(0xFF16A34A),
+                                              color: isDoc ? const Color(0xFFFE3434) : const Color(0xFFFE3434),
                                             ),
                                           ),
                                           const Icon(Icons.arrow_forward_rounded, size: 11, color: Color(0xFF94A3B8)),
@@ -2595,7 +3136,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                             style: TextStyle(
                                               fontSize: 11,
                                               fontWeight: FontWeight.w600,
-                                              color: isDoc ? const Color(0xFF0F766E) : const Color(0xFF0369A1),
+                                              color: isDoc ? const Color(0xFF012A58) : const Color(0xFF012A58),
                                             ),
                                           ),
                                         ],
@@ -2705,10 +3246,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           leading: Container(
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF3B82F6).withOpacity(0.1),
+                              color: const Color(0xFFFE3434).withOpacity(0.1),
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(Icons.security_rounded, size: 18, color: Color(0xFF3B82F6)),
+                            child: const Icon(Icons.security_rounded, size: 18, color: Color(0xFFFE3434)),
                           ),
                           title: Text(
                             action.toString().replaceAll('_', ' '),
@@ -2815,7 +3356,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               icon: const Icon(Icons.history_rounded, size: 16),
                               label: const Text('Audit Trail', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF3B82F6),
+                                backgroundColor: const Color(0xFFFE3434),
                                 foregroundColor: Colors.white,
                                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -2857,7 +3398,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 icon: const Icon(Icons.history_rounded, size: 16),
                                 label: const Text('Audit Trail', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF3B82F6),
+                                  backgroundColor: const Color(0xFFFE3434),
                                   foregroundColor: Colors.white,
                                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -2882,19 +3423,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                                color: const Color(0xFF012A58).withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: const Color(0xFF10B981), width: 0.8),
+                                border: Border.all(color: const Color(0xFF012A58), width: 0.8),
                               ),
                               child: const Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(Icons.shield_rounded, color: Color(0xFF10B981), size: 14),
+                                  Icon(Icons.shield_rounded, color: Color(0xFF012A58), size: 14),
                                   SizedBox(width: 6),
                                   Flexible(
                                     child: Text(
                                       'Sub-Admins Strictly Restricted (403 Forbidden)',
-                                      style: TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.bold),
+                                      style: TextStyle(color: Color(0xFF012A58), fontSize: 11, fontWeight: FontWeight.bold),
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
@@ -3100,7 +3641,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(
-                    colors: [Color(0xFF6366F1), Color(0xFF818CF8)],
+                    colors: [Color(0xFFFE3434), Color(0xFFFE3434)],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
@@ -3170,7 +3711,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     icon: const Icon(Icons.person_add_rounded, size: 16),
                     label: const Text('+ Add Sub-Admin', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF6366F1),
+                      backgroundColor: const Color(0xFFFE3434),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -3208,10 +3749,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                       Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF6366F1).withValues(alpha: 0.08),
+                          color: const Color(0xFFFE3434).withValues(alpha: 0.08),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.supervisor_account_outlined, size: 40, color: Color(0xFF6366F1)),
+                        child: const Icon(Icons.supervisor_account_outlined, size: 40, color: Color(0xFFFE3434)),
                       ),
                       const SizedBox(height: 14),
                       Text(
@@ -3230,7 +3771,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           icon: const Icon(Icons.person_add_rounded, size: 16),
                           label: const Text('Create First Sub-Admin', style: TextStyle(fontWeight: FontWeight.bold)),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF6366F1),
+                            backgroundColor: const Color(0xFFFE3434),
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -3283,7 +3824,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: isActive ? const Color(0xFFE2E8F0) : const Color(0xFFFCA5A5)),
+                        border: Border.all(color: isActive ? const Color(0xFFE2E8F0) : const Color(0x40FE3434)),
                         boxShadow: [
                           BoxShadow(
                             color: Colors.black.withValues(alpha: 0.03),
@@ -3300,7 +3841,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             children: [
                               CircleAvatar(
                                 radius: 22,
-                                backgroundColor: isActive ? const Color(0xFF6366F1) : const Color(0xFF94A3B8),
+                                backgroundColor: isActive ? const Color(0xFFFE3434) : const Color(0xFF94A3B8),
                                 child: Text(
                                   initials.isNotEmpty ? initials : 'SA',
                                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
@@ -3324,7 +3865,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                         Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                           decoration: BoxDecoration(
-                                            color: isActive ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E8),
+                                            color: isActive ? const Color(0x14012A58) : const Color(0x14FE3434),
                                             borderRadius: BorderRadius.circular(8),
                                           ),
                                           child: Text(
@@ -3332,7 +3873,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                             style: TextStyle(
                                               fontSize: 10,
                                               fontWeight: FontWeight.bold,
-                                              color: isActive ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+                                              color: isActive ? const Color(0xFFFE3434) : const Color(0xFFFE3434),
                                             ),
                                           ),
                                         ),
@@ -3349,7 +3890,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               ),
                               Switch(
                                 value: isActive,
-                                activeThumbColor: const Color(0xFF10B981),
+                                activeThumbColor: const Color(0xFF012A58),
                                 onChanged: (val) async {
                                   final newStatus = val ? 'ACTIVE' : 'INACTIVE';
                                   _problemService.updateSubAdminStatusLocally(saId, newStatus);
@@ -3363,7 +3904,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
                                         content: Text(val ? '✓ Sub-Admin "$name" activated.' : '⛔ Sub-Admin "$name" deactivated.'),
-                                        backgroundColor: val ? const Color(0xFF10B981) : const Color(0xFFD97706),
+                                        backgroundColor: val ? const Color(0xFF012A58) : const Color(0xFFFE3434),
                                         duration: const Duration(seconds: 2),
                                       ),
                                     );
@@ -3384,7 +3925,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               const SizedBox(width: 8),
                               Expanded(
                                 child: permissions.isEmpty
-                                    ? const Text('None assigned (Restricted)', style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Color(0xFFDC2626)))
+                                    ? const Text('None assigned (Restricted)', style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Color(0xFFFE3434)))
                                     : Wrap(
                                         spacing: 6,
                                         runSpacing: 6,
@@ -3392,13 +3933,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                           return Container(
                                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                             decoration: BoxDecoration(
-                                              color: const Color(0xFFEEF2FF),
+                                              color: const Color(0x14FE3434),
                                               borderRadius: BorderRadius.circular(8),
-                                              border: Border.all(color: const Color(0xFFC7D2FE)),
+                                              border: Border.all(color: const Color(0x40FE3434)),
                                             ),
                                             child: Text(
                                               AppPermissions.getLabel(p),
-                                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF4338CA)),
+                                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF012A58)),
                                             ),
                                           );
                                         }).toList(),
@@ -3492,7 +4033,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
                                         content: Text('✓ Districts updated for "$name".'),
-                                        backgroundColor: const Color(0xFF10B981),
+                                        backgroundColor: const Color(0xFF012A58),
                                       ),
                                     );
                                   }
@@ -3502,8 +4043,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 icon: const Icon(Icons.history_rounded, size: 13),
                                 label: const Text('History', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                                 style: OutlinedButton.styleFrom(
-                                  foregroundColor: const Color(0xFF0284C7),
-                                  side: const BorderSide(color: Color(0xFF0284C7)),
+                                  foregroundColor: const Color(0xFFFE3434),
+                                  side: const BorderSide(color: Color(0xFFFE3434)),
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                 ),
@@ -3513,8 +4054,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 icon: const Icon(Icons.edit_rounded, size: 13),
                                 label: const Text('Edit Roles', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                                 style: OutlinedButton.styleFrom(
-                                  foregroundColor: const Color(0xFF6366F1),
-                                  side: const BorderSide(color: Color(0xFF6366F1)),
+                                  foregroundColor: const Color(0xFFFE3434),
+                                  side: const BorderSide(color: Color(0xFFFE3434)),
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                 ),
@@ -3526,10 +4067,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 child: Container(
                                   padding: const EdgeInsets.all(7),
                                   decoration: BoxDecoration(
-                                    color: Colors.red.withValues(alpha: 0.08),
+                                    color: Color(0xFFFE3434).withValues(alpha: 0.08),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-                                  child: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 16),
+                                  child: const Icon(Icons.delete_outline_rounded, color: Color(0xFFFE3434), size: 16),
                                 ),
                               ),
                             ],
@@ -3554,9 +4095,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF6366F1) : Colors.white,
+          color: isSelected ? const Color(0xFFFE3434) : Colors.white,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: isSelected ? const Color(0xFF6366F1) : const Color(0xFFE2E8F0)),
+          border: Border.all(color: isSelected ? const Color(0xFFFE3434) : const Color(0xFFE2E8F0)),
         ),
         child: Text(
           label,
@@ -3611,9 +4152,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   ),
                 ],
               ),
-              content: SizedBox(
-                width: 480,
-                height: 360,
+              content: Container(
+                width: double.maxFinite,
+                constraints: const BoxConstraints(maxWidth: 480, maxHeight: 360),
                 child: snapshot.connectionState == ConnectionState.waiting
                     ? const Center(child: CircularProgressIndicator(color: Color(0xFF012A58)))
                     : (snapshot.data == null || snapshot.data!.isEmpty)
@@ -3674,7 +4215,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: Row(
           children: [
-            const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 22),
+            const Icon(Icons.warning_amber_rounded, color: Color(0xFFFE3434), size: 22),
             const SizedBox(width: 8),
             Expanded(
               child: Text('Delete $name?', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), overflow: TextOverflow.ellipsis),
@@ -3687,7 +4228,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
           ElevatedButton.icon(
             icon: const Icon(Icons.delete_forever_rounded, size: 16),
             label: const Text('Delete Sub-Admin', style: TextStyle(fontWeight: FontWeight.bold)),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: Color(0xFFFE3434), foregroundColor: Colors.white),
             onPressed: () async {
               Navigator.of(ctx).pop();
               _problemService.removeSubAdminLocally(subAdminId);
@@ -3699,7 +4240,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text('🗑️ Sub-Admin "$name" removed successfully.'),
-                    backgroundColor: Colors.red,
+                    backgroundColor: Color(0xFFFE3434),
                     duration: const Duration(seconds: 2),
                   ),
                 );
@@ -3759,10 +4300,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF6366F1).withValues(alpha: 0.12),
+                            color: const Color(0xFFFE3434).withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: const Icon(Icons.shield_outlined, color: Color(0xFF6366F1), size: 22),
+                          child: const Icon(Icons.shield_outlined, color: Color(0xFFFE3434), size: 22),
                         ),
                         const SizedBox(width: 12),
                         const Expanded(
@@ -3964,7 +4505,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                       },
                                     ),
                                     TextButton(
-                                      child: const Text('Clear', style: TextStyle(fontSize: 11, color: Colors.red)),
+                                      child: const Text('Clear', style: TextStyle(fontSize: 11, color: Color(0xFFFE3434))),
                                       onPressed: () => setModalState(() => selectedPerms.clear()),
                                     ),
                                   ],
@@ -4006,7 +4547,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                         contentPadding: EdgeInsets.zero,
                                         title: Text(perm.label, style: const TextStyle(fontSize: 12)),
                                         value: isChecked,
-                                        activeColor: const Color(0xFF6366F1),
+                                        activeColor: const Color(0xFFFE3434),
                                         onChanged: (val) {
                                           setModalState(() {
                                             if (val == true) {
@@ -4037,7 +4578,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             : const Icon(Icons.check_circle_rounded, size: 18),
                         label: Text(isLoading ? 'Creating Sub-Admin...' : 'Create Sub-Admin Account', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF6366F1),
+                          backgroundColor: const Color(0xFFFE3434),
                           foregroundColor: Colors.white,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
@@ -4052,7 +4593,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
                                 if (name.isEmpty || phone.isEmpty) {
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('⚠️ Please fill in Full Name and Mobile Phone Number.'), backgroundColor: Color(0xFFD97706)),
+                                    const SnackBar(content: Text('⚠️ Please fill in Full Name and Mobile Phone Number.'), backgroundColor: Color(0xFFFE3434)),
                                   );
                                   return;
                                 }
@@ -4082,12 +4623,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
                                         content: Text('✅ Sub-Admin "$name" created successfully with ${selectedPerms.length} permissions.'),
-                                        backgroundColor: const Color(0xFF10B981),
+                                        backgroundColor: const Color(0xFF012A58),
                                       ),
                                     );
                                   } else {
                                     ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('⚠️ ${res['message'] ?? 'Notice during creation'}'), backgroundColor: const Color(0xFFD97706)),
+                                      SnackBar(content: Text('⚠️ ${res['message'] ?? 'Notice during creation'}'), backgroundColor: const Color(0xFFFE3434)),
                                     );
                                   }
                                 } catch (e) {
@@ -4095,7 +4636,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   if (!dialogCtx.mounted) return;
                                   Navigator.of(dialogCtx).pop();
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('⚠️ Error creating Sub-Admin: $e'), backgroundColor: const Color(0xFFEF4444)),
+                                    SnackBar(content: Text('⚠️ Error creating Sub-Admin: $e'), backgroundColor: const Color(0xFFFE3434)),
                                   );
                                 }
                               },
@@ -4151,10 +4692,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF6366F1).withValues(alpha: 0.12),
+                            color: const Color(0xFFFE3434).withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: const Icon(Icons.edit_rounded, color: Color(0xFF6366F1), size: 22),
+                          child: const Icon(Icons.edit_rounded, color: Color(0xFFFE3434), size: 22),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -4200,7 +4741,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     text: 'Full Name',
                                     style: TextStyle(color: Color(0xFF0F172A)),
                                     children: [
-                                      TextSpan(text: ' *', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                                      TextSpan(text: ' *', style: TextStyle(color: Color(0xFFFE3434), fontWeight: FontWeight.bold)),
                                     ],
                                   ),
                                 ),
@@ -4224,7 +4765,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     text: 'Contact Number',
                                     style: TextStyle(color: Color(0xFF0F172A)),
                                     children: [
-                                      TextSpan(text: ' *', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                                      TextSpan(text: ' *', style: TextStyle(color: Color(0xFFFE3434), fontWeight: FontWeight.bold)),
                                     ],
                                   ),
                                 ),
@@ -4265,14 +4806,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 ChoiceChip(
                                   label: const Text('Active'),
                                   selected: status == 'ACTIVE',
-                                  selectedColor: const Color(0xFFDCFCE7),
+                                  selectedColor: const Color(0x14012A58),
                                   onSelected: (val) => setModalState(() => status = 'ACTIVE'),
                                 ),
                                 const SizedBox(width: 8),
                                 ChoiceChip(
                                   label: const Text('Deactivated'),
                                   selected: status != 'ACTIVE',
-                                  selectedColor: const Color(0xFFFEE2E2),
+                                  selectedColor: const Color(0x14FE3434),
                                   onSelected: (val) => setModalState(() => status = 'INACTIVE'),
                                 ),
                               ],
@@ -4299,7 +4840,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                       },
                                     ),
                                     TextButton(
-                                      child: const Text('Clear', style: TextStyle(fontSize: 11, color: Colors.red)),
+                                      child: const Text('Clear', style: TextStyle(fontSize: 11, color: Color(0xFFFE3434))),
                                       onPressed: () => setModalState(() => selectedPerms.clear()),
                                     ),
                                   ],
@@ -4340,7 +4881,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                         contentPadding: EdgeInsets.zero,
                                         title: Text(perm.label, style: const TextStyle(fontSize: 12)),
                                         value: isChecked,
-                                        activeColor: const Color(0xFF6366F1),
+                                        activeColor: const Color(0xFFFE3434),
                                         onChanged: (val) {
                                           setModalState(() {
                                             if (val == true) {
@@ -4371,7 +4912,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             : const Icon(Icons.save_rounded, size: 18),
                         label: Text(isLoading ? 'Saving Changes...' : 'Save Sub-Admin Changes', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF6366F1),
+                          backgroundColor: const Color(0xFFFE3434),
                           foregroundColor: Colors.white,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
@@ -4416,12 +4957,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
                                         content: Text('✅ Sub-Admin "${nameCtrl.text.trim()}" updated successfully.'),
-                                        backgroundColor: const Color(0xFF10B981),
+                                        backgroundColor: const Color(0xFF012A58),
                                       ),
                                     );
                                   } else {
                                     ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('⚠️ ${res['message'] ?? 'Notice during update'}'), backgroundColor: const Color(0xFFD97706)),
+                                      SnackBar(content: Text('⚠️ ${res['message'] ?? 'Notice during update'}'), backgroundColor: const Color(0xFFFE3434)),
                                     );
                                   }
                                 } catch (e) {
@@ -4429,7 +4970,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   if (!dialogCtx.mounted) return;
                                   Navigator.of(dialogCtx).pop();
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('⚠️ Error updating Sub-Admin: $e'), backgroundColor: const Color(0xFFEF4444)),
+                                    SnackBar(content: Text('⚠️ Error updating Sub-Admin: $e'), backgroundColor: const Color(0xFFFE3434)),
                                   );
                                 }
                               },
@@ -4473,12 +5014,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                      color: const Color(0xFF012A58).withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
                       '${clinics.length} Active',
-                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0D9488)),
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF012A58)),
                     ),
                   ),
                 ],
@@ -4496,10 +5037,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   OutlinedButton.icon(
-                    icon: const Icon(Icons.dashboard_customize_rounded, size: 15, color: Color(0xFF0D9488)),
-                    label: const Text('Open Clinic Dashboard', style: TextStyle(color: Color(0xFF0D9488), fontWeight: FontWeight.bold, fontSize: 11.5)),
+                    icon: const Icon(Icons.dashboard_customize_rounded, size: 15, color: Color(0xFF012A58)),
+                    label: const Text('Open Clinic Dashboard', style: TextStyle(color: Color(0xFF012A58), fontWeight: FontWeight.bold, fontSize: 11.5)),
                     style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Color(0xFF0D9488)),
+                      side: const BorderSide(color: Color(0xFF012A58)),
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
@@ -4515,7 +5056,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     icon: const Icon(Icons.add_location_alt_rounded, size: 15, color: Colors.white),
                     label: const Text('+ Register New Clinic', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11.5)),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF0D9488),
+                      backgroundColor: const Color(0xFF012A58),
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
@@ -4546,7 +5087,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   ElevatedButton.icon(
                     icon: const Icon(Icons.add, size: 16),
                     label: const Text('Add Clinic Now'),
-                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D9488)),
+                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF012A58)),
                     onPressed: () => _showRegisterClinicModal(context),
                   )
                 ],
@@ -4598,10 +5139,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   Container(
                                     padding: const EdgeInsets.all(10),
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                                      color: const Color(0xFF012A58).withValues(alpha: 0.1),
                                       shape: BoxShape.circle,
                                     ),
-                                    child: const Icon(Icons.local_hospital_rounded, color: Color(0xFF0D9488), size: 22),
+                                    child: const Icon(Icons.local_hospital_rounded, color: Color(0xFF012A58), size: 22),
                                   ),
                                   const SizedBox(width: 12),
                                   Expanded(
@@ -4629,10 +5170,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                                        color: const Color(0xFF012A58).withValues(alpha: 0.1),
                                         borderRadius: BorderRadius.circular(8),
                                       ),
-                                      child: const Text('VERIFIED', style: TextStyle(color: Color(0xFF10B981), fontSize: 10, fontWeight: FontWeight.bold)),
+                                      child: const Text('VERIFIED', style: TextStyle(color: Color(0xFF012A58), fontSize: 10, fontWeight: FontWeight.bold)),
                                     ),
                                 ],
                               ),
@@ -4641,18 +5182,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF0D9488).withValues(alpha: 0.08),
+                                    color: const Color(0xFF012A58).withValues(alpha: 0.08),
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      const Icon(Icons.medical_services_outlined, size: 12, color: Color(0xFF0D9488)),
+                                      const Icon(Icons.medical_services_outlined, size: 12, color: Color(0xFF012A58)),
                                       const SizedBox(width: 4),
                                       Flexible(
                                         child: Text(
                                           '${associatedDoctors.length} Specialist${associatedDoctors.length > 1 ? 's' : ''}: ${associatedDoctors.map((d) => d.name).take(2).join(', ')}${associatedDoctors.length > 2 ? '...' : ''}',
-                                          style: const TextStyle(fontSize: 10.5, color: Color(0xFF0D9488), fontWeight: FontWeight.w600),
+                                          style: const TextStyle(fontSize: 10.5, color: Color(0xFF012A58), fontWeight: FontWeight.w600),
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                         ),
@@ -4698,7 +5239,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 children: [
                                   Row(
                                     children: [
-                                      const Icon(Icons.star_rounded, size: 16, color: Color(0xFFF59E0B)),
+                                      const Icon(Icons.star_rounded, size: 16, color: Color(0xFFFE3434)),
                                       const SizedBox(width: 4),
                                       Text('${clinic.rating}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                                       Text(' (${clinic.reviewsCount} reviews)', style: const TextStyle(fontSize: 11, color: Colors.grey)),
@@ -4722,17 +5263,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                         child: Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
                                           decoration: BoxDecoration(
-                                            color: const Color(0xFF0D9488).withValues(alpha: 0.12),
+                                            color: const Color(0xFF012A58).withValues(alpha: 0.12),
                                             borderRadius: BorderRadius.circular(8),
                                           ),
                                           child: const Row(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
-                                              Icon(Icons.person_add_alt_1_rounded, size: 12, color: Color(0xFF0D9488)),
+                                              Icon(Icons.person_add_alt_1_rounded, size: 12, color: Color(0xFF012A58)),
                                               SizedBox(width: 4),
                                               Text(
                                                 '+ Add Doctor',
-                                                style: TextStyle(fontSize: 10.5, color: Color(0xFF0D9488), fontWeight: FontWeight.bold),
+                                                style: TextStyle(fontSize: 10.5, color: Color(0xFF012A58), fontWeight: FontWeight.bold),
                                               ),
                                             ],
                                           ),
@@ -4742,7 +5283,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                         decoration: BoxDecoration(
-                                          color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                                          color: const Color(0xFF012A58).withValues(alpha: 0.1),
                                           borderRadius: BorderRadius.circular(8),
                                         ),
                                         child: const Row(
@@ -4750,10 +5291,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                           children: [
                                             Text(
                                               'Full Details',
-                                              style: TextStyle(fontSize: 11, color: Color(0xFF0D9488), fontWeight: FontWeight.bold),
+                                              style: TextStyle(fontSize: 11, color: Color(0xFF012A58), fontWeight: FontWeight.bold),
                                             ),
                                             SizedBox(width: 3),
-                                            Icon(Icons.arrow_forward_rounded, size: 12, color: Color(0xFF0D9488)),
+                                            Icon(Icons.arrow_forward_rounded, size: 12, color: Color(0xFF012A58)),
                                           ],
                                         ),
                                       ),
@@ -4804,10 +5345,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF0D9488).withValues(alpha: 0.12),
+                        color: const Color(0xFF012A58).withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(14),
                       ),
-                      child: const Icon(Icons.local_hospital_rounded, color: Color(0xFF0D9488), size: 24),
+                      child: const Icon(Icons.local_hospital_rounded, color: Color(0xFF012A58), size: 24),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -4829,7 +5370,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
                                 decoration: BoxDecoration(
-                                  color: clinic.verified ? const Color(0xFF10B981).withValues(alpha: 0.12) : const Color(0xFFF59E0B).withValues(alpha: 0.12),
+                                  color: clinic.verified ? const Color(0xFF012A58).withValues(alpha: 0.12) : const Color(0xFFFE3434).withValues(alpha: 0.12),
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Row(
@@ -4838,7 +5379,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                     Icon(
                                       clinic.verified ? Icons.verified_rounded : Icons.pending_rounded,
                                       size: 12,
-                                      color: clinic.verified ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                                      color: clinic.verified ? const Color(0xFF012A58) : const Color(0xFFFE3434),
                                     ),
                                     const SizedBox(width: 4),
                                     Text(
@@ -4846,7 +5387,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                       style: TextStyle(
                                         fontSize: 10,
                                         fontWeight: FontWeight.bold,
-                                        color: clinic.verified ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                                        color: clinic.verified ? const Color(0xFF012A58) : const Color(0xFFFE3434),
                                       ),
                                     ),
                                   ],
@@ -4855,7 +5396,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(Icons.star_rounded, size: 15, color: Color(0xFFF59E0B)),
+                                  const Icon(Icons.star_rounded, size: 15, color: Color(0xFFFE3434)),
                                   const SizedBox(width: 2),
                                   Text(
                                     '${clinic.rating} (${clinic.reviewsCount} reviews)',
@@ -4904,7 +5445,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   const Expanded(
                                     child: Row(
                                       children: [
-                                        Icon(Icons.location_on_rounded, size: 15, color: Color(0xFF0D9488)),
+                                        Icon(Icons.location_on_rounded, size: 15, color: Color(0xFF012A58)),
                                         SizedBox(width: 6),
                                         Flexible(
                                           child: Text(
@@ -4925,7 +5466,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                         const SnackBar(
                                           content: Text('📋 Clinic address copied to clipboard!'),
                                           duration: Duration(seconds: 2),
-                                          backgroundColor: Color(0xFF0D9488),
+                                          backgroundColor: Color(0xFF012A58),
                                         ),
                                       );
                                     },
@@ -4940,9 +5481,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                       child: const Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          Icon(Icons.copy_rounded, size: 11, color: Color(0xFF0D9488)),
+                                          Icon(Icons.copy_rounded, size: 11, color: Color(0xFF012A58)),
                                           SizedBox(width: 3),
-                                          Text('Copy', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFF0D9488))),
+                                          Text('Copy', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFF012A58))),
                                         ],
                                       ),
                                     ),
@@ -4982,7 +5523,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(Icons.check_circle_rounded, size: 13, color: Color(0xFF10B981)),
+                                    const Icon(Icons.check_circle_rounded, size: 13, color: Color(0xFF012A58)),
                                     const SizedBox(width: 5),
                                     Text(serv, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: AppTheme.textDark)),
                                   ],
@@ -5019,7 +5560,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF0D9488),
+                                  color: const Color(0xFF012A58),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: const Row(
@@ -5042,18 +5583,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           Container(
                             padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFFEF3C7).withValues(alpha: 0.5),
+                              color: const Color(0x14FE3434).withValues(alpha: 0.5),
                               borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: const Color(0xFFFDE68A)),
+                              border: Border.all(color: const Color(0x40FE3434)),
                             ),
                             child: const Row(
                               children: [
-                                Icon(Icons.info_outline_rounded, size: 18, color: Color(0xFFD97706)),
+                                Icon(Icons.info_outline_rounded, size: 18, color: Color(0xFFFE3434)),
                                 SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
                                     'No medical specialists are currently mapped to this clinic practice.',
-                                    style: TextStyle(fontSize: 11.5, color: Color(0xFF92400E)),
+                                    style: TextStyle(fontSize: 11.5, color: Color(0xFFFE3434)),
                                   ),
                                 ),
                               ],
@@ -5078,8 +5619,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   children: [
                                     CircleAvatar(
                                       radius: 20,
-                                      backgroundColor: const Color(0xFF0D9488).withValues(alpha: 0.1),
-                                      child: const Icon(Icons.person, color: Color(0xFF0D9488)),
+                                      backgroundColor: const Color(0xFF012A58).withValues(alpha: 0.1),
+                                      child: const Icon(Icons.person, color: Color(0xFF012A58)),
                                     ),
                                     const SizedBox(width: 12),
                                     Expanded(
@@ -5097,7 +5638,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                           if (doc.phone.isNotEmpty)
                                             Text(
                                               '📞 ${doc.phone}',
-                                              style: const TextStyle(fontSize: 10.5, color: Color(0xFF0D9488), fontWeight: FontWeight.w500),
+                                              style: const TextStyle(fontSize: 10.5, color: Color(0xFF012A58), fontWeight: FontWeight.w500),
                                             ),
                                         ],
                                       ),
@@ -5108,14 +5649,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                         Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                           decoration: BoxDecoration(
-                                            color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                                            color: const Color(0xFF012A58).withValues(alpha: 0.1),
                                             borderRadius: BorderRadius.circular(6),
                                           ),
-                                          child: const Text('ACTIVE', style: TextStyle(color: Color(0xFF10B981), fontSize: 9.5, fontWeight: FontWeight.bold)),
+                                          child: const Text('ACTIVE', style: TextStyle(color: Color(0xFF012A58), fontSize: 9.5, fontWeight: FontWeight.bold)),
                                         ),
                                         const SizedBox(width: 4),
                                         IconButton(
-                                          icon: const Icon(Icons.person_remove_outlined, size: 18, color: Colors.redAccent),
+                                          icon: const Icon(Icons.person_remove_outlined, size: 18, color: Color(0xFFFE3434)),
                                           tooltip: 'Remove Doctor from Clinic',
                                           padding: EdgeInsets.zero,
                                           constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
@@ -5128,7 +5669,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                 actions: [
                                                   TextButton(onPressed: () => Navigator.of(c).pop(false), child: const Text('Cancel')),
                                                   ElevatedButton(
-                                                    style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+                                                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFE3434), foregroundColor: Colors.white),
                                                     onPressed: () => Navigator.of(c).pop(true),
                                                     child: const Text('Remove'),
                                                   ),
@@ -5143,7 +5684,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                 ScaffoldMessenger.of(context).showSnackBar(
                                                   SnackBar(
                                                     content: Text('Dr. ${doc.name} was removed from ${clinic.clinicName}. Global account preserved.'),
-                                                    backgroundColor: Colors.orange.shade800,
+                                                    backgroundColor: Color(0xFFFE3434),
                                                   ),
                                                 );
                                               }
@@ -5182,10 +5723,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           ),
                         );
                       },
-                      icon: const Icon(Icons.dashboard_customize_rounded, size: 16, color: Color(0xFF0D9488)),
-                      label: const Text('Open Clinic Workspace', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: Color(0xFF0D9488))),
+                      icon: const Icon(Icons.dashboard_customize_rounded, size: 16, color: Color(0xFF012A58)),
+                      label: const Text('Open Clinic Workspace', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: Color(0xFF012A58))),
                       style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Color(0xFF0D9488)),
+                        side: const BorderSide(color: Color(0xFF012A58)),
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
@@ -5193,7 +5734,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     ElevatedButton(
                       onPressed: () => Navigator.of(dialogCtx).pop(),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0D9488),
+                        backgroundColor: const Color(0xFF012A58),
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -5237,10 +5778,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           Container(
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                              color: const Color(0xFF012A58).withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            child: const Icon(Icons.add_location_alt_rounded, color: Color(0xFF0D9488)),
+                            child: const Icon(Icons.add_location_alt_rounded, color: Color(0xFF012A58)),
                           ),
                           const SizedBox(width: 12),
                           const Expanded(
@@ -5309,7 +5850,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 : const Icon(Icons.check, size: 16, color: Colors.white),
                             label: Text(isSaving ? 'Registering...' : 'Register Clinic', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF0D9488),
+                              backgroundColor: const Color(0xFF012A58),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),
                             onPressed: isSaving
@@ -5340,14 +5881,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         SnackBar(
                                           content: Text('🎉 Clinic "$name" registered successfully!'),
-                                          backgroundColor: const Color(0xFF10B981),
+                                          backgroundColor: const Color(0xFF012A58),
                                         ),
                                       );
                                     } else {
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         const SnackBar(
                                           content: Text('❌ Failed to save clinic profile.'),
-                                          backgroundColor: Color(0xFFEF4444),
+                                          backgroundColor: Color(0xFFFE3434),
                                         ),
                                       );
                                     }
@@ -5367,83 +5908,155 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   }
 
   void _showNotificationsModal(BuildContext context, String role) {
+    _problemService.syncNotificationsFromApi(role: role);
+
     showDialog(
       context: context,
       builder: (dialogCtx) {
-        final notifs = _problemService.appNotifications
-            .where((n) => n.recipientRole == role || n.recipientId == 'ALL_ADMINS')
-            .toList();
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final notifs = _problemService.getNotificationsForRole(role);
+            final unreadCount = notifs.where((n) => !n.isRead).length;
 
-        return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 440, maxHeight: 520),
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            return Dialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 460, maxHeight: 540),
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Expanded(
-                      child: Row(
-                        children: [
-                          Icon(Icons.notifications_active_rounded, color: AppTheme.primaryBlue, size: 22),
-                          SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Admin System Notifications',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(dialogCtx).pop()),
-                  ],
-                ),
-                const Divider(height: 20),
-                if (notifs.isEmpty)
-                  const Expanded(
-                    child: Center(
-                      child: Text('No system notifications.', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                    ),
-                  )
-                else
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: notifs.length,
-                      itemBuilder: (ctx, idx) {
-                        final n = notifs[idx];
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 10),
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF8FAFC),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFFE2E8F0)),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Row(
                             children: [
-                              Text(n.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.primaryBlue)),
-                              const SizedBox(height: 2),
-                              Text(n.message, style: const TextStyle(fontSize: 11, color: AppTheme.textDark)),
-                              const SizedBox(height: 4),
-                              Text(
-                                '${n.timestamp.hour}:${n.timestamp.minute.toString().padLeft(2, '0')}',
-                                style: const TextStyle(fontSize: 9, color: Colors.grey),
+                              const Icon(Icons.notifications_active_rounded, color: AppTheme.primaryBlue, size: 22),
+                              const SizedBox(width: 8),
+                              const Expanded(
+                                child: Text(
+                                  'Admin System Notifications',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
+                              if (unreadCount > 0)
+                                Container(
+                                  margin: const EdgeInsets.only(left: 6),
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.gsRed.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    '$unreadCount unread',
+                                    style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: AppTheme.gsRed),
+                                  ),
+                                ),
                             ],
                           ),
-                        );
-                      },
+                        ),
+                        if (unreadCount > 0)
+                          TextButton(
+                            key: const Key('admin_mark_all_notifications_read'),
+                            onPressed: () async {
+                              await _problemService.markAllNotificationsRead(role);
+                              if (dialogCtx.mounted) setModalState(() {});
+                            },
+                            child: const Text(
+                              'Mark all read',
+                              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
+                            ),
+                          ),
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.of(dialogCtx).pop(),
+                        ),
+                      ],
                     ),
-                  ),
-              ],
-            ),
-          ),
+                    const Divider(height: 20),
+                    if (notifs.isEmpty)
+                      const Expanded(
+                        child: Center(
+                          child: Text('No system notifications.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                        ),
+                      )
+                    else
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: notifs.length,
+                          itemBuilder: (ctx, idx) {
+                            final n = notifs[idx];
+                            final isUnread = !n.isRead;
+                            return InkWell(
+                              key: Key('admin_notification_item_${n.id}'),
+                              onTap: () async {
+                                if (isUnread) {
+                                  await _problemService.markNotificationRead(n.id);
+                                  if (dialogCtx.mounted) setModalState(() {});
+                                }
+                              },
+                              borderRadius: BorderRadius.circular(12),
+                              child: Container(
+                                margin: const EdgeInsets.only(bottom: 10),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: isUnread ? const Color(0x14FE3434) : const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: isUnread ? const Color(0x40FE3434) : const Color(0xFFE2E8F0),
+                                    width: isUnread ? 1.4 : 1.0,
+                                  ),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            n.title,
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 13,
+                                              color: isUnread ? AppTheme.primaryBlue : AppTheme.textDark,
+                                            ),
+                                          ),
+                                        ),
+                                        if (isUnread)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: AppTheme.primaryBlue,
+                                              borderRadius: BorderRadius.circular(8),
+                                            ),
+                                            child: const Text(
+                                              'NEW',
+                                              style: TextStyle(fontSize: 8.5, color: Colors.white, fontWeight: FontWeight.bold),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(n.message, style: const TextStyle(fontSize: 11.5, color: AppTheme.textDark, height: 1.35)),
+                                    const SizedBox(height: 5),
+                                    Text(
+                                      '${n.timestamp.day}/${n.timestamp.month}/${n.timestamp.year} • ${n.timestamp.hour.toString().padLeft(2, '0')}:${n.timestamp.minute.toString().padLeft(2, '0')}',
+                                      style: const TextStyle(fontSize: 9.5, color: Colors.grey),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
         );
       },
     );
@@ -5896,7 +6509,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text('🎉 Registered ${doctor.name} successfully! Doctor can now sign in using Mobile OTP.'),
-                                  backgroundColor: const Color(0xFF10B981),
+                                  backgroundColor: const Color(0xFF012A58),
                                   duration: const Duration(seconds: 4),
                                 ),
                               );
@@ -6063,7 +6676,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text('⚡ Updated ${doc.name} (${selectedSpecialty}) profile, verification & slots!'),
-                          backgroundColor: const Color(0xFF10B981),
+                          backgroundColor: const Color(0xFF012A58),
                         ),
                       );
                     }
@@ -6085,7 +6698,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
           title: Row(
             children: [
-              const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 24),
+              const Icon(Icons.warning_amber_rounded, color: Color(0xFFFE3434), size: 24),
               const SizedBox(width: 8),
               Text('Remove ${doc.name}?', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ],
@@ -6096,14 +6709,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
             ElevatedButton.icon(
               icon: const Icon(Icons.delete_forever_rounded, size: 16),
               label: const Text('Remove Doctor', style: TextStyle(fontWeight: FontWeight.bold)),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: Color(0xFFFE3434), foregroundColor: Colors.white),
               onPressed: () {
                 _problemService.removeDoctor(doc.id);
                 Navigator.of(dialogCtx).pop();
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text('🗑️ ${doc.name} removed from platform directory.'),
-                    backgroundColor: Colors.red,
+                    backgroundColor: Color(0xFFFE3434),
                   ),
                 );
               },
@@ -6261,9 +6874,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
             children: [
               _buildMiniStatCard('Total Doctors', '${allDoctors.length}', Icons.badge_rounded, AppTheme.primaryBlue),
               const SizedBox(width: 12),
-              _buildMiniStatCard('Available Now', '${allDoctors.where((d) => d.status == 'Available').length}', Icons.check_circle_rounded, const Color(0xFF10B981)),
+              _buildMiniStatCard('Available Now', '${allDoctors.where((d) => d.status == 'Available').length}', Icons.check_circle_rounded, const Color(0xFF012A58)),
               const SizedBox(width: 12),
-              _buildMiniStatCard('Specialties', '${activeSpecs.length}', Icons.category_rounded, const Color(0xFFF59E0B)),
+              _buildMiniStatCard('Specialties', '${activeSpecs.length}', Icons.category_rounded, const Color(0xFFFE3434)),
             ],
           ),
           const SizedBox(height: 16),
@@ -6662,7 +7275,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
           title: const Row(
             children: [
-              Icon(Icons.delete_forever_rounded, color: Colors.red, size: 22),
+              Icon(Icons.delete_forever_rounded, color: Color(0xFFFE3434), size: 22),
               SizedBox(width: 8),
               Text('Remove Consultation', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ],
@@ -6680,7 +7293,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               icon: const Icon(Icons.delete_outline_rounded, size: 16),
               label: const Text('Delete Permanently'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
+                backgroundColor: Color(0xFFFE3434),
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
@@ -6692,7 +7305,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   messenger.showSnackBar(
                     SnackBar(
                       content: Text('🗑️ Consultation request for "${req.patientName}" removed successfully.'),
-                      backgroundColor: Colors.red.shade700,
+                      backgroundColor: Color(0xFFFE3434),
                       duration: const Duration(seconds: 3),
                     ),
                   );
@@ -6792,28 +7405,28 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     title: 'Total Doctors',
                     value: '${_problemService.allDoctors.length}',
                     growth: 'Verified Doctors',
-                    accentColor: const Color(0xFF10B981),
+                    accentColor: const Color(0xFF012A58),
                     icon: Icons.medical_services_rounded,
                   ),
                   _KpiCard(
                     title: 'Total Referrals',
                     value: '${_problemService.adminPatientReferrals.length}',
                     growth: 'Patient-to-Doctor',
-                    accentColor: const Color(0xFF8B5CF6),
+                    accentColor: const Color(0xFFFE3434),
                     icon: Icons.share_rounded,
                   ),
                   _KpiCard(
                     title: 'Pending Consultations',
                     value: '$pendingCount',
                     growth: 'Requires Action',
-                    accentColor: const Color(0xFFD97706),
+                    accentColor: const Color(0xFFFE3434),
                     icon: Icons.pending_actions_rounded,
                   ),
                   _KpiCard(
                     title: 'Total Sub-Admins',
                     value: '${_problemService.subAdmins.length}',
                     growth: 'Portal Sub-Admins',
-                    accentColor: const Color(0xFF6366F1),
+                    accentColor: const Color(0xFFFE3434),
                     icon: Icons.supervisor_account_rounded,
                   ),
                 ],
@@ -6864,16 +7477,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFDCFCE7),
+                        color: const Color(0x14012A58),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: const Row(
                         children: [
-                          Icon(Icons.mark_chat_read_rounded, size: 14, color: Color(0xFF16A34A)),
+                          Icon(Icons.mark_chat_read_rounded, size: 14, color: Color(0xFFFE3434)),
                           SizedBox(width: 4),
                           Text(
                             'WhatsApp',
-                            style: TextStyle(color: Color(0xFF16A34A), fontWeight: FontWeight.bold, fontSize: 11),
+                            style: TextStyle(color: Color(0xFFFE3434), fontWeight: FontWeight.bold, fontSize: 11),
                           ),
                         ],
                       ),
@@ -6932,7 +7545,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(
-                                color: isPending ? const Color(0xFFFDE68A) : const Color(0xFFE2E8F0),
+                                color: isPending ? const Color(0x40FE3434) : const Color(0xFFE2E8F0),
                                 width: isPending ? 1.4 : 1.0,
                               ),
                               boxShadow: [
@@ -6943,8 +7556,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 ),
                                 BoxShadow(
                                   color: isPending
-                                      ? const Color(0xFFF59E0B).withValues(alpha: 0.06)
-                                      : const Color(0xFF10B981).withValues(alpha: 0.05),
+                                      ? const Color(0xFFFE3434).withValues(alpha: 0.06)
+                                      : const Color(0xFF012A58).withValues(alpha: 0.05),
                                   blurRadius: 12,
                                   offset: const Offset(0, 2),
                                 ),
@@ -6963,8 +7576,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                         begin: Alignment.topCenter,
                                         end: Alignment.bottomCenter,
                                         colors: isPending
-                                            ? const [Color(0xFFF59E0B), Color(0xFFD97706)]
-                                            : const [Color(0xFF10B981), Color(0xFF059669)],
+                                            ? const [Color(0xFFFE3434), Color(0xFFFE3434)]
+                                            : const [Color(0xFF012A58), Color(0xFF012A58)],
                                       ),
                                     ),
                                   ),
@@ -6992,13 +7605,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                         begin: Alignment.topLeft,
                                                         end: Alignment.bottomRight,
                                                         colors: isPending
-                                                            ? const [Color(0xFFF59E0B), Color(0xFFD97706)]
-                                                            : const [Color(0xFF0284C7), Color(0xFF0369A1)],
+                                                            ? const [Color(0xFFFE3434), Color(0xFFFE3434)]
+                                                            : const [Color(0xFFFE3434), Color(0xFF012A58)],
                                                       ),
                                                       borderRadius: BorderRadius.circular(14),
                                                       boxShadow: [
                                                         BoxShadow(
-                                                          color: (isPending ? const Color(0xFFF59E0B) : const Color(0xFF0284C7)).withValues(alpha: 0.25),
+                                                          color: (isPending ? const Color(0xFFFE3434) : const Color(0xFFFE3434)).withValues(alpha: 0.25),
                                                           blurRadius: 8,
                                                           offset: const Offset(0, 3),
                                                         ),
@@ -7026,7 +7639,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                       ),
                                                       child: Icon(
                                                         isPending ? Icons.hourglass_top_rounded : Icons.check_circle_rounded,
-                                                        color: isPending ? const Color(0xFFD97706) : const Color(0xFF10B981),
+                                                        color: isPending ? const Color(0xFFFE3434) : const Color(0xFF012A58),
                                                         size: 13,
                                                       ),
                                                     ),
@@ -7079,13 +7692,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
                                                 decoration: BoxDecoration(
                                                   color: isSevere
-                                                      ? const Color(0xFFFEF2F2)
-                                                      : (isModerate ? const Color(0xFFFFFBEB) : const Color(0xFFF0F9FF)),
+                                                      ? const Color(0x14FE3434)
+                                                      : (isModerate ? const Color(0x14FE3434) : const Color(0x14FE3434)),
                                                   borderRadius: BorderRadius.circular(10),
                                                   border: Border.all(
                                                     color: isSevere
-                                                        ? const Color(0xFFFECACA)
-                                                        : (isModerate ? const Color(0xFFFDE68A) : const Color(0xFFBAE6FD)),
+                                                        ? const Color(0x40FE3434)
+                                                        : (isModerate ? const Color(0x40FE3434) : const Color(0x40FE3434)),
                                                     width: 1,
                                                   ),
                                                 ),
@@ -7098,8 +7711,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                       decoration: BoxDecoration(
                                                         shape: BoxShape.circle,
                                                         color: isSevere
-                                                            ? const Color(0xFFDC2626)
-                                                            : (isModerate ? const Color(0xFFD97706) : const Color(0xFF0284C7)),
+                                                            ? const Color(0xFFFE3434)
+                                                            : (isModerate ? const Color(0xFFFE3434) : const Color(0xFFFE3434)),
                                                       ),
                                                     ),
                                                     const SizedBox(width: 5),
@@ -7109,8 +7722,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                         fontSize: 10.5,
                                                         fontWeight: FontWeight.w800,
                                                         color: isSevere
-                                                            ? const Color(0xFFDC2626)
-                                                            : (isModerate ? const Color(0xFFB45309) : const Color(0xFF0369A1)),
+                                                            ? const Color(0xFFFE3434)
+                                                            : (isModerate ? const Color(0xFFFE3434) : const Color(0xFF012A58)),
                                                       ),
                                                     ),
                                                   ],
@@ -7132,7 +7745,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                               child: Row(
                                                 mainAxisSize: MainAxisSize.min,
                                                 children: [
-                                                  const Icon(Icons.location_on_rounded, size: 12, color: Color(0xFF0284C7)),
+                                                  const Icon(Icons.location_on_rounded, size: 12, color: Color(0xFFFE3434)),
                                                   const SizedBox(width: 4),
                                                   Flexible(
                                                     child: Text(
@@ -7169,9 +7782,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                     Container(
                                                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
                                                       decoration: BoxDecoration(
-                                                        color: const Color(0xFFEFF6FF),
+                                                        color: const Color(0x14012A58),
                                                         borderRadius: BorderRadius.circular(6),
-                                                        border: Border.all(color: const Color(0xFFBFDBFE)),
+                                                        border: Border.all(color: const Color(0x40012A58)),
                                                       ),
                                                       child: Row(
                                                         mainAxisSize: MainAxisSize.min,
@@ -7184,7 +7797,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                               style: const TextStyle(
                                                                 fontSize: 11,
                                                                 fontWeight: FontWeight.w800,
-                                                                color: Color(0xFF1D4ED8),
+                                                                color: Color(0xFF012A58),
                                                               ),
                                                               overflow: TextOverflow.ellipsis,
                                                             ),
@@ -7295,15 +7908,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                   padding: const EdgeInsets.all(14),
                                                   decoration: BoxDecoration(
                                                     gradient: const LinearGradient(
-                                                      colors: [Color(0xFFF0FDF4), Color(0xFFECFDF5)],
+                                                      colors: [Color(0x14012A58), Color(0x14012A58)],
                                                       begin: Alignment.topLeft,
                                                       end: Alignment.bottomRight,
                                                     ),
                                                     borderRadius: BorderRadius.circular(16),
-                                                    border: Border.all(color: const Color(0xFFA7F3D0), width: 1.2),
+                                                    border: Border.all(color: const Color(0x40012A58), width: 1.2),
                                                     boxShadow: [
                                                       BoxShadow(
-                                                        color: const Color(0xFF10B981).withValues(alpha: 0.08),
+                                                        color: const Color(0xFF012A58).withValues(alpha: 0.08),
                                                         blurRadius: 10,
                                                         offset: const Offset(0, 3),
                                                       ),
@@ -7319,10 +7932,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                           Container(
                                                             padding: const EdgeInsets.all(8),
                                                             decoration: BoxDecoration(
-                                                              color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                                                              color: const Color(0xFF012A58).withValues(alpha: 0.15),
                                                               shape: BoxShape.circle,
                                                             ),
-                                                            child: const Icon(Icons.verified_user_rounded, color: Color(0xFF059669), size: 20),
+                                                            child: const Icon(Icons.verified_user_rounded, color: Color(0xFF012A58), size: 20),
                                                           ),
                                                           const SizedBox(width: 10),
                                                           Expanded(
@@ -7334,7 +7947,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                                   style: const TextStyle(
                                                                     fontWeight: FontWeight.w900,
                                                                     fontSize: 15,
-                                                                    color: Color(0xFF065F46),
+                                                                    color: Color(0xFF012A58),
                                                                     letterSpacing: 0.1,
                                                                   ),
                                                                 ),
@@ -7347,18 +7960,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                                     Container(
                                                                       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
                                                                       decoration: BoxDecoration(
-                                                                        color: const Color(0xFFDCFCE7),
+                                                                        color: const Color(0x14012A58),
                                                                         borderRadius: BorderRadius.circular(6),
-                                                                        border: Border.all(color: const Color(0xFF86EFAC)),
+                                                                        border: Border.all(color: const Color(0x40012A58)),
                                                                       ),
                                                                       child: const Row(
                                                                         mainAxisSize: MainAxisSize.min,
                                                                         children: [
-                                                                          Icon(Icons.check_circle, size: 10, color: Color(0xFF16A34A)),
+                                                                          Icon(Icons.check_circle, size: 10, color: Color(0xFFFE3434)),
                                                                           SizedBox(width: 3),
                                                                           Text(
                                                                             'Assigned Doctor',
-                                                                            style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                                                                            style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFF012A58)),
                                                                           ),
                                                                         ],
                                                                       ),
@@ -7373,7 +7986,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                                         style: const TextStyle(
                                                                           fontSize: 11.5,
                                                                           fontWeight: FontWeight.w600,
-                                                                          color: Color(0xFF047857),
+                                                                          color: Color(0xFF012A58),
                                                                         ),
                                                                       ),
                                                                   ],
@@ -7387,7 +8000,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                       if (docClinic.isNotEmpty || docLocation.isNotEmpty || docPhone.isNotEmpty || docEmail.isNotEmpty) ...[
                                                         const Padding(
                                                           padding: EdgeInsets.symmetric(vertical: 8),
-                                                          child: Divider(color: Color(0xFFA7F3D0), height: 1, thickness: 0.8),
+                                                          child: Divider(color: Color(0x40012A58), height: 1, thickness: 0.8),
                                                         ),
                                                       ],
 
@@ -7398,10 +8011,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                           children: [
                                                             const Padding(
                                                               padding: EdgeInsets.only(top: 2),
-                                                              child: Icon(Icons.local_hospital_rounded, size: 13, color: Color(0xFF059669)),
+                                                              child: Icon(Icons.local_hospital_rounded, size: 13, color: Color(0xFF012A58)),
                                                             ),
                                                             const SizedBox(width: 6),
-                                                            const Text('Clinic: ', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF065F46))),
+                                                            const Text('Clinic: ', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF012A58))),
                                                             Expanded(
                                                               child: Text(
                                                                 docClinic,
@@ -7419,10 +8032,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                           children: [
                                                             const Padding(
                                                               padding: EdgeInsets.only(top: 2),
-                                                              child: Icon(Icons.location_on_rounded, size: 13, color: Color(0xFF059669)),
+                                                              child: Icon(Icons.location_on_rounded, size: 13, color: Color(0xFF012A58)),
                                                             ),
                                                             const SizedBox(width: 6),
-                                                            const Text('Location: ', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF065F46))),
+                                                            const Text('Location: ', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF012A58))),
                                                             Expanded(
                                                               child: Text(
                                                                 docLocation,
@@ -7438,13 +8051,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                         Row(
                                                           crossAxisAlignment: CrossAxisAlignment.center,
                                                           children: [
-                                                            const Icon(Icons.phone_in_talk_rounded, size: 13, color: Color(0xFF059669)),
+                                                            const Icon(Icons.phone_in_talk_rounded, size: 13, color: Color(0xFF012A58)),
                                                             const SizedBox(width: 6),
-                                                            const Text('Contact: ', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF065F46))),
+                                                            const Text('Contact: ', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF012A58))),
                                                             Expanded(
                                                               child: Text(
                                                                 docPhone,
-                                                                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF0284C7)),
+                                                                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFFFE3434)),
                                                               ),
                                                             ),
                                                           ],
@@ -7458,10 +8071,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                           children: [
                                                             const Padding(
                                                               padding: EdgeInsets.only(top: 2),
-                                                              child: Icon(Icons.email_outlined, size: 13, color: Color(0xFF059669)),
+                                                              child: Icon(Icons.email_outlined, size: 13, color: Color(0xFF012A58)),
                                                             ),
                                                             const SizedBox(width: 6),
-                                                            const Text('Email: ', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF065F46))),
+                                                            const Text('Email: ', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF012A58))),
                                                             Expanded(
                                                               child: Text(
                                                                 docEmail,
@@ -7485,14 +8098,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                                 decoration: BoxDecoration(
                                                                   color: Colors.white,
                                                                   borderRadius: BorderRadius.circular(6),
-                                                                  border: Border.all(color: const Color(0xFFA7F3D0)),
+                                                                  border: Border.all(color: const Color(0x40012A58)),
                                                                 ),
                                                                 child: Row(
                                                                   mainAxisSize: MainAxisSize.min,
                                                                   children: [
-                                                                    const Icon(Icons.payments_outlined, size: 11, color: Color(0xFF059669)),
+                                                                    const Icon(Icons.payments_outlined, size: 11, color: Color(0xFF012A58)),
                                                                     const SizedBox(width: 4),
-                                                                    Text('Fee: $docFee', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Color(0xFF065F46))),
+                                                                    Text('Fee: $docFee', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Color(0xFF012A58))),
                                                                   ],
                                                                 ),
                                                               ),
@@ -7502,14 +8115,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                                 decoration: BoxDecoration(
                                                                   color: Colors.white,
                                                                   borderRadius: BorderRadius.circular(6),
-                                                                  border: Border.all(color: const Color(0xFFA7F3D0)),
+                                                                  border: Border.all(color: const Color(0x40012A58)),
                                                                 ),
                                                                 child: Row(
                                                                   mainAxisSize: MainAxisSize.min,
                                                                   children: [
-                                                                    const Icon(Icons.translate_rounded, size: 11, color: Color(0xFF059669)),
+                                                                    const Icon(Icons.translate_rounded, size: 11, color: Color(0xFF012A58)),
                                                                     const SizedBox(width: 4),
-                                                                    Text(docLanguages, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Color(0xFF065F46))),
+                                                                    Text(docLanguages, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Color(0xFF012A58))),
                                                                   ],
                                                                 ),
                                                               ),
@@ -7519,14 +8132,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                                 decoration: BoxDecoration(
                                                                   color: Colors.white,
                                                                   borderRadius: BorderRadius.circular(6),
-                                                                  border: Border.all(color: const Color(0xFFA7F3D0)),
+                                                                  border: Border.all(color: const Color(0x40012A58)),
                                                                 ),
                                                                 child: Row(
                                                                   mainAxisSize: MainAxisSize.min,
                                                                   children: [
-                                                                    const Icon(Icons.star_rounded, size: 12, color: Color(0xFFF59E0B)),
+                                                                    const Icon(Icons.star_rounded, size: 12, color: Color(0xFFFE3434)),
                                                                     const SizedBox(width: 3),
-                                                                    Text(docRating, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF92400E))),
+                                                                    Text(docRating, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFFFE3434))),
                                                                   ],
                                                                 ),
                                                               ),
@@ -7534,16 +8147,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                               Container(
                                                                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                                                                 decoration: BoxDecoration(
-                                                                  color: const Color(0xFFEFF6FF),
+                                                                  color: const Color(0x14012A58),
                                                                   borderRadius: BorderRadius.circular(6),
-                                                                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                                                                  border: Border.all(color: const Color(0x40012A58)),
                                                                 ),
                                                                 child: Row(
                                                                   mainAxisSize: MainAxisSize.min,
                                                                   children: [
-                                                                    const Icon(Icons.schedule_rounded, size: 11, color: Color(0xFF1D4ED8)),
+                                                                    const Icon(Icons.schedule_rounded, size: 11, color: Color(0xFF012A58)),
                                                                     const SizedBox(width: 4),
-                                                                    Text('Slot: $timeSlot', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8))),
+                                                                    Text('Slot: $timeSlot', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF012A58))),
                                                                   ],
                                                                 ),
                                                               ),
@@ -7566,11 +8179,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                                 child: ElevatedButton(
                                                   onPressed: () => _showAssignDoctorDialog(context, req),
                                                   style: ElevatedButton.styleFrom(
-                                                    backgroundColor: isPending ? const Color(0xFF10B981) : const Color(0xFF0052CC),
+                                                    backgroundColor: isPending ? const Color(0xFF012A58) : const Color(0xFF012A58),
                                                     foregroundColor: Colors.white,
                                                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                                                     elevation: 2,
-                                                    shadowColor: (isPending ? const Color(0xFF10B981) : const Color(0xFF0052CC)).withValues(alpha: 0.35),
+                                                    shadowColor: (isPending ? const Color(0xFF012A58) : const Color(0xFF012A58)).withValues(alpha: 0.35),
                                                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                                   ),
                                                   child: Row(
@@ -7596,13 +8209,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                               const SizedBox(width: 8),
                                               Container(
                                                 decoration: BoxDecoration(
-                                                  color: const Color(0xFFFEF2F2),
+                                                  color: const Color(0x14FE3434),
                                                   borderRadius: BorderRadius.circular(12),
-                                                  border: Border.all(color: const Color(0xFFFECACA)),
+                                                  border: Border.all(color: const Color(0x40FE3434)),
                                                 ),
                                                 child: IconButton(
                                                   tooltip: 'Remove Request',
-                                                  icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFEF4444), size: 18),
+                                                  icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFFE3434), size: 18),
                                                   onPressed: () => _confirmDeleteRequest(context, req),
                                                 ),
                                               ),
@@ -7700,13 +8313,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFFEF3C7),
+                              color: const Color(0x14FE3434),
                               borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: const Color(0xFFFDE68A)),
+                              border: Border.all(color: const Color(0x40FE3434)),
                             ),
                             child: Text(
                               '$pendingCount New',
-                              style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFFD97706)),
+                              style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFFFE3434)),
                             ),
                           ),
                         ],
@@ -7723,10 +8336,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               ),
               TextButton.icon(
                 onPressed: () => setState(() => _selectedNavIndex = 11),
-                icon: const Icon(Icons.open_in_new_rounded, size: 14, color: Color(0xFF8B5CF6)),
+                icon: const Icon(Icons.open_in_new_rounded, size: 14, color: Color(0xFFFE3434)),
                 label: const Text(
                   'Full View',
-                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF8B5CF6)),
+                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFFFE3434)),
                 ),
               ),
             ],
@@ -7765,11 +8378,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 final isAccepted = ref.status == 'Accepted';
                 final isRejected = ref.status == 'Rejected';
                 final statusColor = isAccepted
-                    ? const Color(0xFF10B981)
-                    : (isRejected ? const Color(0xFFEF4444) : const Color(0xFFF59E0B));
+                    ? const Color(0xFF012A58)
+                    : (isRejected ? const Color(0xFFFE3434) : const Color(0xFFFE3434));
                 final statusBg = isAccepted
-                    ? const Color(0xFFDCFCE7)
-                    : (isRejected ? const Color(0xFFFEE2E2) : const Color(0xFFFEF3C7));
+                    ? const Color(0x14012A58)
+                    : (isRejected ? const Color(0x14FE3434) : const Color(0x14FE3434));
                 final statusText = isAccepted
                     ? '🟢 Accepted by Doctor'
                     : (isRejected ? '🔴 Declined' : '🟡 Pending Review');
@@ -7788,7 +8401,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     color: const Color(0xFFF8FAFC),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                      color: ref.status == 'Pending' ? const Color(0xFFDDD6FE) : const Color(0xFFE2E8F0),
+                      color: ref.status == 'Pending' ? const Color(0x40FE3434) : const Color(0xFFE2E8F0),
                       width: ref.status == 'Pending' ? 1.5 : 1,
                     ),
                   ),
@@ -7816,17 +8429,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFDCFCE7),
+                              color: const Color(0x14012A58),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.chat_bubble_rounded, size: 10, color: Color(0xFF16A34A)),
+                                const Icon(Icons.chat_bubble_rounded, size: 10, color: Color(0xFFFE3434)),
                                 const SizedBox(width: 3),
                                 Text(
                                   ref.whatsappStatus == 'Sent' ? 'WhatsApp Sent' : 'Queued',
-                                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF16A34A)),
+                                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFFE3434)),
                                 ),
                               ],
                             ),
@@ -7845,21 +8458,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             child: Container(
                               padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFEEF2FF),
+                                color: const Color(0x14FE3434),
                                 borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: const Color(0xFFC7D2FE)),
+                                border: Border.all(color: const Color(0x40FE3434)),
                               ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   const Row(
                                     children: [
-                                      Icon(Icons.person_pin_rounded, size: 13, color: Color(0xFF4338CA)),
+                                      Icon(Icons.person_pin_rounded, size: 13, color: Color(0xFF012A58)),
                                       SizedBox(width: 4),
                                       Expanded(
                                         child: Text(
                                           'Referring Patient',
-                                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF4338CA)),
+                                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF012A58)),
                                           overflow: TextOverflow.ellipsis,
                                         ),
                                       ),
@@ -7888,21 +8501,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             child: Container(
                               padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFF0FDF4),
+                                color: const Color(0x14012A58),
                                 borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: const Color(0xFFBBF7D0)),
+                                border: Border.all(color: const Color(0x40012A58)),
                               ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   const Row(
                                     children: [
-                                      Icon(Icons.person_rounded, size: 13, color: Color(0xFF15803D)),
+                                      Icon(Icons.person_rounded, size: 13, color: Color(0xFF012A58)),
                                       SizedBox(width: 4),
                                       Expanded(
                                         child: Text(
                                           'Referred Patient',
-                                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF012A58)),
                                           overflow: TextOverflow.ellipsis,
                                         ),
                                       ),
@@ -7942,12 +8555,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             if (patientLoc.isNotEmpty) ...[
                               Row(
                                 children: [
-                                  const Icon(Icons.location_on_outlined, size: 12, color: Color(0xFF0284C7)),
+                                  const Icon(Icons.location_on_outlined, size: 12, color: Color(0xFFFE3434)),
                                   const SizedBox(width: 4),
                                   Expanded(
                                     child: Text(
                                       'Patient Address: $patientLoc',
-                                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF0369A1)),
+                                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF012A58)),
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
@@ -7957,7 +8570,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             ],
                             Row(
                               children: [
-                                const Icon(Icons.medical_services_outlined, size: 12, color: Color(0xFF0D9488)),
+                                const Icon(Icons.medical_services_outlined, size: 12, color: Color(0xFF012A58)),
                                 const SizedBox(width: 4),
                                 Expanded(
                                   child: Text(
@@ -8059,9 +8672,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 child: CustomPaint(
                   painter: _DonutChartPainter(
                     slices: const [
-                      _DonutSlice(pct: 0.65, color: Color(0xFF0D9488)),
-                      _DonutSlice(pct: 0.25, color: Color(0xFF0052CC)),
-                      _DonutSlice(pct: 0.10, color: Color(0xFF60A5FA)),
+                      _DonutSlice(pct: 0.65, color: Color(0xFF012A58)),
+                      _DonutSlice(pct: 0.25, color: Color(0xFF012A58)),
+                      _DonutSlice(pct: 0.10, color: Color(0xFFFE3434)),
                     ],
                   ),
                 ),
@@ -8071,11 +8684,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: const [
-                    _LegendRow(color: Color(0xFF0D9488), label: 'Completed', value: '65%'),
+                    _LegendRow(color: Color(0xFF012A58), label: 'Completed', value: '65%'),
                     SizedBox(height: 8),
-                    _LegendRow(color: Color(0xFF0052CC), label: 'Scheduled', value: '25%'),
+                    _LegendRow(color: Color(0xFF012A58), label: 'Scheduled', value: '25%'),
                     SizedBox(height: 8),
-                    _LegendRow(color: Color(0xFF60A5FA), label: 'Cancelled', value: '10%'),
+                    _LegendRow(color: Color(0xFFFE3434), label: 'Cancelled', value: '10%'),
                   ],
                 ),
               ),
@@ -8249,7 +8862,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text('🎉 Registered $name successfully!'),
-                                backgroundColor: const Color(0xFF10B981),
+                                backgroundColor: const Color(0xFF012A58),
                               ),
                             );
                           }
@@ -8272,9 +8885,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   String _referralSearchQuery = '';
   String _adminReferralStatusFilter = 'All';
   bool _isRefreshingReferrals = false;
+  bool _hasTriggeredInitialReferralsSync = false;
 
   Future<void> _refreshAdminReferrals() async {
-    setState(() => _isRefreshingReferrals = true);
+    setState(() {
+      _isRefreshingReferrals = true;
+      _hasTriggeredInitialReferralsSync = true;
+    });
     await _problemService.syncAdminReferralsFromApi();
     if (mounted) {
       setState(() => _isRefreshingReferrals = false);
@@ -8285,7 +8902,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     final analytics = _problemService.adminReferralAnalytics;
     final allPatientRefs = _problemService.adminPatientReferrals;
 
-    if (allPatientRefs.isEmpty && !_isRefreshingReferrals) {
+    if (allPatientRefs.isEmpty && !_isRefreshingReferrals && !_hasTriggeredInitialReferralsSync) {
+      _hasTriggeredInitialReferralsSync = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _problemService.syncAdminReferralsFromApi();
       });
@@ -8332,14 +8950,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(
-                    colors: [Color(0xFF8B5CF6), Color(0xFF6366F1)],
+                    colors: [Color(0xFFFE3434), Color(0xFFFE3434)],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
                   borderRadius: BorderRadius.circular(14),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF8B5CF6).withValues(alpha: 0.25),
+                      color: const Color(0xFFFE3434).withValues(alpha: 0.25),
                       blurRadius: 8,
                       offset: const Offset(0, 3),
                     ),
@@ -8373,7 +8991,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     : const Icon(Icons.refresh_rounded, size: 16),
                 label: const Text('Refresh Data', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF8B5CF6),
+                  backgroundColor: const Color(0xFFFE3434),
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -8402,35 +9020,35 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     title: 'Total Referrals',
                     value: '${allPatientRefs.length}',
                     growth: 'All Referrals',
-                    accentColor: const Color(0xFF8B5CF6),
+                    accentColor: const Color(0xFFFE3434),
                     icon: Icons.share_rounded,
                   ),
                   _KpiCard(
                     title: 'Pending Review',
                     value: '$pendingCount',
                     growth: 'Awaiting Doctor',
-                    accentColor: const Color(0xFFF59E0B),
+                    accentColor: const Color(0xFFFE3434),
                     icon: Icons.hourglass_top_rounded,
                   ),
                   _KpiCard(
                     title: 'Accepted by Doctor',
                     value: '$acceptedCount',
                     growth: 'Confirmed Care',
-                    accentColor: const Color(0xFF10B981),
+                    accentColor: const Color(0xFF012A58),
                     icon: Icons.check_circle_rounded,
                   ),
                   _KpiCard(
                     title: 'Referrals Declined',
                     value: '$rejectedCount',
                     growth: 'Unavailable',
-                    accentColor: const Color(0xFFEF4444),
+                    accentColor: const Color(0xFFFE3434),
                     icon: Icons.cancel_outlined,
                   ),
                   _KpiCard(
                     title: 'WhatsApp Delivered',
                     value: '${allPatientRefs.where((r) => r.whatsappStatus == 'Sent').length}',
                     growth: 'Mobile Alerts',
-                    accentColor: const Color(0xFF25D366),
+                    accentColor: const Color(0xFFFE3434),
                     icon: Icons.chat_bubble_rounded,
                   ),
                 ],
@@ -8565,11 +9183,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     final isRejected = ref.status == 'Rejected';
 
                     final statusColor = isAccepted
-                        ? const Color(0xFF10B981)
-                        : (isRejected ? const Color(0xFFEF4444) : const Color(0xFFF59E0B));
+                        ? const Color(0xFF012A58)
+                        : (isRejected ? const Color(0xFFFE3434) : const Color(0xFFFE3434));
                     final statusBg = isAccepted
-                        ? const Color(0xFFDCFCE7)
-                        : (isRejected ? const Color(0xFFFEE2E2) : const Color(0xFFFEF3C7));
+                        ? const Color(0x14012A58)
+                        : (isRejected ? const Color(0x14FE3434) : const Color(0x14FE3434));
                     final statusText = isAccepted
                         ? '🟢 Accepted'
                         : (isRejected ? '🔴 Declined' : '🟡 Pending');
@@ -8592,11 +9210,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             children: [
                               Row(
                                 children: [
-                                  const Icon(Icons.person_pin_rounded, size: 14, color: Color(0xFF6366F1)),
+                                  const Icon(Icons.person_pin_rounded, size: 14, color: Color(0xFFFE3434)),
                                   const SizedBox(width: 4),
                                   Text(
                                     ref.referrerPatientName.isNotEmpty ? ref.referrerPatientName : 'Patient Referrer',
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF4338CA)),
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF012A58)),
                                   ),
                                 ],
                               ),
@@ -8637,18 +9255,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               ? Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFFEFF6FF),
+                                    color: const Color(0x14012A58),
                                     borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(color: const Color(0xFFBFDBFE)),
+                                    border: Border.all(color: const Color(0x40012A58)),
                                   ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      const Icon(Icons.location_on_outlined, size: 12, color: Color(0xFF0284C7)),
+                                      const Icon(Icons.location_on_outlined, size: 12, color: Color(0xFFFE3434)),
                                       const SizedBox(width: 3),
                                       Text(
                                         patientLoc,
-                                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF0369A1)),
+                                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF012A58)),
                                       ),
                                     ],
                                   ),
@@ -8664,7 +9282,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             children: [
                               Row(
                                 children: [
-                                  const Icon(Icons.medical_services_outlined, size: 13, color: Color(0xFF0D9488)),
+                                  const Icon(Icons.medical_services_outlined, size: 13, color: Color(0xFF012A58)),
                                   const SizedBox(width: 4),
                                   Text(
                                     ref.doctorName.isNotEmpty ? ref.doctorName : 'Dr. Specialist',
@@ -8689,12 +9307,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFF3E8FF),
+                                  color: const Color(0x14FE3434),
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text(
                                   ref.requiredSpecialist,
-                                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF7E22CE)),
+                                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFFE3434)),
                                 ),
                               ),
                               if (ref.clinicalComplaint.isNotEmpty)
@@ -8729,11 +9347,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.chat_bubble_outline_rounded, size: 12, color: Color(0xFF25D366)),
+                              const Icon(Icons.chat_bubble_outline_rounded, size: 12, color: Color(0xFFFE3434)),
                               const SizedBox(width: 4),
                               Text(
                                 ref.whatsappStatus == 'Sent' ? 'Delivered' : 'Queued',
-                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF16A34A)),
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFFE3434)),
                               ),
                             ],
                           ),
@@ -8773,13 +9391,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
         ),
       ),
       selected: isSelected,
-      selectedColor: const Color(0xFF8B5CF6),
+      selectedColor: const Color(0xFFFE3434),
       backgroundColor: Colors.white,
       checkmarkColor: Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
         side: BorderSide(
-          color: isSelected ? const Color(0xFF8B5CF6) : const Color(0xFFE2E8F0),
+          color: isSelected ? const Color(0xFFFE3434) : const Color(0xFFE2E8F0),
         ),
       ),
       onSelected: (selected) {
@@ -8794,11 +9412,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     final isAccepted = ref.status == 'Accepted';
     final isRejected = ref.status == 'Rejected';
     final statusColor = isAccepted
-        ? const Color(0xFF10B981)
-        : (isRejected ? const Color(0xFFEF4444) : const Color(0xFFF59E0B));
+        ? const Color(0xFF012A58)
+        : (isRejected ? const Color(0xFFFE3434) : const Color(0xFFFE3434));
     final statusBg = isAccepted
-        ? const Color(0xFFDCFCE7)
-        : (isRejected ? const Color(0xFFFEE2E2) : const Color(0xFFFEF3C7));
+        ? const Color(0x14012A58)
+        : (isRejected ? const Color(0x14FE3434) : const Color(0x14FE3434));
 
     showModalBottomSheet(
       context: context,
@@ -8857,7 +9475,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 _buildDetailCard(
                   title: '1. REFERRING PATIENT',
                   icon: Icons.person_pin_rounded,
-                  color: const Color(0xFF6366F1),
+                  color: const Color(0xFFFE3434),
                   items: [
                     {'label': 'Referrer Name', 'value': ref.referrerPatientName},
                     {'label': 'Referrer Mobile', 'value': '+91 ${ref.referrerPatientPhone}'},
@@ -8871,7 +9489,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 _buildDetailCard(
                   title: '2. REFERRED PATIENT',
                   icon: Icons.person_rounded,
-                  color: const Color(0xFF0284C7),
+                  color: const Color(0xFFFE3434),
                   items: [
                     {'label': 'Patient Name', 'value': ref.referredPatientName},
                     {'label': 'Mobile Number', 'value': '+91 ${ref.referredPatientMobile}'},
@@ -8885,7 +9503,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 _buildDetailCard(
                   title: '3. CONSULTING DOCTOR & CLINIC',
                   icon: Icons.medical_services_rounded,
-                  color: const Color(0xFF0D9488),
+                  color: const Color(0xFF012A58),
                   items: [
                     {'label': 'Doctor Name', 'value': ref.doctorName},
                     {'label': 'Specialty', 'value': ref.doctorSpecialty.isNotEmpty ? ref.doctorSpecialty : ref.requiredSpecialist},
@@ -8900,7 +9518,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 _buildDetailCard(
                   title: '4. CLINICAL COMPLAINT & NOTIFICATIONS',
                   icon: Icons.notes_rounded,
-                  color: const Color(0xFF8B5CF6),
+                  color: const Color(0xFFFE3434),
                   items: [
                     {'label': 'Specialist Category', 'value': ref.requiredSpecialist},
                     {'label': 'Clinical Complaint', 'value': ref.clinicalComplaint.isNotEmpty ? ref.clinicalComplaint : 'General specialized evaluation'},
@@ -9006,10 +9624,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'Patients Directory',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+              const Expanded(
+                child: Text(
+                  'Patients Directory',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
+              const SizedBox(width: 8),
               ElevatedButton.icon(
                 onPressed: _showAddPatientDialog,
                 icon: const Icon(Icons.add, size: 16, color: Colors.white),
@@ -9077,7 +9699,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     final String language = patient.languages.isNotEmpty
                         ? patient.languages.join(', ')
                         : 'English';
-                    return _buildPatientDataRow(patient, name, phone, city, pincode, language, email, status, const Color(0xFFDCFCE7), const Color(0xFF16A34A));
+                    return _buildPatientDataRow(patient, name, phone, city, pincode, language, email, status, const Color(0x14012A58), const Color(0xFFFE3434));
                   }).toList(),
                 ),
               ),
@@ -9095,9 +9717,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
           title: Row(
             children: [
-              const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 24),
+              const Icon(Icons.warning_amber_rounded, color: Color(0xFFFE3434), size: 24),
               const SizedBox(width: 8),
-              Text('Remove $name?', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              Expanded(
+                child: Text(
+                  'Remove $name?',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
             ],
           ),
           content: Text('Are you sure you want to remove patient $name from the directory?'),
@@ -9106,7 +9734,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
             ElevatedButton.icon(
               icon: const Icon(Icons.delete_forever_rounded, size: 16),
               label: const Text('Remove Patient', style: TextStyle(fontWeight: FontWeight.bold)),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: Color(0xFFFE3434), foregroundColor: Colors.white),
               onPressed: () {
                 setState(() {
                   _adminPatientsList.removeWhere((p) => p['email'] == email || p['name'] == name);
@@ -9116,7 +9744,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text('🗑️ Patient $name removed from directory.'),
-                    backgroundColor: Colors.red,
+                    backgroundColor: Color(0xFFFE3434),
                   ),
                 );
               },
@@ -9172,15 +9800,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
         DataCell(
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(6)),
+            decoration: BoxDecoration(color: const Color(0x14012A58), borderRadius: BorderRadius.circular(6)),
             child: Text(city, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue)),
           ),
         ),
         DataCell(
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(color: const Color(0xFFFEF3C7), borderRadius: BorderRadius.circular(6)),
-            child: Text(pincode, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFD97706))),
+            decoration: BoxDecoration(color: const Color(0x14FE3434), borderRadius: BorderRadius.circular(6)),
+            child: Text(pincode, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFFE3434))),
           ),
         ),
         DataCell(Text(language, style: const TextStyle(fontSize: 12))),
@@ -9202,7 +9830,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 onPressed: () => _navigateToPatientDetails(patient),
               ),
               IconButton(
-                icon: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 18),
+                icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFFE3434), size: 18),
                 tooltip: 'Remove Patient',
                 onPressed: () => _confirmRemovePatient(context, email, name),
               ),
@@ -9329,7 +9957,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
-                                color: isActive ? const Color(0xFFDCFCE7) : const Color(0xFFF1F5F9),
+                                color: isActive ? const Color(0x14012A58) : const Color(0xFFF1F5F9),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
@@ -9337,15 +9965,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 style: TextStyle(
                                   fontSize: 10,
                                   fontWeight: FontWeight.bold,
-                                  color: isActive ? const Color(0xFF16A34A) : AppTheme.textMuted,
+                                  color: isActive ? const Color(0xFFFE3434) : AppTheme.textMuted,
                                 ),
                               ),
                             ),
                           ),
                           DataCell(Text('${row['totalDoctors']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.primaryBlue))),
-                          DataCell(Text('${row['verifiedDoctors']}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: Color(0xFF10B981)))),
+                          DataCell(Text('${row['verifiedDoctors']}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: Color(0xFF012A58)))),
                           DataCell(Text('${row['consultations']}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
-                          DataCell(Text('${row['appointments']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF8B5CF6)))),
+                          DataCell(Text('${row['appointments']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFFFE3434)))),
                         ],
                       );
                     }).toList(),
@@ -9514,7 +10142,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             ),
                             Switch.adaptive(
                               value: spec.isActive,
-                              activeTrackColor: const Color(0xFF10B981),
+                              activeTrackColor: const Color(0xFF012A58),
                               onChanged: (val) async {
                                 await _problemService.toggleMedicalSpecialtyStatus(spec.id, val);
                                 if (mounted) {
@@ -9525,7 +10153,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                             ? '✅ Activated ${spec.name} across GS HEALTH.'
                                             : '⏸️ Deactivated ${spec.name}.',
                                       ),
-                                      backgroundColor: val ? const Color(0xFF10B981) : const Color(0xFF64748B),
+                                      backgroundColor: val ? const Color(0xFF012A58) : const Color(0xFF64748B),
                                       duration: const Duration(seconds: 2),
                                     ),
                                   );
@@ -9550,7 +10178,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFEFF6FF),
+                                color: const Color(0x14012A58),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
@@ -9710,7 +10338,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text(existing == null ? '✅ Added $name specialty!' : '✅ Updated $name specialty!'),
-                          backgroundColor: const Color(0xFF10B981),
+                          backgroundColor: const Color(0xFF012A58),
                         ),
                       );
                     }
@@ -9744,7 +10372,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
             children: [
               Text('\$$totalRev', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
               const SizedBox(width: 10),
-              Text(totalRev > 0 ? '+100%' : 'Live Sync', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: totalRev > 0 ? const Color(0xFF10B981) : AppTheme.textMuted)),
+              Text(totalRev > 0 ? '+100%' : 'Live Sync', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: totalRev > 0 ? const Color(0xFF012A58) : AppTheme.textMuted)),
             ],
           ),
           const SizedBox(height: 20),
@@ -9785,10 +10413,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 child: CustomPaint(
                   painter: _DonutChartPainter(
                     slices: const [
-                      _DonutSlice(pct: 0.35, color: Color(0xFF0D9488)),
-                      _DonutSlice(pct: 0.25, color: Color(0xFF0052CC)),
-                      _DonutSlice(pct: 0.20, color: Color(0xFF3B82F6)),
-                      _DonutSlice(pct: 0.20, color: Color(0xFF93C5FD)),
+                      _DonutSlice(pct: 0.35, color: Color(0xFF012A58)),
+                      _DonutSlice(pct: 0.25, color: Color(0xFF012A58)),
+                      _DonutSlice(pct: 0.20, color: Color(0xFFFE3434)),
+                      _DonutSlice(pct: 0.20, color: Color(0x40012A58)),
                     ],
                   ),
                 ),
@@ -9797,13 +10425,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
               Expanded(
                 child: Column(
                   children: const [
-                    _LegendRow(color: Color(0xFF0D9488), label: 'Cleaning', value: '35%'),
+                    _LegendRow(color: Color(0xFF012A58), label: 'Cleaning', value: '35%'),
                     SizedBox(height: 8),
-                    _LegendRow(color: Color(0xFF0052CC), label: 'Root Canal', value: '25%'),
+                    _LegendRow(color: Color(0xFF012A58), label: 'Root Canal', value: '25%'),
                     SizedBox(height: 8),
-                    _LegendRow(color: Color(0xFF3B82F6), label: 'Implants', value: '20%'),
+                    _LegendRow(color: Color(0xFFFE3434), label: 'Implants', value: '20%'),
                     SizedBox(height: 8),
-                    _LegendRow(color: Color(0xFF93C5FD), label: 'Others', value: '20%'),
+                    _LegendRow(color: Color(0x40012A58), label: 'Others', value: '20%'),
                   ],
                 ),
               ),

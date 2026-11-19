@@ -57,7 +57,7 @@ class NeedHelpCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFFE0F2FE),
+                color: const Color(0x14FE3434),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Icon(Icons.phone_in_talk_rounded, color: AppTheme.primaryBlue, size: 22),
@@ -172,7 +172,7 @@ class NeedHelpCard extends StatelessWidget {
               textColor: Colors.white,
               onPressed: () => Clipboard.setData(ClipboardData(text: displayHelplineNumber)),
             ),
-            backgroundColor: const Color(0xFF10B981),
+            backgroundColor: const Color(0xFF012A58),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -189,13 +189,13 @@ class NeedHelpCard extends StatelessWidget {
           colors: [
             Color(0xFFFFFFFF),
             Color(0xFFF8FAFC),
-            Color(0xFFEFF6FF),
+            Color(0x14012A58),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFDBEAFE), width: 1.2),
+        border: Border.all(color: const Color(0x14012A58), width: 1.2),
         boxShadow: [
           BoxShadow(
             color: AppTheme.primaryBlue.withValues(alpha: 0.06),
@@ -215,7 +215,7 @@ class NeedHelpCard extends StatelessWidget {
               height: 110,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFF38BDF8).withValues(alpha: 0.08),
+                color: const Color(0xFFFE3434).withValues(alpha: 0.08),
               ),
             ),
           ),
@@ -227,7 +227,7 @@ class NeedHelpCard extends StatelessWidget {
               height: 80,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFF25D366).withValues(alpha: 0.06),
+                color: const Color(0xFFFE3434).withValues(alpha: 0.06),
               ),
             ),
           ),
@@ -246,14 +246,14 @@ class NeedHelpCard extends StatelessWidget {
                       height: 44,
                       decoration: BoxDecoration(
                         gradient: const LinearGradient(
-                          colors: [Color(0xFF0284C7), Color(0xFF0052CC)],
+                          colors: [Color(0xFFFE3434), Color(0xFF012A58)],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         ),
                         borderRadius: BorderRadius.circular(14),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF0284C7).withValues(alpha: 0.25),
+                            color: const Color(0xFFFE3434).withValues(alpha: 0.25),
                             blurRadius: 8,
                             offset: const Offset(0, 3),
                           ),
@@ -288,9 +288,9 @@ class NeedHelpCard extends StatelessWidget {
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFDCFCE7),
+                                  color: const Color(0x14012A58),
                                   borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(color: const Color(0xFF86EFAC)),
+                                  border: Border.all(color: const Color(0x40012A58)),
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
@@ -299,7 +299,7 @@ class NeedHelpCard extends StatelessWidget {
                                       width: 6,
                                       height: 6,
                                       decoration: const BoxDecoration(
-                                        color: Color(0xFF16A34A),
+                                        color: Color(0xFFFE3434),
                                         shape: BoxShape.circle,
                                       ),
                                     ),
@@ -309,7 +309,7 @@ class NeedHelpCard extends StatelessWidget {
                                       style: TextStyle(
                                         fontSize: 9.5,
                                         fontWeight: FontWeight.bold,
-                                        color: Color(0xFF15803D),
+                                        color: Color(0xFF012A58),
                                         letterSpacing: 0.3,
                                       ),
                                     ),
@@ -343,8 +343,8 @@ class NeedHelpCard extends StatelessWidget {
                         icon: Icons.phone_in_talk_rounded,
                         title: 'Call Us Now',
                         subtitle: displayHelplineNumber,
-                        gradientColors: const [Color(0xFF0284C7), Color(0xFF0052CC)],
-                        shadowColor: const Color(0xFF0052CC).withValues(alpha: 0.22),
+                        gradientColors: const [Color(0xFFFE3434), Color(0xFF012A58)],
+                        shadowColor: const Color(0xFF012A58).withValues(alpha: 0.22),
                         iconBgColor: Colors.white.withValues(alpha: 0.2),
                       ),
                     ),
@@ -355,8 +355,8 @@ class NeedHelpCard extends StatelessWidget {
                         icon: Icons.chat_rounded,
                         title: 'Chat on WhatsApp',
                         subtitle: 'Instant Reply ⚡',
-                        gradientColors: const [Color(0xFF22C55E), Color(0xFF15803D)],
-                        shadowColor: const Color(0xFF16A34A).withValues(alpha: 0.22),
+                        gradientColors: const [Color(0xFFFE3434), Color(0xFF012A58)],
+                        shadowColor: const Color(0xFFFE3434).withValues(alpha: 0.22),
                         iconBgColor: Colors.white.withValues(alpha: 0.2),
                         isWhatsApp: true,
                       ),

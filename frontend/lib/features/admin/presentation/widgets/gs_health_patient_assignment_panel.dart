@@ -63,7 +63,7 @@ class _GsHealthPatientAssignmentPanelState extends State<GsHealthPatientAssignme
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [Color(0xFF012A58), Color(0xFF0F3D6E)],
+                colors: [Color(0xFF012A58), Color(0xFF012A58)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -132,7 +132,7 @@ class _GsHealthPatientAssignmentPanelState extends State<GsHealthPatientAssignme
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: _buildKpiCard('Direct Bookings', '$directBookingsCount', Icons.flash_on_rounded, const Color(0xFF059669)),
+                child: _buildKpiCard('Direct Bookings', '$directBookingsCount', Icons.flash_on_rounded, const Color(0xFF012A58)),
               ),
             ],
           ),
@@ -140,11 +140,11 @@ class _GsHealthPatientAssignmentPanelState extends State<GsHealthPatientAssignme
           Row(
             children: [
               Expanded(
-                child: _buildKpiCard('Main Admin Assigned', '$mainAdminCount', Icons.shield_rounded, const Color(0xFF0284C7)),
+                child: _buildKpiCard('Main Admin Assigned', '$mainAdminCount', Icons.shield_rounded, const Color(0xFFFE3434)),
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: _buildKpiCard('Sub-Admin Assigned', '$subAdminCount', Icons.supervisor_account_rounded, const Color(0xFF7C3AED)),
+                child: _buildKpiCard('Sub-Admin Assigned', '$subAdminCount', Icons.supervisor_account_rounded, const Color(0xFFFE3434)),
               ),
             ],
           ),
@@ -367,10 +367,10 @@ class _GsHealthPatientAssignmentPanelState extends State<GsHealthPatientAssignme
     Color sourceColor = const Color(0xFF012A58);
     String sourceLabel = 'Main Admin';
     if (source == 'PATIENT_DIRECT_BOOKING') {
-      sourceColor = const Color(0xFF059669);
+      sourceColor = const Color(0xFF012A58);
       sourceLabel = 'Direct Booking';
     } else if (source == 'SUB_ADMIN_ASSIGNMENT') {
-      sourceColor = const Color(0xFF7C3AED);
+      sourceColor = const Color(0xFFFE3434);
       sourceLabel = 'Sub-Admin ($assignedBy)';
     }
 
@@ -475,7 +475,7 @@ class _GsHealthPatientAssignmentPanelState extends State<GsHealthPatientAssignme
                         const SizedBox(height: 2),
                         Text(
                           'Reassigned from: $prevDocName',
-                          style: const TextStyle(fontSize: 10.5, fontStyle: FontStyle.italic, color: Color(0xFFDC2626)),
+                          style: const TextStyle(fontSize: 10.5, fontStyle: FontStyle.italic, color: Color(0xFFFE3434)),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ],
@@ -515,7 +515,7 @@ class _GsHealthPatientAssignmentPanelState extends State<GsHealthPatientAssignme
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: status == 'ACTIVE' ? const Color(0xFFDCFCE7) : const Color(0xFFF1F5F9),
+                  color: status == 'ACTIVE' ? const Color(0x14012A58) : const Color(0xFFF1F5F9),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
@@ -523,7 +523,7 @@ class _GsHealthPatientAssignmentPanelState extends State<GsHealthPatientAssignme
                   style: TextStyle(
                     fontSize: 9.5,
                     fontWeight: FontWeight.bold,
-                    color: status == 'ACTIVE' ? const Color(0xFF16A34A) : const Color(0xFF475569),
+                    color: status == 'ACTIVE' ? const Color(0xFFFE3434) : const Color(0xFF475569),
                   ),
                 ),
               ),
@@ -715,7 +715,7 @@ class _GsHealthPatientAssignmentPanelState extends State<GsHealthPatientAssignme
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text(res['success'] == true ? '✓ Patient reassigned to ${selectedDoctor!.name}.' : '⚠️ Reassignment failed.'),
-                                backgroundColor: res['success'] == true ? const Color(0xFF10B981) : const Color(0xFFDC2626),
+                                backgroundColor: res['success'] == true ? const Color(0xFF012A58) : const Color(0xFFFE3434),
                               ),
                             );
                           }

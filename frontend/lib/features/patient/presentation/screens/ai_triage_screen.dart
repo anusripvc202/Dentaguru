@@ -100,14 +100,14 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
           lower.contains('cold') ||
           lower.contains('hot')) {
         urgency = 'Consultation Recommended within 48-72 hrs';
-        urgencyColor = const Color(0xFFF59E0B);
+        urgencyColor = const Color(0xFFFE3434);
         condition = 'Suspected Dental Pulpitis or Enamel Decay';
         specialist = 'General Dentist or Endodontist';
         homeCare = 'Rinse gently with warm salt water. Avoid extreme hot/cold foods and chewing on this side.';
         warning = 'Untreated tooth decay can advance quickly to the dental pulp causing intense pain.';
       } else {
         urgency = 'Routine Evaluation Suggested';
-        urgencyColor = const Color(0xFF10B981);
+        urgencyColor = const Color(0xFF012A58);
         condition = 'Mild Enamel Sensitivity or Early Gingival Irritation';
         specialist = 'General Dentist';
         homeCare = 'Maintain gentle brushing with a soft-bristled toothbrush and desensitizing toothpaste.';
@@ -167,10 +167,10 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
                 width: 56,
                 height: 56,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                  color: const Color(0xFF012A58).withValues(alpha: 0.12),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 36),
+                child: const Icon(Icons.check_circle_rounded, color: Color(0xFF012A58), size: 36),
               ),
               const SizedBox(height: 16),
               const Text(
@@ -385,7 +385,7 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
                         final isSelected = _selectedSeverity == sev;
                         final color = sev == 'Severe'
                             ? AppTheme.gsRed
-                            : (sev == 'Moderate' ? const Color(0xFFF59E0B) : const Color(0xFF10B981));
+                            : (sev == 'Moderate' ? const Color(0xFFFE3434) : const Color(0xFF012A58));
                         return Expanded(
                           child: InkWell(
                             key: Key('ai_triage_severity_$sev'),
@@ -580,19 +580,19 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
                             Container(
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFFFFBEB),
+                                color: const Color(0x14FE3434),
                                 borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: const Color(0xFFFDE68A)),
+                                border: Border.all(color: const Color(0x40FE3434)),
                               ),
                               child: Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Icon(Icons.info_outline_rounded, color: Color(0xFFB45309), size: 18),
+                                  const Icon(Icons.info_outline_rounded, color: Color(0xFFFE3434), size: 18),
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
                                       _triageResult!['warning'],
-                                      style: const TextStyle(fontSize: 12, color: Color(0xFF92400E), height: 1.35),
+                                      style: const TextStyle(fontSize: 12, color: Color(0xFFFE3434), height: 1.35),
                                     ),
                                   ),
                                 ],

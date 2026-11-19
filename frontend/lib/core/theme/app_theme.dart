@@ -10,28 +10,28 @@ class AppTheme {
   // Color 2: GS Vibrant Crimson/Coral Red (extracted from 'S' and leaf emblem in logo)
   static const Color gsRed = Color(0xFFFE3434);
 
-  // Brand Colors matching GS HEALTH design system
+  // Brand Colors matching GS HEALTH design system (equal 2-color balance)
   static const Color primaryBlue = gsNavy;
-  static const Color primaryBlueDark = Color(0xFF001B3B);
+  static const Color primaryBlueDark = gsNavy;
   static const Color brandOrange = gsRed;
-  static const Color brandOrangeLight = Color(0xFFFF5252);
+  static const Color brandOrangeLight = gsRed;
 
-  // Soft Tint & Background Colors
-  static const Color softBlueBg = Color(0xFFF4F7FC);
+  // Neutral Surface & Border Colors + Exact Brand Tints
+  static const Color softBlueBg = Color(0xFFF8FAFC);
   static const Color cardBg = Colors.white;
-  static const Color softBlueCard = Color(0xFFEBF2FE);
-  static const Color softBlueBorder = Color(0xFFD4E3FC);
+  static const Color softBlueCard = Color(0x14012A58);
+  static const Color softBlueBorder = Color(0xFFE2E8F0);
 
-  // Text Colors
+  // Text Colors (Neutral Black / Slate Grey for Readability)
   static const Color textDark = Color(0xFF0F172A);
   static const Color textMedium = Color(0xFF475569);
   static const Color textMuted = Color(0xFF8C9BAB);
 
-  // Status Colors
-  static const Color statusConfirmedBg = Color(0xFFEBF2FE);
-  static const Color statusConfirmedText = primaryBlue;
-  static const Color statusCancelBg = Color(0xFFFEE2E2);
-  static const Color statusCancelText = Color(0xFFEF4444);
+  // Status Colors (Strictly using the two GS HEALTH brand colors)
+  static const Color statusConfirmedBg = Color(0x14012A58);
+  static const Color statusConfirmedText = gsNavy;
+  static const Color statusCancelBg = Color(0x14FE3434);
+  static const Color statusCancelText = gsRed;
 
   // 1. LIGHT MODE THEME
   static ThemeData get lightTheme {
@@ -66,9 +66,9 @@ class AppTheme {
         labelSmall: GoogleFonts.plusJakartaSans(fontSize: 11, color: textMuted),
       ),
       textSelectionTheme: const TextSelectionThemeData(
-        cursorColor: primaryBlue,
-        selectionColor: Color(0xFFB3D4FC),
-        selectionHandleColor: primaryBlue,
+        cursorColor: gsNavy,
+        selectionColor: Color(0x28012A58),
+        selectionHandleColor: gsRed,
       ),
       cardTheme: CardThemeData(
         color: cardBg,
@@ -76,7 +76,7 @@ class AppTheme {
         shadowColor: Colors.black.withValues(alpha: 0.04),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
-          side: const BorderSide(color: Color(0xFFEEF2F6), width: 1),
+          side: const BorderSide(color: Color(0xFFE2E8F0), width: 1),
         ),
       ),
       appBarTheme: const AppBarTheme(

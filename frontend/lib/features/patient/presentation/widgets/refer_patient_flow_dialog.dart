@@ -250,7 +250,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    const primaryColor = Color(0xFF0284C7);
+    const primaryColor = Color(0xFFFE3434);
 
     return Container(
       height: MediaQuery.of(context).size.height * 0.92,
@@ -368,7 +368,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: isCompleted
-                              ? const Color(0xFF10B981)
+                              ? const Color(0xFF012A58)
                               : (isCurrent ? primaryColor : (isDark ? Colors.white12 : Colors.black12)),
                         ),
                         child: Center(
@@ -406,7 +406,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                   Container(
                     width: 16,
                     height: 2,
-                    color: isCompleted ? const Color(0xFF10B981) : (isDark ? Colors.white12 : Colors.black12),
+                    color: isCompleted ? const Color(0xFF012A58) : (isDark ? Colors.white12 : Colors.black12),
                     margin: const EdgeInsets.symmetric(horizontal: 4),
                   ),
               ],
@@ -548,7 +548,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                             : (_isMobileRegistered
                                 ? const Padding(
                                     padding: EdgeInsets.only(right: 12),
-                                    child: Icon(Icons.verified_rounded, color: Color(0xFF10B981), size: 20),
+                                    child: Icon(Icons.verified_rounded, color: Color(0xFF012A58), size: 20),
                                   )
                                 : null),
                       ),
@@ -564,14 +564,14 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                         padding: const EdgeInsets.only(top: 4, left: 4),
                         child: Row(
                           children: [
-                            const Icon(Icons.check_circle_outline_rounded, color: Color(0xFF10B981), size: 14),
+                            const Icon(Icons.check_circle_outline_rounded, color: Color(0xFF012A58), size: 14),
                             const SizedBox(width: 4),
                             Expanded(
                               child: Text(
                                 _matchedPatientName != null
                                     ? 'Registered patient: $_matchedPatientName (Will link directly)'
                                     : 'Existing GS HEALTH patient (Will link directly)',
-                                style: const TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.w600),
+                                style: const TextStyle(fontSize: 11, color: Color(0xFF012A58), fontWeight: FontWeight.w600),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -681,9 +681,9 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                 Container(
                   margin: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF0FDF4),
+                    color: isDark ? const Color(0xFF1E293B) : const Color(0x14012A58),
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.4), width: 1.5),
+                    border: Border.all(color: const Color(0xFF012A58).withValues(alpha: 0.4), width: 1.5),
                   ),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(16),
@@ -709,10 +709,10 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                           Container(
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                              color: const Color(0xFF012A58).withValues(alpha: 0.15),
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(Icons.person_add_alt_1_rounded, color: Color(0xFF10B981), size: 20),
+                            child: const Icon(Icons.person_add_alt_1_rounded, color: Color(0xFF012A58), size: 20),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
@@ -734,7 +734,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                               ],
                             ),
                           ),
-                          const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Color(0xFF10B981)),
+                          const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Color(0xFF012A58)),
                         ],
                       ),
                     ),
@@ -786,8 +786,8 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                       margin: const EdgeInsets.only(bottom: 10),
                       decoration: BoxDecoration(
                         color: isDark
-                            ? (isSelected ? const Color(0xFF1E293B) : const Color(0xFF131E31))
-                            : (isSelected ? const Color(0xFFF0F9FF) : Colors.white),
+                            ? (isSelected ? const Color(0xFF1E293B) : const Color(0xFF012A58))
+                            : (isSelected ? const Color(0x14FE3434) : Colors.white),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
                           color: isSelected
@@ -830,7 +830,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                                       child: Container(
                                         padding: const EdgeInsets.all(2),
                                         decoration: const BoxDecoration(
-                                          color: Color(0xFF10B981),
+                                          color: Color(0xFF012A58),
                                           shape: BoxShape.circle,
                                         ),
                                         child: const Icon(Icons.check, size: 12, color: Colors.white),
@@ -974,7 +974,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
     return AnimatedBuilder(
       animation: _patientService,
       builder: (context, _) {
-        final allDoctors = _patientService.allDoctors;
+        final allDoctors = _patientService.availableDoctors;
 
         final currentDoc = _patientService.currentDoctor;
         final currentDocId = currentDoc?.id ?? '';
@@ -1208,8 +1208,8 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                           margin: const EdgeInsets.only(bottom: 10),
                           decoration: BoxDecoration(
                             color: isDark
-                                ? (isSelected ? const Color(0xFF1E293B) : const Color(0xFF131E31))
-                                : (isSelected ? const Color(0xFFF0F9FF) : Colors.white),
+                                ? (isSelected ? const Color(0xFF1E293B) : const Color(0xFF012A58))
+                                : (isSelected ? const Color(0x14FE3434) : Colors.white),
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
                               color: isSelected
@@ -1263,7 +1263,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                                           child: Container(
                                             padding: const EdgeInsets.all(2),
                                             decoration: const BoxDecoration(
-                                              color: Color(0xFF10B981),
+                                              color: Color(0xFF012A58),
                                               shape: BoxShape.circle,
                                             ),
                                             child: const Icon(Icons.check, size: 12, color: Colors.white),
@@ -1309,7 +1309,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                                             ),
                                             const SizedBox(width: 4),
                                             IconButton(
-                                              icon: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 18),
+                                              icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFFE3434), size: 18),
                                               tooltip: 'Delete Doctor',
                                               padding: EdgeInsets.zero,
                                               constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
@@ -1486,7 +1486,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
           title: Row(
             children: [
-              const Icon(Icons.delete_forever_rounded, color: Colors.red, size: 24),
+              const Icon(Icons.delete_forever_rounded, color: Color(0xFFFE3434), size: 24),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -1516,7 +1516,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
             ElevatedButton.icon(
               icon: const Icon(Icons.delete_forever_rounded, size: 16),
               label: const Text('Delete Doctor', style: TextStyle(fontWeight: FontWeight.bold)),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: Color(0xFFFE3434), foregroundColor: Colors.white),
               onPressed: () async {
                 Navigator.of(dialogCtx).pop();
                 if (_selectedDoctor?.id == doc.id) {
@@ -1528,7 +1528,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text('🗑️ ${doc.name} deleted successfully.'),
-                      backgroundColor: Colors.red,
+                      backgroundColor: Color(0xFFFE3434),
                     ),
                   );
                 }
@@ -1655,7 +1655,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                           : (_isMobileRegistered
                               ? const Padding(
                                   padding: EdgeInsets.only(right: 12),
-                                  child: Icon(Icons.verified_rounded, color: Color(0xFF10B981), size: 20),
+                                  child: Icon(Icons.verified_rounded, color: Color(0xFF012A58), size: 20),
                                 )
                               : null),
                     ),
@@ -1671,14 +1671,14 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                       padding: const EdgeInsets.only(top: 4, left: 4),
                       child: Row(
                         children: [
-                          const Icon(Icons.check_circle_outline_rounded, color: Color(0xFF10B981), size: 14),
+                          const Icon(Icons.check_circle_outline_rounded, color: Color(0xFF012A58), size: 14),
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
                               _matchedPatientName != null
                                   ? 'Registered patient: $_matchedPatientName (Will link directly)'
                                   : 'Existing GS HEALTH patient (Will link directly)',
-                              style: const TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.w600),
+                              style: const TextStyle(fontSize: 11, color: Color(0xFF012A58), fontWeight: FontWeight.w600),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -1832,7 +1832,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
               ? const [
                   TextSpan(
                     text: ' *',
-                    style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+                    style: TextStyle(color: Color(0xFFFE3434), fontWeight: FontWeight.bold),
                   )
                 ]
               : null,
@@ -1858,7 +1858,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xFF0284C7), width: 1.5),
+        borderSide: const BorderSide(color: Color(0xFFFE3434), width: 1.5),
       ),
     );
   }
@@ -1907,18 +1907,18 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
             margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.red.withValues(alpha: 0.1),
+              color: Color(0xFFFE3434).withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+              border: Border.all(color: Color(0xFFFE3434).withValues(alpha: 0.3)),
             ),
             child: Row(
               children: [
-                const Icon(Icons.error_outline_rounded, color: Colors.red, size: 20),
+                const Icon(Icons.error_outline_rounded, color: Color(0xFFFE3434), size: 20),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     _submissionErrorMessage!,
-                    style: const TextStyle(fontSize: 13, color: Colors.red, fontWeight: FontWeight.w600),
+                    style: const TextStyle(fontSize: 13, color: Color(0xFFFE3434), fontWeight: FontWeight.w600),
                   ),
                 ),
               ],
@@ -1935,7 +1935,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                 _buildSummaryCard(
                   title: '1. REFERRER (You)',
                   icon: Icons.person_pin_rounded,
-                  color: const Color(0xFF6366F1),
+                  color: const Color(0xFFFE3434),
                   isDark: isDark,
                   items: [
                     {'label': 'Name', 'value': referrerPatient.name.isNotEmpty ? referrerPatient.name : 'Logged-in Patient'},
@@ -1950,7 +1950,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                 _buildSummaryCard(
                   title: '2. REFERRED PATIENT',
                   icon: Icons.person_add_rounded,
-                  color: const Color(0xFF0284C7),
+                  color: const Color(0xFFFE3434),
                   isDark: isDark,
                   items: [
                     {'label': 'Patient Name', 'value': _nameController.text.trim()},
@@ -1967,7 +1967,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                   _buildSummaryCard(
                     title: '3. RECEIVING DOCTOR',
                     icon: Icons.medical_services_rounded,
-                    color: const Color(0xFF10B981),
+                    color: const Color(0xFF012A58),
                     isDark: isDark,
                     items: [
                       {'label': 'Doctor Name', 'value': _selectedDoctor!.name.startsWith('Dr.') ? _selectedDoctor!.name : 'Dr. ${_selectedDoctor!.name}'},
@@ -2009,7 +2009,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                     child: ElevatedButton(
                       onPressed: _isSubmitting ? null : _submitReferral,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF10B981),
+                        backgroundColor: const Color(0xFF012A58),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
                       child: _isSubmitting
@@ -2086,18 +2086,18 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
             margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.red.withValues(alpha: 0.1),
+              color: Color(0xFFFE3434).withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+              border: Border.all(color: Color(0xFFFE3434).withValues(alpha: 0.3)),
             ),
             child: Row(
               children: [
-                const Icon(Icons.error_outline_rounded, color: Colors.red, size: 20),
+                const Icon(Icons.error_outline_rounded, color: Color(0xFFFE3434), size: 20),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     _submissionErrorMessage!,
-                    style: const TextStyle(fontSize: 13, color: Colors.red, fontWeight: FontWeight.w600),
+                    style: const TextStyle(fontSize: 13, color: Color(0xFFFE3434), fontWeight: FontWeight.w600),
                   ),
                 ),
               ],
@@ -2115,7 +2115,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                 _buildSummaryCard(
                   title: '1. REFERRING DOCTOR (You)',
                   icon: Icons.person_pin_rounded,
-                  color: const Color(0xFF6366F1),
+                  color: const Color(0xFFFE3434),
                   isDark: isDark,
                   items: [
                     {'label': 'Doctor Name', 'value': docName},
@@ -2131,7 +2131,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                 _buildSummaryCard(
                   title: '2. REFERRED PATIENT',
                   icon: Icons.person_add_rounded,
-                  color: const Color(0xFF0284C7),
+                  color: const Color(0xFFFE3434),
                   isDark: isDark,
                   items: [
                     {'label': 'Patient Name', 'value': _nameController.text.trim()},
@@ -2156,7 +2156,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                     children: [
                       Row(
                         children: const [
-                          Icon(Icons.assignment_rounded, size: 18, color: Color(0xFF0D9488)),
+                          Icon(Icons.assignment_rounded, size: 18, color: Color(0xFF012A58)),
                           SizedBox(width: 8),
                           Text(
                             '3. CLINICAL REFERRAL NOTES',
@@ -2164,7 +2164,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                               fontSize: 13,
                               fontWeight: FontWeight.bold,
                               letterSpacing: 0.5,
-                              color: Color(0xFF0D9488),
+                              color: Color(0xFF012A58),
                             ),
                           ),
                         ],
@@ -2203,7 +2203,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                   _buildSummaryCard(
                     title: '4. RECEIVING SPECIALIST',
                     icon: Icons.medical_services_rounded,
-                    color: const Color(0xFF10B981),
+                    color: const Color(0xFF012A58),
                     isDark: isDark,
                     items: [
                       {'label': 'Doctor Name', 'value': _selectedDoctor!.name.startsWith('Dr.') ? _selectedDoctor!.name : 'Dr. ${_selectedDoctor!.name}'},
@@ -2245,7 +2245,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                     child: ElevatedButton(
                       onPressed: _isSubmitting ? null : _submitReferral,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF10B981),
+                        backgroundColor: const Color(0xFF012A58),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
                       child: _isSubmitting
@@ -2362,11 +2362,11 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
             width: 72,
             height: 72,
             decoration: BoxDecoration(
-              color: const Color(0xFF10B981).withValues(alpha: 0.15),
+              color: const Color(0xFF012A58).withValues(alpha: 0.15),
               shape: BoxShape.circle,
             ),
             child: const Center(
-              child: Icon(Icons.check_circle_rounded, size: 48, color: Color(0xFF10B981)),
+              child: Icon(Icons.check_circle_rounded, size: 48, color: Color(0xFF012A58)),
             ),
           ),
           const SizedBox(height: 14),
@@ -2412,7 +2412,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                 const SizedBox(height: 8),
                 _buildSuccessRow('Reason', _complaintController.text.trim().isNotEmpty ? _complaintController.text.trim() : 'Medical consultation & referral', isDark),
                 const SizedBox(height: 8),
-                _buildSuccessRow('Status', 'Pending Review', isDark, isBadge: true, badgeColor: const Color(0xFFF59E0B)),
+                _buildSuccessRow('Status', 'Pending Review', isDark, isBadge: true, badgeColor: const Color(0xFFFE3434)),
               ],
             ),
           ),
@@ -2422,13 +2422,13 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: const Color(0xFF25D366).withValues(alpha: 0.12),
+              color: const Color(0xFFFE3434).withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFF25D366).withValues(alpha: 0.3)),
+              border: Border.all(color: const Color(0xFFFE3434).withValues(alpha: 0.3)),
             ),
             child: Row(
               children: [
-                const Icon(Icons.chat_bubble_outline_rounded, color: Color(0xFF25D366), size: 18),
+                const Icon(Icons.chat_bubble_outline_rounded, color: Color(0xFFFE3434), size: 18),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -2436,7 +2436,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                     style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      color: Color(0xFF25D366),
+                      color: Color(0xFFFE3434),
                     ),
                   ),
                 ),
@@ -2457,7 +2457,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
                 style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
               ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF25D366),
+                backgroundColor: const Color(0xFFFE3434),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
               onPressed: () async {
@@ -2607,7 +2607,7 @@ class _ReferPatientFlowDialogState extends State<ReferPatientFlowDialog> {
     );
   }
 
-  Widget _buildSuccessRow(String label, String value, bool isDark, {bool isBadge = false, Color badgeColor = Colors.blue}) {
+  Widget _buildSuccessRow(String label, String value, bool isDark, {bool isBadge = false, Color badgeColor = const Color(0xFF012A58)}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [

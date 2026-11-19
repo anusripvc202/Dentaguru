@@ -142,18 +142,18 @@ class _AppointmentManagementDialogState extends State<AppointmentManagementDialo
                   padding: const EdgeInsets.all(12),
                   margin: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFEE2E2),
+                    color: const Color(0x14FE3434),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFFFCA5A5)),
+                    border: Border.all(color: const Color(0x40FE3434)),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.error_outline_rounded, color: Color(0xFFDC2626), size: 18),
+                      const Icon(Icons.error_outline_rounded, color: Color(0xFFFE3434), size: 18),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           _errorMessage!,
-                          style: const TextStyle(fontSize: 12, color: Color(0xFF991B1B)),
+                          style: const TextStyle(fontSize: 12, color: Color(0xFFFE3434)),
                         ),
                       ),
                     ],
@@ -188,9 +188,9 @@ class _AppointmentManagementDialogState extends State<AppointmentManagementDialo
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: const Color(0xFFEFF6FF),
+            color: const Color(0x14012A58),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFBFDBFE)),
+            border: Border.all(color: const Color(0x40012A58)),
           ),
           child: Row(
             children: [
@@ -211,11 +211,11 @@ class _AppointmentManagementDialogState extends State<AppointmentManagementDialo
                   children: [
                     Text(
                       req.assignedDoctorName ?? 'Attending Specialist',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF1E3A8A)),
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF012A58)),
                     ),
                     Text(
                       req.assignedDoctorClinic ?? 'GS HEALTH Clinic',
-                      style: const TextStyle(fontSize: 11.5, color: Color(0xFF2563EB)),
+                      style: const TextStyle(fontSize: 11.5, color: Color(0xFF012A58)),
                     ),
                   ],
                 ),
@@ -268,13 +268,13 @@ class _AppointmentManagementDialogState extends State<AppointmentManagementDialo
                   icon: const Icon(Icons.cancel_outlined, size: 16),
                   label: const Text('Cancel Visit', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFEE2E2),
-                    foregroundColor: const Color(0xFFDC2626),
+                    backgroundColor: const Color(0x14FE3434),
+                    foregroundColor: const Color(0xFFFE3434),
                     elevation: 0,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),
-                      side: const BorderSide(color: Color(0xFFFCA5A5)),
+                      side: const BorderSide(color: Color(0x40FE3434)),
                     ),
                   ),
                 ),
@@ -314,19 +314,19 @@ class _AppointmentManagementDialogState extends State<AppointmentManagementDialo
     final isRescheduled = s == 'RESCHEDULED';
 
     final bg = isConfirmed
-        ? const Color(0xFFDCFCE7)
+        ? const Color(0x14012A58)
         : isCancelled
-            ? const Color(0xFFFEE2E2)
+            ? const Color(0x14FE3434)
             : isRescheduled
-                ? const Color(0xFFDBEAFE)
-                : const Color(0xFFFEF3C7);
+                ? const Color(0x14012A58)
+                : const Color(0x14FE3434);
     final text = isConfirmed
-        ? const Color(0xFF15803D)
+        ? const Color(0xFF012A58)
         : isCancelled
-            ? const Color(0xFFDC2626)
+            ? const Color(0xFFFE3434)
             : isRescheduled
-                ? const Color(0xFF1D4ED8)
-                : const Color(0xFFD97706);
+                ? const Color(0xFF012A58)
+                : const Color(0xFFFE3434);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -463,18 +463,18 @@ class _AppointmentManagementDialogState extends State<AppointmentManagementDialo
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: const Color(0xFFFFF7ED),
+            color: const Color(0x14FE3434),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFFED7AA)),
+            border: Border.all(color: const Color(0x14FE3434)),
           ),
           child: const Row(
             children: [
-              Icon(Icons.warning_amber_rounded, color: Color(0xFFEA580C), size: 24),
+              Icon(Icons.warning_amber_rounded, color: Color(0xFFFE3434), size: 24),
               SizedBox(width: 10),
               Expanded(
                 child: Text(
                   'Are you sure you want to cancel this appointment? You can book a new appointment at any time.',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF9A3412)),
+                  style: TextStyle(fontSize: 12, color: Color(0xFFFE3434)),
                 ),
               ),
             ],
@@ -499,7 +499,7 @@ class _AppointmentManagementDialogState extends State<AppointmentManagementDialo
               child: ElevatedButton(
                 onPressed: _isProcessing ? null : _handleCancel,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFDC2626),
+                  backgroundColor: const Color(0xFFFE3434),
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -535,7 +535,7 @@ class _AppointmentManagementDialogState extends State<AppointmentManagementDialo
         Navigator.of(context).pop();
         widget.onUpdated?.call();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('✅ Appointment rescheduled successfully!'), backgroundColor: Color(0xFF16A34A)),
+          const SnackBar(content: Text('✅ Appointment rescheduled successfully!'), backgroundColor: Color(0xFFFE3434)),
         );
       } else {
         setState(() {

@@ -40,6 +40,23 @@ function generateRandomOtp() {
     return crypto.randomInt(100000, 1000000).toString();
 }
 
+const PRODUCTION_SUPABASE_REF = 'fommrwxpqzkcktweosgp.supabase.co';
+
+/**
+ * Local / Temporary Render Testing-Only On-Screen OTP Mode:
+ * Active ONLY when NODE_ENV !== 'production' AND OTP_DELIVERY_MODE === 'on_screen'.
+ * Production (NODE_ENV === 'production') can NEVER activate this mode,
+ * even if OTP_DELIVERY_MODE=on_screen is accidentally set.
+ */
+function isOnScreenOtpTestMode() {
+    const nodeEnv = (process.env.NODE_ENV || 'development').trim().toLowerCase();
+    if (nodeEnv === 'production') {
+        return false;
+    }
+    const deliveryMode = (process.env.OTP_DELIVERY_MODE || '').trim().toLowerCase();
+    return deliveryMode === 'on_screen';
+}
+
 function isMissingRpcError(error) {
     if (!error) return false;
     const code = String(error.code || '');
@@ -50,21 +67,37 @@ function isMissingRpcError(error) {
 class OtpStoreService {
     constructor(options = {}) {
         this.supabaseClient = options.supabaseClient !== undefined ? options.supabaseClient : supabaseAdmin;
-        this.isProduction = options.isProduction !== undefined
-            ? options.isProduction
-            : (process.env.NODE_ENV === 'production');
+        this._explicitIsProduction = options.isProduction;
         this.forceMemoryInDev = options.forceMemoryInDev || false;
     }
 
+    get isProduction() {
+        return this._explicitIsProduction !== undefined
+            ? this._explicitIsProduction
+            : ((process.env.NODE_ENV || '').trim().toLowerCase() === 'production');
+    }
+
+    set isProduction(value) {
+        this._explicitIsProduction = value;
+    }
+
     /**
-     * Production safety check: requires configured Supabase service_role client.
-     * In-memory storage is strictly prohibited in production.
+     * Both Production and On-Screen Testing Mode strictly require Supabase RPC storage
+     * (no in-memory fallback permitted).
+     */
+    get requiresSupabaseRpc() {
+        return this.isProduction || isOnScreenOtpTestMode();
+    }
+
+    /**
+     * Production & On-Screen Testing Mode safety check: requires configured Supabase service_role client.
+     * In-memory storage is strictly prohibited in production and in OTP_DELIVERY_MODE=on_screen.
      */
     _ensureProductionConfig() {
-        if (this.isProduction) {
-            const url = process.env.SUPABASE_URL;
-            const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-            const anonKey = process.env.SUPABASE_ANON_KEY;
+        if (this.requiresSupabaseRpc) {
+            const url = (process.env.SUPABASE_URL || '').trim();
+            const serviceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+            const anonKey = (process.env.SUPABASE_ANON_KEY || '').trim();
 
             const hasClient = Boolean(this.supabaseClient && typeof this.supabaseClient.rpc === 'function');
             const hasValidEnv = Boolean(
@@ -75,9 +108,20 @@ class OtpStoreService {
             );
 
             if (!hasClient || (!hasValidEnv && this.supabaseClient === supabaseAdmin)) {
+                const modeLabel = this.isProduction ? 'Production' : 'On-Screen OTP Testing Mode';
                 throw new Error(
-                    'GS HEALTH Production Configuration Error: Valid SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are strictly required in production for atomic OTP storage. In-memory OTP storage is disabled in production.'
+                    `GS HEALTH ${modeLabel} Configuration Error: Valid SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are strictly required for atomic Supabase RPC OTP storage. In-memory OTP fallback is disabled.`
                 );
+            }
+
+            if (isOnScreenOtpTestMode() && this.supabaseClient === supabaseAdmin) {
+                const normalizedUrl = url.toLowerCase().replace(/\/+$/, '');
+                const prodUrl = (process.env.PRODUCTION_SUPABASE_URL || '').trim().toLowerCase().replace(/\/+$/, '');
+                if (normalizedUrl.includes(PRODUCTION_SUPABASE_REF) || (prodUrl && normalizedUrl === prodUrl)) {
+                    throw new Error(
+                        'GS HEALTH Testing Configuration Error: OTP_DELIVERY_MODE=on_screen must use a separate testing Supabase project and must never connect to the production Supabase database.'
+                    );
+                }
             }
         }
     }
@@ -121,7 +165,7 @@ class OtpStoreService {
                 });
 
                 if (error) {
-                    if (!this.isProduction && isMissingRpcError(error)) {
+                    if (!this.requiresSupabaseRpc && isMissingRpcError(error)) {
                         // Migration 02 not applied yet in local dev/test environment; fall through to local store
                     } else {
                         throw new Error(error.message || 'Supabase OTP rate-limit RPC failed.');
@@ -130,14 +174,14 @@ class OtpStoreService {
                     return data;
                 }
             } catch (err) {
-                if (this.isProduction) {
-                    throw new Error(`Production Supabase checkRateLimit failure: ${err.message}`);
+                if (this.requiresSupabaseRpc) {
+                    throw new Error(`Supabase checkRateLimit failure: ${err.message}`);
                 }
             }
         }
 
-        if (this.isProduction) {
-            throw new Error('Production Error: Supabase RPC storage required for OTP rate limiting.');
+        if (this.requiresSupabaseRpc) {
+            throw new Error('Configuration Error: Supabase RPC storage required for OTP rate limiting (in-memory fallback disabled).');
         }
 
         // Dev/Test local fallback
@@ -196,7 +240,7 @@ class OtpStoreService {
                 });
 
                 if (error) {
-                    if (!this.isProduction && isMissingRpcError(error)) {
+                    if (!this.requiresSupabaseRpc && isMissingRpcError(error)) {
                         // Migration 02 not applied yet in local dev/test environment; fall through to local store
                     } else {
                         throw new Error(error.message || 'Supabase request_otp_challenge RPC failed.');
@@ -205,14 +249,14 @@ class OtpStoreService {
                     return data;
                 }
             } catch (err) {
-                if (this.isProduction) {
-                    throw new Error(`Production Supabase requestAndStoreOtp failure: ${err.message}`);
+                if (this.requiresSupabaseRpc) {
+                    throw new Error(`Supabase requestAndStoreOtp failure: ${err.message}`);
                 }
             }
         }
 
-        if (this.isProduction) {
-            throw new Error('Production Error: Supabase RPC storage required for OTP creation.');
+        if (this.requiresSupabaseRpc) {
+            throw new Error('Configuration Error: Supabase RPC storage required for OTP creation (in-memory fallback disabled).');
         }
 
         // Dev/Test atomic local mutex fallback
@@ -309,7 +353,7 @@ class OtpStoreService {
                 });
 
                 if (error) {
-                    if (!this.isProduction && isMissingRpcError(error)) {
+                    if (!this.requiresSupabaseRpc && isMissingRpcError(error)) {
                         // Migration 02 not applied yet in local dev/test environment; fall through to local store
                     } else {
                         throw new Error(error.message || 'Supabase verify_otp_challenge RPC failed.');
@@ -318,14 +362,14 @@ class OtpStoreService {
                     return data;
                 }
             } catch (err) {
-                if (this.isProduction) {
-                    throw new Error(`Production Supabase verifyOtp failure: ${err.message}`);
+                if (this.requiresSupabaseRpc) {
+                    throw new Error(`Supabase verifyOtp failure: ${err.message}`);
                 }
             }
         }
 
-        if (this.isProduction) {
-            throw new Error('Production Error: Supabase RPC storage required for OTP verification.');
+        if (this.requiresSupabaseRpc) {
+            throw new Error('Configuration Error: Supabase RPC storage required for OTP verification (in-memory fallback disabled).');
         }
 
         // Dev/Test atomic local mutex fallback
@@ -395,7 +439,7 @@ class OtpStoreService {
                 });
 
                 if (error) {
-                    if (!this.isProduction && isMissingRpcError(error)) {
+                    if (!this.requiresSupabaseRpc && isMissingRpcError(error)) {
                         // Fall through to local store
                     } else {
                         throw new Error(error.message || 'Supabase invalidate_otp_challenge RPC failed.');
@@ -404,14 +448,14 @@ class OtpStoreService {
                     return data;
                 }
             } catch (err) {
-                if (this.isProduction) {
-                    throw new Error(`Production Supabase invalidateOtp failure: ${err.message}`);
+                if (this.requiresSupabaseRpc) {
+                    throw new Error(`Supabase invalidateOtp failure: ${err.message}`);
                 }
             }
         }
 
-        if (this.isProduction) {
-            throw new Error('Production Error: Supabase RPC storage required for OTP invalidation.');
+        if (this.requiresSupabaseRpc) {
+            throw new Error('Configuration Error: Supabase RPC storage required for OTP invalidation (in-memory fallback disabled).');
         }
 
         return this._withLocalLock(cleanKey, () => {
@@ -436,6 +480,7 @@ module.exports = {
     generateRandomOtp,
     hashOtp,
     normalizeKey,
+    isOnScreenOtpTestMode,
     localOtpMap,
     localLimitMap
 };

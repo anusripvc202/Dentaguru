@@ -1,5 +1,6 @@
 const https = require('https');
 const http = require('http');
+const { isOnScreenOtpTestMode } = require('./otpStoreService');
 
 /**
  * Standard GS HEALTH SMS Message Format
@@ -47,6 +48,21 @@ const sendRealSmsOtp = async (phone, otpCode, options = {}) => {
     const isIndia = cleanDigits.length === 10 || (cleanDigits.length === 12 && cleanDigits.startsWith('91'));
     const phone10Digit = cleanDigits.length > 10 ? cleanDigits.slice(-10) : cleanDigits;
     const smsBody = buildOtpMessage(otpCode);
+
+    // 0. Local Testing-Only On-Screen OTP Mode (NODE_ENV !== 'production' && OTP_DELIVERY_MODE === 'on_screen')
+    // Hard-blocks ALL Fast2SMS and Twilio HTTP calls whenever active, even if SMS credentials exist in env.
+    if (isOnScreenOtpTestMode()) {
+        const maskedTarget = phone10Digit.length >= 5 ? `+91 ${phone10Digit.slice(0, 5)}*****` : '*****';
+        console.log(`🧪 [On-Screen OTP Test Mode] Real SMS blocked for [${maskedTarget}]; returning OTP for on-screen testing.`);
+        return {
+            success: true,
+            simulated: true,
+            onScreenOnly: true,
+            deliveryMode: 'on_screen',
+            blockedRealSms: true,
+            gateway: 'OnScreenTest',
+        };
+    }
 
     // 1. Fast2SMS Integration (India +91 Numbers)
     const fast2smsKey = process.env.FAST2SMS_API_KEY;

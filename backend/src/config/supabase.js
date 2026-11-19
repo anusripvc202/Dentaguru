@@ -1,9 +1,68 @@
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 
-const supabaseUrl = process.env.SUPABASE_URL || 'https://fommrwxpqzkcktweosgp.supabase.co';
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZvbW1yd3hwcXprY2t0d2Vvc2dwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU4MTM3MTAsImV4cCI6MjEwMTM4OTcxMH0.VcuNyxIEeUDMGzMf3upGHzDCE_ihdYn0qZY5sjdOD3g';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey;
+const PRODUCTION_SUPABASE_PROJECT_REF = 'fommrwxpqzkcktweosgp';
+
+/**
+ * Fail-closed Supabase configuration resolver:
+ * - Zero hardcoded production URL or key fallbacks.
+ * - Fails immediately if SUPABASE_URL, SUPABASE_ANON_KEY, or SUPABASE_SERVICE_ROLE_KEY is missing.
+ * - In development/testing (NODE_ENV !== 'production'), refuses connecting to production Supabase.
+ */
+function resolveSupabaseConfig(env = process.env) {
+    const nodeEnv = (env.NODE_ENV || 'development').trim().toLowerCase();
+    const isProduction = nodeEnv === 'production';
+
+    const supabaseUrl = (env.SUPABASE_URL || '').trim().replace(/\/+$/, '');
+    const supabaseAnonKey = (env.SUPABASE_ANON_KEY || '').trim();
+    const supabaseServiceKey = (env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+
+    const missing = [];
+    if (!supabaseUrl || supabaseUrl.toLowerCase().includes('placeholder')) {
+        missing.push('SUPABASE_URL');
+    }
+    if (!supabaseAnonKey || supabaseAnonKey.toLowerCase().includes('placeholder')) {
+        missing.push('SUPABASE_ANON_KEY');
+    }
+    if (!supabaseServiceKey || supabaseServiceKey.toLowerCase().includes('placeholder')) {
+        missing.push('SUPABASE_SERVICE_ROLE_KEY');
+    }
+
+    if (missing.length > 0) {
+        throw new Error(
+            `GS HEALTH Supabase Configuration Error (${nodeEnv}): Missing required environment variable(s): ${missing.join(', ')}. ` +
+            'Hardcoded fallback credentials are disabled.'
+        );
+    }
+
+    if (!/^https?:\/\//i.test(supabaseUrl)) {
+        throw new Error(
+            `GS HEALTH Supabase Configuration Error (${nodeEnv}): SUPABASE_URL must be a valid HTTP(S) URL.`
+        );
+    }
+
+    if (!isProduction) {
+        const normalizedUrl = supabaseUrl.toLowerCase();
+        const prodUrl = (env.PRODUCTION_SUPABASE_URL || '').trim().toLowerCase().replace(/\/+$/, '');
+        if (
+            normalizedUrl.includes(PRODUCTION_SUPABASE_PROJECT_REF) ||
+            (prodUrl && normalizedUrl === prodUrl)
+        ) {
+            throw new Error(
+                `GS HEALTH Isolation Error (${nodeEnv}): Local development/testing backend must never connect to ` +
+                `production Supabase project (${PRODUCTION_SUPABASE_PROJECT_REF}). Configure a dedicated test Supabase project.`
+            );
+        }
+    }
+
+    return {
+        supabaseUrl,
+        supabaseAnonKey,
+        supabaseServiceKey,
+    };
+}
+
+const { supabaseUrl, supabaseAnonKey, supabaseServiceKey } = resolveSupabaseConfig(process.env);
 
 // Public client (with Anon key)
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
@@ -22,7 +81,7 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
 const checkSupabaseHealth = async () => {
     try {
         if (!process.env.SUPABASE_URL || process.env.SUPABASE_URL.includes('placeholder')) {
-            return { configured: false, status: 'unconfigured', message: 'SUPABASE_URL environment variable is using default placeholder.' };
+            return { configured: false, status: 'unconfigured', message: 'SUPABASE_URL environment variable is not configured.' };
         }
         // Ping storage buckets list to test API key & network connection
         const { data: buckets, error } = await supabaseAdmin.storage.listBuckets();
@@ -48,7 +107,9 @@ const checkSupabaseHealth = async () => {
 module.exports = {
     supabase,
     supabaseAdmin,
-    checkSupabaseHealth
+    checkSupabaseHealth,
+    resolveSupabaseConfig,
+    PRODUCTION_SUPABASE_PROJECT_REF,
 };
 
 

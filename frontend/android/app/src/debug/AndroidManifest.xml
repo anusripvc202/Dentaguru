@@ -4,4 +4,8 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- Allow cleartext HTTP traffic (e.g. http://10.0.2.2:5000) in DEBUG builds ONLY.
+         Never merged into release builds. -->
+    <application android:usesCleartextTraffic="true" />
 </manifest>

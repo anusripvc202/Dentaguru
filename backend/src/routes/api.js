@@ -97,17 +97,27 @@ router.get('/admin/clinics/verification', optionalAuth, requirePermission('DENTI
 router.patch('/admin/clinics/:id/verify', optionalAuth, requirePermission('DENTIST_EDIT'), verification.verifyClinic);
 
 // ─────────────────────────────────────────────
-// 4. APPOINTMENTS STATE MACHINE ENDPOINTS
+// 4. APPOINTMENTS STATE MACHINE & NOTIFICATIONS ENDPOINTS
 // ─────────────────────────────────────────────
 router.post('/appointments', optionalAuth, appointments.bookAppointment);
 router.get('/appointments', optionalAuth, appointments.getAppointments);
 router.patch('/appointments/:id/accept', optionalAuth, appointments.acceptAppointment);
+router.put('/appointments/:id/accept', optionalAuth, appointments.acceptAppointment);
+router.post('/appointments/:id/accept', optionalAuth, appointments.acceptAppointment);
 router.patch('/appointments/:id/reject', optionalAuth, appointments.rejectAppointment);
+router.put('/appointments/:id/reject', optionalAuth, appointments.rejectAppointment);
+router.post('/appointments/:id/reject', optionalAuth, appointments.rejectAppointment);
 router.patch('/appointments/:id/reschedule', optionalAuth, appointments.rescheduleAppointment);
 router.put('/appointments/:id', optionalAuth, appointments.rescheduleAppointment);
 router.patch('/appointments/:id/cancel', optionalAuth, appointments.cancelAppointment);
 router.delete('/appointments/:id', optionalAuth, appointments.cancelAppointment);
 router.patch('/appointments/:id/complete', optionalAuth, appointments.completeConsultation);
+
+router.get('/notifications', optionalAuth, appointments.getNotifications);
+router.put('/notifications/read-all', optionalAuth, appointments.markAllNotificationsRead);
+router.patch('/notifications/read-all', optionalAuth, appointments.markAllNotificationsRead);
+router.put('/notifications/:id/read', optionalAuth, appointments.markNotificationRead);
+router.patch('/notifications/:id/read', optionalAuth, appointments.markNotificationRead);
 
 // ─────────────────────────────────────────────
 // 5. CLINIC & DOCTOR PROFILE ENDPOINTS
@@ -121,8 +131,18 @@ router.get('/clinics/:clinicId/dentists', optionalAuth, clinics.getClinicDentist
 router.get('/clinics/:clinicId/doctors', optionalAuth, clinics.getClinicDentists);
 router.post('/clinics/:clinicId/doctors/associate', optionalAuth, clinics.associateClinicDoctor);
 router.delete('/clinics/:clinicId/doctors/:doctorId', optionalAuth, clinics.removeDoctorFromClinic);
+router.get('/dentists/languages', optionalAuth, clinics.getAvailableDoctorLanguages);
+router.get('/doctors/languages', optionalAuth, clinics.getAvailableDoctorLanguages);
 router.get('/dentists', optionalAuth, clinics.getAllDentists);
 router.get('/doctors', optionalAuth, clinics.getAllDentists);
+router.get('/dentists/:id', optionalAuth, clinics.getDoctorById);
+router.get('/doctors/:id', optionalAuth, clinics.getDoctorById);
+router.patch('/dentists/:id/availability', optionalAuth, clinics.updateDoctorAvailability);
+router.put('/dentists/:id/availability', optionalAuth, clinics.updateDoctorAvailability);
+router.post('/dentists/:id/availability', optionalAuth, clinics.updateDoctorAvailability);
+router.patch('/doctors/:id/availability', optionalAuth, clinics.updateDoctorAvailability);
+router.put('/doctors/:id/availability', optionalAuth, clinics.updateDoctorAvailability);
+router.post('/doctors/:id/availability', optionalAuth, clinics.updateDoctorAvailability);
 router.put('/dentists/:id/profile', optionalAuth, clinics.updateDoctorProfile);
 router.patch('/dentists/:id/profile', optionalAuth, clinics.updateDoctorProfile);
 router.put('/doctors/:id/profile', optionalAuth, clinics.updateDoctorProfile);
@@ -191,8 +211,15 @@ router.post('/referrals/:referralId/notify-whatsapp', optionalAuth, referrals.no
 // ─────────────────────────────────────────────
 router.get('/doctor-availability', optionalAuth, availability.getDoctorAvailability);
 router.post('/doctor-availability', optionalAuth, availability.saveDoctorAvailability);
+router.get('/doctor-availability/schedule', optionalAuth, availability.getDoctorSchedule);
+router.put('/doctor-availability/schedule', optionalAuth, availability.updateDoctorSchedule);
+router.post('/doctor-availability/schedule', optionalAuth, availability.updateDoctorSchedule);
 router.post('/doctor-availability/generate-slots', optionalAuth, availability.generateSlots);
+router.get('/doctor-availability/blocked-dates', optionalAuth, availability.getBlockedDates);
 router.post('/doctor-availability/block-date', optionalAuth, availability.blockDoctorDate);
+router.patch('/doctor-availability/block-date', optionalAuth, availability.updateBlockedDateStatus);
+router.put('/doctor-availability/block-date', optionalAuth, availability.updateBlockedDateStatus);
+router.delete('/doctor-availability/block-date', optionalAuth, availability.unblockDoctorDate);
 router.delete('/doctor-availability', optionalAuth, availability.deleteDoctorAvailability);
 
 // ─────────────────────────────────────────────

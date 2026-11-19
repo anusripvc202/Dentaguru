@@ -30,7 +30,7 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
       'description':
           'GS HEALTH connects you with accredited clinics and medical specialists. Report symptoms, get instant e-prescriptions, and manage your health with complete peace of mind.',
       'chips': ['🏥 Verified Clinics', '⚡ Fast Diagnosis', '🛡️ Safe Care'],
-      'gradient': [const Color(0xFF0F172A), const Color(0xFF0052CC)],
+      'gradient': [const Color(0xFF0F172A), const Color(0xFF012A58)],
       'icon': Icons.health_and_safety_rounded,
       'ctaText': 'How GS HEALTH Works',
       'ctaIcon': Icons.info_outline_rounded,
@@ -42,7 +42,7 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
       'description':
           'From routine consultations to advanced multi-specialty care, get paired with the right experienced doctor in your area.',
       'chips': ['🩺 General Medicine', '💎 Cardiology', '⚙️ Specialized Care'],
-      'gradient': [const Color(0xFF0F766E), const Color(0xFF0284C7)],
+      'gradient': [const Color(0xFF012A58), const Color(0xFFFE3434)],
       'icon': Icons.verified_user_rounded,
       'ctaText': 'Book a Specialist',
       'ctaIcon': Icons.calendar_month_rounded,
@@ -54,7 +54,7 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
       'description':
           'Never lose a paper prescription again. Access clinical notes, precise dosage instructions, and complete treatment history on your phone 24/7.',
       'chips': ['🔒 Cloud Encrypted', '📲 Mobile Access', '💊 Clear Dosages'],
-      'gradient': [const Color(0xFF1E1B4B), const Color(0xFF7C3AED)],
+      'gradient': [const Color(0xFF012A58), const Color(0xFFFE3434)],
       'icon': Icons.receipt_long_rounded,
       'ctaText': 'View My Records',
       'ctaIcon': Icons.folder_shared_rounded,
@@ -136,14 +136,14 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
                       padding: const EdgeInsets.all(18),
                       decoration: BoxDecoration(
                         gradient: const LinearGradient(
-                          colors: [Color(0xFF0F172A), Color(0xFF0052CC)],
+                          colors: [Color(0xFF012A58), Color(0xFFFE3434)],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         ),
                         borderRadius: BorderRadius.circular(18),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF0052CC).withValues(alpha: 0.25),
+                            color: const Color(0xFF012A58).withValues(alpha: 0.25),
                             blurRadius: 12,
                             offset: const Offset(0, 4),
                           ),
@@ -201,7 +201,7 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
                       description:
                           'Select your symptoms and medical concern, and optionally attach reports or photos.',
                       icon: Icons.edit_note_rounded,
-                      color: const Color(0xFF0284C7),
+                      color: const Color(0xFFFE3434),
                     ),
                     const SizedBox(height: 10),
                     _buildStepCard(
@@ -210,7 +210,7 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
                       description:
                           'A verified attending doctor evaluates your problem, recommends specialized treatment, or confirms a consultation slot.',
                       icon: Icons.person_search_rounded,
-                      color: const Color(0xFF0D9488),
+                      color: const Color(0xFF012A58),
                     ),
                     const SizedBox(height: 10),
                     _buildStepCard(
@@ -219,7 +219,7 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
                       description:
                           'Visit the accredited clinic, receive digital prescriptions with automated reminders, and maintain your medical history on your phone.',
                       icon: Icons.verified_rounded,
-                      color: const Color(0xFF10B981),
+                      color: const Color(0xFF012A58),
                     ),
                     const SizedBox(height: 20),
 
@@ -385,7 +385,7 @@ class _AboutDentaGuruBannerState extends State<AboutDentaGuruBanner> {
                 Container(
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFEFF6FF),
+                    color: const Color(0x14012A58),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Icon(Icons.info_outline_rounded, size: 15, color: AppTheme.primaryBlue),

@@ -88,7 +88,7 @@ class _ReferFriendDialogState extends State<ReferFriendDialog> {
               Expanded(child: Text(successMessage, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
             ],
           ),
-          backgroundColor: const Color(0xFF10B981),
+          backgroundColor: const Color(0xFF012A58),
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           duration: const Duration(seconds: 3),
@@ -129,14 +129,14 @@ class _ReferFriendDialogState extends State<ReferFriendDialog> {
                   padding: const EdgeInsets.all(9),
                   decoration: BoxDecoration(
                     gradient: const LinearGradient(
-                      colors: [Color(0xFF8B5CF6), Color(0xFF6366F1)],
+                      colors: [Color(0xFFFE3434), Color(0xFFFE3434)],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     ),
                     borderRadius: BorderRadius.circular(12),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFF8B5CF6).withValues(alpha: 0.25),
+                        color: const Color(0xFFFE3434).withValues(alpha: 0.25),
                         blurRadius: 8,
                         offset: const Offset(0, 2),
                       ),
@@ -188,15 +188,15 @@ class _ReferFriendDialogState extends State<ReferFriendDialog> {
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
-                                colors: [Color(0xFFF5F3FF), Color(0xFFEEF2FF)],
+                                colors: [Color(0x14FE3434), Color(0x14FE3434)],
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
                               ),
                               borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: const Color(0xFFC4B5FD), width: 1.5),
+                              border: Border.all(color: const Color(0x40FE3434), width: 1.5),
                               boxShadow: [
                                 BoxShadow(
-                                  color: const Color(0xFF8B5CF6).withValues(alpha: 0.08),
+                                  color: const Color(0xFFFE3434).withValues(alpha: 0.08),
                                   blurRadius: 10,
                                   offset: const Offset(0, 3),
                                 ),
@@ -211,7 +211,7 @@ class _ReferFriendDialogState extends State<ReferFriendDialog> {
                                     fontSize: 10.5,
                                     fontWeight: FontWeight.bold,
                                     letterSpacing: 1.1,
-                                    color: Color(0xFF6D28D9),
+                                    color: Color(0xFFFE3434),
                                   ),
                                 ),
                                 const SizedBox(height: 6),
@@ -220,7 +220,7 @@ class _ReferFriendDialogState extends State<ReferFriendDialog> {
                                   decoration: BoxDecoration(
                                     color: Colors.white,
                                     borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(color: const Color(0xFFDDD6FE)),
+                                    border: Border.all(color: const Color(0x40FE3434)),
                                   ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
@@ -231,13 +231,13 @@ class _ReferFriendDialogState extends State<ReferFriendDialog> {
                                           fontSize: 18,
                                           fontWeight: FontWeight.w900,
                                           letterSpacing: 2,
-                                          color: Color(0xFF5B21B6),
+                                          color: Color(0xFFFE3434),
                                         ),
                                       ),
                                       const SizedBox(width: 8),
                                       InkWell(
                                         onTap: () => _copyToClipboard(referralCode, 'Referral code copied to clipboard!'),
-                                        child: const Icon(Icons.copy_rounded, size: 16, color: Color(0xFF7C3AED)),
+                                        child: const Icon(Icons.copy_rounded, size: 16, color: Color(0xFFFE3434)),
                                       ),
                                     ],
                                   ),
@@ -245,7 +245,7 @@ class _ReferFriendDialogState extends State<ReferFriendDialog> {
                                 const SizedBox(height: 10),
                                 Text(
                                   referralLink,
-                                  style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280), fontWeight: FontWeight.w500),
+                                  style: const TextStyle(fontSize: 11, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
                                   textAlign: TextAlign.center,
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -262,7 +262,7 @@ class _ReferFriendDialogState extends State<ReferFriendDialog> {
                                 child: _buildShareButton(
                                   label: 'WhatsApp',
                                   icon: Icons.chat_rounded,
-                                  color: const Color(0xFF25D366),
+                                  color: const Color(0xFFFE3434),
                                   onTap: () => _shareViaWhatsApp(referralCode, referralLink),
                                 ),
                               ),
@@ -272,7 +272,7 @@ class _ReferFriendDialogState extends State<ReferFriendDialog> {
                                 child: _buildShareButton(
                                   label: 'SMS Invite',
                                   icon: Icons.sms_rounded,
-                                  color: const Color(0xFF0284C7),
+                                  color: const Color(0xFFFE3434),
                                   onTap: () => _shareViaSms(referralCode, referralLink),
                                 ),
                               ),
@@ -282,7 +282,7 @@ class _ReferFriendDialogState extends State<ReferFriendDialog> {
                                 child: _buildShareButton(
                                   label: 'Copy Link',
                                   icon: Icons.link_rounded,
-                                  color: const Color(0xFF7C3AED),
+                                  color: const Color(0xFFFE3434),
                                   onTap: () => _copyToClipboard(referralLink, 'Referral link copied to clipboard!'),
                                 ),
                               ),
@@ -308,7 +308,7 @@ class _ReferFriendDialogState extends State<ReferFriendDialog> {
                                 child: _buildStatCard(
                                   title: 'Total Referred',
                                   count: stats.totalReferred,
-                                  color: const Color(0xFF8B5CF6),
+                                  color: const Color(0xFFFE3434),
                                   icon: Icons.group_rounded,
                                 ),
                               ),
@@ -317,7 +317,7 @@ class _ReferFriendDialogState extends State<ReferFriendDialog> {
                                 child: _buildStatCard(
                                   title: 'Registered Users',
                                   count: stats.registered + stats.consultationBooked + stats.consultationsCompleted,
-                                  color: const Color(0xFF0284C7),
+                                  color: const Color(0xFFFE3434),
                                   icon: Icons.how_to_reg_rounded,
                                 ),
                               ),
@@ -326,7 +326,7 @@ class _ReferFriendDialogState extends State<ReferFriendDialog> {
                                 child: _buildStatCard(
                                   title: 'Consultations',
                                   count: stats.consultationsCompleted + stats.consultationBooked,
-                                  color: const Color(0xFF10B981),
+                                  color: const Color(0xFF012A58),
                                   icon: Icons.task_alt_rounded,
                                 ),
                               ),
@@ -468,8 +468,8 @@ class _ReferFriendDialogState extends State<ReferFriendDialog> {
     final bool isBooked = ref.status == 'CONSULTATION_BOOKED';
 
     final Color statusColor = isCompleted
-        ? const Color(0xFF10B981)
-        : (isBooked ? const Color(0xFF0284C7) : const Color(0xFF6B7280));
+        ? const Color(0xFF012A58)
+        : (isBooked ? const Color(0xFFFE3434) : const Color(0xFF64748B));
 
     final String statusLabel = isCompleted
         ? 'Consultation Completed'
@@ -489,10 +489,10 @@ class _ReferFriendDialogState extends State<ReferFriendDialog> {
         children: [
           CircleAvatar(
             radius: 18,
-            backgroundColor: const Color(0xFF8B5CF6).withValues(alpha: 0.12),
+            backgroundColor: const Color(0xFFFE3434).withValues(alpha: 0.12),
             child: Text(
               ref.referredUserName.isNotEmpty ? ref.referredUserName[0].toUpperCase() : 'F',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF8B5CF6)),
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFFFE3434)),
             ),
           ),
           const SizedBox(width: 10),
@@ -513,7 +513,7 @@ class _ReferFriendDialogState extends State<ReferFriendDialog> {
                 if (ref.assignedDoctorName != null && ref.assignedDoctorName!.isNotEmpty)
                   Text(
                     '👨‍⚕️ ${ref.assignedDoctorName}${ref.assignedClinicName != null ? " (${ref.assignedClinicName})" : ""}',
-                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF0D9488)),
+                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF012A58)),
                     overflow: TextOverflow.ellipsis,
                   ),
               ],

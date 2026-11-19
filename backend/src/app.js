@@ -12,13 +12,14 @@ app.set('trust proxy', 1);
 // ─────────────────────────────────────────────
 // 1. CORS & PARSING MIDDLEWARE
 // ─────────────────────────────────────────────
-app.use(cors({
+const corsOptions = {
     origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
     credentials: true
-}));
-app.options('*', cors());
+};
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -41,10 +42,12 @@ if (process.env.NODE_ENV === 'production') {
 // 3. RATE LIMITING — Brute-force protection
 // ─────────────────────────────────────────────
 
-// General API rate limit: 100 requests per 15 minutes
+// General API rate limit: 100 requests per 15 minutes in production (relaxed in local development
+// so repeated dashboard syncs from localhost do not lock out testing; OTP rate limits stay strictly enforced).
+const isProdEnv = (process.env.NODE_ENV || 'development').trim().toLowerCase() === 'production';
 const generalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 100,
+    max: isProdEnv ? 100 : 1000,
     standardHeaders: true,
     legacyHeaders: false,
     message: { success: false, message: 'Too many requests. Please try again later.' },

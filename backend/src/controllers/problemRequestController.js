@@ -1,4 +1,4 @@
-const { PatientProblemRequest, DentistSuggestion, Dentist, User, Notification, PatientAssignmentHistory, District, SubAdminDistrict, ASSIGNMENT_SOURCES } = require('../models/Schemas');
+const { PatientProblemRequest, DentistSuggestion, Dentist, User, Notification, PatientAssignmentHistory, District, SubAdminDistrict, ASSIGNMENT_SOURCES, isDoctorRecordAvailable } = require('../models/Schemas');
 const { sendPushNotification } = require('../services/notificationService');
 
 // 1. PATIENT: CREATE DENTAL PROBLEM REQUEST
@@ -18,6 +18,17 @@ exports.createProblemRequest = async (req, res) => {
         let realState = req.body.state || (patientUser ? patientUser.state : '') || '';
 
         const preferredDoctorId = req.body.preferredDoctorId || req.body.suggested_dentist_id;
+        if (preferredDoctorId) {
+            const targetDoc = await Dentist.findById(preferredDoctorId);
+            if (targetDoc && !isDoctorRecordAvailable(targetDoc)) {
+                return res.status(409).json({
+                    success: false,
+                    unavailable: true,
+                    isAvailable: false,
+                    message: 'Doctor is currently unavailable and not accepting new consultation requests.'
+                });
+            }
+        }
         const isDirectReferral = !!preferredDoctorId;
         const initialStatus = isDirectReferral ? 'DENTIST_ASSIGNED' : 'PENDING_ADMIN_REVIEW';
 

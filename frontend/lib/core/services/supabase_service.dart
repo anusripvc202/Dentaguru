@@ -8,22 +8,112 @@ class SupabaseService {
   factory SupabaseService() => _instance;
   SupabaseService._internal();
 
-  /// Initialize Supabase client
-  static Future<void> initialize() async {
+  static bool _isInitialized = false;
+  static String? _initializedUrl;
+  static String? _lastInitError;
+
+  static bool get isInitialized => _isInitialized;
+  static String? get initializedUrl => _initializedUrl;
+  static String? get lastInitError => _lastInitError;
+
+  @visibleForTesting
+  static Future<void> Function({
+    required String url,
+    required String anonKey,
+    required bool debug,
+  })? debugSupabaseInitializer;
+
+  @visibleForTesting
+  static void resetForTesting() {
+    _isInitialized = false;
+    _initializedUrl = null;
+    _lastInitError = null;
+    debugSupabaseInitializer = null;
+  }
+
+  static Future<void> _defaultSupabaseInit({
+    required String url,
+    required String anonKey,
+    required bool debug,
+  }) async {
+    await Supabase.initialize(
+      url: url,
+      anonKey: anonKey,
+      debug: debug,
+    );
+  }
+
+  /// Initialize Supabase client with fail-closed debug/testing isolation:
+  /// - Release builds always initialize production Supabase.
+  /// - Debug/testing builds strictly require TEST_SUPABASE_URL & TEST_SUPABASE_ANON_KEY
+  ///   and refuse connecting to production Supabase (`fommrwxpqzkcktweosgp`).
+  static Future<void> initialize({
+    @visibleForTesting bool? isReleaseOverride,
+    @visibleForTesting bool? isDebugOverride,
+    @visibleForTesting bool? isWebOverride,
+    @visibleForTesting TargetPlatform? platformOverride,
+    @visibleForTesting String? testApiUrlOverride,
+    @visibleForTesting String? localApiUrlOverride,
+    @visibleForTesting String? testSupabaseUrlOverride,
+    @visibleForTesting String? testSupabaseAnonKeyOverride,
+  }) async {
+    final bool effectiveRelease = isReleaseOverride ?? kReleaseMode;
+    final bool effectiveDebug = isDebugOverride ?? kDebugMode;
+
+    final ({String url, String anonKey}) config;
     try {
-      await Supabase.initialize(
-        url: ApiConstants.supabaseUrl,
-        anonKey: ApiConstants.supabaseAnonKey,
-        debug: kDebugMode,
+      config = ApiConstants.resolveSupabaseConfig(
+        isRelease: effectiveRelease,
+        isDebug: effectiveDebug,
+        isWeb: isWebOverride ?? kIsWeb,
+        platform: platformOverride,
+        testApiUrl: testApiUrlOverride ?? const String.fromEnvironment('TEST_API_URL', defaultValue: ''),
+        localApiUrl: localApiUrlOverride ?? const String.fromEnvironment('LOCAL_API_URL', defaultValue: ''),
+        testSupabaseUrl: testSupabaseUrlOverride ?? const String.fromEnvironment('TEST_SUPABASE_URL', defaultValue: ''),
+        testSupabaseAnonKey: testSupabaseAnonKeyOverride ?? const String.fromEnvironment('TEST_SUPABASE_ANON_KEY', defaultValue: ''),
       );
-      debugPrint('⚡ Supabase Client initialized successfully.');
+    } on StateError catch (e) {
+      _isInitialized = false;
+      _initializedUrl = null;
+      _lastInitError = e.message;
+      debugPrint('❌ ${e.message}');
+      rethrow;
+    }
+
+    try {
+      final initializer = debugSupabaseInitializer ?? _defaultSupabaseInit;
+      await initializer(
+        url: config.url,
+        anonKey: config.anonKey,
+        debug: effectiveDebug,
+      );
+      _isInitialized = true;
+      _initializedUrl = config.url;
+      _lastInitError = null;
+      final host = Uri.tryParse(config.url)?.host ?? 'configured';
+      debugPrint('⚡ Supabase Client initialized successfully (host: $host).');
     } catch (e) {
+      _isInitialized = false;
+      _initializedUrl = null;
+      _lastInitError = 'Supabase initialization failed.';
       debugPrint('⚠️ Supabase Initialization notice: $e');
+      rethrow;
     }
   }
 
   /// Get active Supabase client instance
   SupabaseClient get client => Supabase.instance.client;
+
+  /// Safely read the current Supabase Auth user without throwing when Supabase
+  /// has not been initialized (e.g., isolated local-backend-only debug runs or tests).
+  static User? get safeCurrentUser {
+    if (!_isInitialized) return null;
+    try {
+      return Supabase.instance.client.auth.currentUser;
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// Dispatch Email OTP code directly via Supabase Auth (Resend Custom SMTP delivery)
   Future<Map<String, dynamic>> sendEmailOtp(String email) async {

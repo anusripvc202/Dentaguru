@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
-const { User, Dentist, Clinic, Referral, comparePassword, getDefaultQualificationForSpecialty } = require('../models/Schemas');
+const { supabase, supabaseAdmin } = require('../config/supabase');
+const { User, Dentist, Clinic, Referral, Notification, PatientProblemRequest, comparePassword, getDefaultQualificationForSpecialty, isDoctorRecordAvailable, extractDoctorLanguages } = require('../models/Schemas');
 const admin = require('firebase-admin');
 const { sendOtpEmail } = require('../services/emailService');
 const { sendRealSmsOtp, normalizePhoneNumber } = require('../services/smsService');
@@ -13,12 +14,12 @@ const generateTokens = (user) => {
     const accessToken = jwt.sign(
         { id: user.id, role: user.role },
         JWT_SECRET,
-        { expiresIn: '15m' }
+        { expiresIn: '7d' }
     );
     const refreshToken = jwt.sign(
         { id: user.id },
         REFRESH_SECRET,
-        { expiresIn: '7d' }
+        { expiresIn: '30d' }
     );
     return { accessToken, refreshToken };
 };
@@ -46,7 +47,7 @@ const getAuthorizedAdminPhone = async () => {
         if (adminUser && adminUser.phone) {
             return normalizeAdminPhone(adminUser.phone);
         }
-    } catch (_) {}
+    } catch (_) { }
     return null;
 };
 
@@ -98,7 +99,7 @@ exports.register = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Phone number already registered. Please sign in with OTP.' });
         }
 
-        // 2. Mandatory Fields Validation: City, Pincode
+        // 2. Mandatory Field Validation: City (Pincode is optional in redesigned GS HEALTH registration)
         const normalizedCity = (city || '').toString().trim();
         const normalizedPincode = (pincode || '').toString().trim();
         const normalizedLocation = (location || clinicAddress || state || '').toString().trim();
@@ -112,9 +113,6 @@ exports.register = async (req, res) => {
 
         if (!normalizedCity) {
             return res.status(400).json({ success: false, message: 'City is mandatory for registration.' });
-        }
-        if (!normalizedPincode) {
-            return res.status(400).json({ success: false, message: 'Pincode is mandatory for registration.' });
         }
 
         // Generate unique referral code for this user
@@ -249,6 +247,7 @@ exports.register = async (req, res) => {
         }
 
         // If registering as a Dentist / Doctor, automatically insert row into 'dentists' and 'clinics' tables
+        let createdDentistRecord = null;
         if (isDoctorReg) {
             const licNum = (licenseNumber && licenseNumber.trim())
                 ? licenseNumber.trim()
@@ -285,6 +284,13 @@ exports.register = async (req, res) => {
                             pricing: defaultPricing
                         });
                         console.log(`✅ New Clinic record created in 'clinics' table for: ${cName}`);
+                        await Notification.create({
+                            recipient_role: 'Admin',
+                            recipient_id: 'ALL_ADMINS',
+                            title: '🏥 New Clinic Registered',
+                            message: `Clinic "${cName}" registered in ${normalizedCity || fullLoc || 'GS Health'}.`,
+                            type: 'clinic_registered'
+                        }).catch(() => null);
                     } else {
                         // Ensure the doctor's specialty is added to the clinic's services if not already present
                         const currentServices = Array.isArray(clinic.services) ? [...clinic.services] : [];
@@ -303,7 +309,7 @@ exports.register = async (req, res) => {
             }
 
             try {
-                await Dentist.create({
+                createdDentistRecord = await Dentist.create({
                     user_id: user.id,
                     clinic_id: clinicId,
                     speciality: resolvedDocSpecialty,
@@ -324,6 +330,39 @@ exports.register = async (req, res) => {
             } catch (dErr) {
                 console.error('⚠️ Doctor Table Creation Warning:', dErr.message);
             }
+        }
+
+        // 🔔 Emit persistent Admin Notification for new user registration (Patient / Doctor / Clinic)
+        try {
+            const roleLower = (effectiveAssignedRole || 'Patient').toLowerCase();
+            if (isDoctorReg) {
+                const docDisplay = (user.name || '').toLowerCase().startsWith('dr') ? user.name : `Dr. ${user.name}`;
+                await Notification.create({
+                    recipient_role: 'Admin',
+                    recipient_id: 'ALL_ADMINS',
+                    title: '🩺 New Doctor Registered',
+                    message: `${docDisplay} (${resolvedDocSpecialty}) registered in ${normalizedCity || 'GS Health'}.`,
+                    type: 'doctor_registered'
+                });
+            } else if (roleLower === 'clinic' || roleLower === 'clinic_admin') {
+                await Notification.create({
+                    recipient_role: 'Admin',
+                    recipient_id: 'ALL_ADMINS',
+                    title: '🏥 New Clinic Registered',
+                    message: `Clinic "${clinicName || user.name}" (${user.phone}) registered in ${normalizedCity || 'GS Health'}.`,
+                    type: 'clinic_registered'
+                });
+            } else if (roleLower === 'patient') {
+                await Notification.create({
+                    recipient_role: 'Admin',
+                    recipient_id: 'ALL_ADMINS',
+                    title: '👤 New Patient Registered',
+                    message: `${user.name} (${user.phone}) registered as a Patient in ${normalizedCity || 'GS Health'}.`,
+                    type: 'patient_registered'
+                });
+            }
+        } catch (notifErr) {
+            console.warn('⚠️ Registration admin notification notice:', notifErr.message);
         }
 
         const { accessToken, refreshToken } = generateTokens(user);
@@ -357,7 +396,7 @@ exports.register = async (req, res) => {
                     } : {})
                 }
             });
-        } catch (_) {}
+        } catch (_) { }
 
         res.status(201).json({
             success: true,
@@ -378,11 +417,15 @@ exports.register = async (req, res) => {
                 referralCode: userReferralCode,
                 profilePhoto: user.biometric_token,
                 ...(isDoctorReg ? {
+                    dentistId: createdDentistRecord?.id || user.id,
+                    userId: user.id,
                     specialty: resolvedDocSpecialty,
                     qualification: resolvedDocQualification,
                     experienceYears: resolvedDocExp,
                     clinicName: clinicName || '',
-                    licenseNumber: licenseNumber || ''
+                    licenseNumber: licenseNumber || '',
+                    availability_status: 'Available',
+                    isAvailable: true
                 } : {})
             },
             accessToken,
@@ -461,7 +504,7 @@ exports.login = async (req, res) => {
         if (user.device_token && typeof user.device_token === 'string' && user.device_token.startsWith('{')) {
             try {
                 tokenMeta = JSON.parse(user.device_token);
-            } catch (_) {}
+            } catch (_) { }
         }
 
         const effectiveStatus = (user.status || tokenMeta.status || 'ACTIVE').toString().toUpperCase();
@@ -516,7 +559,7 @@ exports.login = async (req, res) => {
         }
 
         if (fcmToken) {
-            User.findByIdAndUpdate(user.id, { device_token: fcmToken }).catch(() => {});
+            User.findByIdAndUpdate(user.id, { device_token: fcmToken }).catch(() => { });
         }
 
         const userAge = user.age || user.patient_age || tokenMeta.age || '';
@@ -537,26 +580,34 @@ exports.login = async (req, res) => {
         if (!existingTokens.includes(refreshToken)) existingTokens.push(refreshToken);
         User.findByIdAndUpdate(user.id, {
             refresh_tokens: existingTokens.slice(-20)
-        }).catch(() => {});
+        }).catch(() => { });
 
-        const userLanguages = (Array.isArray(user.languages) && user.languages.length > 0)
+        let userLanguages = (Array.isArray(user.languages) && user.languages.length > 0)
             ? user.languages
             : (Array.isArray(tokenMeta.languages) && tokenMeta.languages.length > 0 ? tokenMeta.languages : ['English']);
 
         let doctorExtra = {};
         if (userRoleStr.includes('dentist') || userRoleStr.includes('doctor')) {
             try {
-                const docRec = await Dentist.findById(user.id);
+                const docRec = await Dentist.findById(user.id) || await Dentist.findOne({ user_id: user.id });
                 const resolvedSpec = docRec?.speciality || docRec?.specialty || tokenMeta.specialty || 'General Dentistry';
+                const docLanguages = docRec ? extractDoctorLanguages({ ...docRec, users: user }) : userLanguages;
+                userLanguages = docLanguages;
                 doctorExtra = {
+                    dentistId: docRec?.id || user.id,
+                    userId: user.id,
+                    clinicId: docRec?.clinic_id || null,
                     specialty: resolvedSpec,
                     qualification: docRec?.qualifications || docRec?.qualification || tokenMeta.qualification || getDefaultQualificationForSpecialty(resolvedSpec),
                     experienceYears: docRec?.experience_years || docRec?.experienceYears || tokenMeta.experienceYears || 5,
                     clinicName: docRec?.clinics?.clinic_name || docRec?.clinicName || tokenMeta.clinicName || '',
                     licenseNumber: docRec?.license_number || docRec?.licenseNumber || tokenMeta.licenseNumber || 'MED-LIC-REG',
-                    verificationStatus: docRec?.verification_status || 'VERIFIED'
+                    languages: docLanguages,
+                    verificationStatus: docRec?.verification_status || 'VERIFIED',
+                    availability_status: docRec?.availability_status || 'Available',
+                    isAvailable: docRec ? isDoctorRecordAvailable(docRec) : true
                 };
-            } catch (_) {}
+            } catch (_) { }
         }
 
         res.json({
@@ -636,7 +687,7 @@ exports.refreshToken = async (req, res) => {
     }
 
     try {
-        const decoded = jwt.verify(refreshToken, REFRESH_SECRET);
+        const decoded = /** @type {any} */ (jwt.verify(refreshToken, REFRESH_SECRET));
         const user = await User.findById(decoded.id);
         if (!user) {
             return res.status(403).json({ success: false, message: 'User account not found.' });
@@ -689,7 +740,7 @@ exports.getPatients = async (req, res) => {
                     if (meta.languages && Array.isArray(meta.languages) && meta.languages.length > 0) {
                         userLanguages = meta.languages;
                     }
-                } catch (_) {}
+                } catch (_) { }
             }
 
             patientMap.set(p.id, {
@@ -738,7 +789,7 @@ exports.getPatients = async (req, res) => {
                     });
                 }
             }
-        } catch (_) {}
+        } catch (_) { }
 
         const resultList = Array.from(patientMap.values());
         res.json({ success: true, count: resultList.length, patients: resultList });
@@ -836,7 +887,7 @@ exports.createSubAdmin = async (req, res) => {
                     reason: 'Initial permission granted on Sub-Admin creation.'
                 });
             }
-        } catch (_) {}
+        } catch (_) { }
 
         // Also ensure Supabase Auth User exists for Sub-Admin if email provided
         if (normalizedEmail) {
@@ -912,7 +963,7 @@ exports.getSubAdmins = async (req, res) => {
                     if (meta.languages && Array.isArray(meta.languages)) userLangs = meta.languages;
                     if (meta.city && !sCity) sCity = meta.city;
                     if (meta.pincode && !sPin) sPin = meta.pincode;
-                } catch (_) {}
+                } catch (_) { }
             }
 
             // Fetch assigned districts
@@ -1106,7 +1157,7 @@ exports.deleteSubAdmin = async (req, res) => {
         // Delete from Supabase Auth if present
         try {
             await supabaseAdmin.auth.admin.deleteUser(id);
-        } catch (_) {}
+        } catch (_) { }
 
         res.json({ success: true, message: 'Sub-Admin deleted successfully.' });
     } catch (err) {
@@ -1240,7 +1291,7 @@ exports.getSubAdminAssignmentHistory = async (req, res) => {
 };
 
 // Production-safe shared OTP storage service (Supabase PostgreSQL RPC with In-memory dev/test fallback)
-const { otpStoreService, generateRandomOtp, hashOtp, normalizeKey } = require('../services/otpStoreService');
+const { otpStoreService, generateRandomOtp, hashOtp, normalizeKey, isOnScreenOtpTestMode } = require('../services/otpStoreService');
 
 async function checkOtpRateLimit(identifier) {
     return otpStoreService.checkRateLimit(identifier);
@@ -1290,18 +1341,30 @@ exports.requestOTP = async (req, res) => {
             });
         }
 
-        // Send Real Mobile SMS via Fast2SMS / Twilio and await carrier response
+        // Send Mobile SMS (or short-circuit when local testing-only OTP_DELIVERY_MODE=on_screen is active)
         const smsResult = await sendRealSmsOtp(pNum, realOtp);
         if (!smsResult.success && !smsResult.simulated) {
             // Safely invalidate stored OTP challenge & roll back cooldown on carrier dispatch failure
-            await otpStoreService.invalidateOtp(pNum, true).catch(() => {});
+            await otpStoreService.invalidateOtp(pNum, true).catch(() => { });
             return res.status(502).json({
                 success: false,
                 message: smsResult.error || 'SMS carrier gateway failed to dispatch verification code.'
             });
         }
 
-        // Return confirmation message without exposing OTP value in response
+        // Local Testing-Only On-Screen OTP Response (NODE_ENV !== 'production' && OTP_DELIVERY_MODE === 'on_screen')
+        // Production (NODE_ENV === 'production') NEVER enters this branch and NEVER exposes OTP in API responses.
+        if (isOnScreenOtpTestMode()) {
+            return res.json({
+                success: true,
+                message: 'Verification code ready on screen (testing mode).',
+                otp: realOtp,
+                deliveryMode: 'on_screen',
+                isAdmin: isAdmin
+            });
+        }
+
+        // Production / Standard Response: NEVER expose OTP value in API response
         res.json({
             success: true,
             message: 'OTP sent successfully to your mobile number.',
@@ -1350,6 +1413,39 @@ exports.verifyOTP = async (req, res) => {
             if (!existingTokens.includes(refreshToken)) existingTokens.push(refreshToken);
             await User.findByIdAndUpdate(user.id, { refresh_tokens: existingTokens.slice(-20) });
 
+            let tokenMeta = {};
+            if (user.device_token && typeof user.device_token === 'string' && user.device_token.startsWith('{')) {
+                try {
+                    tokenMeta = JSON.parse(user.device_token);
+                } catch (_) { }
+            }
+
+            const userRoleStr = (user.role || '').toString().trim().toLowerCase();
+            let resolvedUserLanguages = Array.isArray(user.languages) && user.languages.length > 0 ? user.languages : (tokenMeta.languages || ['English']);
+            let doctorExtra = {};
+            if (userRoleStr.includes('dentist') || userRoleStr.includes('doctor')) {
+                try {
+                    const docRec = await Dentist.findById(user.id) || await Dentist.findOne({ user_id: user.id });
+                    const resolvedSpec = docRec?.speciality || docRec?.specialty || tokenMeta.specialty || 'General Dentistry';
+                    const docLanguages = docRec ? extractDoctorLanguages({ ...docRec, users: user }) : resolvedUserLanguages;
+                    resolvedUserLanguages = docLanguages;
+                    doctorExtra = {
+                        dentistId: docRec?.id || user.id,
+                        userId: user.id,
+                        clinicId: docRec?.clinic_id || null,
+                        specialty: resolvedSpec,
+                        qualification: docRec?.qualifications || docRec?.qualification || tokenMeta.qualification || getDefaultQualificationForSpecialty(resolvedSpec),
+                        experienceYears: docRec?.experience_years || docRec?.experienceYears || tokenMeta.experienceYears || 5,
+                        clinicName: docRec?.clinics?.clinic_name || docRec?.clinicName || tokenMeta.clinicName || '',
+                        licenseNumber: docRec?.license_number || docRec?.licenseNumber || tokenMeta.licenseNumber || 'MED-LIC-REG',
+                        languages: docLanguages,
+                        verificationStatus: docRec?.verification_status || 'VERIFIED',
+                        availability_status: docRec?.availability_status || 'Available',
+                        isAvailable: docRec ? isDoctorRecordAvailable(docRec) : true
+                    };
+                } catch (_) { }
+            }
+
             return res.json({
                 success: true,
                 message: 'OTP verified successfully.',
@@ -1359,9 +1455,18 @@ exports.verifyOTP = async (req, res) => {
                     email: user.email,
                     role: user.role,
                     phone: user.phone,
+                    city: user.city || tokenMeta.city || '',
+                    pincode: user.pincode || tokenMeta.pincode || '',
+                    age: user.age || tokenMeta.age || '',
+                    gender: user.gender || tokenMeta.gender || '',
+                    bloodGroup: user.blood_group || tokenMeta.bloodGroup || '',
+                    emergencyContact: user.emergency_contact || tokenMeta.emergencyContact || '',
+                    languages: resolvedUserLanguages,
+                    profilePhoto: user.biometric_token || null,
                     permissions: user.permissions,
                     districtIds: user.districtIds,
                     districts: user.districts,
+                    ...doctorExtra
                 },
                 accessToken,
                 refreshToken,
@@ -1431,11 +1536,21 @@ exports.forgotPassword = async (req, res) => {
         }
 
         if (!smsSent && !emailSent) {
-            if (user.phone) await otpStoreService.invalidateOtp(user.phone, true).catch(() => {});
-            if (user.email) await otpStoreService.invalidateOtp(user.email, true).catch(() => {});
+            if (user.phone) await otpStoreService.invalidateOtp(user.phone, true).catch(() => { });
+            if (user.email) await otpStoreService.invalidateOtp(user.email, true).catch(() => { });
             return res.status(502).json({
                 success: false,
                 message: smsError || 'Failed to dispatch password reset verification code.'
+            });
+        }
+
+        // Local Testing-Only On-Screen OTP Response for Forgot Password (never active in production)
+        if (isOnScreenOtpTestMode()) {
+            return res.json({
+                success: true,
+                message: 'Password reset verification code ready on screen (testing mode).',
+                otp: realOtp,
+                deliveryMode: 'on_screen'
             });
         }
 
@@ -1500,7 +1615,7 @@ exports.refreshToken = async (req, res) => {
     if (!token) return res.status(401).json({ success: false, message: 'Token required.' });
 
     try {
-        const decoded = jwt.verify(token, REFRESH_SECRET);
+        const decoded = /** @type {any} */ (jwt.verify(token, REFRESH_SECRET));
         const user = await User.findById(decoded.id);
 
         if (!user || !(user.refresh_tokens || []).includes(token)) {
@@ -1618,7 +1733,7 @@ exports.getPatients = async (req, res) => {
     try {
         const dbPatients = await User.find({ role: 'Patient' });
         const patientMap = new Map();
-        
+
         for (const p of dbPatients) {
             const pName = p.name && p.name.trim().length > 0
                 ? p.name.trim()
@@ -1633,7 +1748,7 @@ exports.getPatients = async (req, res) => {
                 created_at: p.created_at
             });
         }
-        
+
         // Merge patients from consultation requests to ensure zero data omission
         try {
             const reqs = await PatientProblemRequest.find({});
@@ -1642,7 +1757,7 @@ exports.getPatients = async (req, res) => {
                 const pName = r.patient?.name || r.patientName || (r.patientEmail ? r.patientEmail.split('@')[0] : 'Patient');
                 const pEmail = r.patient?.email || r.patientEmail || `${pName?.toLowerCase().replace(/\s+/g, '')}@patient.org`;
                 const pPhone = r.patient?.phone || r.patientPhone || '';
-                
+
                 if (pId && !patientMap.has(pId)) {
                     patientMap.set(pId, {
                         id: pId,
@@ -1654,7 +1769,7 @@ exports.getPatients = async (req, res) => {
                     });
                 }
             }
-        } catch (_) {}
+        } catch (_) { }
 
         const resultList = Array.from(patientMap.values());
         res.json({ success: true, count: resultList.length, patients: resultList });

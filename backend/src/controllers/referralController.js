@@ -1,4 +1,4 @@
-const { Referral, User, Appointment, Dentist, Clinic, Notification, PatientProblemRequest } = require('../models/Schemas');
+const { Referral, User, Appointment, Dentist, Clinic, Notification, PatientProblemRequest, isDoctorRecordAvailable } = require('../models/Schemas');
 const { sendPushNotification } = require('../services/notificationService');
 const {
     sendNewReferralWhatsApp,
@@ -138,13 +138,25 @@ const populateReferralData = async (ref) => {
  */
 exports.createReferral = async (req, res) => {
     try {
-        const loggedInUserId = getUserIdFromReq(req) || req.body.referrerPatientId || req.body.referrerId;
-        if (!loggedInUserId) {
+        const loggedInRawId = getUserIdFromReq(req) || req.body.referrerPatientId || req.body.referrerId || req.body.referrer_patient_id || req.body.referrer_id;
+        if (!loggedInRawId) {
             return res.status(401).json({
                 success: false,
-                message: 'Authentication required: Logged-in patient must be the referrer.'
+                message: 'Authentication required: Logged-in user must be the referrer.'
             });
         }
+
+        // Resolve canonical user ID if a dentist table ID was passed as referrer
+        let loggedInUserId = loggedInRawId;
+        try {
+            const directUser = await User.findById(loggedInRawId);
+            if (!directUser) {
+                const asDentist = await Dentist.findById(loggedInRawId);
+                if (asDentist?.user_id) {
+                    loggedInUserId = asDentist.user_id;
+                }
+            }
+        } catch (_) {}
 
         const {
             referredPatientName,
@@ -195,6 +207,17 @@ exports.createReferral = async (req, res) => {
         }
         if (!doctorId) {
             return res.status(400).json({ success: false, message: 'Selected Doctor is required.' });
+        }
+
+        // Enforce Doctor Availability ON/OFF strictly on backend before creating a new referral
+        const targetReferralDoc = await Dentist.findById(doctorId);
+        if (targetReferralDoc && !isDoctorRecordAvailable(targetReferralDoc)) {
+            return res.status(409).json({
+                success: false,
+                unavailable: true,
+                isAvailable: false,
+                message: 'Selected doctor is currently unavailable for new referrals.'
+            });
         }
 
         const cleanMobile = referredPatientMobile.trim();
@@ -302,7 +325,8 @@ exports.createReferral = async (req, res) => {
         const doctorPincode = incomingPincode || doctor?.pincode || clinic?.pincode || '';
         const doctorPhone = incomingPhone || doctor?.users?.phone || doctor?.phone || '';
 
-        // 4. Create Referral Record
+        // 4. Create Referral Record (store canonical dentist.id so FK & doctor queries always match)
+        const canonicalDoctorId = doctor?.id || doctorId;
         const newReferralRecord = await Referral.create({
             referrer_patient_id: loggedInUserId,
             referred_patient_id: linkedPatientId,
@@ -317,8 +341,8 @@ exports.createReferral = async (req, res) => {
             referred_patient_location: referredPatientLocation.trim(),
             required_specialist: requiredSpecialist.trim(),
             clinical_complaint: clinicalComplaint.trim(),
-            doctor_id: doctorId,
-            assigned_doctor_id: doctorId,
+            doctor_id: canonicalDoctorId,
+            assigned_doctor_id: canonicalDoctorId,
             doctor_name: formattedDoctorName,
             doctor_clinic_name: doctorClinic,
             doctor_location: doctorLocation,
@@ -330,34 +354,36 @@ exports.createReferral = async (req, res) => {
             referral_date: new Date().toISOString()
         });
 
-        // Create Problem Request for the referred patient assigned to this Doctor
-        if (linkedPatientId) {
-            try {
-                await PatientProblemRequest.create({
-                    patient_id: linkedPatientId,
-                    problem_category: requiredSpecialist.trim(),
-                    problem_description: `Patient Referral (${clinicalComplaint.trim()})`,
-                    suggested_dentist_id: doctorId,
-                    status: 'DENTIST_ASSIGNED',
-                    city: referredPatientCity.trim(),
-                    pincode: referredPatientPincode.trim(),
-                    state: referredPatientLocation.trim()
+        // 5. Create In-App Notifications for Receiving Doctor, Referred Patient & Admin
+        const doctorRecipientId = doctor?.user_id || doctor?.id || canonicalDoctorId;
+        try {
+            await Notification.create({
+                recipient_role: 'Dentist',
+                recipient_id: doctorRecipientId,
+                referral_id: newReferralRecord.id,
+                type: 'NEW_REFERRAL',
+                title: 'New Patient Referral',
+                message: `${referrerName} has referred ${referredPatientName.trim()} to you.`
+            });
+            if (linkedPatientId) {
+                await Notification.create({
+                    recipient_role: 'Patient',
+                    recipient_id: linkedPatientId,
+                    referral_id: newReferralRecord.id,
+                    type: 'NEW_REFERRAL',
+                    title: 'Specialist Referral Received',
+                    message: `${referrerName} referred you to ${formattedDoctorName} (${doctorSpecialty}).`
                 });
-            } catch (e) {
-                console.warn('⚠️ Problem request creation for referral notice:', e.message);
             }
-        }
-
-        // 5. Create In-App Notification for Doctor (Section 9)
-        const doctorRecipientId = doctor?.user_id || doctor?.id || doctorId;
-        await Notification.create({
-            recipient_role: 'Dentist',
-            recipient_id: doctorRecipientId,
-            referral_id: newReferralRecord.id,
-            type: 'NEW_REFERRAL',
-            title: 'New Patient Referral',
-            message: `${referrerName} has referred ${referredPatientName} to you.`
-        });
+            await Notification.create({
+                recipient_role: 'Admin',
+                recipient_id: 'ALL_ADMINS',
+                referral_id: newReferralRecord.id,
+                type: 'NEW_REFERRAL',
+                title: 'New Patient Referral Submitted',
+                message: `${referrerName} referred ${referredPatientName.trim()} to ${formattedDoctorName}.`
+            });
+        } catch (_) {}
 
         // Send Push Notification to Doctor if Device Token present
         if (doctor?.users?.device_token && typeof doctor.users.device_token === 'string' && !doctor.users.device_token.startsWith('{')) {
@@ -418,19 +444,33 @@ exports.createReferral = async (req, res) => {
  */
 exports.getMyReferrals = async (req, res) => {
     try {
-        const userId = getUserIdFromReq(req);
-        if (!userId) {
+        const rawUserId = getUserIdFromReq(req);
+        if (!rawUserId) {
             return res.status(400).json({
                 success: false,
                 message: 'User ID is required to fetch referrals.'
             });
         }
 
-        const user = await User.findById(userId);
+        let user = await User.findById(rawUserId);
+        let userId = rawUserId;
+        if (!user) {
+            const doc = await Dentist.findById(rawUserId);
+            if (doc?.user_id) {
+                userId = doc.user_id;
+                user = await User.findById(userId);
+            }
+        }
         const referralCode = user?.referral_code || `DG-${(user?.name || 'USER').substring(0, 3).toUpperCase()}${user?.phone ? user.phone.slice(-4) : '2026'}`;
 
-        // Fetch patient referrals created by this patient
-        const rawReferrals = await Referral.find({ referrer_patient_id: userId });
+        // Fetch patient/doctor referrals created by this user
+        const allReferrals = await Referral.find();
+        const rawReferrals = allReferrals.filter(r =>
+            r.referrer_patient_id === userId ||
+            r.referrer_id === userId ||
+            r.referrer_patient_id === rawUserId ||
+            r.referrer_id === rawUserId
+        );
         const populatedList = [];
 
         for (const ref of rawReferrals) {
@@ -530,9 +570,13 @@ exports.getReferralsForReferredPatient = async (req, res) => {
         }
 
         const allReferrals = await Referral.find();
+        const normalizedPhone10 = phone ? String(phone).replace(/[^0-9]/g, '').slice(-10) : '';
         const matching = allReferrals.filter(r => {
             if (userId && (r.referred_patient_id === userId || r.referred_user_id === userId)) return true;
-            if (phone && r.referred_patient_mobile && r.referred_patient_mobile.includes(phone.replace(/[^0-9]/g, '').slice(-10))) return true;
+            if (normalizedPhone10.length >= 10 && r.referred_patient_mobile) {
+                const refDigits10 = String(r.referred_patient_mobile).replace(/[^0-9]/g, '').slice(-10);
+                if (refDigits10 && refDigits10 === normalizedPhone10) return true;
+            }
             return false;
         });
 

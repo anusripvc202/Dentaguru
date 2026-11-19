@@ -16,6 +16,8 @@ import '../../../patient/presentation/widgets/referred_patients_sheet.dart';
 import '../../../../core/widgets/map_location_picker_dialog.dart';
 import '../../../../core/models/medical_specialty_model.dart';
 import '../../../../core/models/prescription_template_model.dart';
+import '../../../../core/models/doctor_availability.dart';
+import '../../../../core/models/referral_model.dart';
 import '../../../admin/presentation/widgets/doctor_slot_management_dialog.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'doctor_patient_record_screen.dart';
@@ -46,6 +48,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   int _selectedDateIndex = 0;
   final DateTime _baseCalendarDate = DateTime.now();
   bool _isDentistAvailableNow = true;
+  bool _isUpdatingAvailability = false;
+  DoctorScheduleModel _doctorSchedule = const DoctorScheduleModel();
+  List<DoctorAvailabilityModel> _doctorBlockedDates = const [];
+  bool _hasSyncedDoctorSchedule = false;
 
   // ── Patients Tab State ──
   final TextEditingController _patientSearchCtrl = TextEditingController();
@@ -84,6 +90,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     _patientService.syncAllDataFromApi();
     _patientService.syncDoctorsFromApi();
     _patientService.syncClinicsFromApi();
+    _patientService.syncAppointmentsFromApi();
     _patientService.syncDoctorReferralsFromApi();
     _patientService.syncReferralsFromApi();
     _patientService.syncNotificationsFromApi(role: 'Dentist');
@@ -95,11 +102,9 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     }
 
     // Sync initial availability state from currentDoctor
-    final docStatus = (_patientService.currentDoctor?.status ?? 'Available').trim().toLowerCase();
-    _isDentistAvailableNow = docStatus != 'offline' && docStatus != 'on leave' && docStatus != 'unavailable';
-    if (_isDentistAvailableNow) {
-      _startIdleAvailabilityTimer();
-    }
+    final initialDoc = _resolveCurrentDoctor() ?? _patientService.currentDoctor;
+    _isDentistAvailableNow = initialDoc?.isAvailable ?? true;
+    _syncDoctorScheduleAndBlockedDates();
 
     _referSearchCtrl.addListener(() {
       if (mounted) {
@@ -110,6 +115,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     // ⏱️ Auto-sync polling timer (every 4s) to catch assigned patients & direct referrals immediately
     _autoSyncTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       if (mounted) {
+        _patientService.syncAppointmentsFromApi();
         _patientService.syncProblemRequestsFromApi();
         _patientService.syncDentistAssignedRequestsFromApi();
         _patientService.syncDoctorReferralsFromApi();
@@ -151,6 +157,16 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
           .onPostgresChanges(
             event: PostgresChangeEvent.all,
             schema: 'public',
+            table: 'dentists',
+            callback: (payload) {
+              if (mounted && !_isUpdatingAvailability) {
+                _patientService.syncDoctorsFromApi(includeUnavailable: true);
+              }
+            },
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
             table: 'notifications',
             callback: (payload) {
               debugPrint('⚡ Realtime update on notifications for Dentist: ${payload.eventType}');
@@ -177,40 +193,68 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     _entryController.forward();
   }
 
-  void _startIdleAvailabilityTimer() {
-    _idleAvailabilityTimer?.cancel();
-    _idleAvailabilityTimer = Timer(const Duration(minutes: 30), () {
-      if (mounted && _isDentistAvailableNow) {
-        _toggleDentistAvailability(false, isAutoIdle: true);
-      }
-    });
-  }
-
   Future<void> _toggleDentistAvailability(bool value, {bool isAutoIdle = false}) async {
+    if (_isUpdatingAvailability) return;
+    final previousValue = _isDentistAvailableNow;
     setState(() {
       _isDentistAvailableNow = value;
+      _isUpdatingAvailability = true;
     });
     _idleAvailabilityTimer?.cancel();
-    if (value) {
-      _startIdleAvailabilityTimer();
+
+    DoctorModel? doc = _resolveCurrentDoctor();
+    if (doc == null || doc.id.isEmpty || doc.id.toUpperCase().startsWith('DOC-')) {
+      await _patientService.syncDoctorsFromApi(includeUnavailable: true);
+      doc = _resolveCurrentDoctor();
     }
-    final doc = _resolveCurrentDoctor();
-    if (doc != null && doc.id.isNotEmpty) {
-      await _patientService.updateDoctorProfessionalProfile(
-        doctorId: doc.id,
-        status: value ? 'Available' : 'Offline',
+    final sess = SessionService().currentSession;
+    final String targetDoctorId = (doc != null && doc.id.isNotEmpty && !doc.id.toUpperCase().startsWith('DOC-'))
+        ? doc.id
+        : ((sess?.metadata['dentistId']?.toString().trim().isNotEmpty == true)
+            ? sess!.metadata['dentistId'].toString().trim()
+            : ((sess?.userId.trim().isNotEmpty == true)
+                ? sess!.userId.trim()
+                : (doc?.id ?? (_patientService.allDoctors.isNotEmpty ? _patientService.allDoctors.first.id : ''))));
+
+    Map<String, dynamic> result = {'success': true};
+    if (targetDoctorId.isNotEmpty) {
+      result = await _patientService.setDoctorAvailability(
+        doctorId: targetDoctorId,
+        isAvailable: value,
       );
     }
-    if (mounted && !isAutoIdle) {
+
+    if (!mounted) return;
+    if (result['success'] != true) {
+      setState(() {
+        _isDentistAvailableNow = previousValue;
+        _isUpdatingAvailability = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result['message']?.toString() ?? 'Failed to update availability status.'),
+          backgroundColor: const Color(0xFFFE3434),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isDentistAvailableNow = value;
+      _isUpdatingAvailability = false;
+    });
+
+    if (!isAutoIdle) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             value
-                ? 'You are now online and available for instant consultations.'
-                : 'You are now offline.',
+                ? 'Availability ON — your profile is now visible to patients and open for bookings.'
+                : 'Availability OFF — hidden from patient search & new bookings. Existing appointments remain intact.',
           ),
-          backgroundColor: value ? AppTheme.gsNavy : const Color(0xFF64748B),
-          duration: const Duration(seconds: 2),
+          backgroundColor: value ? const Color(0xFF012A58) : const Color(0xFF475569),
+          duration: const Duration(seconds: 3),
         ),
       );
     }
@@ -248,6 +292,15 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
       }
     }
     if (mounted) {
+      if (!_isUpdatingAvailability) {
+        final syncedDoc = _resolveCurrentDoctor();
+        if (syncedDoc != null) {
+          _isDentistAvailableNow = syncedDoc.isAvailable;
+          if (!_hasSyncedDoctorSchedule) {
+            _syncDoctorScheduleAndBlockedDates();
+          }
+        }
+      }
       setState(() {});
     }
   }
@@ -454,7 +507,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text('🎉 Profile updated ($selectedSpec • ${qualCtrl.text.trim()}) & fee set to ${feeCtrl.text.trim()}!'),
-                          backgroundColor: const Color(0xFF10B981),
+                          backgroundColor: const Color(0xFF012A58),
                         ),
                       );
                     }
@@ -487,12 +540,12 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         return StatefulBuilder(
           builder: (context, setModalState) {
             Color getCategoryColor(String cat) {
-              if (cat.contains('Antibiotic')) return const Color(0xFF2563EB);
-              if (cat.contains('Pain')) return const Color(0xFFEF4444);
-              if (cat.contains('Antiseptic')) return const Color(0xFF0D9488);
-              if (cat.contains('Antacid') || cat.contains('PPI')) return const Color(0xFFF59E0B);
-              if (cat.contains('Ulcer') || cat.contains('Topical')) return const Color(0xFF7C3AED);
-              return const Color(0xFF059669);
+              if (cat.contains('Antibiotic')) return const Color(0xFF012A58);
+              if (cat.contains('Pain')) return const Color(0xFFFE3434);
+              if (cat.contains('Antiseptic')) return const Color(0xFF012A58);
+              if (cat.contains('Antacid') || cat.contains('PPI')) return const Color(0xFFFE3434);
+              if (cat.contains('Ulcer') || cat.contains('Topical')) return const Color(0xFFFE3434);
+              return const Color(0xFF012A58);
             }
 
             return Dialog(
@@ -512,10 +565,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                             Container(
                               padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                                color: const Color(0xFF012A58).withValues(alpha: 0.12),
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                              child: const Icon(Icons.receipt_long_rounded, color: Color(0xFF10B981), size: 24),
+                              child: const Icon(Icons.receipt_long_rounded, color: Color(0xFF012A58), size: 24),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
@@ -579,7 +632,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                         // Section Label: Related Dental Medication Dropdown
                         const Row(
                           children: [
-                            Icon(Icons.medication_rounded, size: 16, color: Color(0xFF10B981)),
+                            Icon(Icons.medication_rounded, size: 16, color: Color(0xFF012A58)),
                             SizedBox(width: 6),
                             Text(
                               'Select Related Dental Medication',
@@ -597,7 +650,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                           decoration: InputDecoration(
                             labelText: 'Choose Medicine & Strength',
                             hintText: 'Select standard dental prescription...',
-                            prefixIcon: const Icon(Icons.vaccines_rounded, size: 18, color: Color(0xFF10B981)),
+                            prefixIcon: const Icon(Icons.vaccines_rounded, size: 18, color: Color(0xFF012A58)),
                             filled: true,
                             fillColor: const Color(0xFFF8FAFC),
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -678,9 +731,9 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                     decoration: BoxDecoration(
-                                      color: isSelected ? const Color(0xFF10B981) : const Color(0xFFF1F5F9),
+                                      color: isSelected ? const Color(0xFF012A58) : const Color(0xFFF1F5F9),
                                       borderRadius: BorderRadius.circular(16),
-                                      border: Border.all(color: isSelected ? const Color(0xFF10B981) : const Color(0xFFE2E8F0)),
+                                      border: Border.all(color: isSelected ? const Color(0xFF012A58) : const Color(0xFFE2E8F0)),
                                     ),
                                     child: Text(
                                       quickMed.split(' (').first,
@@ -785,7 +838,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                           icon: const Icon(Icons.check_circle_rounded, size: 18),
                           label: const Text('Send Digital E-Prescription to Patient', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF10B981),
+                            backgroundColor: const Color(0xFF012A58),
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -857,7 +910,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text('💊 Digital E-Prescription issued to $pName! Live in Patient Health Locker.'),
-                                  backgroundColor: const Color(0xFF10B981),
+                                  backgroundColor: const Color(0xFF012A58),
                                   duration: const Duration(seconds: 3),
                                 ),
                               );
@@ -895,7 +948,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
       builder: (dialogCtx) {
         return StatefulBuilder(
           builder: (context, setModalState) {
-            final notifs = _patientService.appNotifications.where((n) => n.recipientRole == role || n.recipientRole == 'ALL').toList();
+            final notifs = _patientService.getNotificationsForRole(role);
             final unreadCount = notifs.where((n) => !n.isRead).length;
 
             return Dialog(
@@ -973,13 +1026,13 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                             Color iconColor = AppTheme.primaryBlue;
                             if (n.title.toLowerCase().contains('referral')) {
                               itemIcon = Icons.group_add_rounded;
-                              iconColor = const Color(0xFF6366F1);
+                              iconColor = const Color(0xFFFE3434);
                             } else if (n.title.toLowerCase().contains('consultation') || n.title.toLowerCase().contains('assigned')) {
                               itemIcon = Icons.medical_services_rounded;
-                              iconColor = const Color(0xFF0284C7);
+                              iconColor = const Color(0xFFFE3434);
                             } else if (n.title.toLowerCase().contains('prescription')) {
                               itemIcon = Icons.receipt_long_rounded;
-                              iconColor = const Color(0xFF10B981);
+                              iconColor = const Color(0xFF012A58);
                             }
 
                             return InkWell(
@@ -994,10 +1047,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                 margin: const EdgeInsets.only(bottom: 10),
                                 padding: const EdgeInsets.all(12),
                                 decoration: BoxDecoration(
-                                  color: isUnread ? const Color(0xFFF0F9FF) : const Color(0xFFF8FAFC),
+                                  color: isUnread ? const Color(0x14FE3434) : const Color(0xFFF8FAFC),
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
-                                    color: isUnread ? const Color(0xFFBAE6FD) : const Color(0xFFE2E8F0),
+                                    color: isUnread ? const Color(0x40FE3434) : const Color(0xFFE2E8F0),
                                     width: isUnread ? 1.5 : 1.0,
                                   ),
                                 ),
@@ -1026,7 +1079,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                                   style: TextStyle(
                                                     fontWeight: FontWeight.bold,
                                                     fontSize: 13,
-                                                    color: isUnread ? const Color(0xFF0369A1) : AppTheme.textDark,
+                                                    color: isUnread ? const Color(0xFF012A58) : AppTheme.textDark,
                                                   ),
                                                   maxLines: 1,
                                                   overflow: TextOverflow.ellipsis,
@@ -1037,7 +1090,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                                 Container(
                                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                                   decoration: BoxDecoration(
-                                                    color: const Color(0xFF0284C7),
+                                                    color: const Color(0xFFFE3434),
                                                     borderRadius: BorderRadius.circular(8),
                                                   ),
                                                   child: const Text('NEW', style: TextStyle(fontSize: 8.5, color: Colors.white, fontWeight: FontWeight.bold)),
@@ -1109,7 +1162,15 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
           unselectedFontSize: 12,
           selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w700),
           unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500),
-          onTap: (index) => setState(() => _currentIndex = index),
+          onTap: (index) {
+            setState(() => _currentIndex = index);
+            if (index == 0 || index == 1 || index == 2) {
+              _patientService.syncAppointmentsFromApi();
+              _patientService.syncProblemRequestsFromApi();
+              _patientService.syncDentistAssignedRequestsFromApi();
+              _patientService.syncNotificationsFromApi(role: 'Dentist');
+            }
+          },
           items: const [
             BottomNavigationBarItem(
               icon: Icon(Icons.calendar_today_outlined, size: 22),
@@ -1167,23 +1228,132 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     }
   }
 
+  String _formatDateYmdLocal(DateTime dt) =>
+      '${dt.year.toString().padLeft(4, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+
+  Future<void> _syncDoctorScheduleAndBlockedDates() async {
+    final doc = _resolveCurrentDoctor() ?? _patientService.currentDoctor;
+    final sess = SessionService().currentSession;
+    final targetId = (doc != null && doc.id.isNotEmpty && !doc.id.toUpperCase().startsWith('DOC-'))
+        ? doc.id
+        : ((sess?.metadata['dentistId']?.toString().trim().isNotEmpty == true)
+            ? sess!.metadata['dentistId'].toString().trim()
+            : ((sess?.userId.trim().isNotEmpty == true)
+                ? sess!.userId.trim()
+                : (doc?.id ?? '')));
+    if (targetId.isEmpty) return;
+
+    _hasSyncedDoctorSchedule = true;
+    try {
+      final sched = await _patientService.getDoctorSchedule(targetId);
+      final blocked = await _patientService.getBlockedDates(targetId);
+      if (mounted) {
+        setState(() {
+          _doctorSchedule = sched;
+          _doctorBlockedDates = blocked;
+        });
+      }
+    } catch (_) {}
+  }
+
+  String _formatWorkingDaysSummary(List<String> days) {
+    if (days.isEmpty) return 'Mon - Fri';
+    const shortOrder = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const map = {
+      'monday': 'Mon', 'mon': 'Mon',
+      'tuesday': 'Tue', 'tue': 'Tue',
+      'wednesday': 'Wed', 'wed': 'Wed',
+      'thursday': 'Thu', 'thu': 'Thu',
+      'friday': 'Fri', 'fri': 'Fri',
+      'saturday': 'Sat', 'sat': 'Sat',
+      'sunday': 'Sun', 'sun': 'Sun',
+    };
+    final normalized = <String>[];
+    for (final d in days) {
+      final s = map[d.trim().toLowerCase()];
+      if (s != null && !normalized.contains(s)) normalized.add(s);
+    }
+    normalized.sort((a, b) => shortOrder.indexOf(a).compareTo(shortOrder.indexOf(b)));
+    if (normalized.isEmpty) return 'Mon - Fri';
+    if (normalized.length == 5 &&
+        normalized[0] == 'Mon' &&
+        normalized[4] == 'Fri') {
+      return 'Mon - Fri';
+    }
+    if (normalized.length == 6 &&
+        normalized[0] == 'Mon' &&
+        normalized[5] == 'Sat') {
+      return 'Mon - Sat';
+    }
+    if (normalized.length == 7) return 'Mon - Sun';
+    return normalized.join(', ');
+  }
+
   DoctorModel? _resolveCurrentDoctor() {
     var currentDoc = _patientService.currentDoctor;
     final authUser = _safeAuthUser;
-    if (authUser != null && authUser.email != null && authUser.email!.isNotEmpty) {
-      final authEmailLower = authUser.email!.toLowerCase();
-      final authName = (authUser.userMetadata?['name'] ?? '').toString().toLowerCase();
-      final match = _patientService.allDoctors.where(
-        (d) =>
-            d.email.toLowerCase() == authEmailLower ||
-            (d.id.isNotEmpty && d.id == authUser.id) ||
-            (d.userId.isNotEmpty && d.userId == authUser.id) ||
-            (authName.isNotEmpty && d.name.toLowerCase().contains(authName)),
-      ).firstOrNull;
-      if (match != null) {
-        currentDoc = match;
-        _patientService.currentDoctor = currentDoc;
+    final sess = SessionService().currentSession;
+
+    final candidateIds = <String>{
+      if (authUser?.id != null && authUser!.id.isNotEmpty) authUser.id.trim(),
+      if (sess?.userId != null && sess!.userId.isNotEmpty) sess.userId.trim(),
+      if (sess?.metadata['dentistId'] != null && sess!.metadata['dentistId'].toString().trim().isNotEmpty)
+        sess.metadata['dentistId'].toString().trim(),
+      if (sess?.metadata['userId'] != null && sess!.metadata['userId'].toString().trim().isNotEmpty)
+        sess.metadata['userId'].toString().trim(),
+      if (currentDoc != null && currentDoc.id.isNotEmpty && !currentDoc.id.toUpperCase().startsWith('DOC-'))
+        currentDoc.id.trim(),
+      if (currentDoc != null && currentDoc.userId.isNotEmpty) currentDoc.userId.trim(),
+    };
+
+    final candidateEmails = <String>{
+      if (authUser?.email != null && authUser!.email!.isNotEmpty) authUser.email!.trim().toLowerCase(),
+      if (sess?.email != null && sess!.email!.isNotEmpty) sess.email!.trim().toLowerCase(),
+      if (currentDoc != null && currentDoc.email.isNotEmpty && currentDoc.email != 'doctor@dentaguru.com')
+        currentDoc.email.trim().toLowerCase(),
+    };
+
+    final candidatePhones = <String>{
+      if (sess?.phone != null && sess!.phone!.isNotEmpty)
+        sess.phone!.replaceAll(RegExp(r'[^0-9]'), ''),
+      if (currentDoc != null && currentDoc.phone.isNotEmpty)
+        currentDoc.phone.replaceAll(RegExp(r'[^0-9]'), ''),
+    }..removeWhere((p) => p.isEmpty);
+
+    final candidateName = (
+      sess?.name ??
+      authUser?.userMetadata?['name']?.toString() ??
+      currentDoc?.name ??
+      ''
+    ).replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
+
+    final match = _patientService.allDoctors.where((d) {
+      if (d.id.isNotEmpty && candidateIds.contains(d.id.trim())) return true;
+      if (d.userId.isNotEmpty && candidateIds.contains(d.userId.trim())) return true;
+      if (d.email.isNotEmpty && candidateEmails.contains(d.email.trim().toLowerCase())) return true;
+      final dPhone = d.phone.replaceAll(RegExp(r'[^0-9]'), '');
+      if (dPhone.length >= 10 &&
+          candidatePhones.any((cp) => cp.length >= 10 && dPhone.endsWith(cp.substring(cp.length - 10)))) {
+        return true;
       }
+      final dName = d.name.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
+      if (candidateName.isNotEmpty &&
+          candidateName != 'doctor' &&
+          candidateName != 'dentist' &&
+          dName.isNotEmpty &&
+          (dName == candidateName || dName.contains(candidateName) || candidateName.contains(dName))) {
+        return true;
+      }
+      return false;
+    }).firstOrNull;
+
+    if (match != null) {
+      currentDoc = match;
+      _patientService.currentDoctor = currentDoc;
+    } else if ((currentDoc == null || currentDoc.id.toUpperCase().startsWith('DOC-')) &&
+        _patientService.allDoctors.length == 1) {
+      currentDoc = _patientService.allDoctors.first;
+      _patientService.currentDoctor = currentDoc;
     }
     return currentDoc;
   }
@@ -1273,14 +1443,13 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         ? (rawDocName.startsWith('Dr.') ? rawDocName : 'Dr. $rawDocName')
         : 'Dentist';
 
-    final notifs = _patientService.appNotifications
-        .where((n) => n.recipientRole == 'Dentist' || n.recipientRole == 'ALL')
-        .toList();
+    final notifs = _patientService.getNotificationsForRole('Dentist');
     final unreadCount = notifs.where((n) => !n.isRead).length;
 
     final allMyRequests = _getDentistAssignedAndScheduledRequests();
     final selectedDate = _baseCalendarDate.add(Duration(days: _selectedDateIndex));
     final appointmentsForSelectedDate = _getAppointmentsForDate(allMyRequests, selectedDate, _selectedDateIndex);
+    final allBookedAppointments = allMyRequests.where((req) => _isBookedOrConfirmedAppointment(req)).toList();
 
     return SingleChildScrollView(
       key: const Key('dentist_today_scroll_view'),
@@ -1417,6 +1586,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                     child: Row(
                       children: List.generate(7, (index) {
                         final dt = _baseCalendarDate.add(Duration(days: index));
+                        final dtKey = _formatDateYmdLocal(dt);
+                        final isBlockedDay = _doctorBlockedDates.any((b) => b.date == dtKey);
                         final isSelected = _selectedDateIndex == index;
                         return Padding(
                           padding: EdgeInsets.only(right: index == 6 ? 0 : 10),
@@ -1429,42 +1600,69 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                               width: 60,
                               height: 78,
                               decoration: BoxDecoration(
-                                color: isSelected ? AppTheme.gsNavy : Colors.white,
+                                color: isSelected
+                                    ? (isBlockedDay ? const Color(0xFFFE3434) : AppTheme.gsNavy)
+                                    : (isBlockedDay ? const Color(0x14FE3434) : Colors.white),
                                 borderRadius: BorderRadius.circular(18),
                                 border: Border.all(
-                                  color: isSelected ? AppTheme.gsNavy : const Color(0xFFE2E8F0),
+                                  color: isSelected
+                                      ? (isBlockedDay ? const Color(0xFFFE3434) : AppTheme.gsNavy)
+                                      : (isBlockedDay ? const Color(0x40FE3434) : const Color(0xFFE2E8F0)),
                                   width: 1.2,
                                 ),
                                 boxShadow: isSelected
                                     ? [
                                         BoxShadow(
-                                          color: AppTheme.gsNavy.withValues(alpha: 0.2),
+                                          color: (isBlockedDay ? const Color(0xFFFE3434) : AppTheme.gsNavy).withValues(alpha: 0.2),
                                           blurRadius: 8,
                                           offset: const Offset(0, 3),
                                         ),
                                       ]
                                     : null,
                               ),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
+                              child: Stack(
+                                alignment: Alignment.center,
                                 children: [
-                                  Text(
-                                    _formatDayAbbrev(dt),
-                                    style: TextStyle(
-                                      fontSize: 12.5,
-                                      fontWeight: FontWeight.w600,
-                                      color: isSelected ? Colors.white.withValues(alpha: 0.9) : const Color(0xFF64748B),
-                                    ),
+                                  Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text(
+                                        _formatDayAbbrev(dt),
+                                        style: TextStyle(
+                                          fontSize: 12.5,
+                                          fontWeight: FontWeight.w600,
+                                          color: isSelected
+                                              ? Colors.white.withValues(alpha: 0.9)
+                                              : (isBlockedDay ? const Color(0xFFFE3434) : const Color(0xFF64748B)),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '${dt.day}',
+                                        style: TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.w800,
+                                          color: isSelected
+                                              ? Colors.white
+                                              : (isBlockedDay ? const Color(0xFFFE3434) : const Color(0xFF0F172A)),
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '${dt.day}',
-                                    style: TextStyle(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.w800,
-                                      color: isSelected ? Colors.white : const Color(0xFF0F172A),
+                                  if (isBlockedDay)
+                                    Positioned(
+                                      top: 5,
+                                      right: 6,
+                                      child: Container(
+                                        key: Key('dentist_date_blocked_badge_$dtKey'),
+                                        width: 8,
+                                        height: 8,
+                                        decoration: BoxDecoration(
+                                          color: isSelected ? Colors.white : const Color(0xFFFE3434),
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
                                     ),
-                                  ),
                                 ],
                               ),
                             ),
@@ -1485,19 +1683,19 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 3. Availability Card
+                // 3. Availability Card (ON / OFF Master Toggle)
                 Container(
                   key: const Key('dentist_availability_card'),
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                   decoration: BoxDecoration(
                     color: _isDentistAvailableNow
-                        ? AppTheme.gsNavy.withValues(alpha: 0.05)
+                        ? const Color(0x14012A58)
                         : Colors.white,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
                       color: _isDentistAvailableNow
-                          ? AppTheme.gsNavy.withValues(alpha: 0.45)
+                          ? const Color(0xFF012A58).withValues(alpha: 0.45)
                           : const Color(0xFFE2E8F0),
                       width: 1.3,
                     ),
@@ -1509,28 +1707,57 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                         width: 12,
                         height: 12,
                         decoration: BoxDecoration(
-                          color: _isDentistAvailableNow ? AppTheme.gsNavy : const Color(0xFF94A3B8),
+                          color: _isDentistAvailableNow ? const Color(0xFF012A58) : const Color(0xFF94A3B8),
                           shape: BoxShape.circle,
                         ),
                       ),
                       const SizedBox(width: 14),
-                      const Expanded(
+                      Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              'Available now',
-                              style: TextStyle(
-                                fontSize: 16.5,
-                                fontWeight: FontWeight.w800,
-                                color: Color(0xFF0F172A),
-                              ),
+                            Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    'Availability',
+                                    style: const TextStyle(
+                                      fontSize: 16.5,
+                                      fontWeight: FontWeight.w800,
+                                      color: Color(0xFF0F172A),
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Container(
+                                  key: const Key('dentist_availability_status_badge'),
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: _isDentistAvailableNow
+                                        ? const Color(0xFF012A58)
+                                        : const Color(0xFF64748B),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    _isDentistAvailableNow ? 'ON' : 'OFF',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                      color: Colors.white,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-                            SizedBox(height: 4),
+                            const SizedBox(height: 4),
                             Text(
-                              'Patients who speak your language can reach you instantly. Auto-off after 30 min idle.',
-                              style: TextStyle(
-                                fontSize: 13.5,
+                              _isDentistAvailableNow
+                                  ? 'Visible in patient search and open for new appointment bookings.'
+                                  : 'Hidden from patient search and new bookings. Existing appointments & records remain intact.',
+                              style: const TextStyle(
+                                fontSize: 13,
                                 color: Color(0xFF475569),
                                 height: 1.35,
                               ),
@@ -1543,10 +1770,12 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                         key: const Key('dentist_availability_switch'),
                         value: _isDentistAvailableNow,
                         activeThumbColor: Colors.white,
-                        activeTrackColor: AppTheme.gsNavy,
+                        activeTrackColor: const Color(0xFF012A58),
                         inactiveThumbColor: Colors.white,
                         inactiveTrackColor: const Color(0xFFCBD5E1),
-                        onChanged: (val) => _toggleDentistAvailability(val),
+                        onChanged: _isUpdatingAvailability
+                            ? null
+                            : (val) => _toggleDentistAvailability(val),
                       ),
                     ],
                   ),
@@ -1557,8 +1786,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 _buildDentistSponsoredCourseBanner(context),
                 const SizedBox(height: 28),
 
-                // 5. Appointments for Selected Date OR Empty State
-                if (appointmentsForSelectedDate.isEmpty)
+                // 5. Appointments for Selected Date OR All Upcoming Booked Appointments OR Empty State
+                if (appointmentsForSelectedDate.isEmpty && allBookedAppointments.isEmpty)
                   Container(
                     key: const Key('dentist_no_appointments_empty_state'),
                     width: double.infinity,
@@ -1608,7 +1837,9 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Appointments (${appointmentsForSelectedDate.length})',
+                        appointmentsForSelectedDate.isNotEmpty
+                            ? 'Appointments (${appointmentsForSelectedDate.length})'
+                            : 'Scheduled Appointments (${allBookedAppointments.length})',
                         style: const TextStyle(
                           fontSize: 16.5,
                           fontWeight: FontWeight.w800,
@@ -1616,7 +1847,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                         ),
                       ),
                       const SizedBox(height: 12),
-                      ...appointmentsForSelectedDate.map((req) {
+                      ...(appointmentsForSelectedDate.isNotEmpty
+                              ? appointmentsForSelectedDate
+                              : allBookedAppointments)
+                          .map((req) {
                         final slot = (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.trim().isNotEmpty)
                             ? req.confirmedTimeSlot!
                             : '11:00 AM';
@@ -1624,6 +1858,14 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                       }),
                     ],
                   ),
+
+                if (_patientService.doctorReceivedPatientReferrals.isNotEmpty) ...[
+                  const SizedBox(height: 24),
+                  _buildIncomingReferralsSection(
+                    _patientService.doctorReceivedPatientReferrals,
+                    keyPrefix: 'today',
+                  ),
+                ],
 
                 const SizedBox(height: 36),
 
@@ -1637,6 +1879,22 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     );
   }
 
+  bool _isBookedOrConfirmedAppointment(PatientConsultationRequest req) {
+    final statusLower = req.status.trim().toLowerCase();
+    if (statusLower == 'cancelled' || statusLower == 'rejected') return false;
+    return statusLower == 'pending' ||
+        statusLower == 'confirmed' ||
+        statusLower == 'accepted' ||
+        statusLower == 'scheduled' ||
+        statusLower == 'rescheduled' ||
+        statusLower == 'completed' ||
+        statusLower.contains('confirm') ||
+        statusLower.contains('accept') ||
+        req.problemDescription == 'Scheduled dental consultation' ||
+        req.problemDescription == 'Scheduled medical consultation' ||
+        (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.trim().isNotEmpty);
+  }
+
   List<PatientConsultationRequest> _getAppointmentsForDate(
     List<PatientConsultationRequest> allMyRequests,
     DateTime targetDate,
@@ -1646,15 +1904,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         '${targetDate.year.toString().padLeft(4, '0')}-${targetDate.month.toString().padLeft(2, '0')}-${targetDate.day.toString().padLeft(2, '0')}';
 
     return allMyRequests.where((req) {
-      final statusLower = req.status.trim().toLowerCase();
-      final isBookedOrConfirmed = statusLower == 'confirmed' ||
-          statusLower == 'accepted' ||
-          statusLower == 'scheduled' ||
-          statusLower.contains('confirm') ||
-          statusLower.contains('accept') ||
-          req.problemDescription == 'Scheduled dental consultation';
-
-      if (!isBookedOrConfirmed) return false;
+      if (!_isBookedOrConfirmedAppointment(req)) return false;
 
       if (req.confirmedDate != null && req.confirmedDate!.trim().isNotEmpty) {
         final cDate = req.confirmedDate!.trim().split('T').first;
@@ -1705,8 +1955,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  Color(0xFF1E3A8A),
-                  Color(0xFF0F2557),
+                  Color(0xFF012A58),
+                  Color(0xFF012A58),
                 ],
               ),
               boxShadow: [
@@ -1871,7 +2121,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
       decoration: BoxDecoration(
         color: Colors.white,
         shape: BoxShape.circle,
-        border: Border.all(color: const Color(0xFFF59E0B), width: 1.8),
+        border: Border.all(color: const Color(0xFFFE3434), width: 1.8),
       ),
       child: Center(
         child: Text(
@@ -1893,8 +2143,27 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   }
 
   Widget _buildManageAvailabilitySection() {
-    final currentDoc = _patientService.currentDoctor ??
+    final currentDoc = _resolveCurrentDoctor() ??
+        _patientService.currentDoctor ??
         (_patientService.allDoctors.isNotEmpty ? _patientService.allDoctors.first : null);
+    final docId = (currentDoc != null && currentDoc.id.isNotEmpty) ? currentDoc.id : '';
+    final schedule = docId.isNotEmpty
+        ? (_patientService.getCachedDoctorSchedule(docId) ?? _doctorSchedule)
+        : _doctorSchedule;
+    final blockedDates = docId.isNotEmpty
+        ? (_patientService.getCachedBlockedDates(docId).isNotEmpty
+            ? _patientService.getCachedBlockedDates(docId)
+            : _doctorBlockedDates)
+        : _doctorBlockedDates;
+
+    final workingDaysSummary = _formatWorkingDaysSummary(schedule.workingDays);
+    final hoursSummary = '${schedule.startTime} - ${schedule.endTime}';
+    final lunchSummary = schedule.hasBreak &&
+            (schedule.breakStartTime?.isNotEmpty == true) &&
+            (schedule.breakEndTime?.isNotEmpty == true)
+        ? '${schedule.breakStartTime} - ${schedule.breakEndTime}'
+        : 'No Break';
+    final durationSummary = '${schedule.slotDurationMinutes} mins';
 
     return Container(
       width: double.infinity,
@@ -1949,7 +2218,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
           const Divider(height: 1, color: Color(0xFFF1F5F9)),
           const SizedBox(height: 14),
 
-          // Working Days & Hours Info Row
+          // Working Days & Hours Info Row (Live from DB / Schedule State)
           Wrap(
             spacing: 10,
             runSpacing: 10,
@@ -1957,25 +2226,51 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               _buildAvailabilityInfoPill(
                 icon: Icons.calendar_today_rounded,
                 label: 'Working Days',
-                value: 'Mon - Fri',
+                value: workingDaysSummary,
               ),
               _buildAvailabilityInfoPill(
                 icon: Icons.schedule_rounded,
                 label: 'Hours',
-                value: '09:00 AM - 05:00 PM',
+                value: hoursSummary,
               ),
               _buildAvailabilityInfoPill(
                 icon: Icons.coffee_rounded,
                 label: 'Lunch Break',
-                value: '01:00 PM - 02:00 PM',
+                value: lunchSummary,
               ),
               _buildAvailabilityInfoPill(
                 icon: Icons.timer_outlined,
                 label: 'Slot Duration',
-                value: '30 mins',
+                value: durationSummary,
               ),
             ],
           ),
+          if (blockedDates.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Container(
+              key: const Key('doctor_dashboard_blocked_dates_summary'),
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0x14FE3434),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0x40FE3434)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.event_busy_rounded, size: 15, color: Color(0xFFFE3434)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Blocked Holidays (${blockedDates.length}): ${blockedDates.take(3).map((b) => b.date).join(', ')}${blockedDates.length > 3 ? ' +${blockedDates.length - 3} more' : ''}',
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFFE3434)),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
 
           // Action Toolbar
@@ -1985,12 +2280,14 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
             children: [
               ElevatedButton.icon(
                 key: const Key('doctor_manage_availability_btn'),
-                onPressed: () {
-                  DoctorSlotManagementDialog.show(
+                onPressed: () async {
+                  await DoctorSlotManagementDialog.show(
                     context,
                     initialDoctor: currentDoc,
                     isDoctorSelfManage: true,
+                    initialBlockDateMode: false,
                   );
+                  await _syncDoctorScheduleAndBlockedDates();
                 },
                 icon: const Icon(Icons.edit_calendar_rounded, size: 16, color: Colors.white),
                 label: const Text(
@@ -2005,20 +2302,22 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               ),
               OutlinedButton.icon(
                 key: const Key('doctor_block_holiday_btn'),
-                onPressed: () {
-                  DoctorSlotManagementDialog.show(
+                onPressed: () async {
+                  await DoctorSlotManagementDialog.show(
                     context,
                     initialDoctor: currentDoc,
                     isDoctorSelfManage: true,
+                    initialBlockDateMode: true,
                   );
+                  await _syncDoctorScheduleAndBlockedDates();
                 },
-                icon: const Icon(Icons.block_rounded, size: 16, color: Color(0xFFDC2626)),
+                icon: const Icon(Icons.block_rounded, size: 16, color: Color(0xFFFE3434)),
                 label: const Text(
                   'Block Date / Mark Holiday',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFDC2626)),
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFFE3434)),
                 ),
                 style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: Color(0xFFFCA5A5)),
+                  side: const BorderSide(color: Color(0x40FE3434)),
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
@@ -2028,12 +2327,12 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
           const SizedBox(height: 10),
           const Row(
             children: [
-              Icon(Icons.sync_rounded, size: 13, color: Color(0xFF10B981)),
+              Icon(Icons.sync_rounded, size: 13, color: Color(0xFF012A58)),
               SizedBox(width: 4),
               Expanded(
                 child: Text(
                   'Schedule changes sync instantly to Patient Dashboards & Profile booking slots',
-                  style: TextStyle(fontSize: 10.5, color: Color(0xFF10B981), fontWeight: FontWeight.w600),
+                  style: TextStyle(fontSize: 10.5, color: Color(0xFF012A58), fontWeight: FontWeight.w600),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -2074,6 +2373,71 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     );
   }
 
+  String _formatDoctorApptDate(String? rawDate, DateTime fallback) {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    DateTime dt = fallback;
+    if (rawDate != null && rawDate.trim().isNotEmpty) {
+      final parsed = DateTime.tryParse(rawDate.trim());
+      if (parsed != null) dt = parsed;
+    }
+    final month = months[(dt.month - 1).clamp(0, 11)];
+    return '${dt.day} $month ${dt.year}';
+  }
+
+  String _formatDoctorBookingCreated(DateTime dt) {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    final local = dt.toLocal();
+    final month = months[(local.month - 1).clamp(0, 11)];
+    final hour12 = local.hour % 12 == 0 ? 12 : local.hour % 12;
+    final amPm = local.hour >= 12 ? 'PM' : 'AM';
+    final minStr = local.minute.toString().padLeft(2, '0');
+    return '${local.day} $month ${local.year}, $hour12:$minStr $amPm';
+  }
+
+  Future<void> _handleAcceptTimelineAppointment(PatientConsultationRequest req, String patientName) async {
+    if (_acceptingRequestIds.contains(req.id)) return;
+    setState(() => _acceptingRequestIds.add(req.id));
+    try {
+      final res = await _patientService.acceptAppointmentByDoctor(req.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            res['message']?.toString() ?? '✅ Appointment confirmed for $patientName!',
+          ),
+          backgroundColor: const Color(0xFF012A58),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _acceptingRequestIds.remove(req.id));
+      }
+    }
+  }
+
+  Future<void> _handleRejectTimelineAppointment(PatientConsultationRequest req, String patientName) async {
+    if (_acceptingRequestIds.contains(req.id)) return;
+    setState(() => _acceptingRequestIds.add(req.id));
+    try {
+      final res = await _patientService.rejectAppointmentByDoctor(req.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            res['message']?.toString() ?? 'Appointment declined for $patientName.',
+          ),
+          backgroundColor: const Color(0xFF475569),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _acceptingRequestIds.remove(req.id));
+      }
+    }
+  }
+
   Widget _buildTimelineNode({
     required PatientConsultationRequest req,
     required String time,
@@ -2082,13 +2446,87 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         ? (_patientService.currentPatient.name.isNotEmpty ? _patientService.currentPatient.name : 'Patient')
         : req.patientName;
 
+    final matchedPatient = _patientService.allPatients
+        .where((p) =>
+            (req.patientId != null && req.patientId!.isNotEmpty && p.id == req.patientId) ||
+            (p.name.isNotEmpty && p.name.trim().toLowerCase() == patientName.trim().toLowerCase()) ||
+            (p.phone.isNotEmpty && req.patientPhone.isNotEmpty && p.phone.trim() == req.patientPhone.trim()))
+        .firstOrNull;
+
+    final formattedContact = req.getFormattedPatientPhone(isAuthorized: true);
+    final patientCity = req.city.trim().isNotEmpty
+        ? req.city.trim()
+        : (matchedPatient?.city.trim().isNotEmpty == true ? matchedPatient!.city.trim() : '');
+    final patientPincode = req.pincode.trim().isNotEmpty
+        ? req.pincode.trim()
+        : (matchedPatient?.pincode.trim().isNotEmpty == true ? matchedPatient!.pincode.trim() : '');
+    final patientAge = matchedPatient?.age.trim() ?? '';
+    final patientGender = matchedPatient?.gender.trim() ?? '';
+    final patientBlood = matchedPatient?.bloodGroup.trim() ?? '';
+    final profileParts = <String>[
+      if (patientAge.isNotEmpty) '$patientAge yrs',
+      if (patientGender.isNotEmpty) patientGender,
+      if (patientCity.isNotEmpty) 'City: $patientCity',
+      if (patientPincode.isNotEmpty) 'PIN: $patientPincode',
+      if (patientBlood.isNotEmpty) 'Blood: $patientBlood',
+    ];
+    final profileSummary = profileParts.join(' • ');
+
+    final targetPatientProfile = matchedPatient ??
+        PatientProfile(
+          id: (req.patientId != null && req.patientId!.isNotEmpty) ? req.patientId! : 'pat_${patientName.hashCode}',
+          name: patientName,
+          phone: req.patientPhone,
+          city: patientCity,
+          pincode: patientPincode,
+          age: patientAge.isNotEmpty ? patientAge : '28',
+          gender: patientGender.isNotEmpty ? patientGender : 'Female',
+          bloodGroup: patientBlood.isNotEmpty ? patientBlood : 'O Positive (O+)',
+        );
+
+    final currentDoc = _resolveCurrentDoctor();
+    final clinicName = req.displayDoctorClinic.isNotEmpty
+        ? req.displayDoctorClinic
+        : (req.assignedDoctorClinic?.trim().isNotEmpty == true
+            ? req.assignedDoctorClinic!.trim()
+            : (currentDoc?.clinicName.trim().isNotEmpty == true
+                ? currentDoc!.clinicName.trim()
+                : 'GS HEALTH Practice'));
+
+    final formattedApptDate = _formatDoctorApptDate(req.confirmedDate, req.submittedAt);
+    final formattedBookingCreated = _formatDoctorBookingCreated(req.submittedAt);
+    final statusUpper = req.status.trim().toUpperCase();
+    final bool isConfirmedOrAccepted = statusUpper == 'CONFIRMED' ||
+        statusUpper == 'ACCEPTED' ||
+        statusUpper == 'DENTIST_ACCEPTED';
+    final bool isCompleted = statusUpper == 'COMPLETED';
+    final bool isCancelledOrRejected = statusUpper == 'CANCELLED' || statusUpper == 'REJECTED';
+    final bool isPendingAcceptance = !isConfirmedOrAccepted && !isCompleted && !isCancelledOrRejected;
+    final bool isAccepting = _acceptingRequestIds.contains(req.id);
+
+    final String statusLabel = isConfirmedOrAccepted
+        ? 'Confirmed'
+        : (isCompleted
+            ? 'Completed'
+            : (statusUpper == 'RESCHEDULED'
+                ? 'Rescheduled'
+                : (statusUpper == 'CANCELLED'
+                    ? 'Cancelled'
+                    : (statusUpper == 'REJECTED' ? 'Declined' : 'Pending'))));
+
     return Container(
+      key: Key('doctor_appointment_card_${req.id}'),
       margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppTheme.gsNavy.withValues(alpha: 0.25), width: 1.4),
+        border: Border.all(
+          color: isConfirmedOrAccepted
+              ? const Color(0xFF012A58).withValues(alpha: 0.45)
+              : AppTheme.gsNavy.withValues(alpha: 0.25),
+          width: 1.4,
+        ),
         boxShadow: [
           BoxShadow(
             color: AppTheme.gsNavy.withValues(alpha: 0.06),
@@ -2100,20 +2538,22 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Row 1: Patient Name & Contact + Severity Badge
+          // Row 1: Patient Name, Profile Details & Contact + Status Badge
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(8),
+                      padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
                         color: AppTheme.gsNavy.withValues(alpha: 0.1),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.person_rounded, color: AppTheme.gsNavy, size: 18),
+                      child: const Icon(Icons.person_rounded, color: AppTheme.gsNavy, size: 20),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -2122,13 +2562,23 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                         children: [
                           Text(
                             patientName,
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark),
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15.5, color: AppTheme.textDark),
                             overflow: TextOverflow.ellipsis,
                           ),
-                          if (req.patientPhone.isNotEmpty && req.patientPhone != 'Not Provided') ...[
+                          if (formattedContact.isNotEmpty) ...[
+                            const SizedBox(height: 2),
                             Text(
-                              req.patientPhone,
-                              style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                              formattedContact,
+                              style: const TextStyle(fontSize: 12, color: AppTheme.textMuted, fontWeight: FontWeight.w600),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                          if (profileSummary.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              profileSummary,
+                              style: const TextStyle(fontSize: 11.5, color: Color(0xFF475569), fontWeight: FontWeight.w500),
+                              maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ],
@@ -2139,26 +2589,152 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 ),
               ),
               const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: req.severity == 'Severe' ? const Color(0xFFFEE2E2) : const Color(0xFFFEF3C7),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  '${req.severity} Severity',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: req.severity == 'Severe' ? const Color(0xFF991B1B) : const Color(0xFF92400E),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Container(
+                    key: Key('doctor_appointment_status_badge_${req.id}'),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: statusLabel == 'Confirmed'
+                          ? const Color(0x14012A58)
+                          : (req.severity == 'Severe' ? const Color(0x14FE3434) : const Color(0x14FE3434)),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      statusLabel,
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.bold,
+                        color: statusLabel == 'Confirmed'
+                            ? const Color(0xFF012A58)
+                            : (req.severity == 'Severe' ? const Color(0xFFFE3434) : const Color(0xFFFE3434)),
+                      ),
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 6),
+                  InkWell(
+                    key: Key('doctor_view_patient_details_btn_${req.id}'),
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (ctx) => DoctorPatientRecordScreen(
+                            patient: targetPatientProfile,
+                            onWriteRx: () => _showPrescriptionModal(context, targetPatientProfile.name),
+                            onRefer: () {
+                              Navigator.of(ctx).pop();
+                              _selectPatientForReferral(targetPatientProfile);
+                              setState(() {
+                                _previousTabIndex = 0;
+                                _currentIndex = 3;
+                              });
+                            },
+                          ),
+                        ),
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                      decoration: BoxDecoration(
+                        color: AppTheme.gsNavy.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.assignment_ind_outlined, size: 12, color: AppTheme.gsNavy),
+                          SizedBox(width: 4),
+                          Text(
+                            'Patient Details',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.gsNavy,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
           const SizedBox(height: 12),
 
-          // Row 2: Confirmed Time Slot Banner & Accepted Badge
+          // Row 1b: Patient Details Summary Box (Always Visible on Card)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Wrap(
+              spacing: 14,
+              runSpacing: 6,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.badge_outlined, size: 13.5, color: Color(0xFF475569)),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        'Patient: $patientName',
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                if (formattedContact.isNotEmpty)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.phone_outlined, size: 13.5, color: Color(0xFF475569)),
+                      const SizedBox(width: 4),
+                      Text(
+                        formattedContact,
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                      ),
+                    ],
+                  ),
+                if (patientCity.isNotEmpty)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.location_on_outlined, size: 13.5, color: Color(0xFF475569)),
+                      const SizedBox(width: 3),
+                      Text(
+                        patientPincode.isNotEmpty ? '$patientCity ($patientPincode)' : patientCity,
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                      ),
+                    ],
+                  ),
+                if (patientGender.isNotEmpty || patientAge.isNotEmpty)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.person_outline_rounded, size: 13.5, color: Color(0xFF475569)),
+                      const SizedBox(width: 3),
+                      Text(
+                        [
+                          if (patientGender.isNotEmpty) patientGender,
+                          if (patientAge.isNotEmpty) '$patientAge yrs',
+                        ].join(' • '),
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w500, color: Color(0xFF475569)),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          // Row 2: Appointment Date & Time Slot Banner + Status Pill
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
@@ -2172,7 +2748,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Confirmed Slot: $time',
+                    '$formattedApptDate • $time',
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.gsNavy),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -2180,17 +2756,21 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: AppTheme.gsNavy,
+                    color: isConfirmedOrAccepted ? const Color(0xFF012A58) : AppTheme.gsNavy,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.check_circle_rounded, color: Colors.white, size: 12),
-                      SizedBox(width: 4),
+                      Icon(
+                        isConfirmedOrAccepted ? Icons.verified_rounded : Icons.schedule_rounded,
+                        color: Colors.white,
+                        size: 12,
+                      ),
+                      const SizedBox(width: 4),
                       Text(
-                        'Scheduled',
-                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+                        statusLabel,
+                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
                       ),
                     ],
                   ),
@@ -2198,7 +2778,34 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               ],
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
+
+          // Row 2b: Clinic Details + Booking Created Date & Time
+          Wrap(
+            spacing: 10,
+            runSpacing: 6,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.local_hospital_outlined, size: 13.5, color: Color(0xFF475569)),
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      'Clinic: $clinicName',
+                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              Text(
+                'Booked: $formattedBookingCreated',
+                style: const TextStyle(fontSize: 11, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
 
           // Row 3: Procedure Category & Symptoms Description
           Container(
@@ -2226,6 +2833,100 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
             ),
           ],
           const SizedBox(height: 14),
+
+          // Row 3b: Appointment Acceptance Bar (Accept / Decline for Pending Appointments)
+          if (isPendingAcceptance) ...[
+            Row(
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: SizedBox(
+                    height: 40,
+                    child: ElevatedButton.icon(
+                      key: Key('doctor_accept_appointment_btn_${req.id}'),
+                      icon: isAccepting
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Icon(Icons.check_circle_outline_rounded, size: 16),
+                      label: Text(
+                        isAccepting ? 'Accepting...' : 'Accept Appointment',
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF012A58),
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: isAccepting
+                          ? null
+                          : () => _handleAcceptTimelineAppointment(req, patientName),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 1,
+                  child: SizedBox(
+                    height: 40,
+                    child: OutlinedButton.icon(
+                      key: Key('doctor_reject_appointment_btn_${req.id}'),
+                      icon: const Icon(Icons.close_rounded, size: 15),
+                      label: const Text(
+                        'Decline',
+                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 11.5),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFFE3434),
+                        side: const BorderSide(color: Color(0x40FE3434)),
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: isAccepting
+                          ? null
+                          : () => _handleRejectTimelineAppointment(req, patientName),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+          ] else if (isConfirmedOrAccepted) ...[
+            Container(
+              key: Key('doctor_accepted_badge_${req.id}'),
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0x14012A58),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0x40012A58)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.check_circle_rounded, size: 16, color: Color(0xFF012A58)),
+                  SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Appointment Accepted & Confirmed',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF012A58),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
 
           // Row 4: Action Buttons (Issue E-Prescription & Chat)
           Row(
@@ -2699,7 +3400,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                           style: const TextStyle(
                                             fontSize: 12.5,
                                             fontWeight: FontWeight.w600,
-                                            color: Color(0xFF4A6B5D),
+                                            color: Color(0xFF012A58),
                                           ),
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
@@ -2893,7 +3594,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text((accessRes['message'] ?? 'Access denied: Record is not shared with you.').toString()),
-          backgroundColor: const Color(0xFFDC2626),
+          backgroundColor: const Color(0xFFFE3434),
         ),
       );
       return;
@@ -3030,13 +3731,13 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                         child: Container(
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFFEF2F2),
+                            color: const Color(0x14FE3434),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.lock_person_rounded, size: 36, color: Color(0xFFDC2626)),
+                              const Icon(Icons.lock_person_rounded, size: 36, color: Color(0xFFFE3434)),
                               const SizedBox(height: 8),
                               Text(
                                 (res['message'] ?? 'Access Denied: Patient has not shared this record with you.').toString(),
@@ -3044,7 +3745,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                 style: const TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.bold,
-                                  color: Color(0xFFB91C1C),
+                                  color: Color(0xFFFE3434),
                                 ),
                               ),
                             ],
@@ -3075,14 +3776,14 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                         width: double.infinity,
                         padding: const EdgeInsets.all(20),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFEF2F2),
+                          color: const Color(0x14FE3434),
                           borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: const Color(0xFFFECACA)),
+                          border: Border.all(color: const Color(0x40FE3434)),
                         ),
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.picture_as_pdf_rounded, size: 48, color: Color(0xFFDC2626)),
+                            const Icon(Icons.picture_as_pdf_rounded, size: 48, color: Color(0xFFFE3434)),
                             const SizedBox(height: 10),
                             Text(
                               fileName.isNotEmpty ? fileName : '$title.pdf',
@@ -3140,6 +3841,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   Widget _buildAssignedRequestsTab() {
     final doc = _resolveCurrentDoctor();
     final allRequests = _getDentistAssignedAndScheduledRequests();
+    final incomingReferrals = _patientService.doctorReceivedPatientReferrals;
 
     return SingleChildScrollView(
       key: const Key('dentist_requests_scroll_view'),
@@ -3159,7 +3861,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Triage cases routed to you',
+                        'Triage cases & referrals routed to you',
                         style: TextStyle(
                           fontSize: 13.5,
                           color: Color(0xFF64748B),
@@ -3212,7 +3914,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
 
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
-            child: allRequests.isEmpty
+            child: (allRequests.isEmpty && incomingReferrals.isEmpty)
                 ? Container(
                     key: const Key('dentist_requests_empty_state'),
                     width: double.infinity,
@@ -3250,7 +3952,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                         ),
                         const SizedBox(height: 6),
                         const Text(
-                          'When an admin or AI triage routes a patient consultation to you, it will appear here.',
+                          'When an admin, AI triage, or another doctor routes a patient or referral to you, it will appear here.',
                           style: TextStyle(
                             fontSize: 13.5,
                             color: Color(0xFF64748B),
@@ -3262,11 +3964,289 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                     ),
                   )
                 : Column(
-                    children: allRequests
-                        .map((req) => _buildAssignedRequestCard(req, doc))
-                        .toList(),
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (incomingReferrals.isNotEmpty) ...[
+                        _buildIncomingReferralsSection(incomingReferrals, keyPrefix: 'requests'),
+                        if (allRequests.isNotEmpty) const SizedBox(height: 22),
+                      ],
+                      ...allRequests.map((req) => _buildAssignedRequestCard(req, doc)),
+                    ],
                   ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIncomingReferralsSection(
+    List<PatientReferral> referrals, {
+    String keyPrefix = 'today',
+  }) {
+    return Container(
+      key: Key('doctor_${keyPrefix}_incoming_referrals_section'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.share_outlined, size: 18, color: AppTheme.gsNavy),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Incoming Patient Referrals (${referrals.length})',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF0F172A),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...referrals.map((ref) => _buildDoctorReceivedReferralCard(ref, keyPrefix: keyPrefix)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDoctorReceivedReferralCard(
+    PatientReferral ref, {
+    String keyPrefix = 'today',
+  }) {
+    final normalizedStatus = ref.status.trim().toLowerCase();
+    final isPending = normalizedStatus == 'pending';
+    final isAccepted = normalizedStatus == 'accepted' || normalizedStatus == 'completed';
+    final Color badgeBg = isPending
+        ? const Color(0x14FE3434)
+        : (isAccepted ? const Color(0x14012A58) : const Color(0x14FE3434));
+    final Color badgeFg = isPending
+        ? const Color(0xFFFE3434)
+        : (isAccepted ? const Color(0xFF012A58) : const Color(0xFFFE3434));
+
+    return Container(
+      key: Key('doctor_${keyPrefix}_received_referral_card_${ref.id}'),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppTheme.gsNavy.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Center(
+                  child: Text(
+                    ref.referredPatientName.isNotEmpty
+                        ? ref.referredPatientName[0].toUpperCase()
+                        : 'P',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.gsNavy,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      ref.referredPatientName,
+                      style: const TextStyle(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF0F172A),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      [
+                        if (ref.referredPatientMobile.isNotEmpty) ref.referredPatientMobile,
+                        if (ref.referredPatientAge.isNotEmpty) '${ref.referredPatientAge} yrs',
+                        if (ref.referredPatientGender.isNotEmpty) ref.referredPatientGender,
+                        if (ref.referredPatientCity.isNotEmpty) ref.referredPatientCity,
+                      ].join(' • '),
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        color: Color(0xFF64748B),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: badgeBg,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  ref.status,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    color: badgeFg,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (ref.requiredSpecialist.isNotEmpty)
+                  Text(
+                    'Specialist: ${ref.requiredSpecialist}',
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.gsNavy,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                if (ref.clinicalComplaint.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    ref.clinicalComplaint,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF334155),
+                      height: 1.35,
+                    ),
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+                if (ref.referrerPatientName.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'Referred by: ${ref.referrerPatientName}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF64748B),
+                      fontWeight: FontWeight.w500,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (isPending) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    key: Key('${keyPrefix}_decline_referral_btn_${ref.id}'),
+                    onPressed: () async {
+                      final ok = await _patientService.rejectPatientReferralByDoctor(
+                        ref.id,
+                        rejectionReason: 'Declined by specialist',
+                      );
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            ok
+                                ? 'Referral declined for ${ref.referredPatientName}.'
+                                : 'Could not update referral status.',
+                          ),
+                          backgroundColor: ok ? const Color(0xFF475569) : AppTheme.gsRed,
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                    },
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFFE3434),
+                      side: const BorderSide(color: Color(0x40FE3434)),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text(
+                      'Decline',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton(
+                    key: Key('${keyPrefix}_accept_referral_btn_${ref.id}'),
+                    onPressed: () async {
+                      final ok = await _patientService.acceptPatientReferralByDoctor(ref.id);
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            ok
+                                ? 'Referral accepted for ${ref.referredPatientName}.'
+                                : 'Could not accept referral.',
+                          ),
+                          backgroundColor: ok ? const Color(0xFF012A58) : AppTheme.gsRed,
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF012A58),
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text(
+                      'Accept Referral',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -3354,7 +4334,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFEF3C7),
+                  color: const Color(0x14FE3434),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Row(
@@ -3363,7 +4343,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                     const Icon(
                       Icons.monitor_heart_outlined,
                       size: 13,
-                      color: Color(0xFFB45309),
+                      color: Color(0xFFFE3434),
                     ),
                     const SizedBox(width: 4),
                     Text(
@@ -3371,7 +4351,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                       style: const TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w800,
-                        color: Color(0xFFB45309),
+                        color: Color(0xFFFE3434),
                         letterSpacing: 0.3,
                       ),
                     ),
@@ -3382,7 +4362,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF3E8FF),
+                    color: const Color(0x14FE3434),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: const Row(
@@ -3391,7 +4371,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                       Icon(
                         Icons.share_outlined,
                         size: 12,
-                        color: Color(0xFF7E22CE),
+                        color: Color(0xFFFE3434),
                       ),
                       SizedBox(width: 4),
                       Text(
@@ -3399,7 +4379,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w800,
-                          color: Color(0xFF7E22CE),
+                          color: Color(0xFFFE3434),
                           letterSpacing: 0.3,
                         ),
                       ),
@@ -3409,7 +4389,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
                 decoration: BoxDecoration(
-                  color: isAccepted ? const Color(0xFFDCFCE7) : const Color(0xFFE0F2FE),
+                  color: isAccepted ? const Color(0x14012A58) : const Color(0x14FE3434),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
@@ -3417,7 +4397,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                   style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w700,
-                    color: isAccepted ? const Color(0xFF15803D) : const Color(0xFF0369A1),
+                    color: isAccepted ? const Color(0xFF012A58) : const Color(0xFF012A58),
                   ),
                 ),
               ),
@@ -3839,10 +4819,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                           decoration: BoxDecoration(
-                            color: !_referToClinic ? const Color(0xFF4A6B5D) : Colors.white,
+                            color: !_referToClinic ? const Color(0xFF012A58) : Colors.white,
                             borderRadius: BorderRadius.circular(24),
                             border: Border.all(
-                              color: !_referToClinic ? const Color(0xFF4A6B5D) : const Color(0xFFCBD5E1),
+                              color: !_referToClinic ? const Color(0xFF012A58) : const Color(0xFFCBD5E1),
                             ),
                           ),
                           child: Text(
@@ -3863,10 +4843,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
                           decoration: BoxDecoration(
-                            color: _referToClinic ? const Color(0xFF4A6B5D) : Colors.white,
+                            color: _referToClinic ? const Color(0xFF012A58) : Colors.white,
                             borderRadius: BorderRadius.circular(24),
                             border: Border.all(
-                              color: _referToClinic ? const Color(0xFF4A6B5D) : const Color(0xFFCBD5E1),
+                              color: _referToClinic ? const Color(0xFF012A58) : const Color(0xFFCBD5E1),
                             ),
                           ),
                           child: Text(
@@ -3923,11 +4903,11 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                             decoration: BoxDecoration(
                               color: isSelected
-                                  ? const Color(0xFF4A6B5D)
+                                  ? const Color(0xFF012A58)
                                   : Colors.white,
                               borderRadius: BorderRadius.circular(22),
                               border: Border.all(
-                                color: isSelected ? const Color(0xFF4A6B5D) : const Color(0xFFE2E8F0),
+                                color: isSelected ? const Color(0xFF012A58) : const Color(0xFFE2E8F0),
                                 width: isSelected ? 1.5 : 1.0,
                               ),
                             ),
@@ -4045,11 +5025,11 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                   child: Container(
                                     height: 48,
                                     decoration: BoxDecoration(
-                                      color: isSelected ? const Color(0xFF4A6B5D) : Colors.white,
+                                      color: isSelected ? const Color(0xFF012A58) : Colors.white,
                                       borderRadius: BorderRadius.circular(14),
                                       border: Border.all(
                                         color: isSelected
-                                            ? const Color(0xFF4A6B5D)
+                                            ? const Color(0xFF012A58)
                                             : const Color(0xFFE2E8F0),
                                       ),
                                     ),
@@ -4245,14 +5225,14 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                             width: 36,
                                             height: 36,
                                             color: const Color(0xFFE2E8F0),
-                                            child: const Icon(Icons.image_rounded, size: 20, color: Color(0xFF4A6B5D)),
+                                            child: const Icon(Icons.image_rounded, size: 20, color: Color(0xFF012A58)),
                                           ),
                                         )
                                       : Container(
                                           width: 36,
                                           height: 36,
                                           color: const Color(0xFFE2E8F0),
-                                          child: const Icon(Icons.image_rounded, size: 20, color: Color(0xFF4A6B5D)),
+                                          child: const Icon(Icons.image_rounded, size: 20, color: Color(0xFF012A58)),
                                         ),
                                 )
                               else
@@ -4324,7 +5304,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                       key: const Key('dentist_send_referral_button'),
                       onPressed: _isSubmittingReferral ? null : _submitInlinePatientReferral,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF4A6B5D),
+                        backgroundColor: const Color(0xFF012A58),
                         foregroundColor: Colors.white,
                         elevation: 0,
                         shape: RoundedRectangleBorder(
@@ -4377,7 +5357,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: Color(0xFF4A6B5D), width: 1.5),
+        borderSide: const BorderSide(color: Color(0xFF012A58), width: 1.5),
       ),
     );
   }
@@ -4400,7 +5380,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
             color: Colors.white,
             borderRadius: BorderRadius.circular(18),
             border: Border.all(
-              color: isSelected ? const Color(0xFF4A6B5D) : const Color(0xFFE2E8F0),
+              color: isSelected ? const Color(0xFF012A58) : const Color(0xFFE2E8F0),
               width: isSelected ? 1.6 : 1.0,
             ),
           ),
@@ -4410,7 +5390,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFEDF2EE),
+                  color: const Color(0xFFF1F5F9),
                   borderRadius: BorderRadius.circular(14),
                 ),
                 clipBehavior: Clip.antiAlias,
@@ -4424,7 +5404,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                           style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
-                            color: Color(0xFF4A6B5D),
+                            color: Color(0xFF012A58),
                           ),
                         ),
                       ),
@@ -4464,7 +5444,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: isSelected ? const Color(0xFF4A6B5D) : const Color(0xFFCBD5E1),
+                    color: isSelected ? const Color(0xFF012A58) : const Color(0xFFCBD5E1),
                     width: isSelected ? 6 : 1.5,
                   ),
                 ),
@@ -4496,7 +5476,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
             color: Colors.white,
             borderRadius: BorderRadius.circular(18),
             border: Border.all(
-              color: isSelected ? const Color(0xFF4A6B5D) : const Color(0xFFE2E8F0),
+              color: isSelected ? const Color(0xFF012A58) : const Color(0xFFE2E8F0),
               width: isSelected ? 1.6 : 1.0,
             ),
           ),
@@ -4506,13 +5486,13 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFEDF2EE),
+                  color: const Color(0xFFF1F5F9),
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: const Center(
                   child: Icon(
                     Icons.local_hospital_rounded,
-                    color: Color(0xFF4A6B5D),
+                    color: Color(0xFF012A58),
                     size: 24,
                   ),
                 ),
@@ -4552,7 +5532,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: isSelected ? const Color(0xFF4A6B5D) : const Color(0xFFCBD5E1),
+                    color: isSelected ? const Color(0xFF012A58) : const Color(0xFFCBD5E1),
                     width: isSelected ? 6 : 1.5,
                   ),
                 ),
@@ -4580,7 +5560,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
-      icon: Icon(icon, size: 17, color: const Color(0xFF4A6B5D)),
+      icon: Icon(icon, size: 17, color: const Color(0xFF012A58)),
       label: Text(
         label,
         style: const TextStyle(
@@ -4807,6 +5787,12 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
 
     setState(() => _isSubmittingReferral = true);
     try {
+      final currentDoc = _resolveCurrentDoctor();
+      final referrerUserId = (currentDoc != null && currentDoc.userId.isNotEmpty)
+          ? currentDoc.userId
+          : (SessionService().currentSession?.userId.isNotEmpty == true
+              ? SessionService().currentSession!.userId
+              : null);
       final pName = _referPatientNameCtrl.text.trim();
       final pPhone = _referPatientMobileCtrl.text.replaceAll(RegExp(r'\D'), '').trim();
       final pAge = _referPatientAgeCtrl.text.trim().isNotEmpty
@@ -4816,6 +5802,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
       final gender = _referPatientGender.isNotEmpty ? _referPatientGender : 'Female';
 
       final res = await _patientService.submitPatientReferral(
+        referrerPatientId: referrerUserId,
         referredPatientName: pName,
         referredPatientMobile: pPhone,
         referredPatientAge: pAge,
@@ -4874,6 +5861,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
 
         await _patientService.syncDoctorReferralsFromApi();
         await _patientService.syncReferralsFromApi();
+        await _patientService.syncAdminReferralsFromApi();
         await _patientService.syncProblemRequestsFromApi();
 
         setState(() {
@@ -4892,7 +5880,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Referral successfully sent for $pName.'),
-            backgroundColor: const Color(0xFF4A6B5D),
+            backgroundColor: const Color(0xFF012A58),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -5637,7 +6625,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                               ScaffoldMessenger.of(context).showSnackBar(
                                                 SnackBar(
                                                   content: Text('📍 Map Location Attached: $address, $city ($pincode)'),
-                                                  backgroundColor: const Color(0xFF10B981),
+                                                  backgroundColor: const Color(0xFF012A58),
                                                   duration: const Duration(seconds: 2),
                                                 ),
                                               );
@@ -5648,16 +6636,16 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                         child: Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                           decoration: BoxDecoration(
-                                            color: const Color(0xFF2563EB).withValues(alpha: 0.1),
+                                            color: const Color(0xFF012A58).withValues(alpha: 0.1),
                                             borderRadius: BorderRadius.circular(8),
-                                            border: Border.all(color: const Color(0xFF2563EB).withValues(alpha: 0.3)),
+                                            border: Border.all(color: const Color(0xFF012A58).withValues(alpha: 0.3)),
                                           ),
                                           child: const Row(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
-                                              Icon(Icons.map_rounded, size: 13, color: Color(0xFF2563EB)),
+                                              Icon(Icons.map_rounded, size: 13, color: Color(0xFF012A58)),
                                               SizedBox(width: 4),
-                                              Text('Pick on Map', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
+                                              Text('Pick on Map', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF012A58))),
                                             ],
                                           ),
                                         ),
@@ -5802,13 +6790,13 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                     final phone = phoneCtrl.text.replaceAll(RegExp(r'[^0-9]'), '').trim();
                                     if (name.isEmpty) {
                                       ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('⚠️ Please enter doctor name'), backgroundColor: Color(0xFFEF4444)),
+                                        const SnackBar(content: Text('⚠️ Please enter doctor name'), backgroundColor: Color(0xFFFE3434)),
                                       );
                                       return;
                                     }
                                     if (phone.length < 10) {
                                       ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('⚠️ Please enter a valid 10-digit mobile number'), backgroundColor: Color(0xFFEF4444)),
+                                        const SnackBar(content: Text('⚠️ Please enter a valid 10-digit mobile number'), backgroundColor: Color(0xFFFE3434)),
                                       );
                                       return;
                                     }
@@ -5868,7 +6856,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                         ScaffoldMessenger.of(context).showSnackBar(
                                           SnackBar(
                                             content: Text('✅ $formattedDocName added to GS HEALTH network!'),
-                                            backgroundColor: const Color(0xFF10B981),
+                                            backgroundColor: const Color(0xFF012A58),
                                             behavior: SnackBarBehavior.floating,
                                             duration: const Duration(seconds: 3),
                                           ),
@@ -5878,7 +6866,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                       setModalState(() => isSubmitting = false);
                                       if (!context.mounted) return;
                                       ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('Error registering doctor: $e'), backgroundColor: const Color(0xFFEF4444)),
+                                        SnackBar(content: Text('Error registering doctor: $e'), backgroundColor: const Color(0xFFFE3434)),
                                       );
                                     }
                                   },

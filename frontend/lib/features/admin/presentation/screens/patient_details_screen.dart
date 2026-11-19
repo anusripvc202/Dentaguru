@@ -184,7 +184,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('🎉 ${doctor.name} successfully assigned to ${widget.patient.name}!'),
-            backgroundColor: const Color(0xFF10B981),
+            backgroundColor: const Color(0xFF012A58),
           ),
         );
       }
@@ -341,7 +341,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
         children: [
           CircleAvatar(
             radius: 26,
-            backgroundColor: const Color(0xFFEFF6FF),
+            backgroundColor: const Color(0x14012A58),
             backgroundImage: widget.patient.photoBytes != null ? MemoryImage(widget.patient.photoBytes!) : null,
             child: widget.patient.photoBytes == null
                 ? Text(
@@ -369,12 +369,12 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFDCFCE7),
+                        color: const Color(0x14012A58),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: const Text(
                         'Active',
-                        style: TextStyle(color: Color(0xFF16A34A), fontSize: 10, fontWeight: FontWeight.bold),
+                        style: TextStyle(color: Color(0xFFFE3434), fontSize: 10, fontWeight: FontWeight.bold),
                       ),
                     ),
                   ],
@@ -416,10 +416,10 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
                       decoration: BoxDecoration(
-                        color: isAssigned ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
+                        color: isAssigned ? const Color(0x14012A58) : const Color(0x14FE3434),
                         borderRadius: BorderRadius.circular(6),
                         border: Border.all(
-                          color: isAssigned ? const Color(0xFF86EFAC) : const Color(0xFFFDE68A),
+                          color: isAssigned ? const Color(0x40012A58) : const Color(0x40FE3434),
                         ),
                       ),
                       child: Row(
@@ -428,7 +428,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                           Icon(
                             isAssigned ? Icons.check_circle_rounded : Icons.pending_rounded,
                             size: 12,
-                            color: isAssigned ? const Color(0xFF15803D) : const Color(0xFFB45309),
+                            color: isAssigned ? const Color(0xFF012A58) : const Color(0xFFFE3434),
                           ),
                           const SizedBox(width: 4),
                           Text(
@@ -436,7 +436,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                             style: TextStyle(
                               fontSize: 10.5,
                               fontWeight: FontWeight.bold,
-                              color: isAssigned ? const Color(0xFF15803D) : const Color(0xFFB45309),
+                              color: isAssigned ? const Color(0xFF012A58) : const Color(0xFFFE3434),
                             ),
                           ),
                         ],
@@ -446,7 +446,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFEFF6FF),
+                          color: const Color(0x14012A58),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Row(
@@ -465,17 +465,17 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF3E8FF),
+                          color: const Color(0x14FE3434),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.translate_rounded, size: 11, color: Color(0xFF7E22CE)),
+                            const Icon(Icons.translate_rounded, size: 11, color: Color(0xFFFE3434)),
                             const SizedBox(width: 3),
                             Text(
                               widget.patient.languages.join(', '),
-                              style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Color(0xFF7E22CE)),
+                              style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Color(0xFFFE3434)),
                             ),
                           ],
                         ),
@@ -583,7 +583,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
             'District:',
             district,
             badge: isDistrictIdentified ? 'Verified' : 'PENDING_ADMIN_REVIEW',
-            badgeColor: isDistrictIdentified ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+            badgeColor: isDistrictIdentified ? const Color(0xFFFE3434) : const Color(0xFFFE3434),
           ),
           _buildAssignmentRow(
             'Assigned Doctor:',
@@ -595,7 +595,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
             'Status:',
             status,
             badge: status,
-            badgeColor: status == 'ACTIVE' ? const Color(0xFF16A34A) : const Color(0xFFD97706),
+            badgeColor: status == 'ACTIVE' ? const Color(0xFFFE3434) : const Color(0xFFFE3434),
           ),
         ],
       ),
@@ -663,7 +663,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: isAssigned ? const Color(0xFFBFDBFE) : const Color(0xFFE2E8F0)),
+        border: Border.all(color: isAssigned ? const Color(0x40012A58) : const Color(0xFFE2E8F0)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.02),
@@ -693,13 +693,13 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
                 decoration: BoxDecoration(
-                  color: isAssigned ? const Color(0xFFDCFCE7) : const Color(0xFFF1F5F9),
+                  color: isAssigned ? const Color(0x14012A58) : const Color(0xFFF1F5F9),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
                   isAssigned ? 'Assigned' : 'Not Assigned',
                   style: TextStyle(
-                    color: isAssigned ? const Color(0xFF15803D) : const Color(0xFF64748B),
+                    color: isAssigned ? const Color(0xFF012A58) : const Color(0xFF64748B),
                     fontSize: 10.5,
                     fontWeight: FontWeight.bold,
                   ),
@@ -767,9 +767,9 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFEFF6FF),
+                      color: const Color(0x14012A58),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFFBFDBFE)),
+                      border: Border.all(color: const Color(0x40012A58)),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -911,7 +911,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFEFF6FF),
+                  color: const Color(0x14012A58),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
@@ -1029,10 +1029,10 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                 return Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: isCurrentlyAssignedToThisDoc ? const Color(0xFFF0FDF4) : const Color(0xFFF8FAFC),
+                    color: isCurrentlyAssignedToThisDoc ? const Color(0x14012A58) : const Color(0xFFF8FAFC),
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
-                      color: isCurrentlyAssignedToThisDoc ? const Color(0xFF86EFAC) : const Color(0xFFE2E8F0),
+                      color: isCurrentlyAssignedToThisDoc ? const Color(0x40012A58) : const Color(0xFFE2E8F0),
                       width: isCurrentlyAssignedToThisDoc ? 1.5 : 1,
                     ),
                   ),
@@ -1082,16 +1082,16 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFDCFCE7),
+                                color: const Color(0x14012A58),
                                 borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: const Color(0xFF86EFAC)),
+                                border: Border.all(color: const Color(0x40012A58)),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: const [
-                                  Icon(Icons.check_circle_rounded, size: 12, color: Color(0xFF15803D)),
+                                  Icon(Icons.check_circle_rounded, size: 12, color: Color(0xFF012A58)),
                                   SizedBox(width: 3),
-                                  Text('Assigned', style: TextStyle(color: Color(0xFF15803D), fontSize: 10.5, fontWeight: FontWeight.bold)),
+                                  Text('Assigned', style: TextStyle(color: Color(0xFF012A58), fontSize: 10.5, fontWeight: FontWeight.bold)),
                                 ],
                               ),
                             )
@@ -1200,20 +1200,20 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                                 if (isSamePin)
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(color: const Color(0xFFDCFCE7), borderRadius: BorderRadius.circular(4)),
-                                    child: const Text('✓ Same PIN', style: TextStyle(color: Color(0xFF15803D), fontSize: 9.5, fontWeight: FontWeight.bold)),
+                                    decoration: BoxDecoration(color: const Color(0x14012A58), borderRadius: BorderRadius.circular(4)),
+                                    child: const Text('✓ Same PIN', style: TextStyle(color: Color(0xFF012A58), fontSize: 9.5, fontWeight: FontWeight.bold)),
                                   ),
                                 if (isSameCity)
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(4)),
+                                    decoration: BoxDecoration(color: const Color(0x14012A58), borderRadius: BorderRadius.circular(4)),
                                     child: const Text('✓ Same City', style: TextStyle(color: AppTheme.primaryBlue, fontSize: 9.5, fontWeight: FontWeight.bold)),
                                   ),
                                 if (matchingLanguages.isNotEmpty)
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(color: const Color(0xFFF3E8FF), borderRadius: BorderRadius.circular(4)),
-                                    child: Text('✓ ${matchingLanguages.join(", ")}', style: const TextStyle(color: Color(0xFF7E22CE), fontSize: 9.5, fontWeight: FontWeight.bold)),
+                                    decoration: BoxDecoration(color: const Color(0x14FE3434), borderRadius: BorderRadius.circular(4)),
+                                    child: Text('✓ ${matchingLanguages.join(", ")}', style: const TextStyle(color: Color(0xFFFE3434), fontSize: 9.5, fontWeight: FontWeight.bold)),
                                   ),
                               ],
                             ),
@@ -1327,7 +1327,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFEFF6FF),
+                    color: const Color(0x14012A58),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Row(
@@ -1409,7 +1409,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.healing_rounded, size: 17, color: Color(0xFFD97706)),
+              const Icon(Icons.healing_rounded, size: 17, color: Color(0xFFFE3434)),
               const SizedBox(width: 8),
               const Expanded(
                 child: Text(
@@ -1423,12 +1423,12 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFEF3C7),
+                    color: const Color(0x14FE3434),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
                     req.severity.isNotEmpty ? req.severity : 'Reported',
-                    style: const TextStyle(color: Color(0xFFB45309), fontSize: 10, fontWeight: FontWeight.bold),
+                    style: const TextStyle(color: Color(0xFFFE3434), fontSize: 10, fontWeight: FontWeight.bold),
                   ),
                 ),
             ],

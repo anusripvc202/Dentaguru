@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/models/medical_specialty_model.dart';
+import '../../../../core/services/api_service.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import 'doctor_profile_screen.dart';
 
@@ -59,29 +60,19 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
   String _cityFilter = '';
   String _pincodeFilter = '';
   late String _selectedSpecialty;
-  late String _selectedLanguage;
+  final Set<String> _selectedLanguages = <String>{};
+  List<String> _backendDoctorLanguages = [];
   bool _isUsingMyLocation = false;
   bool _isSyncing = false;
+  String? _syncError;
+  static const int _pageSize = 20;
+  int _visibleCount = _pageSize;
 
   static const LinearGradient _primaryGradient = LinearGradient(
-    colors: [AppTheme.gsNavy, Color(0xFF0A3D7A)],
+    colors: [AppTheme.gsNavy, Color(0xFF012A58)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
-
-  static const List<String> _coreSupportedLanguages = [
-    'Any language',
-    'English',
-    'Hindi',
-    'Telugu',
-    'Tamil',
-    'Kannada',
-    'Malayalam',
-    'Marathi',
-    'Bengali',
-    'Gujarati',
-    'Urdu',
-  ];
 
   List<String> get _availableSpecialtyOptions {
     final specs = <String>[
@@ -103,31 +94,68 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
     return specs;
   }
 
-  List<String> get _availableLanguageOptions {
-    final langs = <String>[..._coreSupportedLanguages];
-    for (final pLang in _patientService.currentPatient.languages) {
-      final clean = pLang.trim();
-      if (clean.isNotEmpty && !langs.any((item) => item.toLowerCase() == clean.toLowerCase())) {
-        langs.add(clean);
-      }
-    }
-    for (final d in _patientService.allDoctors) {
+  /// Dynamically derives available languages from registered doctors' language data.
+  List<String> get _registeredDoctorLanguagesOnly {
+    final Map<String, String> langMap = {};
+    final eligibleDocs = widget.isAdminView
+        ? _patientService.allDoctors
+        : _patientService.allDoctors.where((d) => d.isAvailable);
+
+    for (final d in eligibleDocs) {
       for (final dLang in d.languages) {
         final clean = dLang.trim();
-        if (clean.isNotEmpty && !langs.any((item) => item.toLowerCase() == clean.toLowerCase())) {
-          langs.add(clean);
+        if (clean.isNotEmpty &&
+            clean.toLowerCase() != 'any language' &&
+            !langMap.containsKey(clean.toLowerCase())) {
+          langMap[clean.toLowerCase()] = clean;
         }
       }
     }
-    return langs;
+    for (final bLang in _backendDoctorLanguages) {
+      final clean = bLang.trim();
+      if (clean.isNotEmpty &&
+          clean.toLowerCase() != 'any language' &&
+          !langMap.containsKey(clean.toLowerCase())) {
+        langMap[clean.toLowerCase()] = clean;
+      }
+    }
+    for (final sLang in _selectedLanguages) {
+      final clean = sLang.trim();
+      if (clean.isNotEmpty &&
+          clean.toLowerCase() != 'any language' &&
+          !langMap.containsKey(clean.toLowerCase())) {
+        langMap[clean.toLowerCase()] = clean;
+      }
+    }
+
+    final sorted = langMap.values.toList()
+      ..sort((a, b) {
+        if (a.toLowerCase() == 'english') return -1;
+        if (b.toLowerCase() == 'english') return 1;
+        return a.toLowerCase().compareTo(b.toLowerCase());
+      });
+    return sorted;
   }
+
+  List<String> get _availableLanguageOptions => <String>[
+        'Any language',
+        ..._registeredDoctorLanguagesOnly,
+      ];
 
   @override
   void initState() {
     super.initState();
     _doctorTabFilter = widget.initialTabFilter;
     _selectedSpecialty = widget.initialSpecialty.trim().isNotEmpty ? widget.initialSpecialty.trim() : 'All';
-    _selectedLanguage = widget.initialLanguage.trim().isNotEmpty ? widget.initialLanguage.trim() : 'Any language';
+    final rawInitLang = widget.initialLanguage.trim();
+    if (rawInitLang.isNotEmpty && rawInitLang.toLowerCase() != 'any language') {
+      for (final part in rawInitLang.split(',')) {
+        final clean = part.trim();
+        if (clean.isNotEmpty && clean.toLowerCase() != 'any language') {
+          _selectedLanguages.add(clean);
+        }
+      }
+    }
     _patientService.addListener(_onServiceUpdated);
     _refreshDoctorsIfNeeded();
   }
@@ -148,13 +176,28 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
   }
 
   Future<void> _refreshDoctorsIfNeeded() async {
-    if (_patientService.allDoctors.isEmpty) {
-      setState(() => _isSyncing = true);
+    if (mounted) {
+      setState(() {
+        _isSyncing = true;
+        _syncError = null;
+      });
     }
     try {
-      await _patientService.syncDoctorsFromApi();
+      await _patientService.syncDoctorsFromApi(includeUnavailable: widget.isAdminView);
       await _patientService.syncMyDoctorsFromApi();
-    } catch (_) {}
+      final fetchedLangs = await ApiService().fetchAvailableDoctorLanguages(
+        includeUnavailable: widget.isAdminView,
+      );
+      if (mounted && fetchedLangs.isNotEmpty) {
+        setState(() {
+          _backendDoctorLanguages = fetchedLangs;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        _syncError = e.toString().replaceFirst('Exception: ', '');
+      }
+    }
     if (mounted) {
       setState(() => _isSyncing = false);
     }
@@ -209,15 +252,57 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
     return false;
   }
 
-  bool _matchesLanguage(DoctorModel d, String selectedLang) {
-    final clean = selectedLang.trim();
+  bool _isLanguageSelected(String lang) {
+    final target = lang.trim().toLowerCase();
+    return _selectedLanguages.any((s) => s.trim().toLowerCase() == target);
+  }
+
+  void _toggleLanguageSelection(String lang) {
+    final clean = lang.trim();
     if (clean.isEmpty || clean.toLowerCase() == 'any language') {
+      setState(() {
+        _selectedLanguages.clear();
+        _visibleCount = _pageSize;
+      });
+      return;
+    }
+    setState(() {
+      final existing = _selectedLanguages
+          .where((s) => s.trim().toLowerCase() == clean.toLowerCase())
+          .toList();
+      if (existing.isNotEmpty) {
+        _selectedLanguages.removeAll(existing);
+      } else {
+        _selectedLanguages.add(clean);
+      }
+      _visibleCount = _pageSize;
+    });
+  }
+
+  void _clearLanguageFilter() {
+    setState(() {
+      _selectedLanguages.clear();
+      _visibleCount = _pageSize;
+    });
+  }
+
+  bool _matchesLanguage(DoctorModel d) {
+    if (_selectedLanguages.isEmpty) {
       return true;
     }
-    final target = clean.toLowerCase();
+    final targets = _selectedLanguages
+        .map((l) => l.trim().toLowerCase())
+        .where((l) => l.isNotEmpty && l != 'any language')
+        .toList();
+    if (targets.isEmpty) return true;
+
     for (final lang in d.languages) {
       final normalized = lang.trim().toLowerCase();
-      if (normalized == target || normalized.contains(target) || target.contains(normalized)) {
+      if (normalized.isEmpty) continue;
+      if (targets.any((target) =>
+          normalized == target ||
+          normalized.startsWith('$target ') ||
+          normalized.startsWith('$target('))) {
         return true;
       }
     }
@@ -270,7 +355,7 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
       MaterialPageRoute(
         builder: (_) => FindDoctorsScreen(
           initialSpecialty: clean,
-          initialLanguage: _selectedLanguage,
+          initialLanguage: _selectedLanguages.isEmpty ? 'Any language' : _selectedLanguages.join(','),
           isSpecialtyPage: true,
           isAdminView: widget.isAdminView,
           onAdminEditDoctor: widget.onAdminEditDoctor,
@@ -284,14 +369,16 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final allDocs = _patientService.allDoctors;
-    final myDocs = _patientService.myDoctors;
+    final allDocs = widget.isAdminView
+        ? _patientService.allDoctors
+        : _patientService.allDoctors.where((d) => d.isAvailable).toList();
+    final myDocs = widget.isAdminView
+        ? _patientService.myDoctors
+        : _patientService.myDoctors.where((d) => d.isAvailable).toList();
     final baseDocs = (!widget.isAdminView && _doctorTabFilter == 1) ? myDocs : allDocs;
 
     final filteredDocs = baseDocs.where((d) {
-      final isInactiveStatus = d.status.trim().toLowerCase() == 'suspended' ||
-          d.verificationStatus.trim().toUpperCase() == 'SUSPENDED';
-      if (!widget.isAdminView && isInactiveStatus) {
+      if (!widget.isAdminView && !d.isAvailable) {
         return false;
       }
 
@@ -301,11 +388,12 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
           d.specialty.toLowerCase().contains(q) ||
           d.clinicName.toLowerCase().contains(q) ||
           d.city.toLowerCase().contains(q) ||
+          d.state.toLowerCase().contains(q) ||
           d.pincode.toLowerCase().contains(q) ||
           d.qualification.toLowerCase().contains(q) ||
           d.languages.any((l) => l.toLowerCase().contains(q));
       final matchesSpec = _matchesSpecialty(d, _selectedSpecialty);
-      final matchesLang = _matchesLanguage(d, _selectedLanguage);
+      final matchesLang = _matchesLanguage(d);
       final cityQ = _cityFilter.trim().toLowerCase();
       final matchesCity = cityQ.isEmpty ||
           d.city.toLowerCase().contains(cityQ) ||
@@ -318,6 +406,11 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
           d.clinicAddress.toLowerCase().contains(pinQ);
       return matchesSearch && matchesSpec && matchesLang && matchesCity && matchesPincode;
     }).toList();
+
+    final visibleDocs = filteredDocs.length > _visibleCount
+        ? filteredDocs.take(_visibleCount).toList()
+        : filteredDocs;
+    final hasMoreDocs = filteredDocs.length > visibleDocs.length;
 
     final isSpecificSpecialty =
         _selectedSpecialty.trim().isNotEmpty && _selectedSpecialty.trim().toLowerCase() != 'all';
@@ -447,18 +540,43 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
                       padding: EdgeInsets.symmetric(vertical: 48),
                       child: Center(child: CircularProgressIndicator()),
                     )
+                  else if (_syncError != null && allDocs.isEmpty)
+                    _buildErrorState(_syncError!)
                   else if (filteredDocs.isEmpty)
                     _buildEmptyState()
                   else
                     Column(
-                      children: filteredDocs
-                          .map(
-                            (doc) => Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: _buildDoctorRow(doc),
+                      children: [
+                        ...visibleDocs.map(
+                          (doc) => Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: _buildDoctorRow(doc),
+                          ),
+                        ),
+                        if (hasMoreDocs)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: OutlinedButton.icon(
+                              key: const Key('find_doctors_load_more_button'),
+                              onPressed: () {
+                                setState(() {
+                                  _visibleCount += _pageSize;
+                                });
+                              },
+                              icon: const Icon(Icons.expand_more_rounded, size: 18),
+                              label: Text(
+                                'Load More Doctors (${filteredDocs.length - visibleDocs.length} remaining)',
+                                style: const TextStyle(fontWeight: FontWeight.w700),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: AppTheme.gsNavy,
+                                side: const BorderSide(color: AppTheme.gsNavy),
+                                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
                             ),
-                          )
-                          .toList(),
+                          ),
+                      ],
                     ),
                 ],
               ),
@@ -893,71 +1011,238 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
     );
   }
 
-  Widget _buildLanguageFilterRow() {
-    final languages = _availableLanguageOptions;
-    final isAnySelected = _selectedLanguage.trim().isEmpty ||
-        _selectedLanguage.trim().toLowerCase() == 'any language';
-
-    return SingleChildScrollView(
-      key: const Key('language_filter_scroll_view'),
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: languages.map((lang) {
-          final isAnyOption = lang.trim().toLowerCase() == 'any language';
-          final isSelected = isAnyOption
-              ? isAnySelected
-              : _selectedLanguage.trim().toLowerCase() == lang.trim().toLowerCase();
-
-          return Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                key: Key('language_filter_chip_$lang'),
-                borderRadius: BorderRadius.circular(24),
-                onTap: () {
-                  setState(() {
-                    _selectedLanguage = isAnyOption ? 'Any language' : lang;
-                  });
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-                  decoration: BoxDecoration(
-                    color: isSelected ? AppTheme.gsNavy : Colors.white,
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(
-                      color: isSelected ? AppTheme.gsNavy : const Color(0xFFCBD5E1),
-                      width: 1.1,
+  Future<void> _showLanguageMultiSelectDialog() async {
+    final availableLangs = _registeredDoctorLanguagesOnly;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return AlertDialog(
+              key: const Key('language_multiselect_dialog'),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+              title: Row(
+                children: [
+                  const Icon(Icons.translate_rounded, color: AppTheme.gsNavy, size: 20),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Filter by Language',
+                      style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800, color: AppTheme.textDark),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (!isAnyOption) ...[
-                        Icon(
-                          Icons.star_rounded,
-                          size: 14,
-                          color: isSelected ? Colors.white : AppTheme.gsNavy,
+                  if (_selectedLanguages.isNotEmpty)
+                    TextButton(
+                      key: const Key('language_multiselect_clear_btn'),
+                      onPressed: () {
+                        _clearLanguageFilter();
+                        setModalState(() {});
+                      },
+                      child: const Text(
+                        'Clear',
+                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppTheme.gsRed),
+                      ),
+                    ),
+                ],
+              ),
+              content: SizedBox(
+                width: 340,
+                child: availableLangs.isEmpty
+                    ? const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        child: Text(
+                          'No doctor languages available yet. Register doctors with Languages Known to filter here.',
+                          style: TextStyle(fontSize: 13, color: AppTheme.textMedium),
                         ),
-                        const SizedBox(width: 5),
-                      ],
-                      Text(
-                        lang,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
-                          color: isSelected ? Colors.white : AppTheme.textDark,
+                      )
+                    : SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Align(
+                              alignment: Alignment.centerLeft,
+                              child: Padding(
+                                padding: EdgeInsets.only(bottom: 8),
+                                child: Text(
+                                  'Select one or more languages. Shows doctors speaking at least one selected language.',
+                                  style: TextStyle(fontSize: 12, color: Color(0xFF64748B), height: 1.35),
+                                ),
+                              ),
+                            ),
+                            ...availableLangs.map((lang) {
+                              final checked = _isLanguageSelected(lang);
+                              return CheckboxListTile(
+                                key: Key('language_checkbox_$lang'),
+                                value: checked,
+                                activeColor: AppTheme.gsNavy,
+                                contentPadding: EdgeInsets.zero,
+                                dense: true,
+                                controlAffinity: ListTileControlAffinity.leading,
+                                title: Text(
+                                  lang,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: checked ? FontWeight.w700 : FontWeight.w500,
+                                    color: AppTheme.textDark,
+                                  ),
+                                ),
+                                onChanged: (_) {
+                                  _toggleLanguageSelection(lang);
+                                  setModalState(() {});
+                                },
+                              );
+                            }),
+                          ],
                         ),
                       ),
-                    ],
+              ),
+              actions: [
+                ElevatedButton(
+                  key: const Key('language_multiselect_done_btn'),
+                  onPressed: () => Navigator.of(dialogCtx).pop(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.gsNavy,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
+                  child: const Text('Done', style: TextStyle(fontWeight: FontWeight.w700)),
                 ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildLanguageFilterRow() {
+    final languages = _availableLanguageOptions;
+    final isAnySelected = _selectedLanguages.isEmpty;
+    final dropdownSummary = _selectedLanguages.isEmpty
+        ? 'Filter by Language'
+        : (_selectedLanguages.length <= 2
+            ? _selectedLanguages.join(', ')
+            : '${_selectedLanguages.length} Languages');
+
+    return Row(
+      children: [
+        // Multi-Select "Filter by Language" Dropdown Button
+        InkWell(
+          key: const Key('filter_by_language_dropdown'),
+          onTap: _showLanguageMultiSelectDialog,
+          borderRadius: BorderRadius.circular(24),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 190),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            decoration: BoxDecoration(
+              color: _selectedLanguages.isNotEmpty ? const Color(0x14012A58) : Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: _selectedLanguages.isNotEmpty ? AppTheme.gsNavy : const Color(0xFFCBD5E1),
+                width: 1.1,
               ),
             ),
-          );
-        }).toList(),
-      ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.translate_rounded, size: 15, color: AppTheme.gsNavy),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    dropdownSummary,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: _selectedLanguages.isNotEmpty ? FontWeight.w700 : FontWeight.w600,
+                      color: AppTheme.gsNavy,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: AppTheme.gsNavy),
+              ],
+            ),
+          ),
+        ),
+        if (_selectedLanguages.isNotEmpty) ...[
+          const SizedBox(width: 6),
+          InkWell(
+            key: const Key('clear_language_filter_button'),
+            onTap: _clearLanguageFilter,
+            borderRadius: BorderRadius.circular(20),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0x14FE3434),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: const Color(0x40FE3434)),
+              ),
+              child: const Icon(Icons.close_rounded, size: 14, color: AppTheme.gsRed),
+            ),
+          ),
+        ],
+        const SizedBox(width: 8),
+        // Horizontally Scrollable Quick Multi-Select Language Chips
+        Expanded(
+          child: SingleChildScrollView(
+            key: const Key('language_filter_scroll_view'),
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: languages.map((lang) {
+                final isAnyOption = lang.trim().toLowerCase() == 'any language';
+                final isSelected = isAnyOption ? isAnySelected : _isLanguageSelected(lang);
+
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      key: Key('language_filter_chip_$lang'),
+                      borderRadius: BorderRadius.circular(24),
+                      onTap: () => _toggleLanguageSelection(lang),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 9),
+                        decoration: BoxDecoration(
+                          color: isSelected ? AppTheme.gsNavy : Colors.white,
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(
+                            color: isSelected ? AppTheme.gsNavy : const Color(0xFFCBD5E1),
+                            width: 1.1,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (!isAnyOption) ...[
+                              Icon(
+                                isSelected ? Icons.check_circle_rounded : Icons.translate_rounded,
+                                size: 13.5,
+                                color: isSelected ? Colors.white : AppTheme.gsNavy,
+                              ),
+                              const SizedBox(width: 5),
+                            ],
+                            Text(
+                              lang,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                                color: isSelected ? Colors.white : AppTheme.textDark,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -966,7 +1251,7 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
         _cityFilter.trim().isNotEmpty ||
         _pincodeFilter.trim().isNotEmpty ||
         (_selectedSpecialty.trim().isNotEmpty && _selectedSpecialty.trim().toLowerCase() != 'all') ||
-        (_selectedLanguage.trim().isNotEmpty && _selectedLanguage.trim().toLowerCase() != 'any language');
+        _selectedLanguages.isNotEmpty;
 
     return Container(
       width: double.infinity,
@@ -1029,14 +1314,58 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
     );
   }
 
-  /// Single-line compact doctor listing row:
-  /// [Circular Doctor Image]  Dr. Full Name  →
+  Widget _buildErrorState(String errorMessage) {
+    return Container(
+      key: const Key('find_doctors_error_state'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0x40FE3434)),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.error_outline_rounded, color: AppTheme.gsRed, size: 36),
+          const SizedBox(height: 10),
+          const Text(
+            'Unable to load doctors',
+            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: AppTheme.textDark),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            errorMessage,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12.5, color: AppTheme.textMedium),
+          ),
+          const SizedBox(height: 14),
+          ElevatedButton.icon(
+            key: const Key('find_doctors_retry_button'),
+            onPressed: _refreshDoctorsIfNeeded,
+            icon: const Icon(Icons.refresh_rounded, size: 16),
+            label: const Text('Retry'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.gsNavy,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Doctor listing card showing name, photo, specialization, qualifications, clinic, and availability
   Widget _buildDoctorRow(DoctorModel doc) {
     final cleanName = doc.name.replaceAll('Dr. ', '').replaceAll('Dr.', '').trim();
     final initial = cleanName.isNotEmpty ? cleanName[0].toUpperCase() : 'D';
     final displayName = doc.name.trim().toLowerCase().startsWith('dr')
         ? doc.name.trim()
         : 'Dr. ${doc.name.trim()}';
+    final specialtyText = doc.specialty.trim().isNotEmpty ? doc.specialty.trim() : 'General Dentistry';
+    final qualText = doc.qualification.trim().isNotEmpty ? doc.qualification.trim() : 'BDS, MDS';
+    final clinicText = doc.clinicName.trim().isNotEmpty ? doc.clinicName.trim() : 'GS HEALTH Practice';
+    final cityText = doc.city.trim();
+    final isDocAvailable = doc.isAvailable;
 
     return Container(
       key: Key('doctor_card_${doc.id}'),
@@ -1059,16 +1388,17 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
           borderRadius: BorderRadius.circular(14),
           onTap: () => _openDoctorDetails(doc),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 // Circular Doctor Profile Image (Left)
                 GestureDetector(
                   key: Key('doctor_image_${doc.id}'),
                   onTap: () => _openDoctorDetails(doc),
                   child: Container(
-                    width: 44,
-                    height: 44,
+                    width: 48,
+                    height: 48,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       gradient: doc.photoBytes == null ? _primaryGradient : null,
@@ -1093,20 +1423,97 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
                   ),
                 ),
                 const SizedBox(width: 14),
-                // Doctor Full Name (Middle)
+                // Doctor Full Name, Specialization, Qualifications, Clinic & Availability (Middle)
                 Expanded(
                   child: GestureDetector(
                     key: Key('doctor_name_${doc.id}'),
                     onTap: () => _openDoctorDetails(doc),
-                    child: Text(
-                      displayName,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 15.5,
-                        color: AppTheme.textDark,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                displayName,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 15.5,
+                                  color: AppTheme.textDark,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Container(
+                              key: Key('doctor_availability_badge_${doc.id}'),
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                              decoration: BoxDecoration(
+                                color: isDocAvailable
+                                    ? const Color(0x14012A58)
+                                    : const Color(0xFFF1F5F9),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                isDocAvailable ? 'Available' : 'Unavailable',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: isDocAvailable
+                                      ? const Color(0xFF012A58)
+                                      : const Color(0xFF64748B),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          '$specialtyText • $qualText',
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.primaryBlue,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          cityText.isNotEmpty ? '$clinicText • $cityText' : clinicText,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF64748B),
+                            fontWeight: FontWeight.w500,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (doc.languages.isNotEmpty) ...[
+                          const SizedBox(height: 3),
+                          Row(
+                            children: [
+                              const Icon(Icons.translate_rounded, size: 12, color: AppTheme.gsNavy),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  doc.languages.join(', '),
+                                  key: Key('doctor_languages_${doc.id}'),
+                                  style: const TextStyle(
+                                    fontSize: 11.5,
+                                    color: Color(0xFF475569),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ),

@@ -58,7 +58,7 @@ class _GsHealthDistrictManagementPanelState extends State<GsHealthDistrictManage
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [Color(0xFF012A58), Color(0xFF0F3D6E)],
+                colors: [Color(0xFF012A58), Color(0xFF012A58)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -285,7 +285,7 @@ class _GsHealthDistrictManagementPanelState extends State<GsHealthDistrictManage
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: isActive ? const Color(0xFFE2E8F0) : const Color(0xFFFCA5A5)),
+        border: Border.all(color: isActive ? const Color(0xFFE2E8F0) : const Color(0x40FE3434)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.02),
@@ -347,7 +347,7 @@ class _GsHealthDistrictManagementPanelState extends State<GsHealthDistrictManage
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                           decoration: BoxDecoration(
-                            color: isActive ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
+                            color: isActive ? const Color(0x14012A58) : const Color(0x14FE3434),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
@@ -355,7 +355,7 @@ class _GsHealthDistrictManagementPanelState extends State<GsHealthDistrictManage
                             style: TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
-                              color: isActive ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+                              color: isActive ? const Color(0xFFFE3434) : const Color(0xFFFE3434),
                             ),
                           ),
                         ),
@@ -380,7 +380,7 @@ class _GsHealthDistrictManagementPanelState extends State<GsHealthDistrictManage
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(val ? '✓ District "$name" activated.' : '⛔ District "$name" deactivated.'),
-                      backgroundColor: val ? const Color(0xFF10B981) : const Color(0xFFD97706),
+                      backgroundColor: val ? const Color(0xFF012A58) : const Color(0xFFFE3434),
                       duration: const Duration(seconds: 2),
                     ),
                   );
@@ -398,9 +398,9 @@ class _GsHealthDistrictManagementPanelState extends State<GsHealthDistrictManage
             spacing: 8,
             runSpacing: 6,
             children: [
-              _buildMetricChip(Icons.supervisor_account_rounded, '$subAdminsCount Sub-Admins', const Color(0xFF6366F1)),
+              _buildMetricChip(Icons.supervisor_account_rounded, '$subAdminsCount Sub-Admins', const Color(0xFFFE3434)),
               _buildMetricChip(Icons.medical_services_rounded, '$doctorsCount Doctors', const Color(0xFF012A58)),
-              _buildMetricChip(Icons.people_alt_rounded, '$patientsCount Patients', const Color(0xFF059669)),
+              _buildMetricChip(Icons.people_alt_rounded, '$patientsCount Patients', const Color(0xFF012A58)),
             ],
           ),
 
@@ -419,13 +419,13 @@ class _GsHealthDistrictManagementPanelState extends State<GsHealthDistrictManage
                       return Container(
                         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFEEF2FF),
+                          color: const Color(0x14FE3434),
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: const Color(0xFFC7D2FE)),
+                          border: Border.all(color: const Color(0x40FE3434)),
                         ),
                         child: Text(
                           saName,
-                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF4338CA)),
+                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF012A58)),
                         ),
                       );
                     }).toList(),
@@ -610,7 +610,7 @@ class _GsHealthDistrictManagementPanelState extends State<GsHealthDistrictManage
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text(success ? '✓ District saved successfully.' : '⚠️ Failed to save district.'),
-                                backgroundColor: success ? const Color(0xFF10B981) : const Color(0xFFDC2626),
+                                backgroundColor: success ? const Color(0xFF012A58) : const Color(0xFFFE3434),
                               ),
                             );
                           }

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:dentaguru/features/auth/presentation/screens/auth_screen.dart';
+import 'package:dentaguru/core/constants/api_constants.dart';
 import 'package:dentaguru/core/services/api_service.dart';
 import 'package:dentaguru/core/widgets/denta_guru_logo.dart';
 import 'package:dentaguru/core/widgets/gs_health_hero_banner.dart';
@@ -30,8 +31,10 @@ void main() {
   });
 
   tearDown(() {
+    ApiConstants.debugAllowOnScreenOtpOverride = null;
     ApiService.debugRequestOtpOverride = null;
     ApiService.debugVerifyOtpOverride = null;
+    ApiService.debugLoginOverride = null;
   });
 
   group('GS HEALTH Premium Mobile Login & OTP Experience Tests', () {
@@ -127,6 +130,97 @@ void main() {
 
       // 4. Action button text is "Verify & continue"
       expect(find.widgetWithText(ElevatedButton, 'Verify & continue'), findsOneWidget);
+    });
+
+    testWidgets('Debug testing mode displays on-screen 6-digit OTP banner and Fill button populates all 6 boxes', (WidgetTester tester) async {
+      ApiConstants.debugAllowOnScreenOtpOverride = true;
+      ApiService.debugRequestOtpOverride = ({required String phone, String email = ''}) async {
+        return {
+          'success': true,
+          'message': 'Verification code ready on screen (testing mode).',
+          'otp': '482915',
+          'deliveryMode': 'on_screen',
+          'isAdmin': false,
+        };
+      };
+      String? verifiedCode;
+      ApiService.debugVerifyOtpOverride = ({required String phone, String email = '', required String code}) async {
+        verifiedCode = code;
+        return {'success': code == '482915', 'message': 'OTP verified successfully.'};
+      };
+      String? loginOtpPassed;
+      ApiService.debugLoginOverride = ({String? email, String? phone, String? password, String? otp, String? role}) async {
+        loginOtpPassed = otp;
+        return {'success': false, 'message': 'Invalid credentials. User not registered.'};
+      };
+
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 2.5;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(
+        const ProviderScope(
+          child: MaterialApp(
+            home: AuthScreen(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextFormField).first, '9063663180');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Send code'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+
+      expect(find.byKey(const Key('login_onscreen_otp_banner')), findsOneWidget);
+      expect(find.text('Your verification code: 482915'), findsOneWidget);
+      expect(find.byKey(const Key('login_otp_fill_button')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('login_otp_fill_button')));
+      await tester.pumpAndSettle();
+
+      expect(verifiedCode, '482915');
+      expect(loginOtpPassed, isNull, reason: 'otpAlreadyVerified must prevent double OTP verification on login');
+    });
+
+    testWidgets('Production/release mode never displays on-screen OTP banner or code even if response contains otp', (WidgetTester tester) async {
+      ApiConstants.debugAllowOnScreenOtpOverride = false;
+      ApiService.debugRequestOtpOverride = ({required String phone, String email = ''}) async {
+        return {
+          'success': true,
+          'message': 'OTP sent successfully to your mobile number.',
+          'otp': '482915',
+          'deliveryMode': 'on_screen',
+          'isAdmin': false,
+        };
+      };
+
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 2.5;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(
+        const ProviderScope(
+          child: MaterialApp(
+            home: AuthScreen(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextFormField).first, '9063663180');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Send code'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+
+      expect(find.text('Enter your code'), findsOneWidget);
+      expect(find.byKey(const Key('login_onscreen_otp_banner')), findsNothing);
+      expect(find.textContaining('482915'), findsNothing);
+      expect(find.byKey(const Key('login_otp_fill_button')), findsNothing);
     });
 
     testWidgets('Renders Responsive Two-Column Layout on Desktop Viewport (>900px)', (WidgetTester tester) async {

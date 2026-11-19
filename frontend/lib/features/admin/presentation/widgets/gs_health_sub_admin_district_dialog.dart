@@ -100,8 +100,9 @@ class _GsHealthSubAdminDistrictDialogState extends State<GsHealthSubAdminDistric
           ),
         ],
       ),
-      content: SizedBox(
-        width: 480,
+      content: Container(
+        width: double.maxFinite,
+        constraints: const BoxConstraints(maxWidth: 480),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -146,7 +147,7 @@ class _GsHealthSubAdminDistrictDialogState extends State<GsHealthSubAdminDistric
                       minimumSize: const Size(50, 24),
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
-                    child: const Text('Clear All', style: TextStyle(fontSize: 11, color: Color(0xFFDC2626))),
+                    child: const Text('Clear All', style: TextStyle(fontSize: 11, color: Color(0xFFFE3434))),
                   ),
               ],
             ),

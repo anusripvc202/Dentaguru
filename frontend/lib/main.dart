@@ -48,7 +48,7 @@ class DentaGuruApp extends StatelessWidget {
         // If running on Chrome/Web desktop (>550px), render inside Flagship Mobile Shell
         if (screenWidth > 550) {
           return Scaffold(
-            backgroundColor: const Color(0xFF0B132B),
+            backgroundColor: const Color(0xFF0F172A),
             body: Center(
               child: Container(
                 width: 420,
@@ -65,7 +65,7 @@ class DentaGuruApp extends StatelessWidget {
                       offset: const Offset(0, 15),
                     ),
                     BoxShadow(
-                      color: const Color(0xFF0052CC).withValues(alpha: 0.25),
+                      color: const Color(0xFF012A58).withValues(alpha: 0.30),
                       blurRadius: 60,
                       spreadRadius: -10,
                     ),

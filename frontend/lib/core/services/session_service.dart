@@ -51,6 +51,7 @@ class SessionService {
     );
 
     _cachedSession = session;
+    ApiService().setAuthToken(token);
 
     try {
       final serialized = session.serialize();
@@ -69,7 +70,6 @@ class SessionService {
         await prefs.setString('dentaguru_last_active_phone', phone);
       }
 
-      ApiService().setAuthToken(token);
       debugPrint('🔒 Secure session saved for $role (${email ?? phone ?? userId}). Valid for ${validDuration.inDays} days.');
     } catch (e) {
       debugPrint('⚠️ Error saving secure session to storage: $e');
@@ -143,8 +143,11 @@ class SessionService {
     // 1. Restore Dentist State
     if (normalizedRole.contains('dentist') || normalizedRole.contains('doctor')) {
       final meta = session.metadata;
+      final restoredDentistId = (meta['dentistId'] ?? session.userId).toString().trim();
+      final restoredUserId = (meta['userId'] ?? session.userId).toString().trim();
       PatientProblemService().registerDoctor(
-        id: session.userId,
+        id: restoredDentistId,
+        userId: restoredUserId,
         name: session.name ?? (session.email?.split('@').first ?? 'Doctor'),
         email: session.email ?? '',
         phone: session.phone ?? '',
@@ -153,6 +156,7 @@ class SessionService {
         clinicName: meta['clinicName']?.toString() ?? '',
         experienceYears: int.tryParse(meta['experienceYears']?.toString() ?? '5') ?? 5,
         languages: meta['languages'] is List ? List<String>.from(meta['languages']) : ['English'],
+        skipApiRegister: true,
       );
     }
     // 1b. Restore Clinic State

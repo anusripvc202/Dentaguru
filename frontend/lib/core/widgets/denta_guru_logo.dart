@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../constants/gs_health_brand_assets.dart';
+import '../theme/app_theme.dart';
 
 final Uint8List _kGsLogoLightBytes = base64Decode(kGsHealthLogoBase64);
 final Uint8List _kGsLogoDarkBytes = base64Decode(kGsHealthLogoDarkBgBase64);
@@ -184,7 +185,7 @@ class DentaGuruToothIcon extends StatelessWidget {
             errorBuilder: (_, __, ___) => Icon(
               Icons.medical_services_rounded,
               size: size,
-              color: fallbackColor ?? const Color(0xFF0D9488),
+              color: fallbackColor ?? AppTheme.gsRed,
             ),
           ),
         );

@@ -169,7 +169,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       // Should move to Step 3 (Reason & Symptoms)
-      expect(find.text('Dental Issue / Consultation Reason'), findsOneWidget);
+      expect(find.text('Consultation Reason / Symptoms'), findsOneWidget);
     });
 
     testWidgets('5. DentistTimelineScreen renders dedicated Manage Availability section with action buttons', (tester) async {
@@ -195,6 +195,69 @@ void main() {
       expect(find.text('Manage Availability & Consultation Slots'), findsOneWidget);
       expect(find.byKey(const Key('doctor_manage_availability_btn')), findsOneWidget);
       expect(find.byKey(const Key('doctor_block_holiday_btn')), findsOneWidget);
+    });
+
+    testWidgets('6. Block Date / Mark Holiday mode displays calendar, Date Blocked toggle, and hides patient slots when blocked', (tester) async {
+      tester.view.physicalSize = const Size(390, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      final service = PatientProblemService();
+      service.addTestDoctor(testDoctor);
+      service.currentDoctor = testDoctor;
+
+      final tomorrow = DateTime.now().add(const Duration(days: 1));
+      final tomorrowStr =
+          '${tomorrow.year.toString().padLeft(4, '0')}-${tomorrow.month.toString().padLeft(2, '0')}-${tomorrow.day.toString().padLeft(2, '0')}';
+
+      service.setTestAvailability(
+        testDoctor.id,
+        DoctorAvailabilityModel(
+          dentistId: testDoctor.id,
+          date: tomorrowStr,
+          allSlots: const ['09:00 AM', '09:30 AM'],
+          availableSlots: const [],
+          isBlocked: true,
+          blockedReason: 'Festival Holiday',
+        ),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: DoctorSlotManagementDialog(
+              initialDoctor: testDoctor,
+              isDoctorSelfManage: true,
+              initialBlockDateMode: true,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Zero RenderFlex overflow and all Block Date UI elements present
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('date_blocked_toggle_switch')), findsOneWidget);
+      expect(find.byKey(const Key('doctor_block_calendar_grid')), findsOneWidget);
+      expect(find.byKey(const Key('blocked_dates_list')), findsOneWidget);
+      expect(find.text('Date Blocked (Unavailable / Holiday)'), findsOneWidget);
+      expect(find.byKey(Key('unblock_date_btn_$tomorrowStr')), findsOneWidget);
+
+      // Patient BookVisitFlowDialog hides slots and prevents booking on the blocked date
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: BookVisitFlowDialog(
+              preselectedDoctor: testDoctor,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.textContaining('Doctor is unavailable on this date'), findsOneWidget);
+      expect(find.text('09:30 AM'), findsNothing);
     });
   });
 }

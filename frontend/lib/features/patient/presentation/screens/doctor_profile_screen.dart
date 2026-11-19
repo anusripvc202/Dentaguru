@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/models/doctor_availability.dart';
 import '../../../../core/models/medical_specialty_model.dart';
+import '../../../../core/services/api_service.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../admin/presentation/widgets/doctor_slot_management_dialog.dart';
 
@@ -43,9 +44,10 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
   String _selectedTreatment = 'General Consultation';
   final TextEditingController _symptomsController = TextEditingController();
   bool _isBooking = false;
+  bool _isUnavailableFromBackend = false;
   Map<String, String>? _lastConfirmedBooking;
 
-  static const Color _successGreen = Color(0xFF10B981);
+  static const Color _successGreen = Color(0xFF012A58);
   static const LinearGradient _primaryGradient = LinearGradient(
     colors: [AppTheme.primaryBlue, AppTheme.primaryBlueDark],
     begin: Alignment.topLeft,
@@ -106,6 +108,25 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
     );
     _patientService.addListener(_onServiceChanged);
     _initializeAvailability();
+    if (!widget.isAdminView && !widget.isClinicView) {
+      _verifyDoctorAvailabilityLive();
+    }
+  }
+
+  Future<void> _verifyDoctorAvailabilityLive() async {
+    final docId = _effectiveDoctorId;
+    if (docId.isEmpty) return;
+    final res = await ApiService().fetchDoctorById(docId);
+    if (!mounted) return;
+    if (res['unavailable'] == true || res['isAvailable'] == false) {
+      setState(() {
+        _isUnavailableFromBackend = true;
+      });
+    } else if (res['success'] == true && res['isAvailable'] == true) {
+      setState(() {
+        _isUnavailableFromBackend = false;
+      });
+    }
   }
 
   @override
@@ -139,15 +160,17 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
   Future<void> _loadConfiguredDates() async {
     try {
       final list = await _patientService.getDoctorConfiguredAvailabilities(_effectiveDoctorId);
+      final blockedList = await _patientService.getBlockedDates(_effectiveDoctorId);
       if (!mounted) return;
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
 
       setState(() {
-        for (final item in list) {
+        for (final item in [...list, ...blockedList]) {
           if (item.date.isNotEmpty) {
-            _configuredDateMap[item.date] = item;
-            final parsed = DateTime.tryParse(item.date);
+            final cleanStr = item.date.split('T').first;
+            _configuredDateMap[cleanStr] = item;
+            final parsed = DateTime.tryParse(cleanStr);
             if (parsed != null) {
               final cleanDate = DateTime(parsed.year, parsed.month, parsed.day);
               if (!cleanDate.isBefore(today)) {
@@ -466,7 +489,8 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
         widget.doctor;
     final doc = latestDoc;
     final isFav = _patientService.isDoctorAdded(doc.id.isNotEmpty ? doc.id : doc.userId);
-    final isAvailableStatus = doc.status.trim().toLowerCase() == 'available';
+    final isAvailableStatus = doc.isAvailable && !_isUnavailableFromBackend;
+    final hideDetailsForPatient = !widget.isAdminView && !widget.isClinicView && !isAvailableStatus;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -512,7 +536,7 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
           ),
         ),
         actions: [
-          if (!widget.isAdminView && !widget.isClinicView)
+          if (!widget.isAdminView && !widget.isClinicView && !hideDetailsForPatient)
             Padding(
               padding: const EdgeInsets.only(right: 12),
               child: IconButton(
@@ -537,7 +561,80 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
         ),
       ),
       body: SafeArea(
-        child: Center(
+        child: hideDetailsForPatient
+            ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 440),
+                    child: Container(
+                      key: const Key('doctor_unavailable_state'),
+                      padding: const EdgeInsets.all(28),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 64,
+                            height: 64,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFFF1F5F9),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.event_busy_rounded,
+                              size: 32,
+                              color: Color(0xFF475569),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Doctor is currently unavailable',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 19,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF0F172A),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          const Text(
+                            'This doctor has turned off availability and is not accepting new bookings at the moment. Your existing appointments and medical records remain safely preserved.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              color: Color(0xFF475569),
+                              height: 1.45,
+                            ),
+                          ),
+                          const SizedBox(height: 22),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: () => Navigator.of(context).pop(),
+                              icon: const Icon(Icons.arrow_back_rounded, size: 18),
+                              label: const Text('Browse Available Doctors'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppTheme.gsNavy,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              )
+            : Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 960),
             child: SingleChildScrollView(
@@ -734,6 +831,28 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                         ],
                       ),
                     ],
+                    if (doc.languages.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          const Icon(Icons.translate_rounded, size: 15, color: AppTheme.primaryBlue),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Speaks: ${doc.languages.join(', ')}',
+                              key: const Key('patient_doctor_profile_languages'),
+                              style: const TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.textMedium,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -755,7 +874,7 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
               ),
               _buildMetricPill(
                 icon: Icons.star_rounded,
-                iconColor: Colors.amber.shade700,
+                iconColor: Color(0xFFFE3434),
                 label: 'Rating',
                 value: '${doc.rating.toStringAsFixed(1)} (${doc.reviewCount} reviews)',
               ),
@@ -1120,8 +1239,8 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                   icon: const Icon(Icons.delete_outline_rounded, size: 16),
                   label: const Text('Remove Doctor', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.red.shade700,
-                    side: BorderSide(color: Colors.red.shade300),
+                    foregroundColor: Color(0xFFFE3434),
+                    side: BorderSide(color: Color(0x40FE3434)),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
@@ -1142,10 +1261,10 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFF0D9488).withValues(alpha: 0.25)),
+        border: Border.all(color: const Color(0xFF012A58).withValues(alpha: 0.25)),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF0D9488).withValues(alpha: 0.04),
+            color: const Color(0xFF012A58).withValues(alpha: 0.04),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -1159,10 +1278,10 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                  color: const Color(0xFF012A58).withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.medical_services_rounded, color: Color(0xFF0D9488), size: 20),
+                child: const Icon(Icons.medical_services_rounded, color: Color(0xFF012A58), size: 20),
               ),
               const SizedBox(width: 10),
               const Expanded(
@@ -1196,7 +1315,7 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                   icon: const Icon(Icons.edit_note_rounded, size: 16),
                   label: const Text('Edit Doctor Details', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF0D9488),
+                    backgroundColor: const Color(0xFF012A58),
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
@@ -1212,8 +1331,8 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                 icon: const Icon(Icons.edit_calendar_rounded, size: 16),
                 label: const Text('Update Availability', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF0D9488),
-                  side: const BorderSide(color: Color(0xFF0D9488)),
+                  foregroundColor: const Color(0xFF012A58),
+                  side: const BorderSide(color: Color(0xFF012A58)),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
               ),
@@ -1238,8 +1357,8 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                   style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
                 ),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: isAvailable ? Colors.orange.shade800 : _successGreen,
-                  side: BorderSide(color: isAvailable ? Colors.orange.shade400 : _successGreen),
+                  foregroundColor: isAvailable ? Color(0xFFFE3434) : _successGreen,
+                  side: BorderSide(color: isAvailable ? Color(0xFFFE3434) : _successGreen),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
               ),
@@ -1250,8 +1369,8 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                   icon: const Icon(Icons.person_remove_rounded, size: 16),
                   label: const Text('Remove from Clinic', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.red.shade700,
-                    side: BorderSide(color: Colors.red.shade300),
+                    foregroundColor: Color(0xFFFE3434),
+                    side: BorderSide(color: Color(0x40FE3434)),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
@@ -1455,12 +1574,12 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                     decoration: BoxDecoration(
                       color: isSelected
                           ? AppTheme.primaryBlue
-                          : (isDateBlocked ? Colors.red.shade50 : const Color(0xFFF8FAFC)),
+                          : (isDateBlocked ? Color(0x14FE3434) : const Color(0xFFF8FAFC)),
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
                         color: isSelected
                             ? AppTheme.primaryBlue
-                            : (isDateBlocked ? Colors.red.shade200 : Colors.grey.shade300),
+                            : (isDateBlocked ? Color(0x40FE3434) : Colors.grey.shade300),
                         width: isSelected ? 1.5 : 1,
                       ),
                     ),
@@ -1557,8 +1676,8 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                 label: 'Booked',
               ),
               _buildLegendIndicator(
-                color: Colors.red.shade50,
-                borderColor: Colors.red.shade200,
+                color: Color(0x14FE3434),
+                borderColor: Color(0x40FE3434),
                 label: 'Unavailable',
               ),
             ],
@@ -1576,13 +1695,13 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
               width: double.infinity,
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: Colors.red.shade50,
+                color: Color(0x14FE3434),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.red.shade200),
+                border: Border.all(color: Color(0x40FE3434)),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.event_busy_rounded, color: Colors.red.shade700, size: 24),
+                  Icon(Icons.event_busy_rounded, color: Color(0xFFFE3434), size: 24),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -1593,7 +1712,7 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w800,
-                            color: Colors.red.shade800,
+                            color: Color(0xFFFE3434),
                           ),
                         ),
                         const SizedBox(height: 4),
@@ -1603,10 +1722,36 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                               : 'Doctor is unavailable on this date. Please select another date.',
                           style: TextStyle(
                             fontSize: 12.5,
-                            color: Colors.red.shade700,
+                            color: Color(0xFFFE3434),
                           ),
                         ),
                       ],
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else if (avail != null && !avail.isWorkingDay)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: Color(0x14FE3434),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Color(0x40FE3434)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.event_busy_rounded, color: Color(0xFFFE3434), size: 22),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Doctor does not consult on ${avail.dayOfWeek.isNotEmpty ? '${avail.dayOfWeek}s' : 'this day'}. Please select a configured working day.',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textDark,
+                      ),
                     ),
                   ),
                 ],
@@ -1617,13 +1762,13 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
               width: double.infinity,
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: Colors.orange.shade50,
+                color: Color(0x14FE3434),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.orange.shade200),
+                border: Border.all(color: Color(0x40FE3434)),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.schedule_rounded, color: Colors.orange.shade800, size: 22),
+                  Icon(Icons.schedule_rounded, color: Color(0xFFFE3434), size: 22),
                   const SizedBox(width: 12),
                   const Expanded(
                     child: Text(
@@ -1643,13 +1788,13 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
               width: double.infinity,
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: Colors.orange.shade50,
+                color: Color(0x14FE3434),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.orange.shade200),
+                border: Border.all(color: Color(0x40FE3434)),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.event_busy_rounded, color: Colors.orange.shade800, size: 22),
+                  Icon(Icons.event_busy_rounded, color: Color(0xFFFE3434), size: 22),
                   const SizedBox(width: 12),
                   const Expanded(
                     child: Column(

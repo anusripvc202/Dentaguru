@@ -352,7 +352,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: isSelected ? Colors.white : const Color(0xFF6366F1),
+                            color: isSelected ? Colors.white : const Color(0xFFFE3434),
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Text(
@@ -360,7 +360,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                             style: TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
-                              color: isSelected ? const Color(0xFF6366F1) : Colors.white,
+                              color: isSelected ? const Color(0xFFFE3434) : Colors.white,
                             ),
                           ),
                         ),
@@ -817,7 +817,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: isAssigned ? const Color(0xFFE2E8F0) : const Color(0xFF6366F1).withValues(alpha: 0.3)),
+                        border: Border.all(color: isAssigned ? const Color(0xFFE2E8F0) : const Color(0xFFFE3434).withValues(alpha: 0.3)),
                         boxShadow: [
                           BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 6, offset: const Offset(0, 2)),
                         ],
@@ -833,8 +833,8 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                                   children: [
                                     CircleAvatar(
                                       radius: 16,
-                                      backgroundColor: const Color(0xFF6366F1).withValues(alpha: 0.1),
-                                      child: Text(pName.isNotEmpty ? pName[0].toUpperCase() : 'P', style: const TextStyle(color: Color(0xFF6366F1), fontWeight: FontWeight.bold)),
+                                      backgroundColor: const Color(0xFFFE3434).withValues(alpha: 0.1),
+                                      child: Text(pName.isNotEmpty ? pName[0].toUpperCase() : 'P', style: const TextStyle(color: Color(0xFFFE3434), fontWeight: FontWeight.bold)),
                                     ),
                                     const SizedBox(width: 8),
                                     Flexible(
@@ -850,7 +850,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                 decoration: BoxDecoration(
-                                  color: isAssigned ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
+                                  color: isAssigned ? const Color(0x14012A58) : const Color(0x14FE3434),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: Text(
@@ -858,7 +858,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                                   style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.bold,
-                                    color: isAssigned ? const Color(0xFF16A34A) : const Color(0xFFD97706),
+                                    color: isAssigned ? const Color(0xFFFE3434) : const Color(0xFFFE3434),
                                   ),
                                 ),
                               ),
@@ -892,18 +892,18 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                             Container(
                               padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFF0FDF4),
+                                color: const Color(0x14012A58),
                                 borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: const Color(0xFFBBF7D0)),
+                                border: Border.all(color: const Color(0x40012A58)),
                               ),
                               child: Row(
                                 children: [
-                                  const Icon(Icons.check_circle_rounded, color: Color(0xFF16A34A), size: 16),
+                                  const Icon(Icons.check_circle_rounded, color: Color(0xFFFE3434), size: 16),
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
                                       'Assigned Doctor: ${req.assignedDoctorName ?? "Specialist"} (${req.assignedDoctorSpecialty ?? "General Medicine"})',
-                                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF012A58)),
                                     ),
                                   ),
                                 ],
@@ -921,7 +921,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
                                 ),
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF6366F1),
+                                  backgroundColor: const Color(0xFFFE3434),
                                   foregroundColor: Colors.white,
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                   padding: const EdgeInsets.symmetric(vertical: 10),
@@ -991,8 +991,8 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
                               color: req.status.toLowerCase().contains('review') || req.status.toLowerCase().contains('suggest') || req.status.toLowerCase().contains('assign')
-                                  ? const Color(0xFFDCFCE7)
-                                  : const Color(0xFFFEF3C7),
+                                  ? const Color(0x14012A58)
+                                  : const Color(0x14FE3434),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
@@ -1001,8 +1001,8 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                                 fontSize: 10,
                                 fontWeight: FontWeight.bold,
                                 color: req.status.toLowerCase().contains('review') || req.status.toLowerCase().contains('suggest') || req.status.toLowerCase().contains('assign')
-                                    ? const Color(0xFF16A34A)
-                                    : const Color(0xFFD97706),
+                                    ? const Color(0xFFFE3434)
+                                    : const Color(0xFFFE3434),
                               ),
                             ),
                           ),
@@ -1024,7 +1024,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                               await _service.markAdminReviewed(req.id);
                               if (ctx.mounted) {
                                 ScaffoldMessenger.of(ctx).showSnackBar(
-                                  const SnackBar(content: Text('✓ Marked as reviewed.'), backgroundColor: Color(0xFF10B981)),
+                                  const SnackBar(content: Text('✓ Marked as reviewed.'), backgroundColor: Color(0xFF012A58)),
                                 );
                               }
                             },
@@ -1093,9 +1093,9 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                   child: Row(
                     children: [
                       CircleAvatar(
-                        backgroundColor: const Color(0xFF6366F1).withValues(alpha: 0.1),
+                        backgroundColor: const Color(0xFFFE3434).withValues(alpha: 0.1),
                         child: Text(p.name.isNotEmpty ? p.name[0].toUpperCase() : 'P',
-                            style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF6366F1))),
+                            style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFE3434))),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -1177,8 +1177,8 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                   child: Row(
                     children: [
                       CircleAvatar(
-                        backgroundColor: const Color(0xFF10B981).withValues(alpha: 0.12),
-                        child: const Icon(Icons.medical_services_rounded, color: Color(0xFF10B981), size: 18),
+                        backgroundColor: const Color(0xFF012A58).withValues(alpha: 0.12),
+                        child: const Icon(Icons.medical_services_rounded, color: Color(0xFF012A58), size: 18),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -1198,7 +1198,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                         ),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 20),
+                        icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFFE3434), size: 20),
                         tooltip: 'Delete Doctor',
                         onPressed: () {
                           showDialog(
@@ -1207,7 +1207,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                               title: Row(
                                 children: [
-                                  const Icon(Icons.delete_forever_rounded, color: Colors.red, size: 22),
+                                  const Icon(Icons.delete_forever_rounded, color: Color(0xFFFE3434), size: 22),
                                   const SizedBox(width: 8),
                                   Expanded(child: Text('Delete ${d.name}?', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
                                 ],
@@ -1218,14 +1218,14 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                                 ElevatedButton.icon(
                                   icon: const Icon(Icons.delete_forever_rounded, size: 16),
                                   label: const Text('Delete Doctor', style: TextStyle(fontWeight: FontWeight.bold)),
-                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                                  style: ElevatedButton.styleFrom(backgroundColor: Color(0xFFFE3434), foregroundColor: Colors.white),
                                   onPressed: () async {
                                     Navigator.of(dialogCtx).pop();
                                     await _service.deleteDoctor(d.id);
                                     if (mounted) {
                                       setState(() {});
                                       ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('🗑️ ${d.name} deleted successfully.'), backgroundColor: Colors.red),
+                                        SnackBar(content: Text('🗑️ ${d.name} deleted successfully.'), backgroundColor: Color(0xFFFE3434)),
                                       );
                                     }
                                   },
@@ -1313,17 +1313,17 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(child: _buildMetricCard('Total Patients', '$totalPatients', const Color(0xFF6366F1), Icons.people_alt_rounded)),
+              Expanded(child: _buildMetricCard('Total Patients', '$totalPatients', const Color(0xFFFE3434), Icons.people_alt_rounded)),
               const SizedBox(width: 10),
-              Expanded(child: _buildMetricCard('Verified Doctors', '$totalDoctors', const Color(0xFF10B981), Icons.medical_services_rounded)),
+              Expanded(child: _buildMetricCard('Verified Doctors', '$totalDoctors', const Color(0xFF012A58), Icons.medical_services_rounded)),
             ],
           ),
           const SizedBox(height: 10),
           Row(
             children: [
-              Expanded(child: _buildMetricCard('Total Inquiries', '$totalRequests', const Color(0xFFF59E0B), Icons.chat_bubble_outline_rounded)),
+              Expanded(child: _buildMetricCard('Total Inquiries', '$totalRequests', const Color(0xFFFE3434), Icons.chat_bubble_outline_rounded)),
               const SizedBox(width: 10),
-              Expanded(child: _buildMetricCard('Assigned Referrals', '$assignedCount', const Color(0xFF8B5CF6), Icons.assignment_turned_in_rounded)),
+              Expanded(child: _buildMetricCard('Assigned Referrals', '$assignedCount', const Color(0xFFFE3434), Icons.assignment_turned_in_rounded)),
             ],
           ),
         ],
@@ -1394,10 +1394,10 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
             Container(
               padding: const EdgeInsets.all(16),
               decoration: const BoxDecoration(
-                color: Color(0xFFFEF3C7),
+                color: Color(0x14FE3434),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.lock_person_rounded, size: 40, color: Color(0xFFD97706)),
+              child: const Icon(Icons.lock_person_rounded, size: 40, color: Color(0xFFFE3434)),
             ),
             const SizedBox(height: 16),
             const Text(
@@ -1415,7 +1415,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
               icon: const Icon(Icons.refresh_rounded, size: 16),
               label: const Text('Refresh Permissions', style: TextStyle(fontWeight: FontWeight.bold)),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF6366F1),
+                backgroundColor: const Color(0xFFFE3434),
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
@@ -1527,15 +1527,15 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                                   child: Container(
                                     padding: const EdgeInsets.all(10),
                                     decoration: BoxDecoration(
-                                      color: isSelected ? const Color(0xFFEEF2FF) : const Color(0xFFF8FAFC),
+                                      color: isSelected ? const Color(0x14FE3434) : const Color(0xFFF8FAFC),
                                       borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(color: isSelected ? const Color(0xFF6366F1) : const Color(0xFFE2E8F0)),
+                                      border: Border.all(color: isSelected ? const Color(0xFFFE3434) : const Color(0xFFE2E8F0)),
                                     ),
                                     child: Row(
                                       children: [
                                         Icon(
                                           isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
-                                          color: isSelected ? const Color(0xFF6366F1) : Colors.grey,
+                                          color: isSelected ? const Color(0xFFFE3434) : Colors.grey,
                                           size: 18,
                                         ),
                                         const SizedBox(width: 8),
@@ -1576,7 +1576,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                             icon: const Icon(Icons.chat_rounded, size: 15),
                             label: const Text('WhatsApp', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF10B981),
+                              backgroundColor: const Color(0xFF012A58),
                               foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(vertical: 11),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -1613,7 +1613,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         SnackBar(
                                           content: Text('📱 Doctor ${selectedDoctor!.name} assigned & WhatsApp launched!'),
-                                          backgroundColor: const Color(0xFF10B981),
+                                          backgroundColor: const Color(0xFF012A58),
                                         ),
                                       );
                                     }
@@ -1626,7 +1626,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                             icon: const Icon(Icons.sms_rounded, size: 15),
                             label: const Text('SMS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF2563EB),
+                              backgroundColor: const Color(0xFF012A58),
                               foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(vertical: 11),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -1663,7 +1663,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         SnackBar(
                                           content: Text('✉️ Doctor ${selectedDoctor!.name} assigned & SMS opened!'),
-                                          backgroundColor: const Color(0xFF2563EB),
+                                          backgroundColor: const Color(0xFF012A58),
                                         ),
                                       );
                                     }
@@ -1673,7 +1673,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                         const SizedBox(width: 8),
                         ElevatedButton(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF6366F1),
+                            backgroundColor: const Color(0xFFFE3434),
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 12),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -1694,7 +1694,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
                                         content: Text('🎉 Doctor ${selectedDoctor!.name} assigned successfully!'),
-                                        backgroundColor: const Color(0xFF10B981),
+                                        backgroundColor: const Color(0xFF012A58),
                                       ),
                                     );
                                   }

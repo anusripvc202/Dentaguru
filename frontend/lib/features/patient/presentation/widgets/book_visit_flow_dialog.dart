@@ -47,6 +47,7 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
   DateTime _selectedDate = DateTime.now().add(const Duration(days: 1));
   String? _selectedTimeSlot;
   DoctorAvailabilityModel? _doctorAvailability;
+  Map<String, DoctorAvailabilityModel> _configuredDateMap = {};
   bool _isLoadingSlots = false;
 
   // Step 3: Reason & Symptoms
@@ -85,14 +86,20 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
   @override
   void initState() {
     super.initState();
-    if (widget.preselectedDoctor != null) {
+    if (widget.preselectedDoctor != null && widget.preselectedDoctor!.isAvailable) {
       _selectedDoctor = widget.preselectedDoctor;
       _currentStep = 2; // Jump directly to Date & Slot if doctor preselected
       _loadDoctorAvailability();
+    } else if (widget.preselectedDoctor != null && !widget.preselectedDoctor!.isAvailable) {
+      _errorMessage = 'Doctor is currently unavailable and not accepting new bookings.';
+      _currentStep = 1;
     }
     // Refresh live doctors in background
     _patientService.syncDoctorsFromApi();
   }
+
+  String _formatDateIsoLocal(DateTime dt) =>
+      '${dt.year.toString().padLeft(4, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
 
   Future<void> _loadDoctorAvailability() async {
     if (_selectedDoctor == null) return;
@@ -106,9 +113,16 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
 
     try {
       final avail = await _patientService.getDoctorAvailability(docId, _selectedDate);
+      final blocked = await _patientService.getBlockedDates(docId);
       if (mounted) {
         setState(() {
           _doctorAvailability = avail;
+          _configuredDateMap[_formatDateIsoLocal(_selectedDate)] = avail;
+          for (final b in blocked) {
+            if (b.date.isNotEmpty) {
+              _configuredDateMap[b.date] = b;
+            }
+          }
           _isLoadingSlots = false;
         });
       }
@@ -131,7 +145,7 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
   bool _isSlotBooked(String slot) {
     if (_selectedDoctor == null) return false;
     final docId = _selectedDoctor!.id.isNotEmpty ? _selectedDoctor!.id : _selectedDoctor!.userId;
-    final dateStr = _selectedDate.toIso8601String().split('T').first;
+    final dateStr = _formatDateIsoLocal(_selectedDate);
 
     for (final req in _patientService.requests) {
       final s = req.status.toUpperCase();
@@ -239,7 +253,7 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
   // STEP 1: SELECT DOCTOR
   // ==========================================
   Widget _buildStep1SelectDoctor() {
-    final allDoctors = _patientService.allDoctors;
+    final allDoctors = _patientService.availableDoctors;
     final filteredDoctors = allDoctors.where((doc) {
       final matchesQuery = _doctorSearchQuery.isEmpty ||
           doc.name.toLowerCase().contains(_doctorSearchQuery.toLowerCase()) ||
@@ -343,7 +357,7 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
                     return Container(
                       margin: const EdgeInsets.only(bottom: 12),
                       decoration: BoxDecoration(
-                        color: isSelected ? const Color(0xFFEFF6FF) : Colors.white,
+                        color: isSelected ? const Color(0x14012A58) : Colors.white,
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(
                           color: isSelected ? AppTheme.primaryBlue : const Color(0xFFE2E8F0),
@@ -412,12 +426,12 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
                                         Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                           decoration: BoxDecoration(
-                                            color: const Color(0xFFDCFCE7),
+                                            color: const Color(0x14012A58),
                                             borderRadius: BorderRadius.circular(6),
                                           ),
                                           child: Text(
                                             doc.specialty,
-                                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF012A58)),
                                           ),
                                         ),
                                         if (doc.experienceYears > 0)
@@ -500,9 +514,9 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: const Color(0xFFEFF6FF),
+                color: const Color(0x14012A58),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFBFDBFE)),
+                border: Border.all(color: const Color(0x40012A58)),
               ),
               child: Row(
                 children: [
@@ -523,11 +537,11 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
                       children: [
                         Text(
                           _selectedDoctor!.name,
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: Color(0xFF1E3A8A)),
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: Color(0xFF012A58)),
                         ),
                         Text(
                           '${_selectedDoctor!.specialty} • ${_selectedDoctor!.clinicName.isNotEmpty ? _selectedDoctor!.clinicName : "GS HEALTH Clinic"}',
-                          style: const TextStyle(fontSize: 11, color: Color(0xFF2563EB)),
+                          style: const TextStyle(fontSize: 11, color: Color(0xFF012A58)),
                         ),
                       ],
                     ),
@@ -548,13 +562,15 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
 
           // Horizontal Date Selector (Next 14 Days)
           SizedBox(
-            height: 72,
+            height: 78,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: 14,
               separatorBuilder: (_, __) => const SizedBox(width: 8),
               itemBuilder: (context, idx) {
                 final date = DateTime.now().add(Duration(days: idx + 1));
+                final dKey = _formatDateIsoLocal(date);
+                final isDateBlocked = _configuredDateMap[dKey]?.isBlocked == true;
                 final isSelected = date.year == _selectedDate.year &&
                     date.month == _selectedDate.month &&
                     date.day == _selectedDate.day;
@@ -571,12 +587,16 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
                   borderRadius: BorderRadius.circular(12),
                   child: Container(
                     width: 58,
-                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    padding: const EdgeInsets.symmetric(vertical: 6),
                     decoration: BoxDecoration(
-                      color: isSelected ? AppTheme.primaryBlue : const Color(0xFFF8FAFC),
+                      color: isSelected
+                          ? (isDateBlocked ? const Color(0xFFFE3434) : AppTheme.primaryBlue)
+                          : (isDateBlocked ? const Color(0x14FE3434) : const Color(0xFFF8FAFC)),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: isSelected ? AppTheme.primaryBlue : const Color(0xFFE2E8F0),
+                        color: isSelected
+                            ? (isDateBlocked ? const Color(0xFFFE3434) : AppTheme.primaryBlue)
+                            : (isDateBlocked ? const Color(0x40FE3434) : const Color(0xFFE2E8F0)),
                         width: isSelected ? 1.5 : 1,
                       ),
                     ),
@@ -588,18 +608,32 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
-                            color: isSelected ? Colors.white.withValues(alpha: 0.9) : AppTheme.textMuted,
+                            color: isSelected
+                                ? Colors.white.withValues(alpha: 0.9)
+                                : (isDateBlocked ? const Color(0xFFFE3434) : AppTheme.textMuted),
                           ),
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 2),
                         Text(
                           date.day.toString().padLeft(2, '0'),
                           style: TextStyle(
-                            fontSize: 16,
+                            fontSize: 15,
                             fontWeight: FontWeight.bold,
-                            color: isSelected ? Colors.white : AppTheme.textDark,
+                            color: isSelected
+                                ? Colors.white
+                                : (isDateBlocked ? const Color(0xFFFE3434) : AppTheme.textDark),
                           ),
                         ),
+                        if (isDateBlocked)
+                          Text(
+                            'Blocked',
+                            style: TextStyle(
+                              fontSize: 8.5,
+                              fontWeight: FontWeight.bold,
+                              color: isSelected ? Colors.white : const Color(0xFFFE3434),
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                       ],
                     ),
                   ),
@@ -635,18 +669,18 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: const Color(0xFFFEF2F2),
+                color: const Color(0x14FE3434),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFFCA5A5)),
+                border: Border.all(color: const Color(0x40FE3434)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.block_rounded, color: Color(0xFFDC2626), size: 20),
+                  const Icon(Icons.block_rounded, color: Color(0xFFFE3434), size: 20),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       'Doctor is unavailable on this date (${_doctorAvailability!.blockedReason ?? "Doctor on Leave / Clinic Closed"}). Please choose another date.',
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFDC2626)),
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFFE3434)),
                     ),
                   ),
                 ],
@@ -828,12 +862,12 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
                       padding: const EdgeInsets.symmetric(vertical: 10),
                       decoration: BoxDecoration(
                         color: isSelected
-                            ? (sev == 'Severe' ? const Color(0xFFFEE2E2) : sev == 'Moderate' ? const Color(0xFFFFEDD5) : const Color(0xFFDBEAFE))
+                            ? (sev == 'Severe' ? const Color(0x14FE3434) : sev == 'Moderate' ? const Color(0x14FE3434) : const Color(0x14012A58))
                             : const Color(0xFFF1F5F9),
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
                           color: isSelected
-                              ? (sev == 'Severe' ? const Color(0xFFEF4444) : sev == 'Moderate' ? const Color(0xFFF97316) : const Color(0xFF3B82F6))
+                              ? (sev == 'Severe' ? const Color(0xFFFE3434) : sev == 'Moderate' ? const Color(0xFFFE3434) : const Color(0xFFFE3434))
                               : const Color(0xFFCBD5E1),
                           width: isSelected ? 1.5 : 1,
                         ),
@@ -845,7 +879,7 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
                             fontWeight: FontWeight.bold,
                             fontSize: 12.5,
                             color: isSelected
-                                ? (sev == 'Severe' ? const Color(0xFF991B1B) : sev == 'Moderate' ? const Color(0xFF9A3412) : const Color(0xFF1E40AF))
+                                ? (sev == 'Severe' ? const Color(0xFFFE3434) : sev == 'Moderate' ? const Color(0xFFFE3434) : const Color(0xFF012A58))
                                 : AppTheme.textDark,
                           ),
                         ),
@@ -895,18 +929,18 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: const Color(0xFFFEE2E2),
+                color: const Color(0x14FE3434),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFFCA5A5)),
+                border: Border.all(color: const Color(0x40FE3434)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.error_outline_rounded, color: Color(0xFFDC2626), size: 18),
+                  const Icon(Icons.error_outline_rounded, color: Color(0xFFFE3434), size: 18),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       _errorMessage!,
-                      style: const TextStyle(fontSize: 12, color: Color(0xFF991B1B)),
+                      style: const TextStyle(fontSize: 12, color: Color(0xFFFE3434)),
                     ),
                   ),
                 ],
@@ -1056,11 +1090,11 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: const Color(0xFFDCFCE7),
+                color: const Color(0x14012A58),
                 shape: BoxShape.circle,
-                border: Border.all(color: const Color(0xFF86EFAC), width: 2),
+                border: Border.all(color: const Color(0x40012A58), width: 2),
               ),
-              child: const Icon(Icons.check_rounded, color: Color(0xFF15803D), size: 48),
+              child: const Icon(Icons.check_rounded, color: Color(0xFF012A58), size: 48),
             ),
             const SizedBox(height: 18),
             const Text(

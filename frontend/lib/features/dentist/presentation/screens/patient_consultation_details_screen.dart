@@ -108,19 +108,19 @@ class _PatientConsultationDetailsScreenState extends State<PatientConsultationDe
     Color getCategoryColor(String cat) {
       switch (cat) {
         case 'Antibiotic':
-          return const Color(0xFFEF4444);
+          return const Color(0xFFFE3434);
         case 'Pain & Swelling':
-          return const Color(0xFFF59E0B);
+          return const Color(0xFFFE3434);
         case 'Antiseptic':
-          return const Color(0xFF10B981);
+          return const Color(0xFF012A58);
         case 'Antacid / PPI':
-          return const Color(0xFF6366F1);
+          return const Color(0xFFFE3434);
         case 'Topical Gel':
-          return const Color(0xFF8B5CF6);
+          return const Color(0xFFFE3434);
         case 'Hemostatic':
-          return const Color(0xFFEC4899);
+          return const Color(0xFFFE3434);
         default:
-          return const Color(0xFF0284C7);
+          return const Color(0xFFFE3434);
       }
     }
 
@@ -146,10 +146,10 @@ class _PatientConsultationDetailsScreenState extends State<PatientConsultationDe
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                            color: const Color(0xFF012A58).withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: const Icon(Icons.receipt_long_rounded, color: Color(0xFF10B981), size: 24),
+                          child: const Icon(Icons.receipt_long_rounded, color: Color(0xFF012A58), size: 24),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -223,7 +223,7 @@ class _PatientConsultationDetailsScreenState extends State<PatientConsultationDe
                     // Section Label: Related Dental Medication Dropdown
                     const Row(
                       children: [
-                        Icon(Icons.medication_rounded, size: 16, color: Color(0xFF10B981)),
+                        Icon(Icons.medication_rounded, size: 16, color: Color(0xFF012A58)),
                         SizedBox(width: 6),
                         Text(
                           'Select Related Dental Medication',
@@ -241,7 +241,7 @@ class _PatientConsultationDetailsScreenState extends State<PatientConsultationDe
                       decoration: InputDecoration(
                         labelText: 'Choose Medicine & Strength',
                         hintText: 'Select standard dental prescription...',
-                        prefixIcon: const Icon(Icons.vaccines_rounded, size: 18, color: Color(0xFF10B981)),
+                        prefixIcon: const Icon(Icons.vaccines_rounded, size: 18, color: Color(0xFF012A58)),
                         filled: true,
                         fillColor: const Color(0xFFF8FAFC),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -322,9 +322,9 @@ class _PatientConsultationDetailsScreenState extends State<PatientConsultationDe
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                 decoration: BoxDecoration(
-                                  color: isSelected ? const Color(0xFF10B981) : const Color(0xFFF1F5F9),
+                                  color: isSelected ? const Color(0xFF012A58) : const Color(0xFFF1F5F9),
                                   borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(color: isSelected ? const Color(0xFF10B981) : const Color(0xFFE2E8F0)),
+                                  border: Border.all(color: isSelected ? const Color(0xFF012A58) : const Color(0xFFE2E8F0)),
                                 ),
                                 child: Text(
                                   quickMed.split(' (').first,
@@ -444,7 +444,7 @@ class _PatientConsultationDetailsScreenState extends State<PatientConsultationDe
                             icon: const Icon(Icons.check_circle_rounded, size: 18),
                             label: const Text('Send Digital E-Prescription', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF10B981),
+                              backgroundColor: const Color(0xFF012A58),
                               foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(vertical: 14),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -514,7 +514,7 @@ class _PatientConsultationDetailsScreenState extends State<PatientConsultationDe
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
                                     content: Text('📝 E-Prescription issued successfully for ${widget.patientName}!'),
-                                    backgroundColor: const Color(0xFF10B981),
+                                    backgroundColor: const Color(0xFF012A58),
                                   ),
                                 );
                               }
@@ -567,9 +567,9 @@ class _PatientConsultationDetailsScreenState extends State<PatientConsultationDe
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: const Color(0xFFF0FDF4),
+                color: const Color(0x14012A58),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFF86EFAC), width: 1.5),
+                border: Border.all(color: const Color(0x40012A58), width: 1.5),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -578,15 +578,15 @@ class _PatientConsultationDetailsScreenState extends State<PatientConsultationDe
                     children: [
                       Container(
                         padding: const EdgeInsets.all(8),
-                        decoration: const BoxDecoration(color: Color(0xFFDCFCE7), shape: BoxShape.circle),
-                        child: const Icon(Icons.verified_user_rounded, color: Color(0xFF16A34A), size: 20),
+                        decoration: const BoxDecoration(color: Color(0x14012A58), shape: BoxShape.circle),
+                        child: const Icon(Icons.verified_user_rounded, color: Color(0xFFFE3434), size: 20),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Active Referral • Accepted by You', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF15803D))),
+                            const Text('Active Referral • Accepted by You', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF012A58))),
                             Text('Patient: ${widget.patientName}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark)),
                           ],
                         ),
@@ -596,12 +596,12 @@ class _PatientConsultationDetailsScreenState extends State<PatientConsultationDe
                   const Divider(height: 20),
                   Row(
                     children: [
-                      const Icon(Icons.event_available_rounded, size: 18, color: Color(0xFF16A34A)),
+                      const Icon(Icons.event_available_rounded, size: 18, color: Color(0xFFFE3434)),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           'Confirmed Time Slot: $_currentSlot',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF15803D)),
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF012A58)),
                         ),
                       ),
                     ],
@@ -664,7 +664,7 @@ class _PatientConsultationDetailsScreenState extends State<PatientConsultationDe
                       icon: const Icon(Icons.receipt_long_rounded, size: 16),
                       label: const Text('📝 E-Prescription', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF10B981),
+                        backgroundColor: const Color(0xFF012A58),
                         foregroundColor: Colors.white,
                         elevation: 2,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),

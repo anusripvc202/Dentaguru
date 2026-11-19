@@ -140,7 +140,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: const [
-            Icon(Icons.delete_forever_rounded, color: Color(0xFFEF4444), size: 22),
+            Icon(Icons.delete_forever_rounded, color: Color(0xFFFE3434), size: 22),
             SizedBox(width: 8),
             Text('Delete Referral', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           ],
@@ -156,7 +156,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFEF4444),
+              backgroundColor: const Color(0xFFFE3434),
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
@@ -171,7 +171,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('🗑️ Referral for ${ref.referredPatientName} deleted'),
-          backgroundColor: const Color(0xFFEF4444),
+          backgroundColor: const Color(0xFFFE3434),
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 2),
         ),
@@ -185,14 +185,21 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    const primaryColor = Color(0xFF6366F1);
+    const primaryColor = Color(0xFFFE3434);
 
     return AnimatedBuilder(
       animation: _patientService,
       builder: (context, _) {
         final allCreated = _patientService.myCreatedPatientReferrals;
         final allReceived = _patientService.receivedForMePatientReferrals;
-        final combinedList = [...allCreated, ...allReceived];
+        final seenKeys = <String>{};
+        final combinedList = <PatientReferral>[];
+        for (final r in [...allReceived, ...allCreated]) {
+          final key = r.id.isNotEmpty ? r.id : '${r.referredPatientMobile}_${r.doctorId}';
+          if (seenKeys.add(key)) {
+            combinedList.add(r);
+          }
+        }
 
         // Filter based on search query
         final filteredList = combinedList.where((ref) {
@@ -265,12 +272,16 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
                         children: [
                           Row(
                             children: [
-                              Text(
-                                'Referred Patients',
-                                style: TextStyle(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.bold,
-                                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                              Flexible(
+                                child: Text(
+                                  'Referred Patients',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.bold,
+                                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                  ),
                                 ),
                               ),
                               const SizedBox(width: 8),
@@ -367,7 +378,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
                         style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
                       ),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0D9488),
+                        backgroundColor: const Color(0xFF012A58),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                         elevation: 0,
@@ -510,11 +521,11 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
           color: isSelected
-              ? const Color(0xFF6366F1).withValues(alpha: 0.14)
+              ? const Color(0xFFFE3434).withValues(alpha: 0.14)
               : (isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isSelected ? const Color(0xFF6366F1) : Colors.transparent,
+            color: isSelected ? const Color(0xFFFE3434) : Colors.transparent,
             width: 1.2,
           ),
         ),
@@ -527,7 +538,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
                 fontSize: 11.5,
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
                 color: isSelected
-                    ? const Color(0xFF6366F1)
+                    ? const Color(0xFFFE3434)
                     : (isDark ? Colors.white70 : Colors.black87),
               ),
             ),
@@ -535,7 +546,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
               decoration: BoxDecoration(
-                color: isSelected ? const Color(0xFF6366F1) : (isDark ? Colors.white24 : Colors.black12),
+                color: isSelected ? const Color(0xFFFE3434) : (isDark ? Colors.white24 : Colors.black12),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
@@ -558,11 +569,11 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
     final isRejected = ref.status == 'Rejected';
 
     final statusColor = isAccepted
-        ? const Color(0xFF10B981)
-        : (isRejected ? const Color(0xFFEF4444) : const Color(0xFFF59E0B));
+        ? const Color(0xFF012A58)
+        : (isRejected ? const Color(0xFFFE3434) : const Color(0xFFFE3434));
     final statusBg = isAccepted
-        ? const Color(0xFFDCFCE7)
-        : (isRejected ? const Color(0xFFFEE2E2) : const Color(0xFFFEF3C7));
+        ? const Color(0x14012A58)
+        : (isRejected ? const Color(0x14FE3434) : const Color(0x14FE3434));
     final statusText = isAccepted
         ? '🟢 Accepted by Doctor'
         : (isRejected ? '🔴 Referral Declined' : '🟡 Doctor Reviewing');
@@ -575,7 +586,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isAccepted
-              ? const Color(0xFF86EFAC)
+              ? const Color(0x40012A58)
               : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
         ),
         boxShadow: [
@@ -597,7 +608,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
                   children: [
                     CircleAvatar(
                       radius: 18,
-                      backgroundColor: const Color(0xFF0284C7).withValues(alpha: 0.12),
+                      backgroundColor: const Color(0xFFFE3434).withValues(alpha: 0.12),
                       child: Text(
                         ref.referredPatientName.isNotEmpty
                             ? ref.referredPatientName[0].toUpperCase()
@@ -605,7 +616,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
                         style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF0284C7),
+                          color: Color(0xFFFE3434),
                         ),
                       ),
                     ),
@@ -643,7 +654,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
                             const SizedBox(height: 2),
                             Row(
                               children: [
-                                const Icon(Icons.location_on_outlined, size: 12, color: Color(0xFF0284C7)),
+                                const Icon(Icons.location_on_outlined, size: 12, color: Color(0xFFFE3434)),
                                 const SizedBox(width: 3),
                                 Expanded(
                                   child: Text(
@@ -655,7 +666,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
                                     style: const TextStyle(
                                       fontSize: 10.5,
                                       fontWeight: FontWeight.w500,
-                                      color: Color(0xFF0369A1),
+                                      color: Color(0xFF012A58),
                                     ),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
@@ -686,7 +697,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
                   ),
                   const SizedBox(width: 4),
                   IconButton(
-                    icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Color(0xFFEF4444)),
+                    icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Color(0xFFFE3434)),
                     visualDensity: VisualDensity.compact,
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
@@ -703,7 +714,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
 
           Row(
             children: [
-              const Icon(Icons.medical_services_outlined, size: 14, color: Color(0xFF0D9488)),
+              const Icon(Icons.medical_services_outlined, size: 14, color: Color(0xFF012A58)),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -762,82 +773,94 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFFFEF2F2),
+                color: const Color(0x14FE3434),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
                 'Reason: ${ref.rejectionReason}',
-                style: const TextStyle(fontSize: 11, color: Color(0xFF991B1B), fontWeight: FontWeight.w500),
+                style: const TextStyle(fontSize: 11, color: Color(0xFFFE3434), fontWeight: FontWeight.w500),
               ),
             ),
           ],
 
           const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              ElevatedButton.icon(
-                icon: const Icon(Icons.chat_rounded, size: 13, color: Colors.white),
-                label: Text(
-                  'WhatsApp ${ref.referredPatientName}',
-                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF25D366),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  elevation: 0,
-                ),
-                onPressed: () async {
-                  String rawPhone = ref.referredPatientMobile.replaceAll(RegExp(r'[^0-9]'), '');
-                  if (rawPhone.startsWith('0') && rawPhone.length == 11) {
-                    rawPhone = '91${rawPhone.substring(1)}';
-                  } else if (rawPhone.length == 10) {
-                    rawPhone = '91$rawPhone';
-                  }
-                  final msg = _buildReferralWhatsAppMessage(ref);
-                  final waUrl = Uri.parse(rawPhone.isNotEmpty
-                      ? 'https://wa.me/$rawPhone?text=${Uri.encodeComponent(msg)}'
-                      : 'https://wa.me/?text=${Uri.encodeComponent(msg)}');
-                  try {
-                    await launchUrl(waUrl, mode: LaunchMode.externalApplication);
-                  } catch (_) {}
-                },
-              ),
-              Row(
-                children: [
-                  Text(
-                    '${ref.referralDate.day}/${ref.referralDate.month}/${ref.referralDate.year}',
-                    style: TextStyle(fontSize: 10.5, color: isDark ? Colors.white54 : Colors.black45),
-                  ),
-                  const SizedBox(width: 8),
-                  InkWell(
-                    onTap: () => _confirmDeleteReferral(context, ref),
-                    borderRadius: BorderRadius.circular(8),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFEE2E2),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFFFECACA)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: const [
-                          Icon(Icons.delete_outline_rounded, size: 13, color: Color(0xFFEF4444)),
-                          SizedBox(width: 3),
-                          Text(
-                            'Delete',
-                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFEF4444)),
-                          ),
-                        ],
-                      ),
+          SizedBox(
+            width: double.infinity,
+            child: Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.chat_rounded, size: 13, color: Colors.white),
+                  label: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 165),
+                    child: Text(
+                      'WhatsApp ${ref.referredPatientName}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
                     ),
                   ),
-                ],
-              ),
-            ],
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFE3434),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    elevation: 0,
+                  ),
+                  onPressed: () async {
+                    String rawPhone = ref.referredPatientMobile.replaceAll(RegExp(r'[^0-9]'), '');
+                    if (rawPhone.startsWith('0') && rawPhone.length == 11) {
+                      rawPhone = '91${rawPhone.substring(1)}';
+                    } else if (rawPhone.length == 10) {
+                      rawPhone = '91$rawPhone';
+                    }
+                    final msg = _buildReferralWhatsAppMessage(ref);
+                    final waUrl = Uri.parse(rawPhone.isNotEmpty
+                        ? 'https://wa.me/$rawPhone?text=${Uri.encodeComponent(msg)}'
+                        : 'https://wa.me/?text=${Uri.encodeComponent(msg)}');
+                    try {
+                      await launchUrl(waUrl, mode: LaunchMode.externalApplication);
+                    } catch (_) {}
+                  },
+                ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${ref.referralDate.day}/${ref.referralDate.month}/${ref.referralDate.year}',
+                      style: TextStyle(fontSize: 10.5, color: isDark ? Colors.white54 : Colors.black45),
+                    ),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      onTap: () => _confirmDeleteReferral(context, ref),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: const Color(0x14FE3434),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0x40FE3434)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: const [
+                            Icon(Icons.delete_outline_rounded, size: 13, color: Color(0xFFFE3434)),
+                            SizedBox(width: 3),
+                            Text(
+                              'Delete',
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFFE3434)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ],
       ),

@@ -40,7 +40,7 @@ const List<DentalAd> _patientAds = [
     badgeLabel: 'Featured Platform',
     website: 'https://dentaguru.in',
     ctaText: 'Explore GS HEALTH',
-    gradientColors: [Color(0xFF0F172A), Color(0xFF2563EB)],
+    gradientColors: [Color(0xFF012A58), Color(0xFF012A58)],
     icon: Icons.health_and_safety_rounded,
     emoji: '🦷',
     isDentaGuru: true,
@@ -52,7 +52,7 @@ const List<DentalAd> _patientAds = [
     badgeLabel: 'Dentist Recommended',
     website: 'https://www.colgate.com/en-in/products/toothpaste',
     ctaText: 'Shop Colgate',
-    gradientColors: [Color(0xFF1A56DB), Color(0xFF0EA5E9)],
+    gradientColors: [Color(0xFFFE3434), Color(0xFFFE3434)],
     icon: Icons.star_rounded,
     emoji: '✨',
   ),
@@ -63,7 +63,7 @@ const List<DentalAd> _patientAds = [
     badgeLabel: 'AI Brush Tech',
     website: 'https://oralb.com/en-in/electric-toothbrushes',
     ctaText: 'Explore Oral-B',
-    gradientColors: [Color(0xFF0D9488), Color(0xFF06B6D4)],
+    gradientColors: [Color(0xFF012A58), Color(0xFF012A58)],
     icon: Icons.electric_bolt_rounded,
     emoji: '⚡',
   ),
@@ -74,7 +74,7 @@ const List<DentalAd> _patientAds = [
     badgeLabel: 'Clinically Proven',
     website: 'https://www.listerine-me.com',
     ctaText: 'Try Listerine',
-    gradientColors: [Color(0xFF059669), Color(0xFF10B981)],
+    gradientColors: [Color(0xFFFE3434), Color(0xFFFE3434)],
     icon: Icons.water_drop_rounded,
     emoji: '💧',
   ),
@@ -85,7 +85,7 @@ const List<DentalAd> _patientAds = [
     badgeLabel: '60-Second Relief',
     website: 'https://www.sensodyne.co.in',
     ctaText: 'Get Relief',
-    gradientColors: [Color(0xFF7C3AED), Color(0xFF8B5CF6)],
+    gradientColors: [Color(0xFF012A58), Color(0xFF012A58)],
     icon: Icons.healing_rounded,
     emoji: '🛡️',
   ),
@@ -96,7 +96,7 @@ const List<DentalAd> _patientAds = [
     badgeLabel: 'Featured Partner',
     website: 'https://www.gsimplants.com/smooth-implant',
     ctaText: 'Buy GS Implants',
-    gradientColors: [Color(0xFF0F172A), Color(0xFF2563EB)],
+    gradientColors: [Color(0xFFFE3434), Color(0xFFFE3434)],
     icon: Icons.biotech_rounded,
     emoji: '⚙️',
     isGsiPartner: true,
@@ -124,7 +124,7 @@ const List<DentalAd> _dentistAds = [
     badgeLabel: 'Featured Platform',
     website: 'https://dentaguru.in',
     ctaText: 'Explore GS HEALTH Pro',
-    gradientColors: [Color(0xFF0F172A), Color(0xFF2563EB)],
+    gradientColors: [Color(0xFF012A58), Color(0xFF012A58)],
     icon: Icons.medical_services_rounded,
     emoji: '🦷',
     isDentaGuru: true,
@@ -136,7 +136,7 @@ const List<DentalAd> _dentistAds = [
     badgeLabel: '#1 Dental Brand',
     website: 'https://www.dentsplysirona.com',
     ctaText: 'Explore Products',
-    gradientColors: [Color(0xFF1A56DB), Color(0xFF3B82F6)],
+    gradientColors: [Color(0xFFFE3434), Color(0xFFFE3434)],
     icon: Icons.medical_services_rounded,
     emoji: '💎',
   ),
@@ -147,7 +147,7 @@ const List<DentalAd> _dentistAds = [
     badgeLabel: 'ISO Certified',
     website: 'https://www.kavokerr.com',
     ctaText: 'Shop KaVo',
-    gradientColors: [Color(0xFF0F766E), Color(0xFF0D9488)],
+    gradientColors: [Color(0xFF012A58), Color(0xFF012A58)],
     icon: Icons.precision_manufacturing_rounded,
     emoji: '⚙️',
   ),
@@ -158,7 +158,7 @@ const List<DentalAd> _dentistAds = [
     badgeLabel: 'Next-Day Delivery',
     website: 'https://www.henryschein.com/dental',
     ctaText: 'Order Supplies',
-    gradientColors: [Color(0xFFB45309), Color(0xFFD97706)],
+    gradientColors: [Color(0xFFFE3434), Color(0xFFFE3434)],
     icon: Icons.inventory_2_rounded,
     emoji: '📦',
   ),
@@ -169,7 +169,7 @@ const List<DentalAd> _dentistAds = [
     badgeLabel: 'AI Diagnostics',
     website: 'https://www.planmeca.com',
     ctaText: 'Learn More',
-    gradientColors: [Color(0xFF6D28D9), Color(0xFF7C3AED)],
+    gradientColors: [Color(0xFF012A58), Color(0xFF012A58)],
     icon: Icons.biotech_rounded,
     emoji: '🔭',
   ),
@@ -180,7 +180,7 @@ const List<DentalAd> _dentistAds = [
     badgeLabel: 'Featured Partner',
     website: 'https://www.gsimplants.com/smooth-implant',
     ctaText: 'Buy GS Implants',
-    gradientColors: [Color(0xFF0F172A), Color(0xFF2563EB)],
+    gradientColors: [Color(0xFFFE3434), Color(0xFFFE3434)],
     icon: Icons.biotech_rounded,
     emoji: '⚙️',
     isGsiPartner: true,
@@ -308,7 +308,7 @@ class _DentalAdsBannerState extends State<DentalAdsBanner> {
                     Container(
                       padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFEFF6FF),
+                        color: const Color(0x14012A58),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: const Text('🦷', style: TextStyle(fontSize: 14)),
@@ -333,13 +333,13 @@ class _DentalAdsBannerState extends State<DentalAdsBanner> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFEFF6FF),
+                  color: const Color(0x14012A58),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                  border: Border.all(color: const Color(0x40012A58)),
                 ),
                 child: const Text(
                   'Featured Partner',
-                  style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8)),
+                  style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF012A58)),
                 ),
               ),
             ],
@@ -361,11 +361,11 @@ class _DentalAdsBannerState extends State<DentalAdsBanner> {
             : (widget.isDentist ? 'Medical Supply Partners' : 'Featured Products'));
 
     const headerIcon = '📢';
-    const headerIconBg = Color(0xFFFFF7ED);
+    const headerIconBg = Color(0x14FE3434);
     const badgeLabel = 'Sponsored';
-    const badgeBg = Color(0xFFFEF9C3);
-    const badgeBorder = Color(0xFFFDE047);
-    const badgeTextColor = Color(0xFF92400E);
+    const badgeBg = Color(0x14FE3434);
+    const badgeBorder = Color(0x40FE3434);
+    const badgeTextColor = Color(0xFFFE3434);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -492,7 +492,7 @@ class _GsHeroSplitBanner extends StatelessWidget {
                 description: 'Advanced bicortical solutions, prosthetic components & surgical kits.',
                 ctaText: 'Buy GS Implants',
                 ctaIcon: Icons.shopping_bag_rounded,
-                gradientColors: const [Color(0xFF0F172A), Color(0xFF1E40AF)],
+                gradientColors: const [Color(0xFF012A58), Color(0xFF012A58)],
                 avatarIcon: Icons.biotech_rounded,
                 avatarEmoji: '🦷',
                 onTap: onOpenProducts,
@@ -505,14 +505,14 @@ class _GsHeroSplitBanner extends StatelessWidget {
                 context: context,
                 height: cardHeight,
                 badgeText: 'Masterclass & CME',
-                badgeBgColor: const Color(0xFF10B981).withValues(alpha: 0.25),
-                badgeTextColor: const Color(0xFF6EE7B7),
+                badgeBgColor: Colors.white.withValues(alpha: 0.18),
+                badgeTextColor: Colors.white,
                 title: 'Upcoming Courses',
                 subtitle: 'Basal & Cortical Masterclasses',
                 description: 'Hands-on surgical training, immediate loading & live surgery workshops.',
                 ctaText: 'View Courses',
                 ctaIcon: Icons.school_rounded,
-                gradientColors: const [Color(0xFF0F172A), Color(0xFF0D9488)],
+                gradientColors: const [Color(0xFFFE3434), Color(0xFFFE3434)],
                 avatarIcon: Icons.workspace_premium_rounded,
                 avatarEmoji: '🎓',
                 onTap: onOpenCourses,
@@ -861,9 +861,9 @@ class _DentaGuruPlatformSheet extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF2563EB).withValues(alpha: 0.25),
+                    color: const Color(0xFF012A58).withValues(alpha: 0.5),
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: const Color(0xFF3B82F6).withValues(alpha: 0.4)),
+                    border: Border.all(color: Colors.white24),
                   ),
                   child: const Text('🦷', style: TextStyle(fontSize: 24)),
                 ),
@@ -890,14 +890,14 @@ class _DentaGuruPlatformSheet extends StatelessWidget {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                              color: const Color(0xFFFE3434).withValues(alpha: 0.2),
                               borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.5)),
+                              border: Border.all(color: const Color(0xFFFE3434).withValues(alpha: 0.6)),
                             ),
                             child: const Text(
                               'OFFICIAL',
                               style: TextStyle(
-                                color: Color(0xFF34D399),
+                                color: Color(0xFFFE3434),
                                 fontSize: 8.5,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -936,28 +936,28 @@ class _DentaGuruPlatformSheet extends StatelessWidget {
                   icon: Icons.psychology_rounded,
                   title: 'AI Diagnostic Triage',
                   desc: 'Instant tooth-by-tooth AI symptom assessment, emergency urgency scoring & visual risk grading.',
-                  color: const Color(0xFF3B82F6),
+                  color: const Color(0xFF012A58),
                 ),
                 const SizedBox(height: 12),
                 _buildFeatureCard(
                   icon: Icons.medical_services_rounded,
                   title: 'Verified Specialist Network',
                   desc: 'Connect with certified Orthodontists, Endodontists, Implantologists & Oral Surgeons with live availability.',
-                  color: const Color(0xFF10B981),
+                  color: const Color(0xFFFE3434),
                 ),
                 const SizedBox(height: 12),
                 _buildFeatureCard(
                   icon: Icons.receipt_long_rounded,
                   title: 'Digital E-Prescriptions & Case Sheets',
                   desc: 'Cloud-synced prescriptions with instant WhatsApp delivery to patients and verified pharmacy integration.',
-                  color: const Color(0xFFF59E0B),
+                  color: const Color(0xFF012A58),
                 ),
                 const SizedBox(height: 12),
                 _buildFeatureCard(
                   icon: Icons.share_location_rounded,
                   title: 'Multi-Clinic Direct Referrals',
                   desc: 'Seamless doctor-to-doctor clinical patient referrals with status tracking and automated WhatsApp notifications.',
-                  color: const Color(0xFF8B5CF6),
+                  color: const Color(0xFFFE3434),
                 ),
               ],
             ),
@@ -965,7 +965,7 @@ class _DentaGuruPlatformSheet extends StatelessWidget {
           Container(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             decoration: const BoxDecoration(
-              color: Color(0xFF0B132B),
+              color: Color(0xFF0F172A),
               border: Border(top: BorderSide(color: Colors.white10)),
             ),
             child: SafeArea(
@@ -980,7 +980,7 @@ class _DentaGuruPlatformSheet extends StatelessWidget {
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2563EB),
+                    backgroundColor: const Color(0xFFFE3434),
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 13),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -1067,7 +1067,7 @@ class _GsProductsSheet extends StatelessWidget {
       'url': 'https://www.gsimplants.com/smooth-implant',
       'badge': 'Bestseller',
       'icon': Icons.shield_rounded,
-      'color': Color(0xFF0284C7),
+      'color': Color(0xFFFE3434),
       'features': ['Anti-Peri-implantitis', 'Immediate Loading', 'Ti-6Al-4V Alloy'],
     },
     {
@@ -1077,7 +1077,7 @@ class _GsProductsSheet extends StatelessWidget {
       'url': 'https://www.gsimplants.com/rough-implant',
       'badge': 'High Stability',
       'icon': Icons.grain_rounded,
-      'color': Color(0xFF2563EB),
+      'color': Color(0xFF012A58),
       'features': ['SLA Surface', 'D3/D4 Bone Optimized', 'Deep Bicortical Grip'],
     },
     {
@@ -1087,7 +1087,7 @@ class _GsProductsSheet extends StatelessWidget {
       'url': 'https://www.gsimplants.com/combi-implant',
       'badge': 'Hybrid Tech',
       'icon': Icons.hub_rounded,
-      'color': Color(0xFF7C3AED),
+      'color': Color(0xFFFE3434),
       'features': ['Bendable Neck', 'Hybrid Dual Surface', 'Fracture-Resistant'],
     },
     {
@@ -1097,7 +1097,7 @@ class _GsProductsSheet extends StatelessWidget {
       'url': 'https://www.gsimplants.com/kit',
       'badge': 'Complete Set',
       'icon': Icons.medical_services_rounded,
-      'color': Color(0xFF0D9488),
+      'color': Color(0xFF012A58),
       'features': ['Autoclavable Box', 'Lance Pilot Drills', 'Torque Ratchet Included'],
     },
   ];
@@ -1140,11 +1140,11 @@ class _GsProductsSheet extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF2563EB).withValues(alpha: 0.25),
+                    color: const Color(0xFF012A58).withValues(alpha: 0.25),
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: const Color(0xFF3B82F6).withValues(alpha: 0.4)),
+                    border: Border.all(color: const Color(0xFFFE3434).withValues(alpha: 0.4)),
                   ),
-                  child: const Icon(Icons.biotech_rounded, color: Color(0xFF60A5FA), size: 26),
+                  child: const Icon(Icons.biotech_rounded, color: Color(0xFFFE3434), size: 26),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -1169,14 +1169,14 @@ class _GsProductsSheet extends StatelessWidget {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                              color: const Color(0xFF012A58).withValues(alpha: 0.2),
                               borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.5)),
+                              border: Border.all(color: const Color(0xFF012A58).withValues(alpha: 0.5)),
                             ),
                             child: const Text(
                               'OFFICIAL STORE',
                               style: TextStyle(
-                                color: Color(0xFF34D399),
+                                color: Color(0xFFFE3434),
                                 fontSize: 8.5,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -1225,7 +1225,7 @@ class _GsProductsSheet extends StatelessWidget {
                       child: const Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.picture_as_pdf_rounded, color: Color(0xFFF87171), size: 14),
+                          Icon(Icons.picture_as_pdf_rounded, color: Color(0xFFFE3434), size: 14),
                           SizedBox(width: 6),
                           Flexible(
                             child: Text(
@@ -1249,19 +1249,19 @@ class _GsProductsSheet extends StatelessWidget {
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF2563EB).withValues(alpha: 0.18),
+                        color: const Color(0xFF012A58).withValues(alpha: 0.18),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFF3B82F6).withValues(alpha: 0.4)),
+                        border: Border.all(color: const Color(0xFFFE3434).withValues(alpha: 0.4)),
                       ),
                       child: const Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.language_rounded, color: Color(0xFF60A5FA), size: 14),
+                          Icon(Icons.language_rounded, color: Color(0xFFFE3434), size: 14),
                           SizedBox(width: 6),
                           Flexible(
                             child: Text(
                               'Visit Website',
-                              style: TextStyle(color: Color(0xFF93C5FD), fontSize: 11, fontWeight: FontWeight.w600),
+                              style: TextStyle(color: Color(0x40012A58), fontSize: 11, fontWeight: FontWeight.w600),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -1286,19 +1286,19 @@ class _GsProductsSheet extends StatelessWidget {
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF0D9488).withValues(alpha: 0.18),
+                        color: const Color(0xFF012A58).withValues(alpha: 0.18),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFF14B8A6).withValues(alpha: 0.4)),
+                        border: Border.all(color: const Color(0xFFFE3434).withValues(alpha: 0.4)),
                       ),
                       child: const Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.school_rounded, color: Color(0xFF5EEAD4), size: 14),
+                          Icon(Icons.school_rounded, color: Color(0x40012A58), size: 14),
                           SizedBox(width: 4),
                           Flexible(
                             child: Text(
                               'CME Courses',
-                              style: TextStyle(color: Color(0xFF5EEAD4), fontSize: 11, fontWeight: FontWeight.bold),
+                              style: TextStyle(color: Color(0x40012A58), fontSize: 11, fontWeight: FontWeight.bold),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -1455,8 +1455,8 @@ class _GsProductsSheet extends StatelessWidget {
                               onLaunchUrl('tel:+919550686566');
                             },
                             style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFF38BDF8),
-                              side: const BorderSide(color: Color(0xFF0284C7)),
+                              foregroundColor: const Color(0xFFFE3434),
+                              side: const BorderSide(color: Color(0xFFFE3434)),
                               padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
@@ -1480,7 +1480,7 @@ class _GsProductsSheet extends StatelessWidget {
           Container(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             decoration: const BoxDecoration(
-              color: Color(0xFF0B132B),
+              color: Color(0xFF0F172A),
               border: Border(top: BorderSide(color: Colors.white10)),
             ),
             child: SafeArea(
@@ -1497,7 +1497,7 @@ class _GsProductsSheet extends StatelessWidget {
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2563EB),
+                    backgroundColor: const Color(0xFF012A58),
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 13),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -1530,7 +1530,7 @@ class _GsCoursesSheet extends StatelessWidget {
       'venue': 'GS Clinical Academy & Hospital, Hyderabad & Bangalore',
       'mentor': 'Lead Maxillofacial & Cortical Implant Mentors',
       'badge': '🔥 Bestseller Masterclass',
-      'color': Color(0xFF0D9488),
+      'color': Color(0xFF012A58),
       'icon': Icons.school_rounded,
       'cme': '24 CME Credit Points',
       'fee': '₹35,000',
@@ -1551,7 +1551,7 @@ class _GsCoursesSheet extends StatelessWidget {
       'venue': 'GS HEALTH Training Academy, Mumbai & Delhi Centers',
       'mentor': 'Senior Prosthodontists & Implant Specialists',
       'badge': 'Advanced Prosthetics',
-      'color': Color(0xFF2563EB),
+      'color': Color(0xFF012A58),
       'icon': Icons.hub_rounded,
       'cme': '18 CME Credit Points',
       'fee': '₹28,000',
@@ -1571,7 +1571,7 @@ class _GsCoursesSheet extends StatelessWidget {
       'venue': 'Regional Centers: Chennai, Pune, Kolkata, Vijayawada',
       'mentor': 'Certified GS Implants Clinical Faculty',
       'badge': 'Weekend Intensive',
-      'color': Color(0xFF7C3AED),
+      'color': Color(0xFFFE3434),
       'icon': Icons.science_rounded,
       'cme': '12 CME Credit Points',
       'fee': '₹15,000',
@@ -1623,11 +1623,11 @@ class _GsCoursesSheet extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0D9488).withValues(alpha: 0.25),
+                    color: const Color(0xFF012A58).withValues(alpha: 0.25),
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: const Color(0xFF14B8A6).withValues(alpha: 0.4)),
+                    border: Border.all(color: const Color(0xFFFE3434).withValues(alpha: 0.4)),
                   ),
-                  child: const Icon(Icons.school_rounded, color: Color(0xFF5EEAD4), size: 26),
+                  child: const Icon(Icons.school_rounded, color: Color(0x40012A58), size: 26),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -1652,14 +1652,14 @@ class _GsCoursesSheet extends StatelessWidget {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                              color: const Color(0xFF012A58).withValues(alpha: 0.2),
                               borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.5)),
+                              border: Border.all(color: const Color(0xFF012A58).withValues(alpha: 0.5)),
                             ),
                             child: const Text(
                               'CME CERTIFIED',
                               style: TextStyle(
-                                color: Color(0xFF34D399),
+                                color: Color(0xFFFE3434),
                                 fontSize: 8.5,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -1702,19 +1702,19 @@ class _GsCoursesSheet extends StatelessWidget {
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF25D366).withValues(alpha: 0.15),
+                        color: const Color(0xFFFE3434).withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFF25D366).withValues(alpha: 0.4)),
+                        border: Border.all(color: const Color(0xFFFE3434).withValues(alpha: 0.4)),
                       ),
                       child: const Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.chat_rounded, color: Color(0xFF4ADE80), size: 14),
+                          Icon(Icons.chat_rounded, color: Color(0xFFFE3434), size: 14),
                           SizedBox(width: 6),
                           Flexible(
                             child: Text(
                               'WhatsApp Course Desk',
-                              style: TextStyle(color: Color(0xFF86EFAC), fontSize: 11, fontWeight: FontWeight.bold),
+                              style: TextStyle(color: Color(0x40012A58), fontSize: 11, fontWeight: FontWeight.bold),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -1740,7 +1740,7 @@ class _GsCoursesSheet extends StatelessWidget {
                       child: const Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.phone_in_talk_rounded, color: Color(0xFF60A5FA), size: 14),
+                          Icon(Icons.phone_in_talk_rounded, color: Color(0xFFFE3434), size: 14),
                           SizedBox(width: 6),
                           Flexible(
                             child: Text(
@@ -1861,7 +1861,7 @@ class _GsCoursesSheet extends StatelessWidget {
                           children: [
                             Row(
                               children: [
-                                const Icon(Icons.calendar_month_rounded, size: 13, color: Color(0xFF38BDF8)),
+                                const Icon(Icons.calendar_month_rounded, size: 13, color: Color(0xFFFE3434)),
                                 const SizedBox(width: 6),
                                 Expanded(
                                   child: Text(
@@ -1875,7 +1875,7 @@ class _GsCoursesSheet extends StatelessWidget {
                             const SizedBox(height: 4),
                             Row(
                               children: [
-                                const Icon(Icons.location_on_outlined, size: 13, color: Color(0xFFF87171)),
+                                const Icon(Icons.location_on_outlined, size: 13, color: Color(0xFFFE3434)),
                                 const SizedBox(width: 6),
                                 Expanded(
                                   child: Text(
@@ -1889,12 +1889,12 @@ class _GsCoursesSheet extends StatelessWidget {
                             const SizedBox(height: 4),
                             Row(
                               children: [
-                                const Icon(Icons.military_tech_rounded, size: 13, color: Color(0xFFFBBF24)),
+                                const Icon(Icons.military_tech_rounded, size: 13, color: Color(0xFFFE3434)),
                                 const SizedBox(width: 6),
                                 Expanded(
                                   child: Text(
                                     '${c['cme']} • Fee: ${c['fee']}',
-                                    style: const TextStyle(color: Color(0xFFFCD34D), fontSize: 11, fontWeight: FontWeight.bold),
+                                    style: const TextStyle(color: Color(0xFFFE3434), fontSize: 11, fontWeight: FontWeight.bold),
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
@@ -1946,7 +1946,7 @@ class _GsCoursesSheet extends StatelessWidget {
                                 overflow: TextOverflow.ellipsis,
                               ),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF25D366),
+                                backgroundColor: const Color(0xFFFE3434),
                                 foregroundColor: Colors.white,
                                 padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -1962,8 +1962,8 @@ class _GsCoursesSheet extends StatelessWidget {
                             icon: const Icon(Icons.phone_in_talk_rounded, size: 13),
                             label: const Text('Call', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                             style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFF38BDF8),
-                              side: const BorderSide(color: Color(0xFF0284C7)),
+                              foregroundColor: const Color(0xFFFE3434),
+                              side: const BorderSide(color: Color(0xFFFE3434)),
                               padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
@@ -1979,7 +1979,7 @@ class _GsCoursesSheet extends StatelessWidget {
           Container(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             decoration: const BoxDecoration(
-              color: Color(0xFF0B132B),
+              color: Color(0xFF0F172A),
               border: Border(top: BorderSide(color: Colors.white10)),
             ),
             child: SafeArea(
@@ -1997,7 +1997,7 @@ class _GsCoursesSheet extends StatelessWidget {
                     style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF0D9488),
+                    backgroundColor: const Color(0xFF012A58),
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 13),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

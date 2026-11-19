@@ -215,7 +215,7 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
     return Container(
       height: MediaQuery.of(context).size.height * 0.9,
       decoration: const BoxDecoration(
-        color: Color(0xFFE5DDD5), // Authentic WhatsApp Doodle Beige
+        color: Color(0xFFF1F5F9), // Authentic WhatsApp Doodle Beige
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: Column(
@@ -224,7 +224,7 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: const BoxDecoration(
-              color: Color(0xFF075E54), // Authentic WhatsApp Teal
+              color: Color(0xFF012A58), // Authentic WhatsApp Teal
               borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
             ),
             child: SafeArea(
@@ -255,9 +255,9 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
                           width: 10,
                           height: 10,
                           decoration: BoxDecoration(
-                            color: const Color(0xFF25D366),
+                            color: const Color(0xFFFE3434),
                             shape: BoxShape.circle,
-                            border: Border.all(color: const Color(0xFF075E54), width: 1.5),
+                            border: Border.all(color: const Color(0xFF012A58), width: 1.5),
                           ),
                         ),
                       ),
@@ -275,7 +275,7 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
                         ),
                         const Text(
                           'online',
-                          style: TextStyle(fontSize: 11, color: Color(0xFFB9E5E1), fontWeight: FontWeight.w400),
+                          style: TextStyle(fontSize: 11, color: Color(0x40012A58), fontWeight: FontWeight.w400),
                         ),
                       ],
                     ),
@@ -292,7 +292,7 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
                           title: const Row(
                             children: [
-                              Icon(Icons.delete_forever_rounded, color: Color(0xFFEF4444)),
+                              Icon(Icons.delete_forever_rounded, color: Color(0xFFFE3434)),
                               SizedBox(width: 8),
                               Text('Clear Chat History?', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                             ],
@@ -301,14 +301,14 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
                           actions: [
                             TextButton(onPressed: () => Navigator.pop(confirmCtx), child: const Text('Cancel')),
                             ElevatedButton(
-                              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444), foregroundColor: Colors.white),
+                              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFE3434), foregroundColor: Colors.white),
                               onPressed: () async {
                                 Navigator.pop(confirmCtx);
                                 final ok = await _apiService.clearChatMessages(roomId: _roomId);
                                 if (ok && mounted) {
                                   setState(() => _messages = []);
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('🗑️ Chat history cleared!'), backgroundColor: Color(0xFF10B981)),
+                                    const SnackBar(content: Text('🗑️ Chat history cleared!'), backgroundColor: Color(0xFF012A58)),
                                   );
                                 }
                               },
@@ -334,24 +334,24 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
           // 💬 Live Chat Thread Area
           Expanded(
             child: _isLoading && _messages.isEmpty
-                ? const Center(child: CircularProgressIndicator(color: Color(0xFF075E54)))
+                ? const Center(child: CircularProgressIndicator(color: Color(0xFF012A58)))
                 : _messages.isEmpty
                     ? Center(
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFFFF5C4),
+                            color: const Color(0x14FE3434),
                             borderRadius: BorderRadius.circular(10),
                             boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4)],
                           ),
                           child: const Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.lock_rounded, size: 14, color: Color(0xFF856404)),
+                              Icon(Icons.lock_rounded, size: 14, color: Color(0xFFFE3434)),
                               SizedBox(width: 6),
                               Text(
                                 'Messages are end-to-end encrypted.',
-                                style: TextStyle(fontSize: 11, color: Color(0xFF856404), fontWeight: FontWeight.w500),
+                                style: TextStyle(fontSize: 11, color: Color(0xFFFE3434), fontWeight: FontWeight.w500),
                               ),
                             ],
                           ),
@@ -392,7 +392,7 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         ListTile(
-                                          leading: const Icon(Icons.delete_outline, color: Colors.red),
+                                          leading: const Icon(Icons.delete_outline, color: Color(0xFFFE3434)),
                                           title: const Text('Delete Message'),
                                           onTap: () async {
                                             Navigator.pop(bCtx);
@@ -414,7 +414,7 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
                                 padding: const EdgeInsets.fromLTRB(12, 8, 10, 6),
                                 constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.76),
                                 decoration: BoxDecoration(
-                                  color: isSentByMe ? const Color(0xFFDCF8C6) : Colors.white,
+                                  color: isSentByMe ? const Color(0x14012A58) : Colors.white,
                                   borderRadius: BorderRadius.circular(12).copyWith(
                                     topRight: isSentByMe ? const Radius.circular(2) : const Radius.circular(12),
                                     topLeft: isSentByMe ? const Radius.circular(12) : const Radius.circular(2),
@@ -429,7 +429,7 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
                                   children: [
                                     Text(
                                       text,
-                                      style: const TextStyle(fontSize: 14, color: Color(0xFF111B21), height: 1.3),
+                                      style: const TextStyle(fontSize: 14, color: Color(0xFF0F172A), height: 1.3),
                                     ),
                                     const SizedBox(width: 8),
                                     Padding(
@@ -439,11 +439,11 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
                                         children: [
                                           Text(
                                             timeStr,
-                                            style: const TextStyle(fontSize: 10, color: Color(0xFF667781)),
+                                            style: const TextStyle(fontSize: 10, color: Color(0xFF475569)),
                                           ),
                                           if (isSentByMe) ...[
                                             const SizedBox(width: 3),
-                                            const Icon(Icons.done_all_rounded, size: 14, color: Color(0xFF34B7F1)),
+                                            const Icon(Icons.done_all_rounded, size: 14, color: Color(0xFFFE3434)),
                                           ],
                                         ],
                                       ),
@@ -467,12 +467,12 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
                 top: 8,
                 bottom: MediaQuery.of(context).viewInsets.bottom + 8,
               ),
-              color: const Color(0xFFF0F2F5),
+              color: const Color(0xFFF1F5F9),
               child: Row(
                 children: [
-                  const Icon(Icons.sentiment_satisfied_alt_rounded, color: Color(0xFF54656F), size: 24),
+                  const Icon(Icons.sentiment_satisfied_alt_rounded, color: Color(0xFF475569), size: 24),
                   const SizedBox(width: 8),
-                  const Icon(Icons.attach_file_rounded, color: Color(0xFF54656F), size: 22),
+                  const Icon(Icons.attach_file_rounded, color: Color(0xFF475569), size: 22),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Container(
@@ -482,12 +482,12 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
                       ),
                       child: TextField(
                         controller: _msgController,
-                        style: const TextStyle(fontSize: 14, color: Color(0xFF111B21)),
+                        style: const TextStyle(fontSize: 14, color: Color(0xFF0F172A)),
                         textInputAction: TextInputAction.send,
                         onSubmitted: (_) => _handleSend(),
                         decoration: const InputDecoration(
                           hintText: 'Message',
-                          hintStyle: TextStyle(fontSize: 14, color: Color(0xFF8696A0)),
+                          hintStyle: TextStyle(fontSize: 14, color: Color(0xFF94A3B8)),
                           border: InputBorder.none,
                           contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                         ),
@@ -497,7 +497,7 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
                   const SizedBox(width: 8),
                   CircleAvatar(
                     radius: 20,
-                    backgroundColor: const Color(0xFF075E54),
+                    backgroundColor: const Color(0xFF012A58),
                     child: IconButton(
                       icon: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
                       onPressed: _handleSend,

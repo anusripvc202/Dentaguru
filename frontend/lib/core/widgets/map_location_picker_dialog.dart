@@ -261,7 +261,7 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('📍 Current GPS location accurately detected!'),
-        backgroundColor: Color(0xFF10B981),
+        backgroundColor: Color(0xFF012A58),
         duration: Duration(seconds: 1),
       ),
     );
@@ -302,10 +302,10 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF2563EB).withValues(alpha: 0.1),
+                    color: const Color(0xFF012A58).withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.map_rounded, color: Color(0xFF2563EB), size: 22),
+                  child: const Icon(Icons.map_rounded, color: Color(0xFF012A58), size: 22),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -347,7 +347,7 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                     decoration: InputDecoration(
                       hintText: 'Search locality, area, city or pin...',
                       hintStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
-                      prefixIcon: const Icon(Icons.search_rounded, size: 18, color: Color(0xFF2563EB)),
+                      prefixIcon: const Icon(Icons.search_rounded, size: 18, color: Color(0xFF012A58)),
                       prefixIconConstraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                       suffixIcon: _searchController.text.isNotEmpty
                           ? IconButton(
@@ -361,7 +361,7 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
                       enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
-                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF2563EB), width: 1.8)),
+                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF012A58), width: 1.8)),
                     ),
                     onChanged: (_) => setState(() {}),
                   ),
@@ -398,9 +398,9 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color: isSelected ? const Color(0xFF2563EB) : const Color(0xFFF1F5F9),
+                          color: isSelected ? const Color(0xFF012A58) : const Color(0xFFF1F5F9),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: isSelected ? const Color(0xFF2563EB) : const Color(0xFFCBD5E1)),
+                          border: Border.all(color: isSelected ? const Color(0xFF012A58) : const Color(0xFFCBD5E1)),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -468,7 +468,7 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.local_hospital_rounded, color: Color(0xFF38BDF8), size: 12),
+                                const Icon(Icons.local_hospital_rounded, color: Color(0xFFFE3434), size: 12),
                                 const SizedBox(width: 4),
                                 Text(
                                   _selectedName,
@@ -480,7 +480,7 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                           const SizedBox(height: 2),
                           const Icon(
                             Icons.location_pin,
-                            color: Color(0xFFEF4444),
+                            color: Color(0xFFFE3434),
                             size: 38,
                             shadows: [
                               Shadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 3)),
@@ -630,7 +630,7 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(12),
                       gradient: const LinearGradient(
-                        colors: [Color(0xFF2563EB), Color(0xFF1D4ED8)],
+                        colors: [Color(0xFF012A58), Color(0xFF012A58)],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
@@ -691,8 +691,8 @@ class InteractiveMapGridPainter extends CustomPainter {
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), bgPaint);
 
     // 2. Water body / Park patches
-    final waterPaint = Paint()..color = const Color(0xFFBAE6FD);
-    final parkPaint = Paint()..color = const Color(0xFFDCFCE7);
+    final waterPaint = Paint()..color = const Color(0x40FE3434);
+    final parkPaint = Paint()..color = const Color(0x14012A58);
 
     final waterRect = Rect.fromLTWH(
       (panOffset.dx * 0.5) % size.width - 60,
@@ -739,7 +739,7 @@ class InteractiveMapGridPainter extends CustomPainter {
 
     // 4. Highway diagonal artery
     final highwayPaint = Paint()
-      ..color = const Color(0xFFFEF08A)
+      ..color = const Color(0x14FE3434)
       ..strokeWidth = 10.0 * zoomLevel
       ..style = PaintingStyle.stroke;
     canvas.drawLine(

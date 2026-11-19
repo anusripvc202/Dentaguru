@@ -5,6 +5,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../constants/api_constants.dart';
 import '../models/medical_specialty_model.dart';
 import 'analytics_service.dart';
+import 'session_service.dart';
+import 'supabase_service.dart';
 
 class ApiService {
   static final ApiService _instance = ApiService._internal();
@@ -342,6 +344,7 @@ class ApiService {
               'experience_years': experienceYears ?? 5,
               'qualifications': effectiveQual,
               'availability_status': 'Available',
+              'languages': effectiveLanguages,
               'state': effectiveLocation,
               'city': city?.trim() ?? '',
               'pincode': pincode?.trim() ?? '',
@@ -649,9 +652,13 @@ class ApiService {
 
       final data = jsonDecode(response.body);
       if (response.statusCode == 200 && data['success'] == true) {
+        final bool isOnScreenTestOtp = ApiConstants.allowOnScreenOtpDisplay &&
+            data['deliveryMode'] == 'on_screen';
         return {
           'success': true,
           'message': data['message'] ?? 'OTP sent successfully to your mobile number.',
+          if (isOnScreenTestOtp && data['otp'] != null) 'otp': data['otp'].toString(),
+          if (isOnScreenTestOtp) 'deliveryMode': 'on_screen',
           'isAdmin': data['isAdmin'] == true,
         };
       } else {
@@ -725,10 +732,13 @@ class ApiService {
       ).timeout(const Duration(seconds: 8));
 
       final data = jsonDecode(response.body);
+      final bool isOnScreenTestOtp = ApiConstants.allowOnScreenOtpDisplay &&
+          data['deliveryMode'] == 'on_screen';
       return {
         'success': response.statusCode == 200,
         'message': data['message'] ?? 'Password reset code sent.',
-        'otp': data['otp'],
+        if (isOnScreenTestOtp && data['otp'] != null) 'otp': data['otp'].toString(),
+        if (isOnScreenTestOtp) 'deliveryMode': 'on_screen',
       };
     } catch (e) {
       return {'success': false, 'message': 'Failed to request password reset OTP.'};
@@ -756,9 +766,57 @@ class ApiService {
     }
   }
 
-  /// Fetch live dentists directory directly from Supabase DB with Express API fallback.
-  Future<List<dynamic>> fetchDentists({String? state, String? city, String? pincode, String? specialty, String? availability, String? language}) async {
-    // 1. Direct Supabase query first
+  bool _lastFetchDentistsSucceeded = false;
+  bool get lastFetchDentistsSucceeded => _lastFetchDentistsSucceeded;
+
+  /// Fetch live dentists directory via Express Backend API first (enforces availability ON/OFF)
+  /// with direct Supabase fallback when Express is unreachable.
+  Future<List<dynamic>> fetchDentists({
+    String? state,
+    String? city,
+    String? pincode,
+    String? specialty,
+    String? availability,
+    String? language,
+    List<String>? languages,
+    bool includeUnavailable = false,
+  }) async {
+    _lastFetchDentistsSucceeded = false;
+    final selectedLangs = <String>[
+      if (languages != null)
+        ...languages.map((l) => l.trim()).where((l) => l.isNotEmpty && l.toLowerCase() != 'any language'),
+      if (language != null && language.trim().isNotEmpty && language.trim().toLowerCase() != 'any language')
+        ...language.split(',').map((l) => l.trim()).where((l) => l.isNotEmpty && l.toLowerCase() != 'any language'),
+    ];
+
+    // 1. Express backend API first (authoritative availability enforcement)
+    try {
+      final params = <String, String>{};
+      if (state != null && state.trim().isNotEmpty) params['state'] = state.trim();
+      if (city != null && city.trim().isNotEmpty) params['city'] = city.trim();
+      if (pincode != null && pincode.trim().isNotEmpty) params['pincode'] = pincode.trim();
+      if (specialty != null && specialty.trim().isNotEmpty) params['specialty'] = specialty.trim();
+      if (availability != null && availability.trim().isNotEmpty) params['availability'] = availability.trim();
+      if (selectedLangs.isNotEmpty) {
+        params['languages'] = selectedLangs.join(',');
+      }
+      if (includeUnavailable) params['includeUnavailable'] = 'true';
+
+      final uri = Uri.parse('${ApiConstants.baseUrl}/dentists').replace(queryParameters: params.isNotEmpty ? params : null);
+      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final list = data['dentists'] ?? data['doctors'] ?? [];
+        if (list is List) {
+          _lastFetchDentistsSucceeded = true;
+          return list;
+        }
+      }
+    } catch (e) {
+      debugPrint('Fetch dentists API notice: $e');
+    }
+
+    // 2. Direct Supabase fallback (when Express is unreachable)
     try {
       final client = Supabase.instance.client;
       var query = client.from('dentists').select('*, users!user_id(*), clinics!clinic_id(*)');
@@ -769,60 +827,215 @@ class ApiService {
 
       final res = await query.order('created_at', ascending: false);
       if (res.isNotEmpty) {
-        if (language != null && language.trim().isNotEmpty) {
-          final langLower = language.trim().toLowerCase();
-          final filtered = res.where((d) {
-            final langs = d['languages'];
-            if (langs is List) {
-              return langs.any((l) => l.toString().toLowerCase().contains(langLower));
-            }
-            if (langs is String) {
-              return langs.toLowerCase().contains(langLower);
+        Iterable<dynamic> filtered = res;
+        if (!includeUnavailable) {
+          filtered = filtered.where((d) {
+            final s = (d['availability_status'] ?? d['status'] ?? 'Available').toString().trim().toLowerCase();
+            return s != 'unavailable' && s != 'offline' && s != 'inactive' && s != 'on leave' && s != 'off' && s != 'suspended';
+          });
+        }
+        if (selectedLangs.isNotEmpty) {
+          final targets = selectedLangs.map((l) => l.toLowerCase()).toList();
+          filtered = filtered.where((d) {
+            final List<String> docLangs = [];
+            final raw = d['languages'];
+            if (raw is List) {
+              docLangs.addAll(raw.map((e) => e.toString().trim().toLowerCase()));
+            } else if (raw is String && raw.trim().isNotEmpty) {
+              docLangs.addAll(raw.split(',').map((e) => e.trim().toLowerCase()));
             }
             final userObj = d['users'];
-            if (userObj is Map && userObj['device_token'] != null) {
-              try {
-                final meta = jsonDecode(userObj['device_token'].toString());
-                if (meta['languages'] is List) {
-                  return (meta['languages'] as List).any((l) => l.toString().toLowerCase().contains(langLower));
-                }
-              } catch (_) {}
+            if (userObj is Map) {
+              if (userObj['languages'] is List) {
+                docLangs.addAll((userObj['languages'] as List).map((e) => e.toString().trim().toLowerCase()));
+              }
+              if (userObj['device_token'] != null && userObj['device_token'].toString().startsWith('{')) {
+                try {
+                  final meta = jsonDecode(userObj['device_token'].toString());
+                  if (meta['languages'] is List) {
+                    docLangs.addAll((meta['languages'] as List).map((e) => e.toString().trim().toLowerCase()));
+                  }
+                } catch (_) {}
+              }
             }
-            return false;
-          }).toList();
-          return List<dynamic>.from(filtered);
+            return targets.any((t) => docLangs.any((dl) => dl == t || dl.startsWith('$t ') || dl.startsWith('$t(')));
+          });
         }
-        return List<dynamic>.from(res);
+        return List<dynamic>.from(filtered);
       }
     } catch (e) {
       debugPrint('Supabase direct fetch dentists notice: $e');
-      try {
-        final simpleRes = await Supabase.instance.client.from('dentists').select('*').order('created_at', ascending: false);
-        if (simpleRes.isNotEmpty) return List<dynamic>.from(simpleRes);
-      } catch (_) {}
-    }
-
-    // 2. Express backend API fallback
-    try {
-      final params = <String, String>{};
-      if (state != null && state.trim().isNotEmpty) params['state'] = state.trim();
-      if (city != null && city.trim().isNotEmpty) params['city'] = city.trim();
-      if (pincode != null && pincode.trim().isNotEmpty) params['pincode'] = pincode.trim();
-      if (specialty != null && specialty.trim().isNotEmpty) params['specialty'] = specialty.trim();
-      if (availability != null && availability.trim().isNotEmpty) params['availability'] = availability.trim();
-      if (language != null && language.trim().isNotEmpty) params['language'] = language.trim();
-
-      final uri = Uri.parse('${ApiConstants.baseUrl}/dentists').replace(queryParameters: params.isNotEmpty ? params : null);
-      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final list = data['dentists'] ?? [];
-        if (list is List && list.isNotEmpty) return list;
-      }
-    } catch (e) {
-      debugPrint('Fetch dentists API error: $e');
     }
     return [];
+  }
+
+  @visibleForTesting
+  static Future<List<String>> Function({bool includeUnavailable})? debugFetchDoctorLanguagesOverride;
+
+  /// Fetch distinct languages spoken by registered doctors from the backend/database.
+  Future<List<String>> fetchAvailableDoctorLanguages({bool includeUnavailable = false}) async {
+    if (debugFetchDoctorLanguagesOverride != null) {
+      return debugFetchDoctorLanguagesOverride!(includeUnavailable: includeUnavailable);
+    }
+
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/doctors/languages').replace(
+        queryParameters: includeUnavailable ? {'includeUnavailable': 'true'} : null,
+      );
+      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 20));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final list = data['languages'];
+        if (list is List) {
+          return list
+              .map((e) => e.toString().trim())
+              .where((e) => e.isNotEmpty)
+              .toSet()
+              .toList();
+        }
+      }
+    } catch (e) {
+      debugPrint('Fetch doctor languages API notice: $e');
+    }
+
+    // Fallback: extract distinct languages from direct Supabase query
+    try {
+      final client = Supabase.instance.client;
+      final res = await client.from('dentists').select('languages, availability_status, users!user_id(languages, device_token)');
+      final seen = <String>{};
+      final result = <String>[];
+      for (final row in res) {
+        final status = (row['availability_status'] ?? 'Available').toString().trim().toLowerCase();
+        if (!includeUnavailable &&
+            (status == 'unavailable' || status == 'offline' || status == 'inactive' || status == 'on leave' || status == 'off' || status == 'suspended')) {
+          continue;
+        }
+        final langs = <String>[];
+        if (row['languages'] is List) {
+          langs.addAll((row['languages'] as List).map((e) => e.toString().trim()));
+        }
+        final userObj = row['users'];
+        if (userObj is Map && userObj['device_token'] != null && userObj['device_token'].toString().startsWith('{')) {
+          try {
+            final meta = jsonDecode(userObj['device_token'].toString());
+            if (meta['languages'] is List) {
+              langs.addAll((meta['languages'] as List).map((e) => e.toString().trim()));
+            }
+          } catch (_) {}
+        }
+        for (final l in langs) {
+          if (l.isNotEmpty && seen.add(l.toLowerCase())) {
+            result.add(l);
+          }
+        }
+      }
+      return result;
+    } catch (e) {
+      debugPrint('Supabase direct fetch doctor languages notice: $e');
+    }
+    return [];
+  }
+
+  /// Fetch a single doctor profile by ID (enforces backend availability visibility for patients)
+  Future<Map<String, dynamic>> fetchDoctorById(String doctorId) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/doctors/$doctorId');
+      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 20));
+      final data = jsonDecode(response.body);
+      if (response.statusCode == 200 && data['success'] == true) {
+        return {
+          'success': true,
+          'isAvailable': data['isAvailable'] ?? true,
+          'availability_status': data['availability_status'] ?? 'Available',
+          'doctor': data['doctor'],
+        };
+      }
+      if (response.statusCode == 403 && data['unavailable'] == true) {
+        return {
+          'success': false,
+          'unavailable': true,
+          'isAvailable': false,
+          'message': data['message'] ?? 'Doctor is currently unavailable.',
+        };
+      }
+      return {
+        'success': false,
+        'status': response.statusCode,
+        'message': data['message'] ?? 'Unable to load doctor profile.',
+      };
+    } catch (e) {
+      debugPrint('fetchDoctorById notice: $e');
+      return {
+        'success': false,
+        'networkError': true,
+        'message': 'Unable to verify doctor profile.',
+      };
+    }
+  }
+
+  /// Toggle Doctor Availability ON/OFF persistently via Backend API (and Supabase fallback)
+  Future<Map<String, dynamic>> updateDoctorAvailability(String doctorId, bool isAvailable) async {
+    final statusStr = isAvailable ? 'Available' : 'Unavailable';
+    final bodyJson = jsonEncode({
+      'isAvailable': isAvailable,
+      'availability_status': statusStr,
+      'status': statusStr,
+    });
+
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/doctors/$doctorId/availability');
+      http.Response response;
+      try {
+        response = await http.patch(
+          uri,
+          headers: _headers,
+          body: bodyJson,
+        ).timeout(const Duration(seconds: 35));
+      } catch (_) {
+        response = await http.put(
+          uri,
+          headers: _headers,
+          body: bodyJson,
+        ).timeout(const Duration(seconds: 35));
+      }
+      final data = jsonDecode(response.body);
+      if (response.statusCode == 200 && data['success'] == true) {
+        return {
+          'success': true,
+          'isAvailable': data['isAvailable'] ?? isAvailable,
+          'availability_status': data['availability_status'] ?? statusStr,
+          'message': data['message'] ?? (isAvailable ? 'Availability turned ON.' : 'Availability turned OFF.'),
+          'doctor': data['doctor'],
+        };
+      }
+      return {
+        'success': false,
+        'message': data['message'] ?? 'Failed to update availability status.',
+      };
+    } catch (e) {
+      debugPrint('Express updateDoctorAvailability notice: $e');
+    }
+
+    // Fallback to direct Supabase only if Express is unreachable
+    try {
+      final client = Supabase.instance.client;
+      await client
+          .from('dentists')
+          .update({'availability_status': statusStr, 'updated_at': DateTime.now().toIso8601String()})
+          .or('id.eq.$doctorId,user_id.eq.$doctorId');
+      return {
+        'success': true,
+        'isAvailable': isAvailable,
+        'availability_status': statusStr,
+        'message': isAvailable ? 'Availability turned ON.' : 'Availability turned OFF.',
+      };
+    } catch (e) {
+      debugPrint('Supabase direct updateDoctorAvailability notice: $e');
+      return {
+        'success': false,
+        'message': 'Unable to update availability. Please check your connection.',
+      };
+    }
   }
 
   /// 4b. Fetch patient's saved "My Doctors" list
@@ -1002,26 +1215,19 @@ class ApiService {
     }
   }
 
-  /// Fetch live clinics directory from Supabase
-  Future<List<dynamic>> fetchClinics() async {
+  /// Fetch live clinics directory from Supabase via configured Backend API
+  Future<List<dynamic>> fetchClinics({http.Client? client}) async {
     try {
       final url = Uri.parse(ApiConstants.clinics);
-      final response = await http.get(url, headers: _headers).timeout(const Duration(seconds: 10));
+      final response = client != null
+          ? await client.get(url, headers: _headers).timeout(const Duration(seconds: 10))
+          : await http.get(url, headers: _headers).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         return data['clinics'] ?? [];
       }
     } catch (e) {
-      try {
-        final fallbackUrl = Uri.parse('http://localhost:5000/api/v1/clinics');
-        final response = await http.get(fallbackUrl, headers: _headers);
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body);
-          return data['clinics'] ?? [];
-        }
-      } catch (fErr) {
-        debugPrint('Fetch clinics fallback error: $fErr');
-      }
+      debugPrint('Fetch clinics error: $e');
     }
     return [];
   }
@@ -1094,8 +1300,43 @@ class ApiService {
       try {
         final client = Supabase.instance.client;
         final dateOnly = date.contains('T') ? date.split('T').first : date;
+        String resolvedDentistId = dentistId;
         if (dentistId.isNotEmpty) {
-          final existing = await client.from('appointments').select('*').eq('dentist_id', dentistId).eq('time_slot', timeSlot);
+          final idsToMatch = <String>{dentistId};
+          try {
+            final dRow = await client
+                .from('dentists')
+                .select('id, user_id')
+                .or('id.eq.$dentistId,user_id.eq.$dentistId')
+                .limit(1)
+                .maybeSingle();
+            if (dRow != null) {
+              if (dRow['id'] != null) {
+                resolvedDentistId = dRow['id'].toString();
+                idsToMatch.add(resolvedDentistId);
+              }
+              if (dRow['user_id'] != null) idsToMatch.add(dRow['user_id'].toString());
+            }
+          } catch (_) {}
+
+          final idFilter = idsToMatch.map((id) => 'dentist_id.eq.$id').join(',');
+          final availRec = await client
+              .from('doctor_availability')
+              .select('is_blocked, blocked_reason')
+              .or(idFilter)
+              .eq('date', dateOnly)
+              .limit(1)
+              .maybeSingle()
+              .catchError((_) => null);
+          if (availRec != null && availRec['is_blocked'] == true) {
+            return {
+              'success': false,
+              'isBlocked': true,
+              'message': 'The doctor is unavailable on this date (${availRec['blocked_reason'] ?? 'Blocked / On Leave'}). Please choose another date.',
+            };
+          }
+
+          final existing = await client.from('appointments').select('*').eq('dentist_id', resolvedDentistId).eq('time_slot', timeSlot);
           final conflict = (existing as List).any((a) {
             final s = (a['status'] ?? '').toString().toUpperCase();
             if (s == 'CANCELLED' || s == 'REJECTED') return false;
@@ -1111,7 +1352,7 @@ class ApiService {
         }
         final res = await client.from('appointments').insert({
           'patient_id': patientId,
-          'dentist_id': dentistId.isNotEmpty ? dentistId : null,
+          'dentist_id': resolvedDentistId.isNotEmpty ? resolvedDentistId : null,
           'clinic_id': clinicId.isNotEmpty ? clinicId : null,
           'date': date,
           'time_slot': timeSlot,
@@ -1125,16 +1366,60 @@ class ApiService {
     }
   }
 
-  /// Fetch live appointments from Supabase backend with Direct Supabase Fallback
-  Future<List<dynamic>> fetchAppointments({String? patientId, String? dentistId}) async {
-    final client = Supabase.instance.client;
-    final currentUserId = client.auth.currentUser?.id;
+  /// Test-only hook so widget tests can supply patient/doctor appointment rows without a backend.
+  @visibleForTesting
+  static Future<List<dynamic>> Function({String? patientId, String? dentistId})? debugFetchAppointmentsOverride;
 
-    // 1. Direct Supabase query first
+  /// Fetch live appointments from Express backend first (enriched with selectedDoctor, patient, clinic),
+  /// with Direct 24/7 Supabase Cloud Fallback.
+  Future<List<dynamic>> fetchAppointments({String? patientId, String? dentistId}) async {
+    final override = debugFetchAppointmentsOverride;
+    if (override != null) {
+      return override(patientId: patientId, dentistId: dentistId);
+    }
+
+    final currentUserId = SupabaseService.safeCurrentUser?.id;
+
+    // 1. Primary Express backend API first (resolves both dentists.id and users.id & returns enriched selectedDoctor/patient/clinic)
     try {
-      var query = client.from('appointments').select('*');
+      final uri = Uri.parse(ApiConstants.appointments).replace(queryParameters: {
+        if (patientId != null && patientId.isNotEmpty) 'patientId': patientId,
+        if (dentistId != null && dentistId.isNotEmpty) 'dentistId': dentistId,
+      });
+      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return List<dynamic>.from(data['appointments'] ?? const []);
+      }
+    } catch (e) {
+      debugPrint('Express fetch appointments notice: $e');
+    }
+
+    // 2. Direct 24/7 Supabase Cloud Fallback (only if Express backend is unreachable)
+    try {
+      final client = Supabase.instance.client;
+      var query = client.from('appointments').select(
+        '*, patient:users!patient_id(id, name, email, phone, city, pincode, age, gender), '
+        'dentist:dentists!dentist_id(id, user_id, clinic_id, speciality, qualifications, experience_years, availability_status, users(id, name, phone, email, biometric_token), clinics(id, clinic_name, location)), '
+        'clinic:clinics!clinic_id(id, clinic_name, location)',
+      );
       if (dentistId != null && dentistId.isNotEmpty) {
-        query = query.eq('dentist_id', dentistId);
+        String resolvedDentistTableId = dentistId;
+        try {
+          final docRow = await client
+              .from('dentists')
+              .select('id, user_id')
+              .or('id.eq.$dentistId,user_id.eq.$dentistId')
+              .maybeSingle();
+          if (docRow != null && docRow['id'] != null) {
+            resolvedDentistTableId = docRow['id'].toString();
+          }
+        } catch (_) {}
+        if (resolvedDentistTableId != dentistId) {
+          query = query.or('dentist_id.eq.$resolvedDentistTableId,dentist_id.eq.$dentistId');
+        } else {
+          query = query.eq('dentist_id', dentistId);
+        }
       } else if (patientId != null && patientId.isNotEmpty) {
         query = query.eq('patient_id', patientId);
       } else if (currentUserId != null && currentUserId.isNotEmpty) {
@@ -1145,22 +1430,7 @@ class ApiService {
       final res = await query.order('created_at', ascending: false);
       return List<dynamic>.from(res);
     } catch (e) {
-      debugPrint('Supabase direct fetch appointments notice: $e');
-    }
-
-    // 2. Express backend API fallback
-    try {
-      final uri = Uri.parse(ApiConstants.appointments).replace(queryParameters: {
-        if (patientId != null && patientId.isNotEmpty) 'patientId': patientId,
-        if (dentistId != null && dentistId.isNotEmpty) 'dentistId': dentistId,
-      });
-      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data['appointments'] ?? [];
-      }
-    } catch (e) {
-      debugPrint('Fetch appointments error: $e');
+      debugPrint('Supabase direct fetch appointments fallback notice: $e');
     }
     return [];
   }
@@ -1178,28 +1448,41 @@ class ApiService {
     final override = debugAdminAppointmentsOverride;
     if (override != null) return override();
 
-    // 1. Direct Supabase query first (RLS decides what the caller may see)
+    // 1. Express backend first (enforces Admin/Sub-Admin auth & returns joined patient, selectedDoctor, clinic)
+    try {
+      final response = await http
+          .get(Uri.parse(ApiConstants.appointments), headers: _headers)
+          .timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final list = List<dynamic>.from(data['appointments'] ?? const []);
+        return list.length > limit ? list.sublist(0, limit) : list;
+      }
+    } catch (e) {
+      debugPrint('Admin appointments Express API notice: $e');
+    }
+
+    // 2. Direct Supabase fallback with full relational joins on saved dentist_id & clinic_id
     try {
       final res = await Supabase.instance.client
           .from('appointments')
-          .select('*')
+          .select(
+            '*, patient:users!patient_id(id, name, email, phone), '
+            'dentist:dentists!dentist_id(id, user_id, clinic_id, speciality, qualifications, users(id, name, phone, email, biometric_token), clinics(id, clinic_name, location)), '
+            'clinic:clinics!clinic_id(id, clinic_name, location)',
+          )
           .order('created_at', ascending: false)
           .limit(limit);
       return List<dynamic>.from(res);
     } catch (e) {
-      debugPrint('Admin appointments Supabase notice: $e');
+      debugPrint('Admin appointments Supabase join notice: $e');
+      final fallbackRes = await Supabase.instance.client
+          .from('appointments')
+          .select('*')
+          .order('created_at', ascending: false)
+          .limit(limit);
+      return List<dynamic>.from(fallbackRes);
     }
-
-    // 2. Express backend fallback (controller enforces Admin / Sub-Admin role)
-    final response = await http
-        .get(Uri.parse(ApiConstants.appointments), headers: _headers)
-        .timeout(const Duration(seconds: 35));
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      final list = List<dynamic>.from(data['appointments'] ?? const []);
-      return list.length > limit ? list.sublist(0, limit) : list;
-    }
-    throw Exception('Appointments request failed (${response.statusCode}).');
   }
 
   /// Generates a unique 1-on-1 Chat Room ID between a Patient and a Doctor
@@ -2616,7 +2899,7 @@ class ApiService {
 
     // 1. Try Supabase direct first
     try {
-      final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+      final currentUserId = SupabaseService.safeCurrentUser?.id;
       final payload = {
         if (currentUserId != null && currentUserId.isNotEmpty) 'patient_id': currentUserId,
         'problem_category': problemCategory,
@@ -3648,7 +3931,7 @@ class ApiService {
 
     // 2. Direct Supabase Fallback
     try {
-      final currentUserId = Supabase.instance.client.auth.currentUser?.id;
+      final currentUserId = SupabaseService.safeCurrentUser?.id;
       final res = await Supabase.instance.client.from('patient_assignment_history').insert({
         'patient_id': patientId,
         'dentist_id': dentistId,
@@ -3906,24 +4189,69 @@ class ApiService {
   Future<Map<String, dynamic>> acceptAppointment(String appointmentId) async {
     try {
       final url = Uri.parse('${ApiConstants.baseUrl}/appointments/$appointmentId/accept');
-      final response = await http.patch(url, headers: _headers);
-      return jsonDecode(response.body);
+      http.Response response;
+      try {
+        response = await http.patch(url, headers: _headers).timeout(const Duration(seconds: 35));
+      } catch (_) {
+        response = await http.put(url, headers: _headers).timeout(const Duration(seconds: 35));
+      }
+      final data = jsonDecode(response.body);
+      if (response.statusCode == 200 && data['success'] == true) {
+        return Map<String, dynamic>.from(data);
+      }
+      return {
+        'success': false,
+        'message': data['message'] ?? 'Failed to accept appointment.',
+      };
     } catch (e) {
+      debugPrint('Accept appointment API notice: $e');
+      try {
+        await Supabase.instance.client
+            .from('appointments')
+            .update({'status': 'CONFIRMED'})
+            .eq('id', appointmentId);
+        return {'success': true, 'message': 'Appointment confirmed successfully.'};
+      } catch (_) {}
       return {'success': false, 'message': 'Failed to accept appointment.'};
     }
   }
 
   /// Dentist: Reject Appointment Request [PENDING -> REJECTED]
   Future<Map<String, dynamic>> rejectAppointment(String appointmentId, {String? reason}) async {
+    final bodyJson = jsonEncode({if (reason != null) 'reason': reason});
     try {
       final url = Uri.parse('${ApiConstants.baseUrl}/appointments/$appointmentId/reject');
-      final response = await http.patch(
-        url,
-        headers: _headers,
-        body: jsonEncode({if (reason != null) 'reason': reason}),
-      );
-      return jsonDecode(response.body);
+      http.Response response;
+      try {
+        response = await http.patch(
+          url,
+          headers: _headers,
+          body: bodyJson,
+        ).timeout(const Duration(seconds: 35));
+      } catch (_) {
+        response = await http.put(
+          url,
+          headers: _headers,
+          body: bodyJson,
+        ).timeout(const Duration(seconds: 35));
+      }
+      final data = jsonDecode(response.body);
+      if (response.statusCode == 200 && data['success'] == true) {
+        return Map<String, dynamic>.from(data);
+      }
+      return {
+        'success': false,
+        'message': data['message'] ?? 'Failed to reject appointment.',
+      };
     } catch (e) {
+      debugPrint('Reject appointment API notice: $e');
+      try {
+        await Supabase.instance.client
+            .from('appointments')
+            .update({'status': 'REJECTED'})
+            .eq('id', appointmentId);
+        return {'success': true, 'message': 'Appointment declined.'};
+      } catch (_) {}
       return {'success': false, 'message': 'Failed to reject appointment.'};
     }
   }
@@ -4248,10 +4576,18 @@ class ApiService {
 
       // Tier A: Query dedicated 'referrals' table in Supabase
       try {
-        final res = await client
-            .from('referrals')
-            .select('*, doctor:dentists!doctor_id(id, speciality, qualification, users(name, email, phone), clinics(clinic_name, location)), referrer:users!referrer_patient_id(id, name, phone, email)')
-            .order('created_at', ascending: false);
+        dynamic res;
+        try {
+          res = await client
+              .from('referrals')
+              .select('*, doctor:dentists!doctor_id(id, speciality, qualifications, users(name, email, phone), clinics(clinic_name, location)), referrer:users!referrer_patient_id(id, name, phone, email)')
+              .order('created_at', ascending: false);
+        } catch (_) {
+          res = await client
+              .from('referrals')
+              .select('*')
+              .order('created_at', ascending: false);
+        }
 
         if (res.isNotEmpty) {
           for (final row in res) {
@@ -4552,9 +4888,10 @@ class ApiService {
   }) async {
     String currentUserId = referrerPatientId ?? '';
     if (currentUserId.isEmpty) {
-      try {
-        currentUserId = Supabase.instance.client.auth.currentUser?.id ?? '';
-      } catch (_) {}
+      currentUserId = SessionService().currentSession?.userId ?? '';
+    }
+    if (currentUserId.isEmpty) {
+      currentUserId = SupabaseService.safeCurrentUser?.id ?? '';
     }
 
     final cleanDocName = (doctorName != null && doctorName.trim().isNotEmpty)
@@ -4599,7 +4936,16 @@ class ApiService {
       if (response.statusCode == 201 || response.statusCode == 200) {
         return {'success': true, 'referral': data['referral'], 'message': data['message']};
       } else if (response.statusCode == 409) {
-        return {'success': false, 'isDuplicate': true, 'message': data['message'] ?? 'A pending referral already exists.'};
+        return {
+          'success': false,
+          'isDuplicate': data['isDuplicate'] == true,
+          'message': data['message'] ?? 'A pending referral already exists.',
+        };
+      } else if (response.statusCode == 400 || response.statusCode == 403) {
+        return {
+          'success': false,
+          'message': data['message'] ?? 'Could not submit referral.',
+        };
       }
     } catch (e) {
       debugPrint('⚠️ Express create referral notice: $e');
@@ -4640,11 +4986,41 @@ class ApiService {
 
     try {
       final client = Supabase.instance.client;
+      // Resolve canonical referrer user UUID & canonical dentist UUID
+      String? resolvedReferrerId = currentUserId.isNotEmpty ? currentUserId : null;
+      if (resolvedReferrerId != null) {
+        try {
+          final uCheck = await client.from('users').select('id').eq('id', resolvedReferrerId).maybeSingle();
+          if (uCheck == null) {
+            final dCheck = await client.from('dentists').select('user_id').eq('id', resolvedReferrerId).maybeSingle();
+            if (dCheck != null && dCheck['user_id'] != null) {
+              resolvedReferrerId = dCheck['user_id'].toString();
+            }
+          }
+        } catch (_) {}
+      }
+
+      String? resolvedDoctorId;
+      String? resolvedDoctorUserId;
+      if (doctorId.isNotEmpty) {
+        try {
+          final dRow = await client
+              .from('dentists')
+              .select('id, user_id')
+              .or('id.eq.$doctorId,user_id.eq.$doctorId')
+              .limit(1)
+              .maybeSingle();
+          if (dRow != null) {
+            resolvedDoctorId = dRow['id']?.toString();
+            resolvedDoctorUserId = dRow['user_id']?.toString();
+          }
+        } catch (_) {}
+      }
+
       // Check existing patient or create patient in users table
       try {
-        final cleanPhone = referredPatientMobile.replaceAll(RegExp(r'[^0-9]'), '').length >= 10
-            ? referredPatientMobile.replaceAll(RegExp(r'[^0-9]'), '').substring(referredPatientMobile.replaceAll(RegExp(r'[^0-9]'), '').length - 10)
-            : referredPatientMobile.replaceAll(RegExp(r'[^0-9]'), '');
+        final cleanDigits = referredPatientMobile.replaceAll(RegExp(r'[^0-9]'), '');
+        final cleanPhone = cleanDigits.length >= 10 ? cleanDigits.substring(cleanDigits.length - 10) : cleanDigits;
         final existUser = await client.from('users').select('id').or('phone.eq.$cleanPhone,phone.eq.${referredPatientMobile.trim()}').maybeSingle();
         if (existUser != null && existUser['id'] != null) {
           linkedPatientId = existUser['id'].toString();
@@ -4673,76 +5049,110 @@ class ApiService {
         }
         supaPayload['referred_patient_id'] = linkedPatientId;
         supaPayload['referred_user_id'] = linkedPatientId;
+        supaPayload['referrer_patient_id'] = resolvedReferrerId;
+        supaPayload['referrer_id'] = resolvedReferrerId;
       } catch (err) {
         debugPrint('⚠️ Error auto-creating referred patient in users table: $err');
       }
 
-      // Try dedicated 'referrals' table first
+      // Insert ONLY valid columns of 'referrals' table
+      final dbReferralRow = <String, dynamic>{
+        'referrer_patient_id': resolvedReferrerId,
+        'referrer_id': resolvedReferrerId,
+        'referred_patient_id': linkedPatientId,
+        'referred_user_id': linkedPatientId,
+        'referred_patient_name': referredPatientName.trim(),
+        'referred_patient_mobile': referredPatientMobile.trim(),
+        'referred_patient_age': referredPatientAge.trim(),
+        'referred_patient_gender': referredPatientGender.trim(),
+        'referred_patient_city': referredPatientCity.trim(),
+        'referred_patient_pincode': referredPatientPincode.trim(),
+        'referred_patient_location': referredPatientLocation.trim(),
+        'required_specialist': requiredSpecialist.trim(),
+        'clinical_complaint': clinicalComplaint.trim(),
+        if (resolvedDoctorId != null) 'doctor_id': resolvedDoctorId,
+        if (resolvedDoctorId != null) 'assigned_doctor_id': resolvedDoctorId,
+        'status': 'Pending',
+        'whatsapp_status': 'Sent',
+        'referral_date': DateTime.now().toIso8601String(),
+      };
+
       try {
-        final res = await client.from('referrals').insert({
-          ...supaPayload,
-          'id': null, // let postgres generate UUID
-        }..remove('id')).select().single();
-        
-        // Doctor notification
+        final res = await client.from('referrals').insert(dbReferralRow).select().single();
+        final insertedId = res['id']?.toString() ?? '';
+
+        // Notifications for Receiving Doctor, Referred Patient & Admin
         try {
-          await client.from('notifications').insert({
-            'recipient_role': 'Dentist',
-            'recipient_id': doctorId,
-            'title': 'New Patient Referral',
-            'message': 'A patient has referred ${referredPatientName.trim()} to you.',
-            'type': 'NEW_REFERRAL',
-          });
+          await client.from('notifications').insert([
+            {
+              'recipient_role': 'Dentist',
+              'recipient_id': resolvedDoctorUserId ?? resolvedDoctorId ?? doctorId,
+              if (insertedId.isNotEmpty) 'referral_id': insertedId,
+              'title': 'New Patient Referral',
+              'message': 'A new referral for ${referredPatientName.trim()} has been assigned to you.',
+              'type': 'NEW_REFERRAL',
+            },
+            if (linkedPatientId != null)
+              {
+                'recipient_role': 'Patient',
+                'recipient_id': linkedPatientId,
+                if (insertedId.isNotEmpty) 'referral_id': insertedId,
+                'title': 'Specialist Referral Received',
+                'message': 'You have been referred to $cleanDocName (${requiredSpecialist.trim()}).',
+                'type': 'NEW_REFERRAL',
+              },
+            {
+              'recipient_role': 'Admin',
+              'recipient_id': 'ALL_ADMINS',
+              if (insertedId.isNotEmpty) 'referral_id': insertedId,
+              'title': 'New Patient Referral Submitted',
+              'message': '${referredPatientName.trim()} was referred to $cleanDocName.',
+              'type': 'NEW_REFERRAL',
+            },
+          ]);
         } catch (_) {}
 
-        return {'success': true, 'referral': res, 'message': 'Referral submitted successfully.'};
+        final enrichedRes = Map<String, dynamic>.from(res);
+        enrichedRes['doctorName'] = cleanDocName;
+        enrichedRes['doctorClinicName'] = doctorClinicName ?? 'GS HEALTH Partner Clinic';
+        enrichedRes['doctorSpecialty'] = requiredSpecialist.trim();
+        return {'success': true, 'referral': enrichedRes, 'message': 'Referral submitted successfully.'};
       } catch (referralTableErr) {
-        debugPrint('⚠️ Referrals table notice (falling back to problem requests): $referralTableErr');
-        
-        // Resilient Fallback: Save to patient_problem_requests & notifications
+        debugPrint('⚠️ Referrals table insert error (trying problem requests fallback): $referralTableErr');
+
         try {
           final ppr = await client.from('patient_problem_requests').insert({
-            'patient_id': linkedPatientId ?? (currentUserId.isNotEmpty ? currentUserId : null),
+            'patient_id': linkedPatientId ?? resolvedReferrerId,
             'problem_category': requiredSpecialist.trim(),
             'problem_description': 'Referral for ${referredPatientName.trim()} (${referredPatientMobile.trim()}): ${clinicalComplaint.trim()}',
-            'suggested_dentist_id': doctorId,
+            if (resolvedDoctorId != null) 'suggested_dentist_id': resolvedDoctorId,
             'status': 'DENTIST_ASSIGNED',
             'admin_notes': 'REFERRAL_PAYLOAD:${jsonEncode(supaPayload)}',
             'city': referredPatientCity.trim(),
             'pincode': referredPatientPincode.trim(),
           }).select().single();
 
-          if (ppr != null && ppr['id'] != null) {
+          if (ppr['id'] != null) {
             supaPayload['id'] = ppr['id'].toString();
           }
-
-          // Doctor Notification
-          try {
-            await client.from('notifications').insert({
-              'recipient_role': 'Dentist',
-              'recipient_id': doctorId,
-              'title': 'New Patient Referral',
-              'message': 'A patient has referred ${referredPatientName.trim()} to you.',
-              'type': 'NEW_REFERRAL',
-            });
-          } catch (_) {}
-
           return {'success': true, 'referral': supaPayload, 'message': 'Referral submitted successfully.'};
         } catch (pprErr) {
           debugPrint('⚠️ Problem requests fallback error: $pprErr');
-          return {'success': true, 'referral': supaPayload, 'message': 'Referral recorded successfully.'};
+          return {'success': false, 'message': 'Failed to save referral to database. Please try again.'};
         }
       }
     } catch (supaErr) {
       debugPrint('❌ Direct Supabase create referral error: $supaErr');
-      return {'success': true, 'referral': supaPayload, 'message': 'Referral recorded successfully.'};
+      return {'success': false, 'message': 'Failed to save referral: $supaErr'};
     }
   }
 
   /// Patient: Fetch Referrals created by the logged-in patient
   Future<List<dynamic>> fetchMyPatientReferrals({String? userId}) async {
     final client = Supabase.instance.client;
-    final effectiveUserId = userId ?? client.auth.currentUser?.id ?? '';
+    final effectiveUserId = (userId != null && userId.isNotEmpty)
+        ? userId
+        : (SessionService().currentSession?.userId ?? client.auth.currentUser?.id ?? '');
 
     // 1. Primary Express Backend Call
     try {
@@ -4755,7 +5165,7 @@ class ApiService {
           ..._headers,
           if (effectiveUserId.isNotEmpty) 'x-user-id': effectiveUserId,
         },
-      ).timeout(const Duration(seconds: 15));
+      ).timeout(const Duration(seconds: 35));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -4771,12 +5181,21 @@ class ApiService {
       if (effectiveUserId.isNotEmpty) {
         // Try dedicated referrals table
         try {
-          final res = await client
-              .from('referrals')
-              .select('*, doctor:dentists!doctor_id(id, speciality, users(name, email, phone), clinics(clinic_name, location))')
-              .or('referrer_patient_id.eq.$effectiveUserId,referrer_id.eq.$effectiveUserId')
-              .order('created_at', ascending: false);
-          if (res.isNotEmpty) return List<dynamic>.from(res);
+          dynamic res;
+          try {
+            res = await client
+                .from('referrals')
+                .select('*, doctor:dentists!doctor_id(id, speciality, qualifications, users(name, email, phone), clinics(clinic_name, location))')
+                .or('referrer_patient_id.eq.$effectiveUserId,referrer_id.eq.$effectiveUserId')
+                .order('created_at', ascending: false);
+          } catch (_) {
+            res = await client
+                .from('referrals')
+                .select('*')
+                .or('referrer_patient_id.eq.$effectiveUserId,referrer_id.eq.$effectiveUserId')
+                .order('created_at', ascending: false);
+          }
+          if (res is List && res.isNotEmpty) return List<dynamic>.from(res);
         } catch (_) {}
 
         // Fallback: Check patient_problem_requests
@@ -4813,7 +5232,12 @@ class ApiService {
   /// Doctor: Fetch Referrals assigned strictly to this Doctor
   Future<List<dynamic>> fetchDoctorPatientReferrals({String? doctorId}) async {
     final client = Supabase.instance.client;
-    final effectiveDocId = doctorId ?? client.auth.currentUser?.id ?? '';
+    final effectiveDocId = (doctorId != null && doctorId.isNotEmpty)
+        ? doctorId
+        : (SessionService().currentSession?.metadata['dentistId']?.toString() ??
+            SessionService().currentSession?.userId ??
+            client.auth.currentUser?.id ??
+            '');
 
     // 1. Primary Express Backend Call
     try {
@@ -4826,7 +5250,7 @@ class ApiService {
           ..._headers,
           if (effectiveDocId.isNotEmpty) 'x-user-id': effectiveDocId,
         },
-      ).timeout(const Duration(seconds: 15));
+      ).timeout(const Duration(seconds: 35));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -4856,12 +5280,21 @@ class ApiService {
             conds.add('assigned_doctor_id.eq.$altDocId');
           }
 
-          final res = await client
-              .from('referrals')
-              .select('*, referrer:users!referrer_patient_id(id, name, email, phone)')
-              .or(conds.join(','))
-              .order('created_at', ascending: false);
-          if (res.isNotEmpty) return List<dynamic>.from(res);
+          dynamic res;
+          try {
+            res = await client
+                .from('referrals')
+                .select('*, referrer:users!referrer_patient_id(id, name, email, phone)')
+                .or(conds.join(','))
+                .order('created_at', ascending: false);
+          } catch (_) {
+            res = await client
+                .from('referrals')
+                .select('*')
+                .or(conds.join(','))
+                .order('created_at', ascending: false);
+          }
+          if (res is List && res.isNotEmpty) return List<dynamic>.from(res);
         } catch (_) {}
 
         // Fallback: Check patient_problem_requests for this doctor
@@ -4899,15 +5332,26 @@ class ApiService {
   /// Patient: Fetch Referrals where this patient is the referred person
   Future<List<dynamic>> fetchReceivedPatientReferrals({String? patientId, String? patientPhone}) async {
     final client = Supabase.instance.client;
-    final effectiveId = patientId ?? client.auth.currentUser?.id ?? '';
+    final effectiveId = (patientId != null && patientId.isNotEmpty)
+        ? patientId
+        : (SessionService().currentSession?.userId ?? client.auth.currentUser?.id ?? '');
+    final effectivePhone = (patientPhone != null && patientPhone.isNotEmpty)
+        ? patientPhone
+        : (SessionService().currentSession?.phone ?? '');
 
     // 1. Primary Express Backend Call
     try {
       final url = Uri.parse('${ApiConstants.baseUrl}/referrals/for-me').replace(queryParameters: {
         if (effectiveId.isNotEmpty) 'userId': effectiveId,
-        if (patientPhone != null && patientPhone.isNotEmpty) 'phone': patientPhone,
+        if (effectivePhone.isNotEmpty) 'phone': effectivePhone,
       });
-      final response = await http.get(url, headers: _headers).timeout(const Duration(seconds: 15));
+      final response = await http.get(
+        url,
+        headers: {
+          ..._headers,
+          if (effectiveId.isNotEmpty) 'x-user-id': effectiveId,
+        },
+      ).timeout(const Duration(seconds: 35));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final list = data['referrals'] ?? [];
@@ -4924,20 +5368,31 @@ class ApiService {
         conds.add('referred_patient_id.eq.$effectiveId');
         conds.add('referred_user_id.eq.$effectiveId');
       }
-      if (patientPhone != null && patientPhone.isNotEmpty) {
-        final clean = patientPhone.replaceAll(RegExp(r'[^0-9]'), '');
+      if (effectivePhone.isNotEmpty) {
+        final clean = effectivePhone.replaceAll(RegExp(r'[^0-9]'), '');
         final last10 = clean.length >= 10 ? clean.substring(clean.length - 10) : clean;
-        conds.add('referred_patient_mobile.ilike.%$last10%');
+        if (last10.isNotEmpty) {
+          conds.add('referred_patient_mobile.ilike.%$last10%');
+        }
       }
 
       if (conds.isNotEmpty) {
         try {
-          final res = await client
-              .from('referrals')
-              .select('*, doctor:dentists!doctor_id(id, speciality, users(name, email, phone), clinics(clinic_name, location)), referrer:users!referrer_patient_id(id, name, phone)')
-              .or(conds.join(','))
-              .order('created_at', ascending: false);
-          if (res.isNotEmpty) return List<dynamic>.from(res);
+          dynamic res;
+          try {
+            res = await client
+                .from('referrals')
+                .select('*, doctor:dentists!doctor_id(id, speciality, qualifications, users(name, email, phone), clinics(clinic_name, location)), referrer:users!referrer_patient_id(id, name, phone)')
+                .or(conds.join(','))
+                .order('created_at', ascending: false);
+          } catch (_) {
+            res = await client
+                .from('referrals')
+                .select('*')
+                .or(conds.join(','))
+                .order('created_at', ascending: false);
+          }
+          if (res is List && res.isNotEmpty) return List<dynamic>.from(res);
         } catch (_) {}
       }
     } catch (supaErr) {
@@ -5171,10 +5626,21 @@ class ApiService {
     }
   }
 
-  /// Fetch in-app notifications
+  /// Test-only hook so widget tests can supply notification rows without a backend.
+  @visibleForTesting
+  static Future<List<Map<String, dynamic>>> Function({String? role, String? userId})? debugFetchNotificationsOverride;
+
+  /// Fetch in-app notifications from Express backend first (with RBAC & Doctor ID resolution),
+  /// with Direct 24/7 Supabase Cloud Fallback.
   Future<List<Map<String, dynamic>>> fetchNotifications({String? role, String? userId}) async {
-    final client = Supabase.instance.client;
-    final effectiveUserId = userId ?? client.auth.currentUser?.id ?? '';
+    final override = debugFetchNotificationsOverride;
+    if (override != null) {
+      return override(role: role, userId: userId);
+    }
+
+    final effectiveUserId = (userId != null && userId.trim().isNotEmpty)
+        ? userId.trim()
+        : (SupabaseService.safeCurrentUser?.id ?? '');
 
     // 1. Primary Express Backend Call
     try {
@@ -5188,34 +5654,39 @@ class ApiService {
           ..._headers,
           if (effectiveUserId.isNotEmpty) 'x-user-id': effectiveUserId,
         },
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 35));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final list = data['notifications'] ?? data['data'] ?? [];
-        if (list is List && list.isNotEmpty) {
+        if (list is List) {
           return list.map((e) => Map<String, dynamic>.from(e)).toList();
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Express fetch notifications notice: $e');
+    }
 
     // 2. Direct Supabase Cloud Fallback
     try {
+      final client = Supabase.instance.client;
       final conds = <String>[];
       if (role != null && role.isNotEmpty) {
         conds.add('recipient_role.eq.$role');
         conds.add('recipient_role.eq.ALL');
+        if (role.toLowerCase().contains('admin')) {
+          conds.add('recipient_id.eq.ALL_ADMINS');
+        }
       }
       if (effectiveUserId.isNotEmpty) {
         conds.add('recipient_id.eq.$effectiveUserId');
-        conds.add('user_id.eq.$effectiveUserId');
       }
 
       var query = client.from('notifications').select('*');
       if (conds.isNotEmpty) {
         query = query.or(conds.join(','));
       }
-      final res = await query.order('created_at', ascending: false).limit(50);
+      final res = await query.order('created_at', ascending: false).limit(100);
       if (res.isNotEmpty) {
         return List<Map<String, dynamic>>.from(res);
       }
@@ -5225,24 +5696,54 @@ class ApiService {
     return [];
   }
 
-  /// Mark notification as read
+  /// Mark notification as read in Supabase via Express backend + fallback
   Future<bool> markNotificationAsRead(String notifId) async {
+    if (notifId.trim().isEmpty) return false;
+    bool markedViaApi = false;
+    // 1. Primary Express call
     try {
-      // 1. Express call
-      try {
-        final url = Uri.parse('${ApiConstants.baseUrl}/notifications/$notifId/read');
-        await http.put(url, headers: _headers).timeout(const Duration(seconds: 5));
-      } catch (_) {}
+      final url = Uri.parse('${ApiConstants.baseUrl}/notifications/$notifId/read');
+      final res = await http.put(url, headers: _headers).timeout(const Duration(seconds: 15));
+      if (res.statusCode == 200) {
+        markedViaApi = true;
+      }
+    } catch (_) {}
 
-      // 2. Supabase fallback
-      await Supabase.instance.client
-          .from('notifications')
-          .update({'read': true, 'is_read': true})
-          .eq('id', notifId);
-      return true;
-    } catch (_) {
-      return false;
+    // 2. Direct Supabase fallback if Express unreachable
+    if (!markedViaApi) {
+      try {
+        await Supabase.instance.client
+            .from('notifications')
+            .update({'read': true})
+            .eq('id', notifId);
+        return true;
+      } catch (_) {
+        return false;
+      }
     }
+    return true;
+  }
+
+  /// Mark all notifications as read for a given role & userId
+  Future<bool> markAllNotificationsAsRead({String? role, String? userId}) async {
+    final effectiveUserId = (userId != null && userId.trim().isNotEmpty)
+        ? userId.trim()
+        : (SupabaseService.safeCurrentUser?.id ?? '');
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/notifications/read-all');
+      final res = await http
+          .put(
+            url,
+            headers: _headers,
+            body: jsonEncode({
+              if (role != null && role.isNotEmpty) 'role': role,
+              if (effectiveUserId.isNotEmpty) 'userId': effectiveUserId,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (res.statusCode == 200) return true;
+    } catch (_) {}
+    return false;
   }
 
   /// Create In-App Notification
@@ -5258,12 +5759,10 @@ class ApiService {
       await client.from('notifications').insert({
         'recipient_role': recipientRole,
         'recipient_id': recipientId,
-        'user_id': recipientId,
         'title': title,
         'message': message,
         'type': type,
         'read': false,
-        'is_read': false,
         'created_at': DateTime.now().toIso8601String(),
       });
       return true;
@@ -5276,6 +5775,24 @@ class ApiService {
   // ─────────────────────────────────────────────
   // DOCTOR AVAILABILITY & TIME SLOT MANAGEMENT
   // ─────────────────────────────────────────────
+
+  Future<Map<String, String?>> _resolveCanonicalDoctorIdsSupabase(SupabaseClient client, String dentistId) async {
+    String canonicalDentistId = dentistId;
+    String? userId;
+    try {
+      final dRow = await client
+          .from('dentists')
+          .select('id, user_id')
+          .or('id.eq.$dentistId,user_id.eq.$dentistId')
+          .limit(1)
+          .maybeSingle();
+      if (dRow != null) {
+        if (dRow['id'] != null) canonicalDentistId = dRow['id'].toString();
+        if (dRow['user_id'] != null) userId = dRow['user_id'].toString();
+      }
+    } catch (_) {}
+    return {'dentistId': canonicalDentistId, 'userId': userId};
+  }
 
   /// Fetch Doctor Availability (Express API with 35s timeout & Direct Supabase Fallback)
   Future<Map<String, dynamic>> fetchDoctorAvailability({
@@ -5293,7 +5810,13 @@ class ApiService {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        return {'success': true, 'availability': data['availability'], 'availabilities': data['availabilities']};
+        return {
+          'success': true,
+          'availability': data['availability'],
+          'availabilities': data['availabilities'],
+          'schedule': data['schedule'],
+          'blockedDates': data['blockedDates'],
+        };
       }
     } catch (e) {
       debugPrint('Express fetchDoctorAvailability notice: $e');
@@ -5306,23 +5829,27 @@ class ApiService {
           ? (date.contains('T') ? date.split('T').first : date)
           : null;
 
-      if (cleanDate != null) {
-        final idsToMatch = <String>{dentistId};
+      final resolved = await _resolveCanonicalDoctorIdsSupabase(client, dentistId);
+      final canonicalId = resolved['dentistId'] ?? dentistId;
+      final userId = resolved['userId'];
+      final idsToMatch = <String>{dentistId, canonicalId, if (userId != null) userId};
+      final idFilter = idsToMatch.map((id) => 'dentist_id.eq.$id').join(',');
+
+      Map<String, dynamic>? scheduleMap;
+      if (userId != null && userId.isNotEmpty) {
         try {
-          final dRow = await client
-              .from('dentists')
-              .select('id, user_id')
-              .or('id.eq.$dentistId,user_id.eq.$dentistId')
-              .limit(1)
-              .maybeSingle();
-          if (dRow != null) {
-            if (dRow['id'] != null) idsToMatch.add(dRow['id'].toString());
-            if (dRow['user_id'] != null) idsToMatch.add(dRow['user_id'].toString());
+          final uRow = await client.from('users').select('device_token').eq('id', userId).maybeSingle();
+          final dt = uRow?['device_token']?.toString();
+          if (dt != null && dt.startsWith('{')) {
+            final parsed = jsonDecode(dt);
+            if (parsed is Map && parsed['schedule'] is Map) {
+              scheduleMap = Map<String, dynamic>.from(parsed['schedule'] as Map);
+            }
           }
         } catch (_) {}
+      }
 
-        final idFilter = idsToMatch.map((id) => 'dentist_id.eq.$id').join(',');
-
+      if (cleanDate != null) {
         final record = await client
             .from('doctor_availability')
             .select('*')
@@ -5363,13 +5890,18 @@ class ApiService {
         return {
           'success': true,
           'hasCustomRecord': record != null,
+          'schedule': scheduleMap,
           'availability': {
-            'dentistId': dentistId,
+            'dentistId': canonicalId,
             'date': cleanDate,
             'dayOfWeek': record?['day_of_week'] ?? '',
-            'startTime': record?['start_time'] ?? '09:00 AM',
-            'endTime': record?['end_time'] ?? '05:00 PM',
-            'slotDurationMinutes': record?['slot_duration_minutes'] ?? 30,
+            'startTime': record?['start_time'] ?? scheduleMap?['startTime'] ?? '09:00 AM',
+            'endTime': record?['end_time'] ?? scheduleMap?['endTime'] ?? '05:00 PM',
+            'slotDurationMinutes': record?['slot_duration_minutes'] ?? scheduleMap?['slotDurationMinutes'] ?? 30,
+            'hasBreak': scheduleMap?['hasBreak'] ?? true,
+            'breakStartTime': scheduleMap?['breakStartTime'],
+            'breakEndTime': scheduleMap?['breakEndTime'],
+            'workingDays': scheduleMap?['workingDays'],
             'allSlots': allSlots,
             'bookedSlots': bookedSlots,
             'availableSlots': availableSlots,
@@ -5378,30 +5910,147 @@ class ApiService {
           }
         };
       } else {
-        final idsToMatch = <String>{dentistId};
-        try {
-          final dRow = await client
-              .from('dentists')
-              .select('id, user_id')
-              .or('id.eq.$dentistId,user_id.eq.$dentistId')
-              .limit(1)
-              .maybeSingle();
-          if (dRow != null) {
-            if (dRow['id'] != null) idsToMatch.add(dRow['id'].toString());
-            if (dRow['user_id'] != null) idsToMatch.add(dRow['user_id'].toString());
-          }
-        } catch (_) {}
-        final idFilter = idsToMatch.map((id) => 'dentist_id.eq.$id').join(',');
         final records = await client
             .from('doctor_availability')
             .select('*')
             .or(idFilter)
             .order('date', ascending: true);
-        return {'success': true, 'availabilities': records};
+        final blocked = (records as List).where((r) => r['is_blocked'] == true).toList();
+        return {
+          'success': true,
+          'availabilities': records,
+          'blockedDates': blocked,
+          'schedule': scheduleMap,
+        };
       }
     } catch (e) {
       debugPrint('Supabase direct fetchDoctorAvailability notice: $e');
       return {'success': false, 'message': 'Failed to fetch doctor availability: $e'};
+    }
+  }
+
+  /// Fetch Persisted Weekly Schedule & Blocked Dates
+  Future<Map<String, dynamic>> fetchDoctorSchedule({required String dentistId}) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/doctor-availability/schedule')
+          .replace(queryParameters: {'dentistId': dentistId});
+      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+    } catch (e) {
+      debugPrint('Express fetchDoctorSchedule notice: $e');
+    }
+    return await fetchDoctorAvailability(dentistId: dentistId);
+  }
+
+  /// Update Persisted Weekly Working Days, Hours, Lunch Break & Slot Duration
+  Future<Map<String, dynamic>> updateDoctorSchedule({
+    required String dentistId,
+    required List<String> workingDays,
+    required String startTime,
+    required String endTime,
+    required int slotDurationMinutes,
+    required bool hasBreak,
+    String? breakStartTime,
+    String? breakEndTime,
+    List<String>? slots,
+    bool applyToUpcomingDays = true,
+  }) async {
+    final payload = {
+      'dentistId': dentistId,
+      'workingDays': workingDays,
+      'startTime': startTime,
+      'endTime': endTime,
+      'slotDurationMinutes': slotDurationMinutes,
+      'hasBreak': hasBreak,
+      if (hasBreak && breakStartTime != null) 'breakStartTime': breakStartTime,
+      if (hasBreak && breakEndTime != null) 'breakEndTime': breakEndTime,
+      if (slots != null) 'slots': slots,
+      'applyToUpcomingDays': applyToUpcomingDays,
+    };
+
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/doctor-availability/schedule');
+      final response = await http.put(
+        uri,
+        headers: _headers,
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return jsonDecode(response.body);
+      }
+      if (response.statusCode == 400 || response.statusCode == 403) {
+        return jsonDecode(response.body);
+      }
+    } catch (e) {
+      debugPrint('Express updateDoctorSchedule notice: $e');
+    }
+
+    // Supabase Fallback
+    try {
+      final client = Supabase.instance.client;
+      final resolved = await _resolveCanonicalDoctorIdsSupabase(client, dentistId);
+      final userId = resolved['userId'];
+      if (userId != null && userId.isNotEmpty) {
+        final uRow = await client.from('users').select('device_token').eq('id', userId).maybeSingle();
+        Map<String, dynamic> meta = {};
+        final dt = uRow?['device_token']?.toString();
+        if (dt != null && dt.startsWith('{')) {
+          try {
+            meta = Map<String, dynamic>.from(jsonDecode(dt) as Map);
+          } catch (_) {}
+        }
+        meta['schedule'] = {
+          'workingDays': workingDays,
+          'startTime': startTime,
+          'endTime': endTime,
+          'slotDurationMinutes': slotDurationMinutes,
+          'hasBreak': hasBreak,
+          'breakStartTime': hasBreak ? breakStartTime : null,
+          'breakEndTime': hasBreak ? breakEndTime : null,
+          'isConfigured': true,
+          'updatedAt': DateTime.now().toIso8601String(),
+        };
+        await client.from('users').update({'device_token': jsonEncode(meta)}).eq('id', userId);
+        return {'success': true, 'message': 'Schedule saved to Supabase.', 'schedule': meta['schedule']};
+      }
+    } catch (e) {
+      debugPrint('Supabase direct updateDoctorSchedule notice: $e');
+    }
+    return {'success': false, 'message': 'Failed to save schedule.'};
+  }
+
+  /// Fetch All Blocked Dates for a Doctor
+  Future<Map<String, dynamic>> fetchBlockedDates({required String dentistId}) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/doctor-availability/blocked-dates')
+          .replace(queryParameters: {'dentistId': dentistId});
+      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+    } catch (e) {
+      debugPrint('Express fetchBlockedDates notice: $e');
+    }
+
+    try {
+      final client = Supabase.instance.client;
+      final resolved = await _resolveCanonicalDoctorIdsSupabase(client, dentistId);
+      final canonicalId = resolved['dentistId'] ?? dentistId;
+      final userId = resolved['userId'];
+      final idsToMatch = <String>{dentistId, canonicalId, if (userId != null) userId};
+      final idFilter = idsToMatch.map((id) => 'dentist_id.eq.$id').join(',');
+      final records = await client
+          .from('doctor_availability')
+          .select('*')
+          .or(idFilter)
+          .eq('is_blocked', true)
+          .order('date', ascending: true);
+      return {'success': true, 'blockedDates': records};
+    } catch (e) {
+      debugPrint('Supabase direct fetchBlockedDates notice: $e');
+      return {'success': false, 'blockedDates': const []};
     }
   }
 
@@ -5414,6 +6063,7 @@ class ApiService {
     String startTime = '09:00 AM',
     String endTime = '05:00 PM',
     int slotDurationMinutes = 30,
+    bool hasBreak = true,
     String? breakStartTime,
     String? breakEndTime,
     List<String>? workingDays,
@@ -5430,6 +6080,7 @@ class ApiService {
       'startTime': startTime,
       'endTime': endTime,
       'slotDurationMinutes': slotDurationMinutes,
+      'hasBreak': hasBreak,
       if (breakStartTime != null) 'breakStartTime': breakStartTime,
       if (breakEndTime != null) 'breakEndTime': breakEndTime,
       if (workingDays != null) 'workingDays': workingDays,
@@ -5450,8 +6101,8 @@ class ApiService {
       if (response.statusCode == 200 || response.statusCode == 201) {
         return jsonDecode(response.body);
       }
-      if (response.statusCode == 403) {
-        return {'success': false, 'message': 'Access Denied: Not authorized to modify availability.'};
+      if (response.statusCode == 400 || response.statusCode == 403) {
+        return jsonDecode(response.body);
       }
     } catch (e) {
       debugPrint('Express saveDoctorAvailability notice: $e');
@@ -5460,11 +6111,40 @@ class ApiService {
     // 2. Direct Supabase Fallback
     try {
       final client = Supabase.instance.client;
+      final resolved = await _resolveCanonicalDoctorIdsSupabase(client, dentistId);
+      final canonicalId = resolved['dentistId'] ?? dentistId;
+      final userId = resolved['userId'];
+
+      if (workingDays != null && workingDays.isNotEmpty && userId != null && userId.isNotEmpty) {
+        try {
+          final uRow = await client.from('users').select('device_token').eq('id', userId).maybeSingle();
+          Map<String, dynamic> meta = {};
+          final dt = uRow?['device_token']?.toString();
+          if (dt != null && dt.startsWith('{')) {
+            try {
+              meta = Map<String, dynamic>.from(jsonDecode(dt) as Map);
+            } catch (_) {}
+          }
+          meta['schedule'] = {
+            'workingDays': workingDays,
+            'startTime': startTime,
+            'endTime': endTime,
+            'slotDurationMinutes': slotDurationMinutes,
+            'hasBreak': hasBreak,
+            'breakStartTime': hasBreak ? breakStartTime : null,
+            'breakEndTime': hasBreak ? breakEndTime : null,
+            'isConfigured': true,
+            'updatedAt': DateTime.now().toIso8601String(),
+          };
+          await client.from('users').update({'device_token': jsonEncode(meta)}).eq('id', userId);
+        } catch (_) {}
+      }
+
       final targetDates = (dates != null && dates.isNotEmpty) ? dates : [cleanDate];
       dynamic lastRes;
       for (final d in targetDates) {
         lastRes = await client.from('doctor_availability').upsert({
-          'dentist_id': dentistId,
+          'dentist_id': canonicalId,
           'date': d.contains('T') ? d.split('T').first : d,
           'day_of_week': dayOfWeek,
           'start_time': startTime,
@@ -5472,7 +6152,7 @@ class ApiService {
           'slot_duration_minutes': slotDurationMinutes,
           'slots': slots,
           'is_blocked': isBlocked,
-          'blocked_reason': blockedReason,
+          'blocked_reason': isBlocked ? blockedReason : null,
           'updated_at': DateTime.now().toIso8601String(),
         }, onConflict: 'dentist_id,date').select().single();
       }
@@ -5484,23 +6164,35 @@ class ApiService {
     }
   }
 
-  /// Block specific doctor date (Express with Direct Supabase Fallback)
+  /// Block or Unblock specific doctor date(s) (Express with Direct Supabase Fallback)
   Future<Map<String, dynamic>> blockDoctorDate({
     required String dentistId,
     required String date,
+    List<String>? dates,
     String reason = 'Doctor on Leave / Clinic Closed',
+    bool isBlocked = true,
   }) async {
     final cleanDate = date.contains('T') ? date.split('T').first : date;
+    final cleanDates = dates?.map((d) => d.contains('T') ? d.split('T').first : d).toList();
 
     try {
       final uri = Uri.parse('${ApiConstants.baseUrl}/doctor-availability/block-date');
       final response = await http.post(
         uri,
         headers: _headers,
-        body: jsonEncode({'dentistId': dentistId, 'date': cleanDate, 'reason': reason}),
+        body: jsonEncode({
+          'dentistId': dentistId,
+          'date': cleanDate,
+          if (cleanDates != null && cleanDates.isNotEmpty) 'dates': cleanDates,
+          'reason': reason,
+          'isBlocked': isBlocked,
+        }),
       ).timeout(const Duration(seconds: 35));
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return jsonDecode(response.body);
+      }
+      if (response.statusCode == 400 || response.statusCode == 403) {
         return jsonDecode(response.body);
       }
     } catch (e) {
@@ -5509,19 +6201,53 @@ class ApiService {
 
     try {
       final client = Supabase.instance.client;
-      final res = await client.from('doctor_availability').upsert({
-        'dentist_id': dentistId,
-        'date': cleanDate,
-        'is_blocked': true,
-        'blocked_reason': reason,
-        'slots': <String>[],
-        'updated_at': DateTime.now().toIso8601String(),
-      }, onConflict: 'dentist_id,date').select().single();
+      final resolved = await _resolveCanonicalDoctorIdsSupabase(client, dentistId);
+      final canonicalId = resolved['dentistId'] ?? dentistId;
+      final targets = (cleanDates != null && cleanDates.isNotEmpty) ? cleanDates : [cleanDate];
+      dynamic lastRes;
+      for (final d in targets) {
+        lastRes = await client.from('doctor_availability').upsert({
+          'dentist_id': canonicalId,
+          'date': d,
+          'is_blocked': isBlocked,
+          'blocked_reason': isBlocked ? reason : null,
+          if (isBlocked) 'slots': <String>[],
+          'updated_at': DateTime.now().toIso8601String(),
+        }, onConflict: 'dentist_id,date').select().single();
+      }
 
-      return {'success': true, 'message': 'Date blocked successfully.', 'availability': res};
+      return {
+        'success': true,
+        'isBlocked': isBlocked,
+        'message': isBlocked ? 'Date blocked successfully.' : 'Date unblocked successfully.',
+        'availability': lastRes,
+      };
     } catch (e) {
-      return {'success': false, 'message': 'Failed to block doctor date: $e'};
+      return {'success': false, 'message': 'Failed to update blocked date status: $e'};
     }
+  }
+
+  /// Unblock a previously blocked doctor date (Express DELETE with Direct Supabase Fallback)
+  Future<Map<String, dynamic>> unblockDoctorDate({
+    required String dentistId,
+    required String date,
+  }) async {
+    final cleanDate = date.contains('T') ? date.split('T').first : date;
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/doctor-availability/block-date')
+          .replace(queryParameters: {'dentistId': dentistId, 'date': cleanDate});
+      final response = await http.delete(uri, headers: _headers).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+      if (response.statusCode == 400 || response.statusCode == 403) {
+        return jsonDecode(response.body);
+      }
+    } catch (e) {
+      debugPrint('Express unblockDoctorDate notice: $e');
+    }
+
+    return blockDoctorDate(dentistId: dentistId, date: cleanDate, isBlocked: false);
   }
 
   /// Delete Doctor Availability for a date
@@ -5539,10 +6265,12 @@ class ApiService {
     } catch (_) {}
 
     try {
+      final resolved = await _resolveCanonicalDoctorIdsSupabase(Supabase.instance.client, dentistId);
+      final canonicalId = resolved['dentistId'] ?? dentistId;
       await Supabase.instance.client
           .from('doctor_availability')
           .delete()
-          .eq('dentist_id', dentistId)
+          .eq('dentist_id', canonicalId)
           .eq('date', cleanDate);
       return true;
     } catch (_) {

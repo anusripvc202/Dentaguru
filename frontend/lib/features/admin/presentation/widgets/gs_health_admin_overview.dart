@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -7,8 +9,8 @@ import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/widgets/dental_ads_banner.dart';
 
 const Color _kBorder = Color(0xFFE2E8F0);
-const Color _kSoftNavy = Color(0xFFEBF2FE);
-const Color _kSoftBorder = Color(0xFFD4E3FC);
+const Color _kSoftNavy = Color(0x14012A58);
+const Color _kSoftBorder = Color(0x40012A58);
 
 // =============================================================================
 // DATA MODELS
@@ -56,8 +58,8 @@ class AdminQuickActionData {
   });
 }
 
-/// View-model for the "Latest appointments" cards. Built from real backend rows
-/// (or, as a fallback, from the already-synced consultation requests).
+/// View-model for Admin appointments. Built strictly from real `appointments` rows
+/// using the actual saved `dentist_id` and `clinic_id` (never substituting a later assignment).
 class AdminAppointmentItem {
   final String id;
   final String patientName;
@@ -65,8 +67,14 @@ class AdminAppointmentItem {
   final String status;
   final String dateRaw;
   final String timeSlot;
+  final String dentistId;
   final String dentistName;
+  final String doctorSpecialty;
+  final Uint8List? doctorPhotoBytes;
+  final String doctorPhotoUrl;
+  final String clinicId;
   final String clinicName;
+  final String createdAtRaw;
   final String mode; // 'IN-CLINIC' | 'ONLINE' | ''
   final String notes;
   final String treatment;
@@ -83,6 +91,12 @@ class AdminAppointmentItem {
     required this.mode,
     required this.notes,
     required this.treatment,
+    this.dentistId = '',
+    this.doctorSpecialty = '',
+    this.doctorPhotoBytes,
+    this.doctorPhotoUrl = '',
+    this.clinicId = '',
+    this.createdAtRaw = '',
   });
 
   static String _firstNonEmpty(Map row, List<String> keys) {
@@ -105,8 +119,32 @@ class AdminAppointmentItem {
     return '';
   }
 
-  /// Builds an item from a raw `appointments` row, resolving patient/dentist
-  /// names from the already-synced directories.
+  static String _formatDoctorName(String raw) {
+    final clean = raw.trim();
+    if (clean.isEmpty) return '';
+    final lower = clean.toLowerCase();
+    if (lower.startsWith('dr.') || lower.startsWith('dr ')) return clean;
+    return 'Dr. $clean';
+  }
+
+  static ({Uint8List? bytes, String url}) _parsePhoto(dynamic rawPhoto) {
+    if (rawPhoto == null) return (bytes: null, url: '');
+    final str = rawPhoto.toString().trim();
+    if (str.isEmpty || str == 'null') return (bytes: null, url: '');
+    if (str.startsWith('http://') || str.startsWith('https://')) {
+      return (bytes: null, url: str);
+    }
+    try {
+      final cleaned = str.contains(',') ? str.split(',').last.trim() : str;
+      final decoded = base64Decode(cleaned);
+      if (decoded.isNotEmpty) return (bytes: decoded, url: '');
+    } catch (_) {}
+    return (bytes: null, url: '');
+  }
+
+  /// Builds an item strictly from a raw `appointments` row, resolving the patient,
+  /// originally selected doctor (`dentist_id`), and clinic (`clinic_id`) from the
+  /// backend relational joins first, then falling back to synced directories by exact ID.
   factory AdminAppointmentItem.fromRow(
     Map row, {
     required List<PatientProfile> patients,
@@ -115,8 +153,21 @@ class AdminAppointmentItem {
     final patientObj = (row['patient'] is Map)
         ? row['patient'] as Map
         : (row['users'] is Map ? row['users'] as Map : const {});
+    final selectedDocObj = (row['selectedDoctor'] is Map) ? row['selectedDoctor'] as Map : const {};
+    final dentistObj = (row['dentist'] is Map) ? row['dentist'] as Map : const {};
+    final dentistUserObj = (dentistObj['users'] is Map) ? dentistObj['users'] as Map : const {};
+    final dentistClinicObj = (dentistObj['clinics'] is Map) ? dentistObj['clinics'] as Map : const {};
+    final clinicObj = row['clinic'] is Map ? row['clinic'] as Map : const {};
+
     final patientId = _firstNonEmpty(row, ['patient_id', 'patientId']);
-    final dentistId = _firstNonEmpty(row, ['dentist_id', 'dentistId']);
+    final dentistId = _firstNonEmpty(row, ['dentist_id', 'dentistId']).isNotEmpty
+        ? _firstNonEmpty(row, ['dentist_id', 'dentistId'])
+        : _firstNonEmpty(selectedDocObj, ['id']);
+    final clinicId = _firstNonEmpty(row, ['clinic_id', 'clinicId']).isNotEmpty
+        ? _firstNonEmpty(row, ['clinic_id', 'clinicId'])
+        : (_firstNonEmpty(clinicObj, ['id']).isNotEmpty
+            ? _firstNonEmpty(clinicObj, ['id'])
+            : _firstNonEmpty(dentistObj, ['clinic_id']));
 
     PatientProfile? matchedPatient;
     if (patientId.isNotEmpty) {
@@ -130,38 +181,69 @@ class AdminAppointmentItem {
     DoctorModel? matchedDoctor;
     if (dentistId.isNotEmpty) {
       for (final d in doctors) {
-        if (d.id == dentistId || d.userId == dentistId) {
+        if (d.id == dentistId || (d.userId.isNotEmpty && d.userId == dentistId)) {
           matchedDoctor = d;
           break;
         }
       }
     }
 
-    final clinicObj = row['clinic'] is Map ? row['clinic'] as Map : const {};
     var name = _firstNonEmpty(patientObj, ['name']);
     if (name.isEmpty) name = _firstNonEmpty(row, ['patient_name', 'patientName']);
     if (name.isEmpty) name = matchedPatient?.name ?? '';
+
     var phone = _firstNonEmpty(patientObj, ['phone']);
-    if (phone.isEmpty) phone = _firstNonEmpty(row, ['phone', 'patient_phone']);
+    if (phone.isEmpty) phone = _firstNonEmpty(row, ['patient_phone', 'phone']);
     if (phone.isEmpty) phone = matchedPatient?.phone ?? '';
-    var dentist = _firstNonEmpty(row, ['dentist_name', 'dentistName']);
+
+    var dentist = _firstNonEmpty(selectedDocObj, ['name']);
+    if (dentist.isEmpty) dentist = _firstNonEmpty(dentistUserObj, ['name']);
+    if (dentist.isEmpty) dentist = _firstNonEmpty(dentistObj, ['name']);
+    if (dentist.isEmpty) dentist = _firstNonEmpty(row, ['dentist_name', 'dentistName']);
     if (dentist.isEmpty) dentist = matchedDoctor?.name ?? '';
+    dentist = _formatDoctorName(dentist);
+
+    var specialty = _firstNonEmpty(selectedDocObj, ['specialty', 'speciality']);
+    if (specialty.isEmpty) specialty = _firstNonEmpty(dentistObj, ['speciality', 'specialty']);
+    if (specialty.isEmpty) specialty = _firstNonEmpty(row, ['doctor_specialty', 'specialty']);
+    if (specialty.isEmpty) specialty = matchedDoctor?.specialty ?? '';
+
+    var clinic = _firstNonEmpty(clinicObj, ['clinic_name', 'name']);
+    if (clinic.isEmpty) clinic = _firstNonEmpty(selectedDocObj, ['clinicName', 'clinic_name']);
+    if (clinic.isEmpty) clinic = _firstNonEmpty(dentistClinicObj, ['clinic_name', 'name']);
+    if (clinic.isEmpty) clinic = _firstNonEmpty(row, ['clinic_name', 'clinicName']);
+    if (clinic.isEmpty) clinic = matchedDoctor?.clinicName ?? '';
+
+    final dynamic rawPhoto = selectedDocObj['profilePhoto'] ??
+        dentistUserObj['biometric_token'] ??
+        dentistObj['profilePhoto'] ??
+        row['doctor_photo'];
+    final parsedPhoto = _parsePhoto(rawPhoto);
+    final Uint8List? photoBytes = parsedPhoto.bytes ?? matchedDoctor?.photoBytes;
+    final String photoUrl = parsedPhoto.url;
+
     var notes = _firstNonEmpty(row, ['notes', 'patient_notes', 'reason', 'symptoms']);
     if (notes.startsWith('{') || notes.startsWith('[')) notes = '';
 
+    final createdRaw = _firstNonEmpty(row, ['booking_created_at', 'created_at', 'createdAt']);
+
     return AdminAppointmentItem(
       id: _firstNonEmpty(row, ['id', '_id']),
-      patientName: name.isEmpty ? 'Patient' : name,
+      patientName: name.isEmpty ? 'Patient Unavailable' : name,
       phone: phone,
       status: _firstNonEmpty(row, ['status']).isEmpty
           ? 'PENDING'
           : _firstNonEmpty(row, ['status']),
       dateRaw: _firstNonEmpty(row, ['date', 'appointment_date', 'appointmentDate']),
-      timeSlot: _firstNonEmpty(row, ['time_slot', 'timeSlot']),
+      timeSlot: _firstNonEmpty(row, ['time_slot', 'timeSlot', 'appointment_time']),
+      dentistId: dentistId,
       dentistName: dentist,
-      clinicName: _firstNonEmpty(clinicObj, ['clinic_name', 'name']).isNotEmpty
-          ? _firstNonEmpty(clinicObj, ['clinic_name', 'name'])
-          : _firstNonEmpty(row, ['clinic_name', 'clinicName']),
+      doctorSpecialty: specialty,
+      doctorPhotoBytes: photoBytes,
+      doctorPhotoUrl: photoUrl,
+      clinicId: clinicId,
+      clinicName: clinic,
+      createdAtRaw: createdRaw,
       mode: _normalizeMode(_firstNonEmpty(row, [
         'consultation_mode',
         'consultationMode',
@@ -175,18 +257,20 @@ class AdminAppointmentItem {
     );
   }
 
-  /// Fallback built from the already-synced consultation requests that carry a
-  /// confirmed time slot (the same source the existing Appointments panel uses).
+  /// Fallback built from consultation requests when appointments table has no rows.
   factory AdminAppointmentItem.fromRequest(PatientConsultationRequest r) {
     return AdminAppointmentItem(
       id: r.id,
-      patientName: r.patientName.trim().isEmpty ? 'Patient' : r.patientName.trim(),
+      patientName: r.patientName.trim().isEmpty ? 'Patient Unavailable' : r.patientName.trim(),
       phone: r.patientPhone,
       status: r.status,
       dateRaw: r.confirmedDate ?? r.submittedAt.toIso8601String(),
       timeSlot: r.confirmedTimeSlot ?? '',
+      dentistId: r.assignedDoctorId ?? '',
       dentistName: r.assignedDoctorName ?? '',
+      doctorSpecialty: r.problemCategory,
       clinicName: r.assignedDoctorClinic ?? '',
+      createdAtRaw: r.submittedAt.toIso8601String(),
       mode: '',
       notes: '',
       treatment: r.problemCategory,
@@ -256,10 +340,77 @@ String _to24h(String slot) {
 
 DateTime? _parseDate(String raw) => raw.isEmpty ? null : DateTime.tryParse(raw);
 
-String _dateLabel(String raw) {
+String formatAdminAppointmentDate(String raw) {
   final d = _parseDate(raw);
-  if (d == null) return raw;
-  return '${_weekdays[d.weekday - 1]}, ${d.day} ${_months[d.month - 1]}';
+  if (d == null) return raw.isEmpty ? 'Date not set' : raw;
+  final local = d.toLocal();
+  return '${_weekdays[local.weekday - 1]}, ${local.day} ${_months[local.month - 1]} ${local.year}';
+}
+
+String formatAdminCreatedDateTime(String raw) {
+  final d = _parseDate(raw);
+  if (d == null) return raw.isEmpty ? 'Not recorded' : raw;
+  final local = d.toLocal();
+  final h12 = local.hour % 12 == 0 ? 12 : local.hour % 12;
+  final mm = local.minute.toString().padLeft(2, '0');
+  final ampm = local.hour >= 12 ? 'PM' : 'AM';
+  return '${local.day} ${_months[local.month - 1]} ${local.year}, $h12:$mm $ampm';
+}
+
+String _dateLabel(String raw) => formatAdminAppointmentDate(raw);
+
+String adminStatusLabel(String raw) => _statusLabel(raw);
+
+({Color bg, Color fg}) adminStatusColors(String raw) => _statusColors(raw);
+
+/// Reusable avatar showing Doctor profile photo (bytes or network URL) or initials fallback.
+class AdminDoctorAvatar extends StatelessWidget {
+  final String doctorName;
+  final Uint8List? photoBytes;
+  final String photoUrl;
+  final double radius;
+
+  const AdminDoctorAvatar({
+    super.key,
+    required this.doctorName,
+    this.photoBytes,
+    this.photoUrl = '',
+    this.radius = 18,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cleaned = doctorName.replaceAll('Dr.', '').replaceAll('Dr ', '').trim();
+    final initial = cleaned.isNotEmpty ? cleaned[0].toUpperCase() : 'D';
+    if (photoBytes != null && photoBytes!.isNotEmpty) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: _kSoftNavy,
+        backgroundImage: MemoryImage(photoBytes!),
+      );
+    }
+    if (photoUrl.isNotEmpty) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: _kSoftNavy,
+        backgroundImage: NetworkImage(photoUrl),
+        onBackgroundImageError: (_, __) {},
+        child: null,
+      );
+    }
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: _kSoftNavy,
+      child: Text(
+        initial,
+        style: TextStyle(
+          fontSize: radius * 0.78,
+          fontWeight: FontWeight.w800,
+          color: AppTheme.gsNavy,
+        ),
+      ),
+    );
+  }
 }
 
 String _statusLabel(String raw) {
@@ -274,7 +425,7 @@ String _statusLabel(String raw) {
     return (bg: const Color(0xFFF1F5F9), fg: const Color(0xFF64748B));
   }
   if (u.contains('PENDING') || u.contains('REVIEW') || u.contains('SUBMITTED')) {
-    return (bg: AppTheme.gsRed.withValues(alpha: 0.12), fg: const Color(0xFFC21F1F));
+    return (bg: AppTheme.gsRed.withValues(alpha: 0.12), fg: const Color(0xFFFE3434));
   }
   return (bg: _kSoftNavy, fg: AppTheme.gsNavy);
 }
@@ -1030,7 +1181,7 @@ class _AdSlide extends StatelessWidget {
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [Color(0xFF0A3D7A), AppTheme.gsNavy, Color(0xFF001B3B)],
+                    colors: [Color(0xFF012A58), AppTheme.gsNavy, Color(0xFF012A58)],
                   ),
                 ),
               ),
@@ -1157,11 +1308,15 @@ class _AppointmentCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = _statusColors(item.status);
     final date = _parseDate(item.dateRaw);
-    final dayAbbr = date == null ? '—' : _weekdays[date.weekday - 1];
+    final dayAbbr = date == null ? '—' : _weekdays[date.toLocal().weekday - 1];
     final time = item.timeSlot.isEmpty ? '—' : _to24h(item.timeSlot);
+    final displayDoctorName = item.dentistName.isNotEmpty ? item.dentistName : 'Doctor Unavailable';
+    final displaySpecialty = item.doctorSpecialty.isNotEmpty ? item.doctorSpecialty : 'Specialty Not Listed';
+    final displayClinic = item.clinicName.isNotEmpty ? item.clinicName : 'Clinic Not Listed';
+    final displayPhone = item.phone.isNotEmpty ? item.phone : 'No mobile';
     final dateLine = [
       if (item.dateRaw.isNotEmpty) _dateLabel(item.dateRaw),
-      if (showPhone && item.phone.isNotEmpty) item.phone,
+      if (item.timeSlot.isNotEmpty) item.timeSlot,
     ].join(' · ');
 
     return Container(
@@ -1189,8 +1344,8 @@ class _AppointmentCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
-                  width: 74,
-                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
+                  width: 68,
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
                   decoration: BoxDecoration(
                     color: _kSoftNavy,
                     borderRadius: BorderRadius.circular(16),
@@ -1200,8 +1355,10 @@ class _AppointmentCard extends StatelessWidget {
                     children: [
                       Text(
                         dayAbbr,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          fontSize: 13.5,
+                          fontSize: 12.5,
                           color: AppTheme.textMedium,
                           fontWeight: FontWeight.w600,
                         ),
@@ -1212,7 +1369,7 @@ class _AppointmentCard extends StatelessWidget {
                         child: Text(
                           time,
                           style: const TextStyle(
-                            fontSize: 20,
+                            fontSize: 18,
                             fontWeight: FontWeight.w800,
                             color: AppTheme.gsNavy,
                           ),
@@ -1235,7 +1392,7 @@ class _AppointmentCard extends StatelessWidget {
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                fontSize: 17,
+                                fontSize: 16,
                                 height: 1.2,
                                 fontWeight: FontWeight.w800,
                                 color: AppTheme.textDark,
@@ -1243,47 +1400,107 @@ class _AppointmentCard extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: colors.bg,
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: Text(
-                              _statusLabel(item.status),
-                              style: TextStyle(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w800,
-                                color: colors.fg,
+                          Flexible(
+                            flex: 0,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: colors.bg,
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: Text(
+                                _statusLabel(item.status),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: colors.fg,
+                                ),
                               ),
                             ),
                           ),
                         ],
                       ),
-                      if (dateLine.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          dateLine,
-                          style: const TextStyle(fontSize: 13.5, color: AppTheme.textMedium),
-                        ),
-                      ],
-                      if (item.dentistName.isNotEmpty) ...[
-                        const SizedBox(height: 4),
+                      if (showPhone) ...[
+                        const SizedBox(height: 3),
                         Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Padding(
-                              padding: EdgeInsets.only(top: 1),
-                              child: Icon(Icons.medical_services_outlined, size: 16, color: AppTheme.textMedium),
-                            ),
-                            const SizedBox(width: 6),
+                            const Icon(Icons.phone_outlined, size: 13, color: AppTheme.textMuted),
+                            const SizedBox(width: 5),
                             Expanded(
                               child: Text(
-                                item.dentistName,
-                                style: const TextStyle(fontSize: 13.5, color: AppTheme.textMedium),
+                                displayPhone,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 12.5, color: AppTheme.textMedium),
                               ),
                             ),
                           ],
+                        ),
+                      ],
+                      if (dateLine.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          dateLine,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12.5, color: AppTheme.textMedium, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                      const SizedBox(height: 8),
+                      // Selected Doctor box (photo + name + specialization + clinic)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: _kBorder),
+                        ),
+                        child: Row(
+                          children: [
+                            AdminDoctorAvatar(
+                              doctorName: displayDoctorName,
+                              photoBytes: item.doctorPhotoBytes,
+                              photoUrl: item.doctorPhotoUrl,
+                              radius: 17,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    displayDoctorName,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppTheme.gsNavy,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 1),
+                                  Text(
+                                    '$displaySpecialty • $displayClinic',
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 12, color: AppTheme.textMedium),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (item.createdAtRaw.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          'Booked on: ${formatAdminCreatedDateTime(item.createdAtRaw)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
                         ),
                       ],
                       if (item.mode.isNotEmpty) ...[
@@ -1306,7 +1523,7 @@ class _AppointmentCard extends StatelessWidget {
                               Text(
                                 item.mode,
                                 style: const TextStyle(
-                                  fontSize: 12,
+                                  fontSize: 11.5,
                                   fontWeight: FontWeight.w800,
                                   color: AppTheme.gsNavy,
                                   letterSpacing: 0.4,
@@ -1320,10 +1537,10 @@ class _AppointmentCard extends StatelessWidget {
                         const SizedBox(height: 6),
                         Text(
                           '“${item.notes}”',
-                          maxLines: 3,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            fontSize: 14,
+                            fontSize: 13,
                             fontStyle: FontStyle.italic,
                             color: AppTheme.textMedium,
                           ),
@@ -1562,11 +1779,61 @@ Future<void> showAdminAppointmentDetailsSheet(
                 ],
               ),
               const SizedBox(height: 16),
-              line('Date', item.dateRaw.isEmpty ? '' : _dateLabel(item.dateRaw)),
-              line('Time', item.timeSlot.isEmpty ? '' : _to24h(item.timeSlot)),
-              if (canViewPhone) line('Mobile', item.phone),
-              line('Dentist', item.dentistName),
-              line('Clinic', item.clinicName),
+              // Selected Doctor summary header with profile photo
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                margin: const EdgeInsets.only(bottom: 14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: _kBorder),
+                ),
+                child: Row(
+                  children: [
+                    AdminDoctorAvatar(
+                      doctorName: item.dentistName.isNotEmpty ? item.dentistName : 'Doctor',
+                      photoBytes: item.doctorPhotoBytes,
+                      photoUrl: item.doctorPhotoUrl,
+                      radius: 22,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'SELECTED DOCTOR',
+                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: AppTheme.textMuted, letterSpacing: 0.6),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            item.dentistName.isNotEmpty ? item.dentistName : 'Doctor Unavailable',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.gsNavy),
+                          ),
+                          Text(
+                            item.doctorSpecialty.isNotEmpty ? item.doctorSpecialty : 'Specialty Not Listed',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12.5, color: AppTheme.textMedium),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              line('Patient', item.patientName),
+              if (canViewPhone) line('Mobile', item.phone.isNotEmpty ? item.phone : 'Not provided'),
+              line('Doctor', item.dentistName.isNotEmpty ? item.dentistName : 'Doctor Unavailable'),
+              line('Specialty', item.doctorSpecialty.isNotEmpty ? item.doctorSpecialty : 'Specialty Not Listed'),
+              line('Clinic', item.clinicName.isNotEmpty ? item.clinicName : 'Clinic Not Listed'),
+              line('Appt. Date', item.dateRaw.isEmpty ? 'Date not set' : formatAdminAppointmentDate(item.dateRaw)),
+              line('Appt. Time', item.timeSlot.isEmpty ? 'Time not set' : item.timeSlot),
+              line('Booked On', item.createdAtRaw.isEmpty ? 'Not recorded' : formatAdminCreatedDateTime(item.createdAtRaw)),
+              line('Status', _statusLabel(item.status)),
               line('Treatment', item.treatment),
               line('Type', item.mode),
               line('Notes', item.notes),

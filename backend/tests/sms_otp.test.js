@@ -17,6 +17,10 @@ const {
     localLimitMap
 } = require('../src/services/otpStoreService');
 
+// Keep Tests 1–23 deterministic regardless of local backend/.env OTP_DELIVERY_MODE setting;
+// Tests 24–28 explicitly toggle OTP_DELIVERY_MODE='on_screen'.
+delete process.env.OTP_DELIVERY_MODE;
+
 console.log('=== STARTING GS HEALTH SMS OTP & SUPABASE STORAGE TESTS ===\n');
 
 async function runTests() {
@@ -394,6 +398,9 @@ async function runTests() {
     });
 
     await asyncTest('22. Regression: Single wrong OTP in verifyOTP, resetPassword & login increments attempts exactly once', async () => {
+        const prevForceMemory = otpStoreService.forceMemoryInDev;
+        otpStoreService.forceMemoryInDev = true;
+        try {
         const testPhone = '9000000010';
         const correctCode = '654321';
         localOtpMap.delete(testPhone);
@@ -478,6 +485,9 @@ async function runTests() {
         } finally {
             otpStoreService.verifyOtp = origVerify;
         }
+        } finally {
+            otpStoreService.forceMemoryInDev = prevForceMemory;
+        }
     });
 
     await asyncTest('23. Migration uses bounded SKIP LOCKED cleanup and rollback signatures match', async () => {
@@ -494,6 +504,395 @@ async function runTests() {
         assert.ok(rollbackSql.includes('DROP FUNCTION IF EXISTS public.check_otp_rate_limit(TEXT, INTEGER, INTEGER, INTEGER)'));
         assert.ok(rollbackSql.includes('DROP TABLE IF EXISTS public.otp_challenges'));
         assert.ok(rollbackSql.includes('DROP TABLE IF EXISTS public.otp_rate_limits'));
+    });
+
+    await asyncTest('24. On-screen testing mode (NODE_ENV=development & OTP_DELIVERY_MODE=on_screen) blocks Fast2SMS/Twilio, uses Supabase RPC hash storage, and returns 6-digit OTP', async () => {
+        const { isOnScreenOtpTestMode } = require('../src/services/otpStoreService');
+        const prevEnv = process.env.NODE_ENV;
+        const prevMode = process.env.OTP_DELIVERY_MODE;
+        const prevFast2Sms = process.env.FAST2SMS_API_KEY;
+        const prevTwilioSid = process.env.TWILIO_ACCOUNT_SID;
+        const prevTwilioToken = process.env.TWILIO_AUTH_TOKEN;
+        const prevTwilioFrom = process.env.TWILIO_PHONE_NUMBER;
+        const prevSupaUrl = process.env.SUPABASE_URL;
+        const prevSupaService = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        const prevSupaAnon = process.env.SUPABASE_ANON_KEY;
+        const prevHttpsRequest = https.request;
+        const prevClient = otpStoreService.supabaseClient;
+
+        process.env.NODE_ENV = 'development';
+        process.env.OTP_DELIVERY_MODE = 'on_screen';
+        process.env.FAST2SMS_API_KEY = 'must_be_blocked_fast2sms_key';
+        process.env.TWILIO_ACCOUNT_SID = 'AC_must_be_blocked_twilio_sid';
+        process.env.TWILIO_AUTH_TOKEN = 'must_be_blocked_twilio_token';
+        process.env.TWILIO_PHONE_NUMBER = '+15550001234';
+        process.env.SUPABASE_URL = 'https://test-project.supabase.co';
+        process.env.SUPABASE_SERVICE_ROLE_KEY = 'test_service_role_key_xyz';
+        process.env.SUPABASE_ANON_KEY = 'test_anon_key_abc';
+
+        let externalSmsCalled = false;
+        https.request = () => {
+            externalSmsCalled = true;
+            throw new Error('Fast2SMS/Twilio HTTP calls must NEVER happen when OTP_DELIVERY_MODE=on_screen');
+        };
+
+        const rpcChallenges = new Map();
+        otpStoreService.supabaseClient = {
+            rpc: async (fnName, params) => {
+                if (fnName === 'request_otp_challenge') {
+                    assert.strictEqual(params.p_hashed_code.length, 64, 'Must store 64-char HMAC-SHA256 hash in Supabase RPC');
+                    assert.strictEqual(params.p_ttl_seconds, 300);
+                    assert.strictEqual(params.p_cooldown_seconds, 30);
+                    assert.strictEqual(params.p_max_attempts, 5);
+                    rpcChallenges.set(params.p_identifier, { hash: params.p_hashed_code, used: false });
+                    return { data: { allowed: true, status: 200, requestCount: 1 }, error: null };
+                }
+                if (fnName === 'verify_otp_challenge') {
+                    const rec = rpcChallenges.get(params.p_identifier);
+                    if (!rec || rec.used) return { data: { valid: false, reason: 'NOT_FOUND', message: 'Invalid or expired OTP.' }, error: null };
+                    if (rec.hash !== params.p_incoming_hash) return { data: { valid: false, reason: 'INVALID_CODE', message: 'Invalid OTP code.' }, error: null };
+                    rec.used = true;
+                    rpcChallenges.delete(params.p_identifier);
+                    return { data: { valid: true, reason: 'VERIFIED', message: 'OTP verified successfully.' }, error: null };
+                }
+                return { data: { allowed: true }, error: null };
+            }
+        };
+
+        try {
+            assert.strictEqual(isOnScreenOtpTestMode(), true);
+            const anyPhone = '8765432190';
+            let status = 200;
+            let body = null;
+            const res = {
+                status: (c) => { status = c; return res; },
+                json: (d) => { body = d; return res; }
+            };
+
+            await auth.requestOTP({ body: { phone: anyPhone } }, res);
+            assert.strictEqual(status, 200);
+            assert.strictEqual(body.success, true);
+            assert.strictEqual(body.deliveryMode, 'on_screen');
+            assert.match(String(body.otp), /^\d{6}$/, 'Must return random 6-digit OTP for testing');
+            assert.strictEqual(externalSmsCalled, false, 'Fast2SMS/Twilio must be blocked in on_screen mode');
+            assert.strictEqual(rpcChallenges.get(anyPhone).hash, hashOtp(body.otp), 'Stored hash must match salted HMAC-SHA256');
+
+            // Verify single-use replay protection via Supabase RPC
+            const v1 = await otpStoreService.verifyOtp(anyPhone, body.otp);
+            assert.strictEqual(v1.valid, true);
+            const v2 = await otpStoreService.verifyOtp(anyPhone, body.otp);
+            assert.strictEqual(v2.valid, false, 'Replay attempt must be rejected');
+        } finally {
+            https.request = prevHttpsRequest;
+            otpStoreService.supabaseClient = prevClient;
+            if (prevEnv !== undefined) process.env.NODE_ENV = prevEnv; else delete process.env.NODE_ENV;
+            if (prevMode !== undefined) process.env.OTP_DELIVERY_MODE = prevMode; else delete process.env.OTP_DELIVERY_MODE;
+            if (prevFast2Sms !== undefined) process.env.FAST2SMS_API_KEY = prevFast2Sms; else delete process.env.FAST2SMS_API_KEY;
+            if (prevTwilioSid !== undefined) process.env.TWILIO_ACCOUNT_SID = prevTwilioSid; else delete process.env.TWILIO_ACCOUNT_SID;
+            if (prevTwilioToken !== undefined) process.env.TWILIO_AUTH_TOKEN = prevTwilioToken; else delete process.env.TWILIO_AUTH_TOKEN;
+            if (prevTwilioFrom !== undefined) process.env.TWILIO_PHONE_NUMBER = prevTwilioFrom; else delete process.env.TWILIO_PHONE_NUMBER;
+            if (prevSupaUrl !== undefined) process.env.SUPABASE_URL = prevSupaUrl; else delete process.env.SUPABASE_URL;
+            if (prevSupaService !== undefined) process.env.SUPABASE_SERVICE_ROLE_KEY = prevSupaService; else delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+            if (prevSupaAnon !== undefined) process.env.SUPABASE_ANON_KEY = prevSupaAnon; else delete process.env.SUPABASE_ANON_KEY;
+        }
+    });
+
+    await asyncTest('25. On-screen testing mode enforces Supabase RPC storage with NO in-memory fallback', async () => {
+        const prevEnv = process.env.NODE_ENV;
+        const prevMode = process.env.OTP_DELIVERY_MODE;
+        const prevSupaUrl = process.env.SUPABASE_URL;
+        const prevSupaService = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        const prevSupaAnon = process.env.SUPABASE_ANON_KEY;
+
+        process.env.NODE_ENV = 'development';
+        process.env.OTP_DELIVERY_MODE = 'on_screen';
+        process.env.SUPABASE_URL = 'https://placeholder.supabase.co';
+        delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+        process.env.SUPABASE_ANON_KEY = 'anon_key';
+
+        try {
+            const testSvc = new OtpStoreService();
+            await assert.rejects(
+                () => testSvc.requestAndStoreOtp('9000000099', '123456'),
+                /In-memory OTP fallback is disabled/
+            );
+
+            // Also verify missing/failing RPC throws instead of falling back to memory
+            const brokenRpcSvc = new OtpStoreService({
+                supabaseClient: {
+                    rpc: async () => ({ data: null, error: { code: 'PGRST202', message: 'could not find the function' } })
+                }
+            });
+            await assert.rejects(
+                () => brokenRpcSvc.requestAndStoreOtp('9000000099', '123456'),
+                /could not find the function/
+            );
+        } finally {
+            if (prevEnv !== undefined) process.env.NODE_ENV = prevEnv; else delete process.env.NODE_ENV;
+            if (prevMode !== undefined) process.env.OTP_DELIVERY_MODE = prevMode; else delete process.env.OTP_DELIVERY_MODE;
+            if (prevSupaUrl !== undefined) process.env.SUPABASE_URL = prevSupaUrl; else delete process.env.SUPABASE_URL;
+            if (prevSupaService !== undefined) process.env.SUPABASE_SERVICE_ROLE_KEY = prevSupaService; else delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+            if (prevSupaAnon !== undefined) process.env.SUPABASE_ANON_KEY = prevSupaAnon; else delete process.env.SUPABASE_ANON_KEY;
+        }
+    });
+
+    await asyncTest('26. Production (NODE_ENV=production) NEVER activates on_screen mode or exposes OTP even if OTP_DELIVERY_MODE=on_screen', async () => {
+        const { isOnScreenOtpTestMode } = require('../src/services/otpStoreService');
+        const prevEnv = process.env.NODE_ENV;
+        const prevMode = process.env.OTP_DELIVERY_MODE;
+        const prevFast2Sms = process.env.FAST2SMS_API_KEY;
+        const prevSupaUrl = process.env.SUPABASE_URL;
+        const prevSupaService = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        const prevSupaAnon = process.env.SUPABASE_ANON_KEY;
+        const prevHttpsRequest = https.request;
+        const prevClient = otpStoreService.supabaseClient;
+
+        process.env.NODE_ENV = 'production';
+        process.env.OTP_DELIVERY_MODE = 'on_screen'; // Must be ignored in production!
+        process.env.FAST2SMS_API_KEY = 'prod_fast2sms_key';
+        process.env.SUPABASE_URL = 'https://prod-project.supabase.co';
+        process.env.SUPABASE_SERVICE_ROLE_KEY = 'prod_service_key';
+        process.env.SUPABASE_ANON_KEY = 'prod_anon_key';
+
+        let smsCalledInProd = false;
+        https.request = (_opts, cb) => {
+            smsCalledInProd = true;
+            const req = new EventEmitter();
+            req.write = () => {};
+            req.end = () => {
+                const res = new EventEmitter();
+                res.statusCode = 200;
+                cb(res);
+                res.emit('data', JSON.stringify({ return: true, message: ['SMS sent successfully.'] }));
+                res.emit('end');
+            };
+            return req;
+        };
+
+        otpStoreService.supabaseClient = {
+            rpc: async () => ({ data: { allowed: true, status: 200 }, error: null })
+        };
+
+        try {
+            assert.strictEqual(isOnScreenOtpTestMode(), false, 'Production must NEVER activate on_screen test mode');
+            let status = 200;
+            let body = null;
+            const res = {
+                status: (c) => { status = c; return res; },
+                json: (d) => { body = d; return res; }
+            };
+            await auth.requestOTP({ body: { phone: '9876501234' } }, res);
+            assert.strictEqual(status, 200);
+            assert.strictEqual(smsCalledInProd, true, 'Production must continue using real SMS');
+            assert.strictEqual(body.otp, undefined, 'Production API must NEVER expose OTP');
+            assert.strictEqual(body.deliveryMode, undefined);
+        } finally {
+            https.request = prevHttpsRequest;
+            otpStoreService.supabaseClient = prevClient;
+            if (prevEnv !== undefined) process.env.NODE_ENV = prevEnv; else delete process.env.NODE_ENV;
+            if (prevMode !== undefined) process.env.OTP_DELIVERY_MODE = prevMode; else delete process.env.OTP_DELIVERY_MODE;
+            if (prevFast2Sms !== undefined) process.env.FAST2SMS_API_KEY = prevFast2Sms; else delete process.env.FAST2SMS_API_KEY;
+            if (prevSupaUrl !== undefined) process.env.SUPABASE_URL = prevSupaUrl; else delete process.env.SUPABASE_URL;
+            if (prevSupaService !== undefined) process.env.SUPABASE_SERVICE_ROLE_KEY = prevSupaService; else delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+            if (prevSupaAnon !== undefined) process.env.SUPABASE_ANON_KEY = prevSupaAnon; else delete process.env.SUPABASE_ANON_KEY;
+        }
+    });
+
+    await asyncTest('27. Forgot Password API returns on-screen OTP in testing mode without sending real SMS', async () => {
+        const prevEnv = process.env.NODE_ENV;
+        const prevMode = process.env.OTP_DELIVERY_MODE;
+        const prevFast2Sms = process.env.FAST2SMS_API_KEY;
+        const prevHttpsRequest = https.request;
+        const prevClient = otpStoreService.supabaseClient;
+        const { User } = require('../src/models/Schemas');
+        const prevFindOne = User.findOne;
+
+        process.env.NODE_ENV = 'development';
+        process.env.OTP_DELIVERY_MODE = 'on_screen';
+        process.env.FAST2SMS_API_KEY = 'must_be_blocked_key';
+
+        let externalCalled = false;
+        https.request = () => {
+            externalCalled = true;
+            throw new Error('Must not call external SMS in on_screen testing mode');
+        };
+
+        otpStoreService.supabaseClient = {
+            rpc: async () => ({ data: { allowed: true, status: 200 }, error: null })
+        };
+        User.findOne = async () => ({
+            id: 'fp-user-1',
+            email: 'fp@dentaguru.internal',
+            phone: '9123450987'
+        });
+
+        try {
+            let status = 200;
+            let body = null;
+            const res = {
+                status: (c) => { status = c; return res; },
+                json: (d) => { body = d; return res; }
+            };
+            await auth.forgotPassword({ body: { phone: '9123450987' } }, res);
+            assert.strictEqual(status, 200);
+            assert.strictEqual(body.success, true);
+            assert.strictEqual(body.deliveryMode, 'on_screen');
+            assert.match(String(body.otp), /^\d{6}$/);
+            assert.strictEqual(externalCalled, false);
+        } finally {
+            https.request = prevHttpsRequest;
+            otpStoreService.supabaseClient = prevClient;
+            User.findOne = prevFindOne;
+            if (prevEnv !== undefined) process.env.NODE_ENV = prevEnv; else delete process.env.NODE_ENV;
+            if (prevMode !== undefined) process.env.OTP_DELIVERY_MODE = prevMode; else delete process.env.OTP_DELIVERY_MODE;
+            if (prevFast2Sms !== undefined) process.env.FAST2SMS_API_KEY = prevFast2Sms; else delete process.env.FAST2SMS_API_KEY;
+        }
+    });
+
+    await asyncTest('28. On-screen testing mode refuses connecting to production Supabase database URL', async () => {
+        const prevEnv = process.env.NODE_ENV;
+        const prevMode = process.env.OTP_DELIVERY_MODE;
+        const prevSupaUrl = process.env.SUPABASE_URL;
+        const prevSupaService = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        const prevSupaAnon = process.env.SUPABASE_ANON_KEY;
+        const prevProdUrl = process.env.PRODUCTION_SUPABASE_URL;
+
+        process.env.NODE_ENV = 'development';
+        process.env.OTP_DELIVERY_MODE = 'on_screen';
+        process.env.SUPABASE_SERVICE_ROLE_KEY = 'some_service_role_key';
+        process.env.SUPABASE_ANON_KEY = 'some_anon_key';
+
+        try {
+            // Case A: Hardcoded production project ref (with or without trailing slash)
+            process.env.SUPABASE_URL = 'https://fommrwxpqzkcktweosgp.supabase.co/';
+            const svcA = new OtpStoreService();
+            assert.throws(() => {
+                svcA._ensureProductionConfig();
+            }, /separate testing Supabase project/);
+
+            // Case B: Custom PRODUCTION_SUPABASE_URL env match (trailing slash normalized)
+            process.env.PRODUCTION_SUPABASE_URL = 'https://custom-prod-ref.supabase.co/';
+            process.env.SUPABASE_URL = 'https://custom-prod-ref.supabase.co';
+            const svcB = new OtpStoreService();
+            assert.throws(() => {
+                svcB._ensureProductionConfig();
+            }, /separate testing Supabase project/);
+        } finally {
+            if (prevEnv !== undefined) process.env.NODE_ENV = prevEnv; else delete process.env.NODE_ENV;
+            if (prevMode !== undefined) process.env.OTP_DELIVERY_MODE = prevMode; else delete process.env.OTP_DELIVERY_MODE;
+            if (prevSupaUrl !== undefined) process.env.SUPABASE_URL = prevSupaUrl; else delete process.env.SUPABASE_URL;
+            if (prevSupaService !== undefined) process.env.SUPABASE_SERVICE_ROLE_KEY = prevSupaService; else delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+            if (prevSupaAnon !== undefined) process.env.SUPABASE_ANON_KEY = prevSupaAnon; else delete process.env.SUPABASE_ANON_KEY;
+            if (prevProdUrl !== undefined) process.env.PRODUCTION_SUPABASE_URL = prevProdUrl; else delete process.env.PRODUCTION_SUPABASE_URL;
+        }
+    });
+
+    await asyncTest('29. Local development keep-alive is disabled and never pings production Render', async () => {
+        const { resolveKeepAliveUrl } = require('../src/server');
+
+        // Default local development (no KEEP_ALIVE_URL / RENDER_EXTERNAL_URL) -> disabled (null)
+        assert.strictEqual(resolveKeepAliveUrl({ NODE_ENV: 'development' }), null);
+        assert.strictEqual(resolveKeepAliveUrl({}), null);
+
+        // Even if KEEP_ALIVE_URL or RENDER_EXTERNAL_URL points to production Render in dev -> blocked (null)
+        assert.strictEqual(
+            resolveKeepAliveUrl({
+                NODE_ENV: 'development',
+                KEEP_ALIVE_URL: 'https://dentaguru-backend.onrender.com/api/v1/clinics',
+            }),
+            null
+        );
+        assert.strictEqual(
+            resolveKeepAliveUrl({
+                NODE_ENV: 'development',
+                RENDER_EXTERNAL_URL: 'https://dentaguru-backend.onrender.com',
+            }),
+            null
+        );
+
+        // Temporary non-production test Render service may ping its own test URL
+        assert.strictEqual(
+            resolveKeepAliveUrl({
+                NODE_ENV: 'development',
+                RENDER_EXTERNAL_URL: 'https://dentaguru-backend-test.onrender.com/',
+            }),
+            'https://dentaguru-backend-test.onrender.com/api/v1/clinics'
+        );
+    });
+
+    await asyncTest('30. Production keep-alive behavior remains unchanged', async () => {
+        const { resolveKeepAliveUrl, PRODUCTION_KEEP_ALIVE_URL } = require('../src/server');
+
+        assert.strictEqual(
+            resolveKeepAliveUrl({ NODE_ENV: 'production' }),
+            PRODUCTION_KEEP_ALIVE_URL
+        );
+        assert.strictEqual(
+            resolveKeepAliveUrl({
+                NODE_ENV: 'production',
+                RENDER_EXTERNAL_URL: 'https://dentaguru-backend.onrender.com',
+            }),
+            'https://dentaguru-backend.onrender.com/api/v1/clinics'
+        );
+        assert.strictEqual(
+            resolveKeepAliveUrl({
+                NODE_ENV: 'production',
+                KEEP_ALIVE_URL: 'https://dentaguru-backend.onrender.com/health',
+            }),
+            'https://dentaguru-backend.onrender.com/health'
+        );
+    });
+
+    await asyncTest('31. backend/src/config/supabase.js has no hardcoded production URL fallback and fails immediately when credentials are missing', async () => {
+        const { resolveSupabaseConfig } = require('../src/config/supabase');
+        const source = fs.readFileSync(path.resolve(__dirname, '../src/config/supabase.js'), 'utf8');
+
+        assert.strictEqual(source.includes('fommrwxpqzkcktweosgp.supabase.co'), false, 'Hardcoded production URL must be removed');
+        assert.strictEqual(source.includes('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9'), false, 'Hardcoded production anon key must be removed');
+
+        assert.throws(() => resolveSupabaseConfig({ NODE_ENV: 'development' }), /Missing required environment variable\(s\): SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY/);
+        assert.throws(() => resolveSupabaseConfig({
+            NODE_ENV: 'test',
+            SUPABASE_URL: 'https://ojinzcdldwugpnxrnjcq.supabase.co',
+            SUPABASE_ANON_KEY: 'test_anon_fixture',
+        }), /SUPABASE_SERVICE_ROLE_KEY/);
+        assert.throws(() => resolveSupabaseConfig({ NODE_ENV: 'production' }), /Missing required environment variable/);
+    });
+
+    await asyncTest('32. Development/testing backend refuses connecting to production Supabase even without OTP_DELIVERY_MODE', async () => {
+        const { resolveSupabaseConfig } = require('../src/config/supabase');
+
+        assert.throws(() => resolveSupabaseConfig({
+            NODE_ENV: 'development',
+            SUPABASE_URL: 'https://fommrwxpqzkcktweosgp.supabase.co',
+            SUPABASE_ANON_KEY: 'dummy_anon_fixture',
+            SUPABASE_SERVICE_ROLE_KEY: 'dummy_service_fixture',
+        }), /Local development\/testing backend must never connect to production Supabase/);
+
+        assert.throws(() => resolveSupabaseConfig({
+            NODE_ENV: 'test',
+            SUPABASE_URL: 'https://fommrwxpqzkcktweosgp.supabase.co/',
+            SUPABASE_ANON_KEY: 'dummy_anon_fixture',
+            SUPABASE_SERVICE_ROLE_KEY: 'dummy_service_fixture',
+        }), /Local development\/testing backend must never connect to production Supabase/);
+
+        // Dedicated test Supabase succeeds in development/test
+        const testCfg = resolveSupabaseConfig({
+            NODE_ENV: 'development',
+            SUPABASE_URL: 'https://ojinzcdldwugpnxrnjcq.supabase.co/',
+            SUPABASE_ANON_KEY: 'test_anon_fixture',
+            SUPABASE_SERVICE_ROLE_KEY: 'test_service_fixture',
+        });
+        assert.strictEqual(testCfg.supabaseUrl, 'https://ojinzcdldwugpnxrnjcq.supabase.co');
+
+        // Production explicitly allows production Supabase when env vars are set
+        const prodCfg = resolveSupabaseConfig({
+            NODE_ENV: 'production',
+            SUPABASE_URL: 'https://fommrwxpqzkcktweosgp.supabase.co',
+            SUPABASE_ANON_KEY: 'prod_anon_fixture',
+            SUPABASE_SERVICE_ROLE_KEY: 'prod_service_fixture',
+        });
+        assert.strictEqual(prodCfg.supabaseUrl, 'https://fommrwxpqzkcktweosgp.supabase.co');
     });
 
     console.log('\n=================================================');

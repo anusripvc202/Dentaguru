@@ -68,12 +68,12 @@ class _AdminReferralsScreenState extends State<AdminReferralsScreen> {
     switch (status.toLowerCase()) {
       case 'accepted':
       case 'completed':
-        return const Color(0xFF16A34A);
+        return const Color(0xFFFE3434);
       case 'pending':
-        return const Color(0xFFD97706);
+        return const Color(0xFFFE3434);
       case 'rejected':
       case 'cancelled':
-        return const Color(0xFFDC2626);
+        return const Color(0xFFFE3434);
       default:
         return const Color(0xFF475569);
     }
@@ -83,12 +83,12 @@ class _AdminReferralsScreenState extends State<AdminReferralsScreen> {
     switch (status.toLowerCase()) {
       case 'accepted':
       case 'completed':
-        return const Color(0xFFDCFCE7);
+        return const Color(0x14012A58);
       case 'pending':
-        return const Color(0xFFFEF3C7);
+        return const Color(0x14FE3434);
       case 'rejected':
       case 'cancelled':
-        return const Color(0xFFFEE2E2);
+        return const Color(0x14FE3434);
       default:
         return const Color(0xFFF1F5F9);
     }
@@ -287,13 +287,13 @@ class _AdminReferralsScreenState extends State<AdminReferralsScreen> {
                     // Analytics Summary Cards
                     Row(
                       children: [
-                        Expanded(child: _metricCard('Total', '${allRefs.length}', const Color(0xFF4A6B5D))),
+                        Expanded(child: _metricCard('Total', '${allRefs.length}', const Color(0xFF012A58))),
                         const SizedBox(width: 8),
-                        Expanded(child: _metricCard('Pending', '$pendingCount', const Color(0xFFD97706))),
+                        Expanded(child: _metricCard('Pending', '$pendingCount', const Color(0xFFFE3434))),
                         const SizedBox(width: 8),
-                        Expanded(child: _metricCard('Accepted', '$acceptedCount', const Color(0xFF16A34A))),
+                        Expanded(child: _metricCard('Accepted', '$acceptedCount', const Color(0xFFFE3434))),
                         const SizedBox(width: 8),
-                        Expanded(child: _metricCard('Rejected', '$rejectedCount', const Color(0xFFDC2626))),
+                        Expanded(child: _metricCard('Rejected', '$rejectedCount', const Color(0xFFFE3434))),
                       ],
                     ),
                     const SizedBox(height: 14),

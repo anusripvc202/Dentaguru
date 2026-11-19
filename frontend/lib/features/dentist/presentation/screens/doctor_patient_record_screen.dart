@@ -150,10 +150,10 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
                           Container(
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF4A6B5D).withValues(alpha: 0.12),
+                              color: const Color(0xFF012A58).withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            child: const Icon(Icons.receipt_long_rounded, color: Color(0xFF4A6B5D), size: 24),
+                            child: const Icon(Icons.receipt_long_rounded, color: Color(0xFF012A58), size: 24),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
@@ -318,7 +318,7 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
                         label: const Text('Send Digital E-Prescription to Patient',
                             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF4A6B5D),
+                          backgroundColor: const Color(0xFF012A58),
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -389,7 +389,7 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text('💊 Digital E-Prescription issued to $pName! Live in Patient Health Locker.'),
-                                backgroundColor: const Color(0xFF4A6B5D),
+                                backgroundColor: const Color(0xFF012A58),
                                 duration: const Duration(seconds: 3),
                               ),
                             );
@@ -656,7 +656,7 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
                               ),
                             ),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF4A6B5D),
+                              backgroundColor: const Color(0xFF012A58),
                               foregroundColor: Colors.white,
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                               padding: const EdgeInsets.symmetric(vertical: 12),
@@ -679,7 +679,7 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
                               ),
                             ),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFEDF2EE),
+                              backgroundColor: const Color(0xFFF1F5F9),
                               foregroundColor: const Color(0xFF0F172A),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                               padding: const EdgeInsets.symmetric(vertical: 12),
@@ -749,7 +749,7 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
         key: Key(keyName),
         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
         decoration: BoxDecoration(
-          color: const Color(0xFFF1F5F2),
+          color: const Color(0xFFF8FAFC),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
@@ -796,10 +796,10 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF4A6B5D) : Colors.white,
+          color: isSelected ? const Color(0xFF012A58) : Colors.white,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isSelected ? const Color(0xFF4A6B5D) : const Color(0xFFE2E8F0),
+            color: isSelected ? const Color(0xFF012A58) : const Color(0xFFE2E8F0),
           ),
         ),
         child: Text(
@@ -849,7 +849,7 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
                     width: 8,
                     height: 8,
                     decoration: const BoxDecoration(
-                      color: Color(0xFFE5A93C),
+                      color: Color(0xFFFE3434),
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -953,7 +953,7 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: isPlanned ? const Color(0xFFE5A93C) : const Color(0xFFE2E8F0),
+                      color: isPlanned ? const Color(0xFFFE3434) : const Color(0xFFE2E8F0),
                       width: isPlanned ? 1.5 : 1,
                     ),
                   ),
@@ -965,7 +965,7 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
                         style: TextStyle(
                           fontSize: 13.5,
                           fontWeight: FontWeight.w700,
-                          color: isPlanned ? const Color(0xFFB45309) : const Color(0xFF0F172A),
+                          color: isPlanned ? const Color(0xFFFE3434) : const Color(0xFF0F172A),
                         ),
                       ),
                     ),
@@ -1036,7 +1036,7 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
             ? req.confirmedDate!
             : '${req.submittedAt.day}/${req.submittedAt.month}/${req.submittedAt.year}';
         final isCompleted = req.status == 'COMPLETED' || req.status == 'CONFIRMED';
-        final statusColor = isCompleted ? const Color(0xFF4A6B5D) : const Color(0xFFE5A93C);
+        final statusColor = isCompleted ? const Color(0xFF012A58) : const Color(0xFFFE3434);
 
         return Container(
           margin: const EdgeInsets.only(bottom: 12),
@@ -1058,12 +1058,12 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
                         Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF4A6B5D).withValues(alpha: 0.1),
+                            color: const Color(0xFF012A58).withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: const Icon(
                             Icons.event_available_rounded,
-                            color: Color(0xFF4A6B5D),
+                            color: Color(0xFF012A58),
                             size: 18,
                           ),
                         ),
@@ -1214,7 +1214,7 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF4A6B5D).withValues(alpha: 0.1),
+                      color: const Color(0xFF012A58).withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
@@ -1222,7 +1222,7 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
                       style: const TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
-                        color: Color(0xFF4A6B5D),
+                        color: Color(0xFF012A58),
                       ),
                     ),
                   ),

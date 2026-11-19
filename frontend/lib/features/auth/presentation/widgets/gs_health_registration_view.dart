@@ -406,7 +406,7 @@ class GsHealthRegistrationView extends StatelessWidget {
             curve: Curves.easeOut,
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
             decoration: BoxDecoration(
-              color: isSelected ? const Color(0xFFEFF4FA) : Colors.white,
+              color: isSelected ? const Color(0x14012A58) : Colors.white,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
                 color: isSelected ? AppTheme.gsNavy : const Color(0xFFE2E8F0),
@@ -596,8 +596,32 @@ class GsHealthRegistrationView extends StatelessWidget {
         ),
         const SizedBox(height: 18),
 
-        // 3. Languages You Consult In
+        // 3. Languages Known (Multi-Select Consultation Languages)
         _buildFieldLabel('LANGUAGES YOU CONSULT IN'),
+        const SizedBox(height: 4),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(
+              'Languages Known',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.gsNavy,
+              ),
+            ),
+            Text(
+              '• Select multiple (${selectedLanguages.length} selected)',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: const Color(0xFF64748B),
+              ),
+            ),
+          ],
+        ),
         const SizedBox(height: 10),
         _buildPreferredLanguagesWrap(),
         const SizedBox(height: 20),
@@ -737,7 +761,7 @@ class GsHealthRegistrationView extends StatelessWidget {
               color: selected ? AppTheme.gsNavy : Colors.white,
               borderRadius: BorderRadius.circular(24),
               border: Border.all(
-                color: selected ? AppTheme.gsNavy : const Color(0xFFDCE3EC),
+                color: selected ? AppTheme.gsNavy : const Color(0xFFE2E8F0),
                 width: 1.2,
               ),
             ),
@@ -762,7 +786,7 @@ class GsHealthRegistrationView extends StatelessWidget {
       key: const Key('reg_dentist_review_note'),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: const Color(0xFFF5F7FB),
+        color: const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: const Color(0xFFE2E8F0)),
       ),
@@ -920,7 +944,7 @@ class GsHealthRegistrationView extends StatelessWidget {
                   border: Border.all(
                     color: isSelected
                         ? AppTheme.gsRed
-                        : const Color(0xFFDCE3EC),
+                        : const Color(0xFFE2E8F0),
                     width: 1.2,
                   ),
                 ),
@@ -964,7 +988,7 @@ class GsHealthRegistrationView extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFEFF4FA),
+                    color: const Color(0x14012A58),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                       color: AppTheme.gsNavy.withValues(alpha: 0.25),
@@ -999,7 +1023,7 @@ class GsHealthRegistrationView extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              color: const Color(0xFFEFF4FA),
+              color: const Color(0x14012A58),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
                 color: AppTheme.gsNavy.withValues(alpha: 0.2),
@@ -1079,7 +1103,7 @@ class GsHealthRegistrationView extends StatelessWidget {
             style: OutlinedButton.styleFrom(
               backgroundColor: Colors.white,
               foregroundColor: AppTheme.gsNavy,
-              side: const BorderSide(color: Color(0xFFD5DCE6), width: 1.3),
+              side: const BorderSide(color: Color(0xFFE2E8F0), width: 1.3),
               elevation: 0,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
@@ -1142,7 +1166,7 @@ class GsHealthRegistrationView extends StatelessWidget {
         color: const Color(0xFF94A3B8),
       ),
       filled: true,
-      fillColor: const Color(0xFFF3F5F8),
+      fillColor: const Color(0xFFF8FAFC),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       suffixIcon: suffixIcon,
       border: OutlineInputBorder(

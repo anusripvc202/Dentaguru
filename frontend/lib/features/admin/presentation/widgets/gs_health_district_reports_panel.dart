@@ -46,7 +46,7 @@ class _GsHealthDistrictReportsPanelState extends State<GsHealthDistrictReportsPa
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [Color(0xFF012A58), Color(0xFF0F3D6E)],
+                colors: [Color(0xFF012A58), Color(0xFF012A58)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -228,10 +228,10 @@ class _GsHealthDistrictReportsPanelState extends State<GsHealthDistrictReportsPa
                       Row(
                         children: [
                           Expanded(child: _buildReportMetric('Patients', '$patientCount', const Color(0xFF012A58))),
-                          Expanded(child: _buildReportMetric('Doctors', '$docCount', const Color(0xFF0284C7))),
-                          Expanded(child: _buildReportMetric('Clinics', '$clinicCount', const Color(0xFF059669))),
-                          Expanded(child: _buildReportMetric('Assignments', '$assignmentCount', const Color(0xFF7C3AED))),
-                          Expanded(child: _buildReportMetric('Sub-Admins', '$saCount', const Color(0xFFD97706))),
+                          Expanded(child: _buildReportMetric('Doctors', '$docCount', const Color(0xFFFE3434))),
+                          Expanded(child: _buildReportMetric('Clinics', '$clinicCount', const Color(0xFF012A58))),
+                          Expanded(child: _buildReportMetric('Assignments', '$assignmentCount', const Color(0xFFFE3434))),
+                          Expanded(child: _buildReportMetric('Sub-Admins', '$saCount', const Color(0xFFFE3434))),
                         ],
                       ),
                     ],
