@@ -2347,9 +2347,6 @@ const _inMemoryReferrals = [];
 const Referral = {
     async create(referralData) {
         const id = referralData.id || require('crypto').randomUUID();
-        const referrerPatientId = referralData.referrer_patient_id || referralData.referrerPatientId || referralData.referrer_id || referralData.referrerId;
-        const referredPatientId = referralData.referred_patient_id || referralData.referredPatientId || referralData.referred_user_id || referralData.referredUserId || null;
-        const doctorId = referralData.doctor_id || referralData.doctorId || referralData.assigned_doctor_id || referralData.assignedDoctorId || null;
         const rawReferrerId = referralData.referrer_patient_id || referralData.referrerPatientId || referralData.referrer_id || referralData.referrerId;
         const referrerPatientId = await resolveUserUuid(rawReferrerId) || rawReferrerId;
         const rawReferredPatientId = referralData.referred_patient_id || referralData.referredPatientId || referralData.referred_user_id || referralData.referredUserId || null;
@@ -2373,12 +2370,9 @@ const Referral = {
 
         const payload = {
             id,
-            referrer_patient_id: referrerPatientId,
-            referrer_id: referrerPatientId, // Backward compatibility
             referrer_patient_id: referrerPatientId || null,
             referrer_id: referrerPatientId || null,
             referred_patient_id: referredPatientId,
-            referred_user_id: referredPatientId, // Backward compatibility
             referred_user_id: referredPatientId,
             referred_patient_name: referralData.referred_patient_name || referralData.referredPatientName || '',
             referred_patient_mobile: referralData.referred_patient_mobile || referralData.referredPatientMobile || '',
@@ -2410,18 +2404,8 @@ const Referral = {
                 return data;
             }
             if (error) {
-                // Fallback attempt with subset if some columns don't exist yet
-                const safePayload = {
-                    id: payload.id,
-                    referrer_id: payload.referrer_id,
-                    referred_user_id: payload.referred_user_id,
-                    referral_code: payload.referral_code || 'DG-REF',
-                    status: payload.status,
-                    created_at: payload.created_at,
-                    updated_at: payload.updated_at
-                };
                 console.warn('⚠️ Supabase Referrals primary insert notice:', error.message);
-                const safePayload = { ...payload };
+                const safePayload = /** @type {Record<string, any>} */ ({ ...payload });
                 delete safePayload.assigned_doctor_id;
                 const { data: d2, error: e2 } = await supabaseAdmin.from('referrals').insert(safePayload).select().single();
                 if (!e2 && d2) {
@@ -2443,95 +2427,66 @@ const Referral = {
     },
 
     async find(query = {}) {
+        const refIdRaw = query.referrer_patient_id || query.referrerPatientId || query.referrer_id || query.referrerId;
+        const docIdRaw = query.doctor_id || query.doctorId || query.assigned_doctor_id || query.assignedDoctorId;
+        const patIdRaw = query.referred_patient_id || query.referredPatientId || query.referred_user_id || query.referredUserId;
+        const mobileRaw = query.referred_patient_mobile || query.referredPatientMobile;
+
+        const applyFilters = (req) => {
+            if (refIdRaw) {
+                req = req.or(`referrer_patient_id.eq.${refIdRaw},referrer_id.eq.${refIdRaw}`);
+            }
+            if (docIdRaw) {
+                req = req.or(`doctor_id.eq.${docIdRaw},assigned_doctor_id.eq.${docIdRaw}`);
+            }
+            if (patIdRaw) {
+                req = req.or(`referred_patient_id.eq.${patIdRaw},referred_user_id.eq.${patIdRaw}`);
+            }
+            if (mobileRaw) {
+                req = req.eq('referred_patient_mobile', mobileRaw);
+            }
+            if (query.status) req = req.eq('status', query.status);
+            return req;
+        };
+
         try {
-            let req = supabaseAdmin.from('referrals').select('*, referrer:users!referrer_patient_id(id, name, email, phone), doctor:dentists!doctor_id(id, speciality, users(name, email, phone), clinics(clinic_name, location))');
-            if (query.referrer_patient_id || query.referrerPatientId || query.referrer_id || query.referrerId) {
-                const refId = query.referrer_patient_id || query.referrerPatientId || query.referrer_id || query.referrerId;
-                req = req.or(`referrer_patient_id.eq.${refId},referrer_id.eq.${refId}`);
-                const refIdRaw = query.referrer_patient_id || query.referrerPatientId || query.referrer_id || query.referrerId;
-                const docIdRaw = query.doctor_id || query.doctorId || query.assigned_doctor_id || query.assignedDoctorId;
-                const patIdRaw = query.referred_patient_id || query.referredPatientId || query.referred_user_id || query.referredUserId;
-                const mobileRaw = query.referred_patient_mobile || query.referredPatientMobile;
+            const req = applyFilters(
+                supabaseAdmin
+                    .from('referrals')
+                    .select('*, referrer:users!referrer_patient_id(id, name, email, phone), doctor:dentists!doctor_id(id, user_id, speciality, users(name, email, phone), clinics(clinic_name, location))')
+            );
+            const { data, error } = await req.order('created_at', { ascending: false });
+            if (!error && Array.isArray(data)) {
+                return data;
+            }
+            if (error) {
+                console.warn('⚠️ Referral.find join notice, retrying simple select:', error.message);
+                const simpleReq = applyFilters(supabaseAdmin.from('referrals').select('*'));
+                const simple = await simpleReq.order('created_at', { ascending: false });
+                if (!simple.error && Array.isArray(simple.data)) {
+                    return simple.data;
+                }
+            }
+        } catch (_) { }
 
-                const applyFilters = (req) => {
-                    if (refIdRaw) {
-                        req = req.or(`referrer_patient_id.eq.${refIdRaw},referrer_id.eq.${refIdRaw}`);
-                    }
-                    if (query.doctor_id || query.doctorId || query.assigned_doctor_id || query.assignedDoctorId) {
-                        const docId = query.doctor_id || query.doctorId || query.assigned_doctor_id || query.assignedDoctorId;
-                        req = req.or(`doctor_id.eq.${docId},assigned_doctor_id.eq.${docId}`);
-                        if (docIdRaw) {
-                            req = req.or(`doctor_id.eq.${docIdRaw},assigned_doctor_id.eq.${docIdRaw}`);
-                        }
-                        if (query.referred_patient_id || query.referredPatientId || query.referred_user_id || query.referredUserId) {
-                            const refUserId = query.referred_patient_id || query.referredPatientId || query.referred_user_id || query.referredUserId;
-                            req = req.or(`referred_patient_id.eq.${refUserId},referred_user_id.eq.${refUserId}`);
-                            if (patIdRaw) {
-                                req = req.or(`referred_patient_id.eq.${patIdRaw},referred_user_id.eq.${patIdRaw}`);
-                            }
-                            if (query.referred_patient_mobile || query.referredPatientMobile) {
-                                req = req.eq('referred_patient_mobile', query.referred_patient_mobile || query.referredPatientMobile);
-                                if (mobileRaw) {
-                                    req = req.eq('referred_patient_mobile', mobileRaw);
-                                }
-                                if (query.status) req = req.eq('status', query.status);
-                                return req;
-                            };
-
-                            try {
-                                let req = applyFilters(
-                                    supabaseAdmin
-                                        .from('referrals')
-                                        .select('*, referrer:users!referrer_patient_id(id, name, email, phone), doctor:dentists!doctor_id(id, user_id, speciality, users(name, email, phone), clinics(clinic_name, location))')
-                                );
-                                const { data, error } = await req.order('created_at', { ascending: false });
-                                if (!error && data && data.length > 0) {
-                                    if (!error && Array.isArray(data)) {
-                                        return data;
-                                    }
-                                    if (error) {
-                                        // Fallback to simpler select without complex foreign joins
-                                        const simple = await supabaseAdmin.from('referrals').select('*').order('created_at', { ascending: false });
-                                        if (simple.data && simple.data.length > 0) {
-                                            console.warn('⚠️ Referral.find join notice, retrying simple select:', error.message);
-                                            const simpleReq = applyFilters(supabaseAdmin.from('referrals').select('*'));
-                                            const simple = await simpleReq.order('created_at', { ascending: false });
-                                            if (!simple.error && Array.isArray(simple.data)) {
-                                                return simple.data;
-                                            }
-                                        }
-                                    } catch (_) { }
-
-                                    let filtered = [..._inMemoryReferrals];
-                                    const rRefId = query.referrer_patient_id || query.referrerPatientId || query.referrer_id || query.referrerId;
-                                    if (rRefId) {
-                                        filtered = filtered.filter(r => (r.referrer_patient_id === rRefId || r.referrer_id === rRefId));
-                                        if (refIdRaw) {
-                                            filtered = filtered.filter(r => (r.referrer_patient_id === refIdRaw || r.referrer_id === refIdRaw));
-                                        }
-                                        const rDocId = query.doctor_id || query.doctorId || query.assigned_doctor_id || query.assignedDoctorId;
-                                        if (rDocId) {
-                                            filtered = filtered.filter(r => (r.doctor_id === rDocId || r.assigned_doctor_id === rDocId));
-                                            if (docIdRaw) {
-                                                filtered = filtered.filter(r => (r.doctor_id === docIdRaw || r.assigned_doctor_id === docIdRaw));
-                                            }
-                                            const rPatId = query.referred_patient_id || query.referredPatientId || query.referred_user_id || query.referredUserId;
-                                            if (rPatId) {
-                                                filtered = filtered.filter(r => (r.referred_patient_id === rPatId || r.referred_user_id === rPatId));
-                                                if (patIdRaw) {
-                                                    filtered = filtered.filter(r => (r.referred_patient_id === patIdRaw || r.referred_user_id === patIdRaw));
-                                                }
-                                                const rPhone = query.referred_patient_mobile || query.referredPatientMobile;
-                                                if (rPhone) {
-                                                    filtered = filtered.filter(r => (r.referred_patient_mobile === rPhone));
-                                                    if (mobileRaw) {
-                                                        filtered = filtered.filter(r => (r.referred_patient_mobile === mobileRaw));
-                                                    }
-                                                    if (query.status) {
-                                                        filtered = filtered.filter(r => r.status === query.status);
-                                                    }
-                                                    return filtered;
-                                                },
+        let filtered = [..._inMemoryReferrals];
+        if (refIdRaw) {
+            filtered = filtered.filter(r => (r.referrer_patient_id === refIdRaw || r.referrer_id === refIdRaw));
+        }
+        if (docIdRaw) {
+            filtered = filtered.filter(r => (r.doctor_id === docIdRaw || r.assigned_doctor_id === docIdRaw));
+        }
+        if (patIdRaw) {
+            filtered = filtered.filter(r => (r.referred_patient_id === patIdRaw || r.referred_user_id === patIdRaw));
+        }
+        if (mobileRaw) {
+            filtered = filtered.filter(r => (r.referred_patient_mobile === mobileRaw));
+        }
+        if (query.status) {
+            filtered = filtered.filter(r => r.status === query.status);
+        }
+        return filtered;
+    },
 
     async findById(id) {
                                                     if (!id) return null;

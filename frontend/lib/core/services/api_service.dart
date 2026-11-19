@@ -635,47 +635,70 @@ class ApiService {
   @visibleForTesting
   static Future<Map<String, dynamic>> Function({required String phone, String email})? debugRequestOtpOverride;
 
-  /// Request Mobile OTP Code via Real SMS
+  List<Uri> _candidateEndpointUrls(String path) {
+    final primary = ApiConstants.baseUrl;
+    final candidates = <String>[primary];
+    if (!kReleaseMode) {
+      if (primary.contains('://localhost:')) {
+        candidates.add(primary.replaceFirst('://localhost:', '://127.0.0.1:'));
+      } else if (primary.contains('://127.0.0.1:')) {
+        candidates.add(primary.replaceFirst('://127.0.0.1:', '://localhost:'));
+      } else if (primary.contains('://10.0.2.2:')) {
+        candidates.add(primary.replaceFirst('://10.0.2.2:', '://localhost:'));
+        candidates.add(primary.replaceFirst('://10.0.2.2:', '://127.0.0.1:'));
+      }
+    }
+    return candidates.map((base) => Uri.parse('$base$path')).toList();
+  }
+
+  /// Request Mobile OTP Code via Real SMS (or local on-screen test mode)
   Future<Map<String, dynamic>> requestOtp({required String phone, String email = ''}) async {
     if (debugRequestOtpOverride != null) {
       return debugRequestOtpOverride!(phone: phone, email: email);
     }
-    try {
-      final url = Uri.parse('${ApiConstants.baseUrl}/auth/otp/request');
-      debugPrint('🌐 Sending requestOtp to: $url');
+    final urls = _candidateEndpointUrls('/auth/otp/request');
+    Object? lastError;
+    for (final url in urls) {
+      try {
+        debugPrint('🌐 Sending requestOtp to: $url');
 
-      final response = await http.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'phone': phone, 'email': email}),
-      ).timeout(const Duration(seconds: 40));
+        final response = await http.post(
+          url,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'phone': phone, 'email': email}),
+        ).timeout(const Duration(seconds: 40));
 
-      final data = jsonDecode(response.body);
-      if (response.statusCode == 200 && data['success'] == true) {
-        final bool isOnScreenTestOtp = ApiConstants.allowOnScreenOtpDisplay &&
-            data['deliveryMode'] == 'on_screen';
-        return {
-          'success': true,
-          'message': data['message'] ?? 'OTP sent successfully to your mobile number.',
-          if (isOnScreenTestOtp && data['otp'] != null) 'otp': data['otp'].toString(),
-          if (isOnScreenTestOtp) 'deliveryMode': 'on_screen',
-          'isAdmin': data['isAdmin'] == true,
-        };
-      } else {
-        return {
-          'success': false,
-          'status': response.statusCode,
-          'message': data['message'] ?? 'Failed to send OTP SMS. Please check your mobile number.',
-          'isAdmin': data['isAdmin'] == true,
-        };
+        final data = jsonDecode(response.body);
+        if (response.statusCode == 200 && data['success'] == true) {
+          final bool isOnScreenTestOtp = ApiConstants.allowOnScreenOtpDisplay &&
+              data['deliveryMode'] == 'on_screen';
+          return {
+            'success': true,
+            'message': data['message'] ?? 'OTP sent successfully to your mobile number.',
+            if (isOnScreenTestOtp && data['otp'] != null) 'otp': data['otp'].toString(),
+            if (isOnScreenTestOtp) 'deliveryMode': 'on_screen',
+            'isAdmin': data['isAdmin'] == true,
+          };
+        } else {
+          return {
+            'success': false,
+            'status': response.statusCode,
+            'message': data['message'] ?? 'Failed to send OTP SMS. Please check your mobile number.',
+            'isAdmin': data['isAdmin'] == true,
+          };
+        }
+      } catch (e) {
+        lastError = e;
+        debugPrint('⚠️ requestOtp attempt ($url) network error: $e');
       }
-    } catch (e) {
-      debugPrint('⚠️ requestOtp network error: $e');
-      return {
-        'success': false,
-        'message': 'Unable to connect to SMS verification server. Please try again.',
-      };
     }
+    debugPrint('⚠️ requestOtp failed across all candidate URLs: $lastError');
+    return {
+      'success': false,
+      'message': !kReleaseMode && ApiConstants.isUsingNonProductionBackend()
+          ? 'Unable to reach local OTP backend (${ApiConstants.baseUrl}). Ensure "cd backend && npm start" is running.'
+          : 'Unable to connect to SMS verification server. Please try again.',
+    };
   }
 
   @visibleForTesting
@@ -687,38 +710,43 @@ class ApiService {
       return debugVerifyOtpOverride!(phone: phone, email: email, code: code);
     }
 
-    try {
-      final url = Uri.parse('${ApiConstants.baseUrl}/auth/otp/verify');
-      final response = await http.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'phone': phone, 'email': email, 'code': code.trim()}),
-      ).timeout(const Duration(seconds: 40));
+    final urls = _candidateEndpointUrls('/auth/otp/verify');
+    Object? lastError;
+    for (final url in urls) {
+      try {
+        final response = await http.post(
+          url,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'phone': phone, 'email': email, 'code': code.trim()}),
+        ).timeout(const Duration(seconds: 40));
 
-      final data = jsonDecode(response.body);
-      if (response.statusCode == 200 && data['success'] == true) {
-        return {
-          'success': true,
-          'message': data['message'] ?? 'OTP verified successfully.',
-          'user': data['user'],
-          'accessToken': data['accessToken'],
-          'refreshToken': data['refreshToken'],
-          'isAdmin': data['isAdmin'] == true,
-        };
-      } else {
-        return {
-          'success': false,
-          'status': response.statusCode,
-          'message': data['message'] ?? 'Invalid or expired OTP code. Please request a new OTP.',
-        };
+        final data = jsonDecode(response.body);
+        if (response.statusCode == 200 && data['success'] == true) {
+          return {
+            'success': true,
+            'message': data['message'] ?? 'OTP verified successfully.',
+            'user': data['user'],
+            'accessToken': data['accessToken'],
+            'refreshToken': data['refreshToken'],
+            'isAdmin': data['isAdmin'] == true,
+          };
+        } else {
+          return {
+            'success': false,
+            'status': response.statusCode,
+            'message': data['message'] ?? 'Invalid or expired OTP code. Please request a new OTP.',
+          };
+        }
+      } catch (e) {
+        lastError = e;
+        debugPrint('⚠️ verifyOtp attempt ($url) network error: $e');
       }
-    } catch (e) {
-      debugPrint('⚠️ verifyOtp network error: $e');
-      return {
-        'success': false,
-        'message': 'Failed to verify OTP code due to connection error. Please try again.',
-      };
     }
+    debugPrint('⚠️ verifyOtp failed across all candidate URLs: $lastError');
+    return {
+      'success': false,
+      'message': 'Failed to verify OTP code due to connection error. Please try again.',
+    };
   }
 
   /// Request Forgot Password OTP

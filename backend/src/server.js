@@ -87,7 +87,7 @@ function startServer() {
 
     // Start Server listening
     const HOST = '0.0.0.0';
-    server.listen(PORT, HOST, () => {
+    server.listen(Number(PORT) || 5000, HOST, () => {
         console.log(`GS HEALTH API server running on ${HOST}:${PORT} [NODE_ENV=${process.env.NODE_ENV || 'development'}]`);
         if (isOnScreenOtpTestMode()) {
             console.log('🧪 [On-Screen OTP Testing Mode] ACTIVE — Real SMS hard-blocked; Supabase RPC storage enforced.');
