@@ -148,7 +148,20 @@ test('GS HEALTH Complete Dashboard Data Persistence, Notifications & Find Doctor
         const { data: docCRow } = await supabaseAdmin.from('dentists').select('clinic_id').eq('id', docCDentistId).maybeSingle();
         if (docCRow?.clinic_id) createdClinicIds.push(docCRow.clinic_id);
 
-        // 4. Authenticate Primary Admin (9281030535)
+        // 4. Ensure Primary Admin (9281030535) exists in gs-health-test and authenticate
+        const { User } = require('../src/models/Schemas');
+        let existingAdmin = await User.findByMobile('9281030535').catch(() => null);
+        if (!existingAdmin) {
+            existingAdmin = await User.create({
+                name: 'GS Health Primary Admin',
+                email: `admin.dash.${suffix}@gshealth-test.local`,
+                password: `AdminPass_${suffix}!`,
+                phone: '9281030535',
+                role: 'Admin',
+                status: 'ACTIVE'
+            });
+            if (existingAdmin?.id) createdUserIds.push(existingAdmin.id);
+        }
         const adminLogin = await apiRequest(baseUrl, 'POST', '/auth/login', {
             body: { phone: '9281030535', role: 'Admin' }
         });

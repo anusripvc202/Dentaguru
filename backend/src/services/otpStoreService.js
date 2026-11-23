@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const { supabaseAdmin } = require('../config/supabase');
+const { getOtpSalt, isCloudEnv } = require('../config/secrets');
 
-const OTP_SALT = process.env.OTP_SALT || process.env.JWT_SECRET || 'gs_health_otp_salt_2026';
 const OTP_EXPIRY_SECONDS = 5 * 60; // 5 minutes TTL (300 seconds)
 const OTP_COOLDOWN_SECONDS = 30; // 30 seconds resend cooldown
 const OTP_COOLDOWN_MS = OTP_COOLDOWN_SECONDS * 1000;
@@ -30,7 +30,7 @@ function normalizeKey(identifier) {
  * Salted HMAC-SHA256 hash of OTP code (raw OTPs are never stored)
  */
 function hashOtp(code) {
-    return crypto.createHmac('sha256', OTP_SALT).update(String(code).trim()).digest('hex');
+    return crypto.createHmac('sha256', getOtpSalt()).update(String(code).trim()).digest('hex');
 }
 
 /**
@@ -48,13 +48,52 @@ const PRODUCTION_SUPABASE_REF = 'fommrwxpqzkcktweosgp.supabase.co';
  * Production (NODE_ENV === 'production') can NEVER activate this mode,
  * even if OTP_DELIVERY_MODE=on_screen is accidentally set.
  */
-function isOnScreenOtpTestMode() {
-    const nodeEnv = (process.env.NODE_ENV || 'development').trim().toLowerCase();
+function isOnScreenOtpTestMode(env = process.env) {
+    const nodeEnv = (env.NODE_ENV || 'development').trim().toLowerCase();
     if (nodeEnv === 'production') {
         return false;
     }
-    const deliveryMode = (process.env.OTP_DELIVERY_MODE || '').trim().toLowerCase();
+    const deliveryMode = (env.OTP_DELIVERY_MODE || '').trim().toLowerCase();
     return deliveryMode === 'on_screen';
+}
+
+/**
+ * Parse approved testing phone numbers for on-screen OTP display in staging/testing.
+ * Combines ON_SCREEN_OTP_ALLOWLIST (comma-separated) and ADMIN_PHONE / ADMIN_MOBILE_NUMBER.
+ */
+function getOnScreenOtpAllowlist(env = process.env) {
+    const rawEntries = [
+        env.ON_SCREEN_OTP_ALLOWLIST || '',
+        env.ADMIN_PHONE || '',
+        env.ADMIN_MOBILE_NUMBER || ''
+    ]
+        .join(',')
+        .split(',')
+        .map(v => normalizeKey(v))
+        .filter(v => v.length >= 10);
+    return new Set(rawEntries);
+}
+
+/**
+ * Check whether the target phone is approved for on-screen OTP display:
+ * - Production: ALWAYS false.
+ * - Staging or explicit ON_SCREEN_OTP_ALLOWLIST: strictly restricted to allowlisted 10-digit numbers.
+ * - Local development / unit tests when ON_SCREEN_OTP_ALLOWLIST is unset: allowed for testing.
+ */
+function isPhoneAllowedForOnScreenOtp(phone, env = process.env) {
+    const nodeEnv = (env.NODE_ENV || 'development').trim().toLowerCase();
+    if (nodeEnv === 'production') return false;
+    if (!isOnScreenOtpTestMode(env)) return false;
+
+    const normPhone = normalizeKey(phone);
+    if (!normPhone || normPhone.length < 10) return false;
+
+    const explicitRaw = (env.ON_SCREEN_OTP_ALLOWLIST || '').trim();
+    const allowlist = getOnScreenOtpAllowlist(env);
+    if (nodeEnv === 'staging' || explicitRaw.length > 0) {
+        return allowlist.has(normPhone);
+    }
+    return true;
 }
 
 function isMissingRpcError(error) {
@@ -82,11 +121,11 @@ class OtpStoreService {
     }
 
     /**
-     * Both Production and On-Screen Testing Mode strictly require Supabase RPC storage
+     * Production, Staging, and On-Screen Testing Mode strictly require Supabase RPC storage
      * (no in-memory fallback permitted).
      */
     get requiresSupabaseRpc() {
-        return this.isProduction || isOnScreenOtpTestMode();
+        return isCloudEnv() || this.isProduction || isOnScreenOtpTestMode();
     }
 
     /**
@@ -481,6 +520,8 @@ module.exports = {
     hashOtp,
     normalizeKey,
     isOnScreenOtpTestMode,
+    getOnScreenOtpAllowlist,
+    isPhoneAllowedForOnScreenOtp,
     localOtpMap,
     localLimitMap
 };

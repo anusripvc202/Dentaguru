@@ -50,7 +50,7 @@ function formatRecord(r) {
                 ? 'Prescription'
                 : 'Other');
 
-    const title = parsedNotes.title || r.diagnosis || 'Dental Health Record';
+    const title = parsedNotes.title || r.diagnosis || 'Medical Health Record';
     const description = parsedNotes.description !== undefined
         ? parsedNotes.description
         : (parsedNotes.subtitle || '');
@@ -59,11 +59,21 @@ function formatRecord(r) {
         id: r.id,
         patientId: r.patient_id,
         patientName: parsedNotes.patientName || patientObj.name || '',
-        dentistId: r.dentist_id || null,
+        dentistId: r.dentist_id || parsedNotes.dentistId || null,
+        appointmentId: r.appointment_id || parsedNotes.appointmentId || null,
         recordSource: parsedNotes.recordSource || (parsedNotes.fileName ? 'patient_upload' : 'doctor_issued'),
         type: parsedNotes.type || (category === 'Dental X-ray' ? 'xray' : category === 'Prescription' ? 'prescription' : 'document'),
         title,
         category,
+        specialty: parsedNotes.specialty || '',
+        department: parsedNotes.department || '',
+        diagnosis: parsedNotes.diagnosis || r.diagnosis || title,
+        symptoms: parsedNotes.symptoms || '',
+        clinicalSections: parsedNotes.clinicalSections && typeof parsedNotes.clinicalSections === 'object' ? parsedNotes.clinicalSections : {},
+        followUpDate: parsedNotes.followUpDate || '',
+        instructions: parsedNotes.instructions || '',
+        approvedByDoctor: parsedNotes.approvedByDoctor === true,
+        doctorQualification: parsedNotes.doctorQualification || '',
         description,
         subtitle: parsedNotes.subtitle || description || category,
         doctorName: parsedNotes.doctorName || parsedNotes.doctor_name || '',
@@ -237,11 +247,24 @@ exports.getSharedRecordsForDoctor = async (req, res) => {
     }
 };
 
-// 3. CREATE NEW MEDICAL / DENTAL HEALTH RECORD
+// 3. CREATE NEW MULTI-SPECIALTY MEDICAL HEALTH RECORD OR E-PRESCRIPTION
 exports.createRecord = async (req, res) => {
     const {
         patientId,
         patientName,
+        dentistId,
+        doctorId,
+        appointmentId,
+        specialty,
+        speciality,
+        department,
+        diagnosis,
+        symptoms,
+        clinicalSections,
+        followUpDate,
+        instructions,
+        doctorQualification,
+        approvedByDoctor,
         type,
         recordSource,
         title,
@@ -287,16 +310,17 @@ exports.createRecord = async (req, res) => {
             }
         }
 
-        const isPatientUpload = recordSource === 'patient_upload' || Boolean(fileName || storageKey || category);
-        const cleanTitle = String(title || '').trim();
+        const isDoctorIssuedPrescription = recordSource === 'doctor_issued' || (type === 'prescription' && !fileName && !storageKey);
+        const isPatientUpload = !isDoctorIssuedPrescription && (recordSource === 'patient_upload' || Boolean(fileName || storageKey || category));
+        const cleanTitle = String(title || diagnosis || '').trim();
         if (!cleanTitle) {
             return res.status(400).json({
                 success: false,
-                message: 'Record Name is required.'
+                message: 'Record Name or Diagnosis is required.'
             });
         }
 
-        let effectiveCategory = category || 'Other';
+        let effectiveCategory = category || (type === 'prescription' ? 'Prescription' : 'Other');
         if (isPatientUpload && !ALLOWED_CATEGORIES.includes(effectiveCategory)) {
             return res.status(400).json({
                 success: false,
@@ -346,17 +370,55 @@ exports.createRecord = async (req, res) => {
             if (pUser && pUser.name) resolvedPatientName = pUser.name;
         }
 
+        // Dynamically resolve doctor's dentist_id & specialization when issuing clinical prescriptions
+        const rawDocId = dentistId || doctorId || ((req.user && ['dentist', 'doctor'].includes(String(req.user.role || '').toLowerCase())) ? req.user.id : null);
+        let resolvedDentistUuid = null;
+        let resolvedSpecialty = String(specialty || speciality || '').trim();
+        let resolvedDepartment = String(department || '').trim();
+        let resolvedDoctorName = doctorName || '';
+        let resolvedDoctorQualification = doctorQualification || '';
+
+        if (rawDocId) {
+            try {
+                const resolvedDocIds = await resolveDentistIds(rawDocId);
+                resolvedDentistUuid = resolvedDocIds.dentistTableId || null;
+                const docRow = await Dentist.findById(resolvedDentistUuid || rawDocId);
+                if (docRow) {
+                    if (!resolvedDentistUuid && docRow.id) resolvedDentistUuid = docRow.id;
+                    if (!resolvedSpecialty) resolvedSpecialty = String(docRow.speciality || docRow.specialty || '').trim();
+                    if (!resolvedDepartment) resolvedDepartment = String(docRow.department || '').trim();
+                    if (!resolvedDoctorName) resolvedDoctorName = docRow.users?.name || docRow.name || '';
+                    if (!resolvedDoctorQualification) resolvedDoctorQualification = docRow.qualifications || docRow.qualification || '';
+                }
+            } catch (_) {}
+        }
+
+        const cleanSections = (clinicalSections && typeof clinicalSections === 'object' && !Array.isArray(clinicalSections))
+            ? clinicalSections
+            : {};
+
         const nowIso = new Date().toISOString();
         const notesMeta = {
             recordSource: isPatientUpload ? 'patient_upload' : 'doctor_issued',
             type: type || (effectiveCategory === 'Dental X-ray' ? 'xray' : effectiveCategory === 'Prescription' ? 'prescription' : 'document'),
             title: cleanTitle,
             category: effectiveCategory,
+            dentistId: resolvedDentistUuid || rawDocId || '',
+            appointmentId: appointmentId ? String(appointmentId).trim() : '',
+            specialty: resolvedSpecialty,
+            department: resolvedDepartment,
+            diagnosis: String(diagnosis || cleanTitle).trim(),
+            symptoms: String(symptoms || '').trim(),
+            clinicalSections: cleanSections,
+            followUpDate: String(followUpDate || '').trim(),
+            instructions: String(instructions || '').trim(),
+            doctorQualification: String(resolvedDoctorQualification || '').trim(),
+            approvedByDoctor: approvedByDoctor !== undefined ? Boolean(approvedByDoctor) : isDoctorIssuedPrescription,
             description: String(description || '').trim(),
             subtitle: String(subtitle || description || effectiveCategory).trim(),
             patientId: resolvedPatientUuid,
             patientName: resolvedPatientName,
-            doctorName: doctorName || '',
+            doctorName: resolvedDoctorName,
             clinicName: clinicName || '',
             fileName: fileName || '',
             fileType: normalizedExt.toUpperCase(),
@@ -374,7 +436,9 @@ exports.createRecord = async (req, res) => {
 
         const created = await MedicalRecord.create({
             patient_id: resolvedPatientUuid,
-            diagnosis: cleanTitle,
+            dentist_id: resolvedDentistUuid || undefined,
+            appointment_id: appointmentId ? String(appointmentId).trim() : undefined,
+            diagnosis: String(diagnosis || cleanTitle).trim(),
             notes: JSON.stringify(notesMeta),
             prescriptions: Array.isArray(items) ? items : [],
             xray_urls: (isXray && cleanKey) ? [cleanKey] : [],

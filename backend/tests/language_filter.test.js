@@ -210,4 +210,110 @@ test('GS HEALTH Language-Based Doctor Filtering E2E Suite', async (t) => {
     assert.equal(frenchRes.status, 200);
     assert.ok(frenchRes.json.dentists.some((d) => d.id === doc3.dentistId));
   });
+
+  await t.test('6. End-to-end Telugu/English + Hindi/Kannada + Any language + specialty alias + newly registered Malayalam doctor', async () => {
+    // Register Doc A (Telugu + English) and Doc B (Hindi + Kannada)
+    const regA = await api('/auth/register', {
+      method: 'POST',
+      body: {
+        name: `DocTeluguEng ${suffix}`,
+        phone: `75000${suffix.slice(-5)}`,
+        role: 'Dentist',
+        city: 'Vijayawada',
+        pincode: '520001',
+        specialty: 'Orthodontics',
+        qualification: 'BDS, MDS',
+        experienceYears: 7,
+        languages: ['Telugu', 'English'],
+      },
+    });
+    assert.equal(regA.status, 201);
+    cleanupUserIds.push(regA.json.user.id);
+    cleanupDentistIds.push(regA.json.user.dentistId);
+
+    const regB = await api('/auth/register', {
+      method: 'POST',
+      body: {
+        name: `DocHindiKan ${suffix}`,
+        phone: `76000${suffix.slice(-5)}`,
+        role: 'Dentist',
+        city: 'Bengaluru',
+        pincode: '560001',
+        specialty: 'General Dentistry',
+        qualification: 'BDS',
+        experienceYears: 5,
+        languages: ['Hindi', 'Kannada'],
+      },
+    });
+    assert.equal(regB.status, 201);
+    cleanupUserIds.push(regB.json.user.id);
+    cleanupDentistIds.push(regB.json.user.dentistId);
+
+    const docAId = regA.json.user.dentistId;
+    const docBId = regB.json.user.dentistId;
+
+    // All 4 languages must appear dynamically
+    const langsRes = await api('/doctors/languages');
+    assert.equal(langsRes.status, 200);
+    const langsLower = langsRes.json.languages.map((l) => l.toLowerCase());
+    for (const expected of ['telugu', 'english', 'hindi', 'kannada']) {
+      assert.ok(langsLower.includes(expected), `Expected ${expected} in /doctors/languages`);
+    }
+
+    // Selecting Telugu -> ONLY Doc A (not Doc B)
+    const teluguRes = await api(`/dentists?languages=Telugu&search=${suffix}`);
+    assert.equal(teluguRes.status, 200);
+    assert.ok(teluguRes.json.dentists.some((d) => d.id === docAId));
+    assert.ok(!teluguRes.json.dentists.some((d) => d.id === docBId));
+
+    // Selecting Kannada -> ONLY Doc B (not Doc A)
+    const kannadaRes = await api(`/dentists?languages=Kannada&search=${suffix}`);
+    assert.equal(kannadaRes.status, 200);
+    assert.ok(kannadaRes.json.dentists.some((d) => d.id === docBId));
+    assert.ok(!kannadaRes.json.dentists.some((d) => d.id === docAId));
+
+    // Multi-select Telugu + Kannada -> BOTH Doc A and Doc B
+    const multiRes = await api(`/dentists?languages=Telugu,Kannada&search=${suffix}`);
+    assert.equal(multiRes.status, 200);
+    assert.ok(multiRes.json.dentists.some((d) => d.id === docAId));
+    assert.ok(multiRes.json.dentists.some((d) => d.id === docBId));
+
+    // Selecting "Any language" -> unfiltered list includes both
+    const anyRes = await api(`/dentists?languages=Any%20language&search=${suffix}`);
+    assert.equal(anyRes.status, 200);
+    assert.ok(anyRes.json.dentists.some((d) => d.id === docAId));
+    assert.ok(anyRes.json.dentists.some((d) => d.id === docBId));
+
+    // Combined specialty alias ("Orthodontist" -> "Orthodontics") + city + pincode + language
+    const aliasCombo = await api('/dentists?city=Vijayawada&pincode=520001&specialty=Orthodontist&languages=Telugu');
+    assert.equal(aliasCombo.status, 200);
+    assert.ok(aliasCombo.json.dentists.some((d) => d.id === docAId));
+    assert.ok(!aliasCombo.json.dentists.some((d) => d.id === docBId));
+
+    // Newly registered doctor with Malayalam -> Malayalam automatically appears
+    const regC = await api('/auth/register', {
+      method: 'POST',
+      body: {
+        name: `DocMalayalam ${suffix}`,
+        phone: `77000${suffix.slice(-5)}`,
+        role: 'Dentist',
+        city: 'Kochi',
+        pincode: '682001',
+        specialty: 'Cardiology',
+        qualification: 'MBBS, MD',
+        experienceYears: 8,
+        languages: ['Malayalam'],
+      },
+    });
+    assert.equal(regC.status, 201);
+    cleanupUserIds.push(regC.json.user.id);
+    cleanupDentistIds.push(regC.json.user.dentistId);
+
+    const langsAfter = await api('/doctors/languages');
+    assert.equal(langsAfter.status, 200);
+    assert.ok(
+      langsAfter.json.languages.map((l) => l.toLowerCase()).includes('malayalam'),
+      'Newly registered doctor language Malayalam must automatically appear',
+    );
+  });
 });

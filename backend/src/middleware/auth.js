@@ -1,6 +1,26 @@
 const jwt = require('jsonwebtoken');
 const { User, SubAdminPermission, PERMISSION_CONSTANTS } = require('../models/Schemas');
 const { supabase, supabaseAdmin } = require('../config/supabase');
+const { getJwtSecret, isCloudEnv } = require('../config/secrets');
+
+const enforceActiveSubAdminStatus = (dbUser, tokenIssuedAtSec = null) => {
+    if (!dbUser) return null;
+    const roleLower = (dbUser.role || '').toString().trim().toLowerCase();
+    const isSubAdmin = roleLower === 'sub-admin' || roleLower === 'subadmin' || roleLower === 'sub_admin';
+    const effectiveStatus = (dbUser.status || 'ACTIVE').toString().trim().toUpperCase();
+    if (isSubAdmin && (effectiveStatus === 'INACTIVE' || effectiveStatus === 'DEACTIVATED')) {
+        return 'Access Denied: Your Sub-Admin account has been deactivated by the Main Admin. Please contact the administrator.';
+    }
+    if (isSubAdmin && tokenIssuedAtSec && dbUser.device_token && typeof dbUser.device_token === 'string' && dbUser.device_token.trim().startsWith('{')) {
+        try {
+            const meta = JSON.parse(dbUser.device_token);
+            if (meta.revokedBefore && (tokenIssuedAtSec * 1000) < Number(meta.revokedBefore)) {
+                return 'Session invalidated by administrator. Please sign in again.';
+            }
+        } catch (_) { }
+    }
+    return null;
+};
 
 const authenticateJWT = async (req, res, next) => {
     const authHeader = req.headers.authorization;
@@ -18,7 +38,7 @@ const authenticateJWT = async (req, res, next) => {
                     if (!dbUser && user.email) {
                         dbUser = await User.findOne({ email: user.email.toLowerCase() });
                     }
-                } catch (_) {}
+                } catch (_) { }
 
                 let userPermissions = dbUser?.permissions || [];
                 if ((!userPermissions || userPermissions.length === 0) && (dbUser?.role === 'Sub-Admin' || dbUser?.role === 'SUB_ADMIN')) {
@@ -49,8 +69,8 @@ const authenticateJWT = async (req, res, next) => {
             console.log('Supabase token verification failed, checking local fallback JWT...');
         }
 
-        // 2. Direct Supabase session token fallback (sb_direct_<userId>)
-        if (token.startsWith('sb_direct_')) {
+        // 2. Direct Supabase session token fallback (sb_direct_<userId>) — strictly disabled in cloud (staging/production)
+        if (!isCloudEnv() && token.startsWith('sb_direct_')) {
             try {
                 const directUserId = token.replace('sb_direct_', '').trim();
                 const dbUser = await User.findById(directUserId);
@@ -75,14 +95,22 @@ const authenticateJWT = async (req, res, next) => {
                     }
                     return next();
                 }
-            } catch (_) {}
+            } catch (_) { }
         }
 
-        // 3. Local JWT Verification Fallback (development/mock mode)
+        // 3. Local JWT Verification Fallback
         try {
-            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretjwtkey123');
-            
+            const decoded = jwt.verify(token, getJwtSecret());
+
             const dbUser = await User.findById(decoded.id);
+            const blockedMsg = enforceActiveSubAdminStatus(dbUser, decoded.iat || null);
+            if (blockedMsg) {
+                return res.status(403).json({
+                    success: false,
+                    code: 'ACCOUNT_DEACTIVATED',
+                    message: blockedMsg
+                });
+            }
             let userPermissions = dbUser?.permissions || decoded.permissions || [];
             if ((!userPermissions || userPermissions.length === 0) && (dbUser?.role === 'Sub-Admin' || dbUser?.role === 'SUB_ADMIN')) {
                 userPermissions = await SubAdminPermission.getPermissionsForUser(decoded.id);
@@ -118,6 +146,25 @@ const authenticateJWT = async (req, res, next) => {
 const optionalAuth = async (req, res, next) => {
     const authHeader = req.headers.authorization;
 
+    const enforceActiveSubAdminStatus = (dbUser, tokenIssuedAtSec = null) => {
+        if (!dbUser) return null;
+        const roleLower = (dbUser.role || '').toString().trim().toLowerCase();
+        const isSubAdmin = roleLower === 'sub-admin' || roleLower === 'subadmin' || roleLower === 'sub_admin';
+        const effectiveStatus = (dbUser.status || 'ACTIVE').toString().trim().toUpperCase();
+        if (isSubAdmin && (effectiveStatus === 'INACTIVE' || effectiveStatus === 'DEACTIVATED')) {
+            return 'Access Denied: Your Sub-Admin account has been deactivated by the Main Admin. Please contact the administrator.';
+        }
+        if (isSubAdmin && tokenIssuedAtSec && dbUser.device_token && typeof dbUser.device_token === 'string' && dbUser.device_token.trim().startsWith('{')) {
+            try {
+                const meta = JSON.parse(dbUser.device_token);
+                if (meta.revokedBefore && (tokenIssuedAtSec * 1000) < Number(meta.revokedBefore)) {
+                    return 'Session invalidated by administrator. Please sign in again.';
+                }
+            } catch (_) { }
+        }
+        return null;
+    };
+
     if (authHeader && authHeader.startsWith('Bearer ')) {
         const token = authHeader.split(' ')[1];
 
@@ -130,7 +177,12 @@ const optionalAuth = async (req, res, next) => {
                     if (!dbUser && user.email) {
                         dbUser = await User.findOne({ email: user.email.toLowerCase() });
                     }
-                } catch (_) {}
+                } catch (_) { }
+
+                const blockedMsg = enforceActiveSubAdminStatus(dbUser);
+                if (blockedMsg) {
+                    return res.status(403).json({ success: false, code: 'ACCOUNT_DEACTIVATED', message: blockedMsg });
+                }
 
                 let userPermissions = dbUser?.permissions || [];
                 if ((!userPermissions || userPermissions.length === 0) && (dbUser?.role === 'Sub-Admin' || dbUser?.role === 'SUB_ADMIN')) {
@@ -148,13 +200,17 @@ const optionalAuth = async (req, res, next) => {
                 };
                 return next();
             }
-        } catch (_) {}
+        } catch (_) { }
 
-        if (token.startsWith('sb_direct_')) {
+        if (!isCloudEnv() && token.startsWith('sb_direct_')) {
             try {
                 const directUserId = token.replace('sb_direct_', '').trim();
                 const dbUser = await User.findById(directUserId);
                 if (dbUser) {
+                    const blockedMsg = enforceActiveSubAdminStatus(dbUser);
+                    if (blockedMsg) {
+                        return res.status(403).json({ success: false, code: 'ACCOUNT_DEACTIVATED', message: blockedMsg });
+                    }
                     let userPermissions = dbUser.permissions || [];
                     if ((!userPermissions || userPermissions.length === 0) && (dbUser.role === 'Sub-Admin' || dbUser.role === 'SUB_ADMIN')) {
                         userPermissions = await SubAdminPermission.getPermissionsForUser(dbUser.id);
@@ -169,12 +225,16 @@ const optionalAuth = async (req, res, next) => {
                     };
                     return next();
                 }
-            } catch (_) {}
+            } catch (_) { }
         }
 
         try {
-            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretjwtkey123');
+            const decoded = jwt.verify(token, getJwtSecret());
             const dbUser = await User.findById(decoded.id);
+            const blockedMsg = enforceActiveSubAdminStatus(dbUser, decoded.iat || null);
+            if (blockedMsg) {
+                return res.status(403).json({ success: false, code: 'ACCOUNT_DEACTIVATED', message: blockedMsg });
+            }
             let userPermissions = dbUser?.permissions || decoded.permissions || [];
             if ((!userPermissions || userPermissions.length === 0) && (dbUser?.role === 'Sub-Admin' || dbUser?.role === 'SUB_ADMIN')) {
                 userPermissions = await SubAdminPermission.getPermissionsForUser(decoded.id);
@@ -188,7 +248,7 @@ const optionalAuth = async (req, res, next) => {
                 status: dbUser?.status || 'ACTIVE',
                 permissions: userPermissions
             };
-        } catch (_) {}
+        } catch (_) { }
     }
     next();
 };
@@ -205,9 +265,9 @@ const requireRole = (allowedRoles) => {
         const matches = allowedRoles.some(r => r.toLowerCase() === roleLower);
 
         if (!matches) {
-            return res.status(403).json({ 
-                success: false, 
-                message: `Access denied. Role '${req.user.role}' is not authorized for this resource.` 
+            return res.status(403).json({
+                success: false,
+                message: `Access denied. Role '${req.user.role}' is not authorized for this resource.`
             });
         }
 
@@ -271,9 +331,9 @@ const requirePermission = (requiredPermission, alternativePermissions = []) => {
             const alternativesUpper = (alternativePermissions || []).map(p => (p || '').toString().trim().toUpperCase());
 
             const hasPerm = permsList.includes('*') ||
-                            permsList.includes('ALL') ||
-                            permsList.includes(requiredUpper) ||
-                            alternativesUpper.some(alt => permsList.includes(alt));
+                permsList.includes('ALL') ||
+                permsList.includes(requiredUpper) ||
+                alternativesUpper.some(alt => permsList.includes(alt));
 
             if (hasPerm) {
                 return next();
@@ -328,29 +388,39 @@ const requireChatAccess = async (req, res, next) => {
 
     // 3. Doctor / Dentist Access Verification
     if (role === 'dentist' || role === 'doctor') {
-        if (!roomId || req.method === 'POST') {
-            return next(); // Allow sending messages or general listing
+        if (!roomId) {
+            // General listing (e.g., GET /chat/conversations) is filtered to this doctor's own rooms
+            return next();
         }
 
         try {
-            const { ChatMessage } = require('../models/Schemas');
+            const { ChatMessage, resolveClinicIds } = require('../models/Schemas');
             const docId = req.user.id;
+            const docNameClean = (req.user.name || '').replace(/^Dr\.\s*/i, '').trim().toLowerCase();
 
             // Check if doctor participated in this room
             const existingInRoom = await ChatMessage.find({ room_id: roomId });
-            const isParticipant = existingInRoom.some(m => 
-                m.sender_id === docId || 
-                m.receiver_id === docId || 
+            const isParticipant = existingInRoom.some(m =>
+                m.sender_id === docId ||
+                m.receiver_id === docId ||
                 (m.sender && (m.sender.id === docId || m.sender.email === req.user.email))
             );
 
-            if (isParticipant || existingInRoom.length === 0) {
+            if (isParticipant) {
                 return next();
             }
 
-            const cleanRoom = roomId.replace(/^PATIENT[-_]/i, '').replace(/_/g, ' ').trim().toLowerCase();
+            const cleanRoom = roomId.replace(/^PATIENT[-_]/i, '').replace(/^CHAT[-_]/i, '').replace(/_/g, ' ').trim().toLowerCase();
+            const roomNormLower = String(roomId).toLowerCase();
 
-            // Check if room belongs to a patient matching consultations or appointments
+            // Allow new room initiation when POSTing into a room explicitly naming this doctor (and not occupied by another doctor)
+            if (req.method === 'POST' && existingInRoom.length === 0) {
+                if (!docNameClean || roomNormLower.includes(docNameClean) || req.body?.senderId === docId) {
+                    return next();
+                }
+            }
+
+            // Check if room belongs to a patient matching consultations, appointments, or referrals for this doctor
             const { supabaseAdmin } = require('../config/supabase');
             const { data: dRecord } = await supabaseAdmin.from('dentists').select('id, user_id').or(`id.eq.${docId},user_id.eq.${docId}`).maybeSingle();
             const allDentistIds = [docId, dRecord?.id, dRecord?.user_id].filter(Boolean);
@@ -360,9 +430,9 @@ const requireChatAccess = async (req, res, next) => {
                 .in('suggested_dentist_id', allDentistIds);
 
             const isAssigned = (assignedReqs || []).some(r => {
-                const pName = (r.patient_name || '').toLowerCase();
+                const pName = (r.patient_name || '').trim().toLowerCase();
                 const pId = String(r.patient_id || '').toLowerCase();
-                return cleanRoom.includes(pName) || (pName && pName.includes(cleanRoom)) || cleanRoom.includes(pId);
+                return (pName && (cleanRoom.includes(pName) || pName.includes(cleanRoom))) || (pId && roomNormLower.includes(pId));
             });
 
             if (isAssigned) {
@@ -370,22 +440,93 @@ const requireChatAccess = async (req, res, next) => {
             }
 
             const { data: assignedApps } = await supabaseAdmin.from('appointments')
-                .select('id, patient_id, dentist_id')
+                .select('id, patient_id, dentist_id, patient:users!patient_id(name)')
                 .in('dentist_id', allDentistIds);
 
             const hasApp = (assignedApps || []).some(a => {
                 const pId = String(a.patient_id || '').toLowerCase();
-                return cleanRoom.includes(pId) || roomId.toLowerCase().includes(pId);
+                const pObj = Array.isArray(a.patient) ? a.patient[0] : a.patient;
+                const pName = (pObj?.name || '').trim().toLowerCase();
+                return (pId && roomNormLower.includes(pId)) || (pName && cleanRoom.includes(pName));
             });
 
             if (hasApp) {
                 return next();
             }
 
-            return next();
+            const { data: assignedRefs } = await supabaseAdmin.from('referrals')
+                .select('id, referred_doctor_id, patient_id, referred_name')
+                .in('referred_doctor_id', allDentistIds);
+
+            const hasReferral = (assignedRefs || []).some(r => {
+                const pId = String(r.patient_id || '').toLowerCase();
+                const rName = (r.referred_name || '').trim().toLowerCase();
+                return (pId && roomNormLower.includes(pId)) || (rName && cleanRoom.includes(rName));
+            });
+
+            if (hasReferral) {
+                return next();
+            }
+
+            // Allow empty initial room creation if doctor's own name/ID is explicitly in the room identifier
+            if (existingInRoom.length === 0 && docNameClean && roomNormLower.includes(docNameClean)) {
+                return next();
+            }
+
+            return res.status(403).json({
+                success: false,
+                message: 'Access Denied: You can only view or message conversations for patients assigned to you.'
+            });
         } catch (e) {
             console.error('Doctor chat auth check error:', e.message);
+            return res.status(500).json({
+                success: false,
+                message: 'Unable to verify doctor conversation access.'
+            });
+        }
+    }
+
+    // 3b. Clinic / Clinic Admin Access Verification
+    if (role === 'clinic' || role === 'clinic_admin') {
+        if (!roomId) {
             return next();
+        }
+        try {
+            const { ChatMessage, resolveClinicIds } = require('../models/Schemas');
+            const { supabaseAdmin } = require('../config/supabase');
+            const cResolved = await resolveClinicIds(req.user.id);
+            const cId = cResolved.clinicId;
+            if (!cId) {
+                return res.status(403).json({ success: false, message: 'Access Denied: No clinic profile linked.' });
+            }
+            const { data: clinicDocs } = await supabaseAdmin
+                .from('dentists')
+                .select('id, user_id, users(name)')
+                .eq('clinic_id', cId);
+            const clinicDocIds = new Set();
+            const clinicDocNames = [];
+            for (const d of (clinicDocs || [])) {
+                if (d.id) clinicDocIds.add(d.id);
+                if (d.user_id) clinicDocIds.add(d.user_id);
+                const du = Array.isArray(d.users) ? d.users[0] : d.users;
+                const dn = (du?.name || '').replace(/^Dr\.\s*/i, '').trim().toLowerCase();
+                if (dn) clinicDocNames.push(dn);
+            }
+            const existingInRoom = await ChatMessage.find({ room_id: roomId });
+            const hasClinicParticipant = existingInRoom.some(m =>
+                clinicDocIds.has(m.sender_id) || clinicDocIds.has(m.receiver_id) ||
+                clinicDocNames.some(dn => (m.sender?.name || '').toLowerCase().includes(dn))
+            );
+            const roomLower = String(roomId).toLowerCase();
+            if (hasClinicParticipant || clinicDocNames.some(dn => roomLower.includes(dn))) {
+                return next();
+            }
+            return res.status(403).json({
+                success: false,
+                message: 'Access Denied: You can only view conversations involving doctors affiliated with your clinic.'
+            });
+        } catch (e) {
+            return res.status(500).json({ success: false, message: 'Unable to verify clinic conversation access.' });
         }
     }
 
@@ -400,10 +541,10 @@ const requireChatAccess = async (req, res, next) => {
         const patientEmailPrefix = (req.user.email || '').split('@')[0].trim().toLowerCase().replace(/[^a-z0-9]/g, '');
         const normalizedRoom = roomId.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-        const matchesRoom = (patientName && normalizedRoom.includes(patientName)) || 
-                            (patientName && patientName.includes(normalizedRoom.replace(/^patient/, ''))) ||
-                            (patientId && normalizedRoom.includes(patientId)) ||
-                            (patientEmailPrefix && normalizedRoom.includes(patientEmailPrefix));
+        const matchesRoom = (patientName && normalizedRoom.includes(patientName)) ||
+            (patientName && patientName.includes(normalizedRoom.replace(/^patient/, ''))) ||
+            (patientId && normalizedRoom.includes(patientId)) ||
+            (patientEmailPrefix && normalizedRoom.includes(patientEmailPrefix));
 
         if (matchesRoom) {
             return next();
@@ -417,7 +558,7 @@ const requireChatAccess = async (req, res, next) => {
             if (isOwnRoom || msgs.length === 0) {
                 return next();
             }
-        } catch (_) {}
+        } catch (_) { }
 
         return res.status(403).json({
             success: false,

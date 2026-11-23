@@ -32,7 +32,7 @@ router.post('/auth/refresh', auth.refreshToken);
 router.post('/auth/supabase-sync', auth.supabaseAuthSync);
 router.post('/auth/biometric', authenticateJWT, auth.saveBiometric);
 router.put('/auth/fcm-token', authenticateJWT, auth.updateFcmToken);
-router.post('/auth/reset-db', auth.resetDatabase);
+router.post('/auth/reset-db', authenticateJWT, requireMainAdmin, auth.resetDatabase);
 
 // ─────────────────────────────────────────────
 // 2. PATIENT PROBLEM REQUESTS & ADMIN SUGGESTIONS
@@ -54,7 +54,7 @@ router.post('/problem-requests/:id/suggest-dentist', optionalAuth, requirePermis
 router.delete('/admin/problem-requests/:id', optionalAuth, requirePermission('PROBLEM_UPDATE'), problemRequests.deleteProblemRequest);
 router.delete('/patient/problem-requests/:id', optionalAuth, problemRequests.deleteProblemRequest);
 router.get('/admin/patients', optionalAuth, requirePermission('PATIENT_VIEW'), auth.getPatients);
-router.get('/patients', optionalAuth, auth.getPatients);
+router.get('/patients', optionalAuth, requirePermission('PATIENT_VIEW'), auth.getPatients);
 
 // Sub-Admin Management Routes (Strictly Primary Main Admin Only)
 router.post('/admin/sub-admins', optionalAuth, requireMainAdmin, auth.createSubAdmin);
@@ -126,9 +126,11 @@ router.post('/clinics', optionalAuth, clinics.registerClinicProfile);
 router.get('/clinics', optionalAuth, clinics.getClinics);
 router.put('/clinics/:id', optionalAuth, clinics.updateClinicDepartments);
 router.patch('/clinics/:id/departments', optionalAuth, clinics.updateClinicDepartments);
-router.delete('/clinics/:id', optionalAuth, clinics.deleteClinic);
+router.delete('/clinics/:id', optionalAuth, requireMainAdmin, clinics.deleteClinic);
 router.get('/clinics/:clinicId/dentists', optionalAuth, clinics.getClinicDentists);
 router.get('/clinics/:clinicId/doctors', optionalAuth, clinics.getClinicDentists);
+router.post('/clinics/:clinicId/doctors', optionalAuth, clinics.addClinicDoctor);
+router.post('/clinics/:clinicId/dentists', optionalAuth, clinics.addClinicDoctor);
 router.post('/clinics/:clinicId/doctors/associate', optionalAuth, clinics.associateClinicDoctor);
 router.delete('/clinics/:clinicId/doctors/:doctorId', optionalAuth, clinics.removeDoctorFromClinic);
 router.get('/dentists/languages', optionalAuth, clinics.getAvailableDoctorLanguages);
@@ -147,10 +149,10 @@ router.put('/dentists/:id/profile', optionalAuth, clinics.updateDoctorProfile);
 router.patch('/dentists/:id/profile', optionalAuth, clinics.updateDoctorProfile);
 router.put('/doctors/:id/profile', optionalAuth, clinics.updateDoctorProfile);
 router.patch('/doctors/:id/profile', optionalAuth, clinics.updateDoctorProfile);
-router.delete('/dentists/:id', optionalAuth, clinics.deleteDentist);
-router.delete('/doctors/:id', optionalAuth, clinics.deleteDentist);
-router.delete('/admin/dentists/:id', optionalAuth, clinics.deleteDentist);
-router.delete('/admin/doctors/:id', optionalAuth, clinics.deleteDentist);
+router.delete('/dentists/:id', optionalAuth, requireMainAdmin, clinics.deleteDentist);
+router.delete('/doctors/:id', optionalAuth, requireMainAdmin, clinics.deleteDentist);
+router.delete('/admin/dentists/:id', optionalAuth, requireMainAdmin, clinics.deleteDentist);
+router.delete('/admin/doctors/:id', optionalAuth, requireMainAdmin, clinics.deleteDentist);
 
 // Patient Saved Doctors (My Doctors) Endpoints
 router.get('/patient/my-doctors', optionalAuth, clinics.getPatientDoctors);
@@ -170,6 +172,8 @@ router.get('/upload/signed-url', authenticateJWT, upload.getSignedFileUrl);
 router.get('/chat/conversations', optionalAuth, requireChatAccess, chat.getConversations);
 router.get('/chat/messages', optionalAuth, requireChatAccess, chat.getMessages);
 router.post('/chat/send', optionalAuth, requireChatAccess, chat.sendMessage);
+router.post('/chat/read', optionalAuth, requireChatAccess, chat.markRoomRead);
+router.patch('/chat/read', optionalAuth, requireChatAccess, chat.markRoomRead);
 router.post('/chat/clear', optionalAuth, requireChatAccess, chat.clearMessages);
 router.delete('/chat/clear', optionalAuth, requireChatAccess, chat.clearMessages);
 router.get('/chat/audit-logs', optionalAuth, requireMainAdmin, chat.getAuditLogs);
@@ -195,6 +199,7 @@ router.get('/records/:id/access', optionalAuth, records.getRecordFileAccess);
 router.post('/referrals', optionalAuth, referrals.createReferral);
 router.get('/referrals/my-referrals', optionalAuth, referrals.getMyReferrals);
 router.get('/referrals/doctor', optionalAuth, referrals.getDoctorReferrals);
+router.get('/referrals/clinic', optionalAuth, referrals.getClinicReferrals);
 router.get('/referrals/received', optionalAuth, referrals.getDoctorReferrals);
 router.get('/referrals/for-me', optionalAuth, referrals.getReferralsForReferredPatient);
 router.post('/referrals/check-patient', optionalAuth, referrals.checkPatientExists);
@@ -226,18 +231,20 @@ router.delete('/doctor-availability', optionalAuth, availability.deleteDoctorAva
 // 11. MEDICAL SPECIALTIES & MULTI-SPECIALTY REPORTING
 // ─────────────────────────────────────────────
 router.get('/specialties', optionalAuth, specialties.getSpecialties);
-router.get('/admin/specialties', optionalAuth, specialties.getSpecialties);
-router.post('/specialties', optionalAuth, specialties.createSpecialty);
-router.post('/admin/specialties', optionalAuth, specialties.createSpecialty);
-router.put('/specialties/:id', optionalAuth, specialties.updateSpecialty);
-router.patch('/specialties/:id', optionalAuth, specialties.updateSpecialty);
-router.put('/admin/specialties/:id', optionalAuth, specialties.updateSpecialty);
-router.patch('/admin/specialties/:id', optionalAuth, specialties.updateSpecialty);
-router.patch('/specialties/:id/status', optionalAuth, specialties.toggleSpecialtyStatus);
-router.patch('/admin/specialties/:id/status', optionalAuth, specialties.toggleSpecialtyStatus);
-router.delete('/specialties/:id', optionalAuth, specialties.deleteSpecialty);
-router.delete('/admin/specialties/:id', optionalAuth, specialties.deleteSpecialty);
-router.get('/admin/reports/specialties', optionalAuth, specialties.getSpecialtyAnalyticsReport);
+router.get('/specialties/clinical-config', optionalAuth, specialties.getSpecialtyClinicalConfigEndpoint);
+router.post('/triage/analyze', optionalAuth, specialties.analyzeAiTriage);
+router.get('/admin/specialties', optionalAuth, requirePermission('DENTIST_VIEW', ['PATIENT_VIEW', 'ASSIGNMENT_VIEW']), specialties.getSpecialties);
+router.post('/specialties', optionalAuth, requireMainAdmin, specialties.createSpecialty);
+router.post('/admin/specialties', optionalAuth, requireMainAdmin, specialties.createSpecialty);
+router.put('/specialties/:id', optionalAuth, requireMainAdmin, specialties.updateSpecialty);
+router.patch('/specialties/:id', optionalAuth, requireMainAdmin, specialties.updateSpecialty);
+router.put('/admin/specialties/:id', optionalAuth, requireMainAdmin, specialties.updateSpecialty);
+router.patch('/admin/specialties/:id', optionalAuth, requireMainAdmin, specialties.updateSpecialty);
+router.patch('/specialties/:id/status', optionalAuth, requireMainAdmin, specialties.toggleSpecialtyStatus);
+router.patch('/admin/specialties/:id/status', optionalAuth, requireMainAdmin, specialties.toggleSpecialtyStatus);
+router.delete('/specialties/:id', optionalAuth, requireMainAdmin, specialties.deleteSpecialty);
+router.delete('/admin/specialties/:id', optionalAuth, requireMainAdmin, specialties.deleteSpecialty);
+router.get('/admin/reports/specialties', optionalAuth, requireMainAdmin, specialties.getSpecialtyAnalyticsReport);
 
 module.exports = router;
 

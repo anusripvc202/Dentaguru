@@ -232,8 +232,23 @@ async function runTests() {
             assert.strictEqual(dbRow.license_number, `AVAIL-LIC-${suffix}`);
         });
 
-        // 3. Doctor OFF -> hidden from patient search, specialty search, clinic listing, and includeUnavailable bypass attempt
-        await testCase('3. Doctor OFF -> hidden from patient search, specialty filter, clinic doctors, and patient bypass attempts', async () => {
+        // 3. Doctor OFF -> hidden from default patient search, specialty search & clinic listing, but returned when includeUnavailable=true
+        await testCase('3. Doctor OFF -> hidden from default search/specialty/clinic; visible with Unavailable status when includeUnavailable=true', async () => {
+            const defaultPatientSearch = createMockRes();
+            await clinicController.getAllDentists(
+                {
+                    query: { search: `AvailTest ${suffix}` },
+                    user: { id: createdIds.patientUserId, role: 'Patient' }
+                },
+                defaultPatientSearch.res
+            );
+            assert.strictEqual(defaultPatientSearch.out.statusCode, 200);
+            assert.strictEqual(
+                defaultPatientSearch.out.body.doctors.some(d => d.id === createdIds.dentistId || d.user_id === createdIds.doctorUserId),
+                false,
+                'OFF doctor must NOT appear in default patient search (without includeUnavailable=true)'
+            );
+
             const patientSearch = createMockRes();
             await clinicController.getAllDentists(
                 {
@@ -243,11 +258,10 @@ async function runTests() {
                 patientSearch.res
             );
             assert.strictEqual(patientSearch.out.statusCode, 200);
-            assert.strictEqual(
-                patientSearch.out.body.doctors.some(d => d.id === createdIds.dentistId || d.user_id === createdIds.doctorUserId),
-                false,
-                'OFF doctor must NOT appear in patient search (even with includeUnavailable=true)'
-            );
+            const matchedOff = patientSearch.out.body.doctors.find(d => d.id === createdIds.dentistId || d.user_id === createdIds.doctorUserId);
+            assert.ok(matchedOff, 'Registered doctor must appear in directory listing when includeUnavailable=true');
+            assert.strictEqual(matchedOff.isAvailable, false);
+            assert.strictEqual(matchedOff.availability_status, 'Unavailable');
 
             const specSearch = createMockRes();
             await clinicController.getAllDentists(

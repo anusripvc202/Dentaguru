@@ -6,8 +6,9 @@ const jwt = require('jsonwebtoken');
 const app = require('../app');
 const { User, ChatMessage, AuditLog } = require('../models/Schemas');
 const { supabaseAdmin } = require('../config/supabase');
+const { getJwtSecret } = require('../config/secrets');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'supersecretjwtkey123';
+const JWT_SECRET = getJwtSecret();
 
 async function runRbacTests() {
     console.log('🛡️ --- STARTING DENTAGURU CHAT PRIVACY & RBAC SECURITY TEST SUITE --- 🛡️\n');

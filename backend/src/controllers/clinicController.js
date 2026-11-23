@@ -1,8 +1,12 @@
 const { supabaseAdmin } = require('../config/supabase');
+const { isCloudEnv } = require('../config/secrets');
 const {
+    User,
     Clinic,
     Dentist,
     Notification,
+    resolveClinicIds,
+    resolveMedicalSpecialtyRecord,
     matchesSpecialtyQuery,
     getDefaultQualificationForSpecialty,
     isDoctorRecordAvailable,
@@ -45,7 +49,7 @@ function formatDentistRecord(d) {
 
     const doctorLangs = extractDoctorLanguages(d);
 
-    const resolvedSpec = d.speciality || d.specialty || 'General Dentistry';
+    const resolvedSpec = d.speciality || d.specialty || d.medical_specialties?.name || 'General Medicine';
     const resolvedQual = d.qualifications || d.qualification || getDefaultQualificationForSpecialty(resolvedSpec);
     const availabilityStatus = d.availability_status || d.status || 'Available';
     const isAvailable = isDoctorRecordAvailable(d);
@@ -53,20 +57,28 @@ function formatDentistRecord(d) {
     return {
         id: d.id,
         user_id: d.user_id || uObj.id,
+        clinic_id: d.clinic_id || cObj.id || null,
+        clinicId: d.clinic_id || cObj.id || null,
         name: formattedName,
         email: d.email || uObj.email || '',
         phone: d.phone || uObj.phone || '',
         speciality: resolvedSpec,
         specialty: resolvedSpec,
-        license_number: d.license_number || d.licenseNumber || 'MED-LIC-REG',
-        licenseNumber: d.license_number || d.licenseNumber || 'MED-LIC-REG',
+        specialty_id: d.specialty_id || d.medical_specialties?.id || null,
+        specialtyId: d.specialty_id || d.medical_specialties?.id || null,
+        department: d.department || d.medical_specialties?.department || '',
+        license_number: d.license_number || d.licenseNumber || '',
+        licenseNumber: d.license_number || d.licenseNumber || '',
         qualification: resolvedQual,
         experienceYears: d.experience_years || d.experienceYears || 5,
         experience_years: d.experience_years || d.experienceYears || 5,
+        consultation_fee: d.consultation_fee || d.consultationFee || '',
+        consultationFee: d.consultation_fee || d.consultationFee || '',
+        bio: d.bio || '',
         rating: d.rating || 5.0,
         reviews_count: d.reviews_count || d.reviewCount || 1,
-        clinicName: cObj.clinic_name || d.clinicName || 'GS HEALTH Practice',
-        clinicAddress: cObj.location || d.clinicAddress || d.location || 'Healthcare Hub',
+        clinicName: cObj.clinic_name || d.clinicName || '',
+        clinicAddress: cObj.location || d.clinicAddress || d.location || '',
         state: d.state || uObj.state || '',
         city: d.city || uObj.city || '',
         pincode: d.pincode || uObj.pincode || '',
@@ -83,15 +95,96 @@ function formatDentistRecord(d) {
     };
 }
 
+/**
+ * Resolve canonical clinic record, clinic identifiers (clinics.id + user_id + clinic_name),
+ * and attached doctor IDs for strict multi-clinic scoping across bookings, referrals & notifications.
+ */
+exports.resolveClinicRecordAndDoctorIds = async (rawClinicIdentifier) => {
+    const resolved = await resolveClinicIds(rawClinicIdentifier);
+    let clinic = resolved.clinicRecord || (resolved.clinicId ? await Clinic.findById(resolved.clinicId) : null);
+    if (!clinic && rawClinicIdentifier) {
+        const cleanRaw = String(rawClinicIdentifier).trim();
+        clinic = await Clinic.findById(cleanRaw).catch(() => null)
+            || await Clinic.findOne({ user_id: cleanRaw }).catch(() => null)
+            || await Clinic.findOne({ clinic_name: cleanRaw }).catch(() => null);
+    }
+    const clinicId = clinic?.id || resolved.clinicId || null;
+    const clinicName = (clinic?.clinic_name || resolved.clinicName || '').trim();
+    const doctorIds = new Set();
+
+    if (clinicId) {
+        const byClinicId = await Dentist.find({ clinic_id: clinicId }).catch(() => []);
+        for (const d of (byClinicId || [])) {
+            if (d?.id) doctorIds.add(String(d.id));
+            if (d?.user_id) doctorIds.add(String(d.user_id));
+        }
+    }
+
+    if (clinicName && clinicName.toLowerCase() !== 'gs health practice' && clinicName.toLowerCase() !== 'independent practice') {
+        const allDocs = await Dentist.find({}).catch(() => []);
+        const targetLower = clinicName.toLowerCase();
+        for (const d of (allDocs || [])) {
+            const cName = (d.clinics?.clinic_name || d.clinicName || '').toString().trim().toLowerCase();
+            if (cName && cName === targetLower) {
+                if (d?.id) doctorIds.add(String(d.id));
+                if (d?.user_id) doctorIds.add(String(d.user_id));
+            }
+        }
+    }
+
+    return {
+        clinic,
+        clinicId,
+        clinicUserId: clinic?.user_id || resolved.clinicUserId || null,
+        clinicName,
+        allClinicIds: resolved.allIds,
+        doctorIds: Array.from(doctorIds),
+    };
+};
+
+function ensureClinicOrDoctorMutationAuth(req, res) {
+    if (req.user) {
+        const callerRole = (req.user.role || '').toString().trim().toLowerCase();
+        if (callerRole === 'patient') {
+            res.status(403).json({
+                success: false,
+                message: 'Forbidden: Patients are not authorized to modify clinic or doctor records.'
+            });
+            return false;
+        }
+        return true;
+    }
+
+    if (isCloudEnv() || (req.headers && !req.headers['x-user-id'] && !req.headers.authorization)) {
+        res.status(401).json({
+            success: false,
+            message: 'Authentication required.'
+        });
+        return false;
+    }
+    return true;
+}
+
 // 1. REGISTER CLINIC PROFILE
 exports.registerClinicProfile = async (req, res) => {
+    if (!ensureClinicOrDoctorMutationAuth(req, res)) return;
     const { clinicName, location, services, pricing, coordinates } = req.body;
     try {
         const role = req.user?.role || '';
+        const cleanName = (clinicName || '').toString().trim();
+        if (cleanName) {
+            const byName = await Clinic.findOne({ clinic_name: cleanName }).catch(() => null);
+            if (byName) {
+                if (req.user?.id && !byName.user_id) {
+                    await Clinic.findByIdAndUpdate(byName.id, { user_id: req.user.id });
+                }
+                return res.status(200).json({ success: true, message: 'Existing clinic profile linked.', clinic: byName });
+            }
+        }
         if (role !== 'SuperAdmin' && role !== 'Admin' && req.user?.id) {
             const clinic = await Clinic.findOne({ user_id: req.user.id });
             if (clinic) {
-                return res.status(400).json({ success: false, message: 'Clinic profile already exists.' });
+                return res.status(200).json({ success: true, message: 'Clinic profile already exists.', clinic });
             }
         }
 
@@ -112,7 +205,7 @@ exports.registerClinicProfile = async (req, res) => {
                 message: `Clinic "${clinicName || 'GS Health Clinic'}" registered at ${location || 'Healthcare Hub'}.`,
                 type: 'clinic_registered'
             });
-        } catch (_) {}
+        } catch (_) { }
 
         res.status(201).json({ success: true, message: 'Clinic profile created in Supabase PostgreSQL.', clinic });
     } catch (err) {
@@ -142,11 +235,82 @@ exports.getClinicDentists = async (req, res) => {
     try {
         const includeUnavailableRequested = String(req.query.includeUnavailable || '').trim().toLowerCase() === 'true';
         const allowUnavailable = isPrivilegedDoctorViewer(req) && (includeUnavailableRequested || req.query.includeUnavailable === undefined);
-        const rawDentists = await Dentist.find({ clinic_id: clinicId });
+
+        const resolvedScope = await exports.resolveClinicRecordAndDoctorIds(clinicId);
+        const canonicalClinicId = resolvedScope.clinicId || clinicId;
+        const rawDentists = canonicalClinicId ? await Dentist.find({ clinic_id: canonicalClinicId }) : [];
+
+        // Also include clinic-named doctors resolved via resolveClinicRecordAndDoctorIds (without losing clinic_id scoping)
+        const seenIds = new Set(rawDentists.map(d => String(d.id || '')));
+        const seenUserIds = new Set(rawDentists.map(d => String(d.user_id || d.users?.id || '')).filter(Boolean));
+        if (resolvedScope.doctorIds && resolvedScope.doctorIds.length > 0) {
+            const allDentists = await Dentist.find({});
+            const scopedIdSet = new Set(resolvedScope.doctorIds.map(id => String(id)));
+            for (const d of (allDentists || [])) {
+                if (!seenIds.has(String(d.id || '')) && (scopedIdSet.has(String(d.id || '')) || scopedIdSet.has(String(d.user_id || '')))) {
+                    rawDentists.push(d);
+                    seenIds.add(String(d.id || ''));
+                    if (d.user_id) seenUserIds.add(String(d.user_id));
+                }
+            }
+        }
+
+        // Also include Dentist/Doctor-role user accounts linked via device_token metadata if they don't yet have a dentists row
+        if (canonicalClinicId || resolvedScope.clinicName) {
+            const doctorRoleUsers = await User.find({ role: { $in: ['DOCTOR', 'Doctor', 'Dentist'] } }).catch(() => []);
+            const targetClinicNameLower = (resolvedScope.clinicName || '').trim().toLowerCase();
+            for (const u of doctorRoleUsers) {
+                const uid = String(u.id || '').trim();
+                if (!uid || seenUserIds.has(uid) || seenIds.has(uid)) continue;
+                let meta = {};
+                if (u.device_token && typeof u.device_token === 'string' && u.device_token.startsWith('{')) {
+                    try { meta = JSON.parse(u.device_token); } catch (_) { }
+                }
+                const metaCid = String(meta.clinicId || meta.clinic_id || '').trim();
+                const metaCName = String(meta.clinicName || u.clinic_name || '').trim().toLowerCase();
+                const matchesClinic = (canonicalClinicId && metaCid && metaCid === String(canonicalClinicId)) ||
+                    (targetClinicNameLower && metaCName && metaCName === targetClinicNameLower);
+                if (matchesClinic) {
+                    const uSpec = u.specialty || meta.specialty || 'General Medicine';
+                    rawDentists.push({
+                        id: u.id,
+                        user_id: u.id,
+                        clinic_id: canonicalClinicId || null,
+                        name: u.name,
+                        speciality: uSpec,
+                        specialty: uSpec,
+                        specialty_id: meta.specialtyId || null,
+                        department: meta.department || '',
+                        qualifications: u.qualification || meta.qualification || getDefaultQualificationForSpecialty(uSpec),
+                        experience_years: u.experienceYears || meta.experienceYears || 5,
+                        clinicName: resolvedScope.clinicName || meta.clinicName || '',
+                        phone: u.phone || '',
+                        email: u.email || '',
+                        state: u.state || '',
+                        city: u.city || '',
+                        pincode: u.pincode || '',
+                        languages: extractDoctorLanguages({ languages: u.languages, users: u }),
+                        availability_status: 'Available',
+                        users: u,
+                        clinics: resolvedScope.clinic || {}
+                    });
+                    seenIds.add(uid);
+                    seenUserIds.add(uid);
+                }
+            }
+        }
+
+        const formattedDentists = rawDentists.map(formatDentistRecord);
         const visibleDentists = allowUnavailable
-            ? rawDentists
-            : rawDentists.filter(d => isDoctorRecordAvailable(d));
-        res.json({ success: true, count: visibleDentists.length, dentists: visibleDentists });
+            ? formattedDentists
+            : formattedDentists.filter(d => d.isAvailable);
+        res.json({
+            success: true,
+            count: visibleDentists.length,
+            clinic: resolvedScope.clinic || null,
+            dentists: visibleDentists,
+            doctors: visibleDentists
+        });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to fetch clinic doctors.' });
     }
@@ -164,18 +328,14 @@ exports.getAllDentists = async (req, res) => {
         const explicitIncludeUnavailable = String(includeUnavailable || '').trim().toLowerCase() === 'true';
         const explicitHideUnavailable = String(includeUnavailable || '').trim().toLowerCase() === 'false';
         const privilegedCaller = isPrivilegedDoctorViewer(req);
-        const allowUnavailable = privilegedCaller && !explicitHideUnavailable && (explicitIncludeUnavailable || Boolean(req.user));
+        const allowUnavailable = !explicitHideUnavailable && (explicitIncludeUnavailable || (privilegedCaller && Boolean(req.user)));
         const selectedLangFilters = parseLanguageFilters(languages || language);
 
-        // Build filter query for dentists table (do NOT filter availability_status or languages at DB query level
-        // before merging fallback User records, so OFF doctors are never resurrected and availableLanguages can be computed accurately)
-        const filterQuery = {};
-        if (state && state.trim()) filterQuery.state = state.trim();
-        if (city && city.trim()) filterQuery.city = city.trim();
-        if (pincode && pincode.trim()) filterQuery.pincode = pincode.trim();
-        if (effectiveSpecialty) filterQuery.speciality = effectiveSpecialty;
-
-        const dentists = await Dentist.find(filterQuery);
+        // Fetch all dentist rows before applying location/specialty/language filters so:
+        // 1) OFF doctors are never resurrected by User merge,
+        // 2) availableLanguages always reflects all eligible registered doctors, and
+        // 3) city/pincode/specialty match consistently across dentists, users, and clinics fields.
+        const dentists = await Dentist.find({});
         const { User } = require('../models/Schemas');
 
         // Track ALL existing dentist rows (including OFF ones) so the User fallback merge cannot create duplicate doctor records or resurrect an OFF doctor
@@ -188,23 +348,7 @@ exports.getAllDentists = async (req, res) => {
         const existingPhones = new Set(dentists.map(d => normPhone10(d.phone || d.users?.phone)).filter(Boolean));
 
         // Also fetch user-based dentists / doctors and merge (those not yet in dentists table)
-        const [dentistRoleUsers, doctorRoleUsers] = await Promise.all([
-            User.find({ role: 'Dentist' }),
-            User.find({ role: 'Doctor' })
-        ]);
-        let dentistUsers = [...dentistRoleUsers, ...doctorRoleUsers];
-
-        if (state && state.trim()) {
-            const stateLower = state.trim().toLowerCase();
-            dentistUsers = dentistUsers.filter(u => (u.state || '').toLowerCase().includes(stateLower));
-        }
-        if (city && city.trim()) {
-            const cityLower = city.trim().toLowerCase();
-            dentistUsers = dentistUsers.filter(u => (u.city || '').toLowerCase().includes(cityLower));
-        }
-        if (pincode && pincode.trim()) {
-            dentistUsers = dentistUsers.filter(u => (u.pincode || '').includes(pincode.trim()));
-        }
+        const dentistUsers = await User.find({ role: { $in: ['DOCTOR', 'Doctor', 'Dentist'] } });
 
         for (const u of dentistUsers) {
             const emailClean = (u.email || '').toLowerCase();
@@ -218,13 +362,10 @@ exports.getAllDentists = async (req, res) => {
                 if (u.device_token && typeof u.device_token === 'string' && u.device_token.startsWith('{')) {
                     try {
                         userMeta = JSON.parse(u.device_token);
-                    } catch (_) {}
+                    } catch (_) { }
                 }
                 const userLangs = extractDoctorLanguages({ languages: u.languages, users: u });
-                const uSpec = u.specialty || userMeta.specialty || 'General Dentistry';
-                if (effectiveSpecialty && !matchesSpecialtyQuery(uSpec, effectiveSpecialty)) {
-                    continue;
-                }
+                const uSpec = u.specialty || userMeta.specialty || 'General Medicine';
                 const uQual = u.qualification || userMeta.qualification || getDefaultQualificationForSpecialty(uSpec);
                 const uExp = u.experienceYears || userMeta.experienceYears || 5;
                 dentists.push({
@@ -237,7 +378,7 @@ exports.getAllDentists = async (req, res) => {
                     experienceYears: uExp,
                     rating: 5.0,
                     reviews_count: 1,
-                    clinicName: u.clinic_name || userMeta.clinicName || 'GS HEALTH Practice',
+                    clinicName: u.clinic_name || userMeta.clinicName || '',
                     phone: u.phone || '',
                     email: u.email || '',
                     state: u.state || '',
@@ -276,7 +417,7 @@ exports.getAllDentists = async (req, res) => {
             formattedDentists = formattedDentists.filter(d => d.isAvailable);
         }
 
-        // Collect available languages across eligible registered doctors BEFORE applying language filter
+        // Collect available languages across ALL eligible registered doctors BEFORE applying location/specialty/language filters
         const availableLanguagesSet = new Map();
         for (const d of formattedDentists) {
             for (const lang of (d.languages || [])) {
@@ -287,6 +428,34 @@ exports.getAllDentists = async (req, res) => {
             }
         }
         const availableLanguages = Array.from(availableLanguagesSet.values());
+
+        // Apply combined State, City, Pincode, Specialty, Search, and Language filters at backend level
+        if (state && state.trim()) {
+            const stateKw = state.trim().toLowerCase();
+            formattedDentists = formattedDentists.filter(d =>
+                (d.state || '').toLowerCase().includes(stateKw) ||
+                (d.location || '').toLowerCase().includes(stateKw)
+            );
+        }
+        if (city && city.trim()) {
+            const cityKw = city.trim().toLowerCase();
+            formattedDentists = formattedDentists.filter(d =>
+                (d.city || '').toLowerCase().includes(cityKw) ||
+                (d.state || '').toLowerCase().includes(cityKw) ||
+                (d.location || '').toLowerCase().includes(cityKw) ||
+                (d.clinicName || '').toLowerCase().includes(cityKw)
+            );
+        }
+        if (pincode && pincode.trim()) {
+            const pinKw = pincode.trim().toLowerCase();
+            formattedDentists = formattedDentists.filter(d =>
+                (d.pincode || '').toLowerCase().includes(pinKw) ||
+                (d.location || '').toLowerCase().includes(pinKw)
+            );
+        }
+        if (effectiveSpecialty && effectiveSpecialty.toLowerCase() !== 'all' && effectiveSpecialty.toLowerCase() !== 'all specialties') {
+            formattedDentists = formattedDentists.filter(d => matchesSpecialtyQuery(d.specialty || d.speciality, effectiveSpecialty));
+        }
 
         if (searchKw) {
             formattedDentists = formattedDentists.filter(d => {
@@ -344,18 +513,16 @@ exports.getAllDentists = async (req, res) => {
 exports.getAvailableDoctorLanguages = async (req, res) => {
     try {
         const includeUnavailableRequested = String(req.query.includeUnavailable || '').trim().toLowerCase() === 'true';
-        const allowUnavailable = isPrivilegedDoctorViewer(req) && includeUnavailableRequested;
+        const explicitHideUnavailable = String(req.query.includeUnavailable || '').trim().toLowerCase() === 'false';
+        const allowUnavailable = !explicitHideUnavailable && (includeUnavailableRequested || (isPrivilegedDoctorViewer(req) && Boolean(req.user)));
 
         const dentists = await Dentist.find({});
         const { User } = require('../models/Schemas');
         const existingEmails = new Set(dentists.map(d => (d.email || d.users?.email || '').toLowerCase()).filter(Boolean));
         const existingUserIds = new Set(dentists.map(d => String(d.user_id || d.users?.id || d.id || '').trim()).filter(Boolean));
 
-        const [dentistRoleUsers, doctorRoleUsers] = await Promise.all([
-            User.find({ role: 'Dentist' }),
-            User.find({ role: 'Doctor' })
-        ]);
-        for (const u of [...dentistRoleUsers, ...doctorRoleUsers]) {
+        const doctorRoleUsers = await User.find({ role: { $in: ['DOCTOR', 'Doctor', 'Dentist'] } });
+        for (const u of doctorRoleUsers) {
             const emailClean = (u.email || '').toLowerCase();
             const userIdClean = String(u.id || '').trim();
             if ((!emailClean || !existingEmails.has(emailClean)) && (!userIdClean || !existingUserIds.has(userIdClean))) {
@@ -431,6 +598,7 @@ exports.getDoctorById = async (req, res) => {
 
 // 4c. TOGGLE / UPDATE DOCTOR AVAILABILITY ON/OFF (Persists availability_status in Supabase without touching profile/appointments/records)
 exports.updateDoctorAvailability = async (req, res) => {
+    if (!ensureClinicOrDoctorMutationAuth(req, res)) return;
     const { id } = req.params;
     try {
         if (!id || !String(id).trim()) {
@@ -575,7 +743,7 @@ exports.deleteDentist = async (req, res) => {
         // 1. Delete from patient_doctors junction if any
         try {
             await supabaseAdmin.from('patient_doctors').delete().or(`doctor_id.eq.${id},patient_id.eq.${id}`);
-        } catch (_) {}
+        } catch (_) { }
 
         // 2. Check dentists table and delete
         let userId = null;
@@ -587,14 +755,14 @@ exports.deleteDentist = async (req, res) => {
             } else {
                 await supabaseAdmin.from('dentists').delete().or(`id.eq.${id},user_id.eq.${id}`);
             }
-        } catch (_) {}
+        } catch (_) { }
 
         // 3. Delete from users table if applicable
         const targetUserId = userId || id;
         try {
             await supabaseAdmin.from('users').delete().eq('id', targetUserId);
             await supabaseAdmin.auth.admin.deleteUser(targetUserId);
-        } catch (_) {}
+        } catch (_) { }
 
         res.json({ success: true, message: 'Doctor deleted successfully.' });
     } catch (err) {
@@ -605,11 +773,17 @@ exports.deleteDentist = async (req, res) => {
 
 // 9. UPDATE DOCTOR PROFESSIONAL PROFILE (Specialty, Qualification, Experience, Clinic, Availability)
 exports.updateDoctorProfile = async (req, res) => {
+    if (!ensureClinicOrDoctorMutationAuth(req, res)) return;
     const { id } = req.params;
     const {
         name,
         specialty,
         speciality,
+        specialtyId,
+        specialty_id,
+        specialtyName,
+        medicalSpecialty,
+        department,
         qualification,
         qualifications,
         experienceYears,
@@ -634,6 +808,8 @@ exports.updateDoctorProfile = async (req, res) => {
         const normalizedLanguages = (languages !== undefined || languagesKnown !== undefined)
             ? normalizeLanguagesList(languages ?? languagesKnown)
             : null;
+        const requestedSpec = (specialty || speciality || specialtyName || medicalSpecialty || '').toString().trim();
+        const requestedSpecId = (specialtyId || specialty_id || '').toString().trim() || undefined;
         let clinicId = undefined;
         if (clinicName && String(clinicName).trim()) {
             const cName = String(clinicName).trim();
@@ -643,14 +819,16 @@ exports.updateDoctorProfile = async (req, res) => {
                     clinic_name: cName,
                     location: city ? `${city}${pincode ? ' - ' + pincode : ''}` : 'GS HEALTH Medical Center',
                     verified: true,
-                    services: [specialty || speciality || 'General Medicine']
+                    services: [requestedSpec || 'General Medicine']
                 });
             }
             if (clinic && clinic.id) clinicId = clinic.id;
         }
 
         const updatedDentist = await Dentist.findByIdAndUpdate(id, {
-            speciality: specialty || speciality,
+            ...(requestedSpec ? { speciality: requestedSpec } : {}),
+            ...(requestedSpecId ? { specialty_id: requestedSpecId } : {}),
+            ...(department ? { department } : {}),
             qualifications: qualification || qualifications,
             experience_years: experienceYears ?? experience_years,
             license_number: licenseNumber || license_number,
@@ -671,7 +849,7 @@ exports.updateDoctorProfile = async (req, res) => {
                     ...(pincode ? { pincode } : {}),
                     ...(normalizedLanguages && normalizedLanguages.length > 0 ? { languages: normalizedLanguages } : {})
                 });
-            } catch (_) {}
+            } catch (_) { }
         }
 
         const refreshed = await Dentist.findById(updatedDentist?.id || id) || updatedDentist;
@@ -688,6 +866,7 @@ exports.updateDoctorProfile = async (req, res) => {
 
 // 10. UPDATE CLINIC DEPARTMENTS & SERVICES (Multi-Specialty Clinic Management)
 exports.updateClinicDepartments = async (req, res) => {
+    if (!ensureClinicOrDoctorMutationAuth(req, res)) return;
     const { id } = req.params;
     const { clinicName, location, departments, services, pricing } = req.body;
     try {
@@ -729,8 +908,191 @@ exports.updateClinicDepartments = async (req, res) => {
     }
 };
 
+// 10b. ADD NEW DOCTOR DIRECTLY UNDER A CLINIC (Supports Multiple Doctors per Clinic)
+exports.addClinicDoctor = async (req, res) => {
+    if (!ensureClinicOrDoctorMutationAuth(req, res)) return;
+    const { clinicId } = req.params;
+    const {
+        name,
+        phone,
+        email,
+        specialty,
+        speciality,
+        specialtyId,
+        specialty_id,
+        qualification,
+        qualifications,
+        experienceYears,
+        experience_years,
+        licenseNumber,
+        license_number,
+        consultationFee,
+        consultation_fee,
+        bio,
+        city,
+        pincode,
+        state,
+        languages,
+        clinicName
+    } = req.body;
+    try {
+        const cleanName = String(name || '').trim();
+        const rawPhone = String(phone || '').trim();
+        const phoneDigits = rawPhone.replace(/[^0-9]/g, '');
+        const cleanPhone = phoneDigits.length === 12 && phoneDigits.startsWith('91')
+            ? phoneDigits.slice(2)
+            : (phoneDigits.length === 11 && phoneDigits.startsWith('0') ? phoneDigits.slice(1) : phoneDigits);
+
+        if (!cleanName || cleanPhone.length < 10) {
+            return res.status(400).json({
+                success: false,
+                message: 'Doctor full name and valid 10-digit phone number are required.'
+            });
+        }
+
+        const resolvedScope = await exports.resolveClinicRecordAndDoctorIds(clinicId !== 'default' ? clinicId : (clinicName || ''));
+        let targetClinic = resolvedScope.clinic;
+        if (!targetClinic && clinicName && String(clinicName).trim()) {
+            targetClinic = await Clinic.findOne({ clinic_name: String(clinicName).trim() }).catch(() => null);
+            if (!targetClinic) {
+                targetClinic = await Clinic.create({
+                    clinic_name: String(clinicName).trim(),
+                    location: [city, pincode].filter(Boolean).join(' - ') || 'GS HEALTH Medical Center',
+                    verified: true,
+                    services: [specialty || speciality || 'General Medicine']
+                });
+            }
+        }
+        const canonicalClinicId = targetClinic?.id || (clinicId && clinicId !== 'default' ? clinicId : null);
+        const resolvedClinicName = targetClinic?.clinic_name || String(clinicName || '').trim();
+
+        const rawSpecInput = String(specialty || speciality || '').trim();
+        const specResolution = await resolveMedicalSpecialtyRecord(
+            rawSpecInput || 'General Medicine',
+            specialtyId || specialty_id || null
+        );
+        const resolvedSpec = specResolution.specialty;
+        const resolvedQual = String(qualification || qualifications || '').trim() || getDefaultQualificationForSpecialty(resolvedSpec);
+        const resolvedExp = parseInt(experienceYears ?? experience_years ?? 5, 10) || 5;
+        const cleanLangs = normalizeLanguagesList(languages);
+        const finalLangs = cleanLangs.length > 0 ? cleanLangs : ['English'];
+
+        // Check if doctor account already exists by phone or email
+        let user = await User.findByMobile(cleanPhone).catch(() => null);
+        const cleanEmailInput = String(email || '').trim().toLowerCase();
+        if (!user && cleanEmailInput && cleanEmailInput.includes('@')) {
+            user = await User.findOne({ email: cleanEmailInput }).catch(() => null);
+        }
+
+        if (!user) {
+            const generatedEmail = (cleanEmailInput && cleanEmailInput.includes('@'))
+                ? cleanEmailInput
+                : `user_${cleanPhone}@dentaguru.internal`;
+            const effectivePassword = `OTP_SECURE_${require('crypto').randomBytes(12).toString('hex')}`;
+            const formattedDocName = cleanName.startsWith('Dr.') ? cleanName : `Dr. ${cleanName}`;
+            const metaObj = {
+                city: String(city || targetClinic?.city || '').trim(),
+                pincode: String(pincode || targetClinic?.pincode || '').trim(),
+                location: targetClinic?.location || '',
+                languages: finalLangs,
+                specialty: resolvedSpec,
+                specialtyId: specResolution.specialty_id || null,
+                department: specResolution.department || '',
+                qualification: resolvedQual,
+                experienceYears: resolvedExp,
+                clinicId: canonicalClinicId,
+                clinicName: resolvedClinicName,
+                licenseNumber: String(licenseNumber || license_number || '').trim()
+            };
+            user = await User.create({
+                name: formattedDocName,
+                email: generatedEmail,
+                password: effectivePassword,
+                phone: cleanPhone,
+                role: 'DOCTOR',
+                state: String(state || '').trim(),
+                city: metaObj.city,
+                pincode: metaObj.pincode,
+                languages: finalLangs,
+                device_token: JSON.stringify(metaObj)
+            });
+        }
+
+        // Check if this user already has a dentists row
+        let dentistRec = await Dentist.findOne({ user_id: user.id }).catch(() => null);
+        if (dentistRec) {
+            dentistRec = await Dentist.findByIdAndUpdate(dentistRec.id, {
+                ...(canonicalClinicId ? { clinic_id: canonicalClinicId } : {}),
+                ...(rawSpecInput ? { speciality: resolvedSpec, specialty_id: specResolution.specialty_id, department: specResolution.department } : {}),
+                qualifications: resolvedQual,
+                experience_years: resolvedExp,
+                ...(consultationFee || consultation_fee ? { consultation_fee: String(consultationFee || consultation_fee) } : {}),
+                ...(bio !== undefined ? { bio: String(bio || '') } : {}),
+                availability_status: 'Available'
+            });
+        } else {
+            dentistRec = await Dentist.create({
+                user_id: user.id,
+                clinic_id: canonicalClinicId,
+                speciality: resolvedSpec,
+                specialty_id: specResolution.specialty_id || null,
+                department: specResolution.department || '',
+                license_number: String(licenseNumber || license_number || '').trim(),
+                experience_years: resolvedExp,
+                qualifications: resolvedQual,
+                availability_status: 'Available',
+                consultation_fee: String(consultationFee || consultation_fee || ''),
+                bio: String(bio || ''),
+                state: String(state || '').trim(),
+                city: String(city || targetClinic?.city || '').trim(),
+                pincode: String(pincode || targetClinic?.pincode || '').trim(),
+                languages: finalLangs,
+                rating: 5.0,
+                reviews_count: 0
+            });
+        }
+
+        if (targetClinic && resolvedSpec) {
+            const currentServices = Array.isArray(targetClinic.services) ? [...targetClinic.services] : [];
+            if (!currentServices.some(s => String(s).toLowerCase() === resolvedSpec.toLowerCase())) {
+                currentServices.push(resolvedSpec);
+                await Clinic.findByIdAndUpdate(targetClinic.id, { services: currentServices }).catch(() => null);
+            }
+        }
+
+        await Notification.create({
+            recipient_role: 'Admin',
+            recipient_id: 'ALL_ADMINS',
+            title: '🩺 New Clinic Doctor Added',
+            message: `${user.name} (${resolvedSpec}) added to ${resolvedClinicName || 'Clinic'}.`,
+            type: 'doctor_registered'
+        }).catch(() => null);
+
+        const refreshedDoctor = (dentistRec?.id ? await Dentist.findById(dentistRec.id).catch(() => null) : null) || {
+            ...dentistRec,
+            users: user,
+            clinics: targetClinic || {}
+        };
+        const formatted = formatDentistRecord(refreshedDoctor);
+        const allClinicDoctors = canonicalClinicId
+            ? (await Dentist.find({ clinic_id: canonicalClinicId }).catch(() => [])).map(formatDentistRecord)
+            : [formatted];
+
+        res.status(201).json({
+            success: true,
+            message: 'Doctor added to clinic successfully.',
+            doctor: formatted,
+            doctors: allClinicDoctors
+        });
+    } catch (err) {
+        console.error('Add Clinic Doctor Error:', err.message);
+        res.status(500).json({ success: false, message: err.message || 'Failed to add doctor to clinic.' });
+    }
+};
+
 // 11. ASSOCIATE EXISTING DOCTOR WITH CLINIC (No Duplicate Account Creation)
 exports.associateClinicDoctor = async (req, res) => {
+    if (!ensureClinicOrDoctorMutationAuth(req, res)) return;
     const { clinicId } = req.params;
     const { doctorId, phone, email, licenseNumber, clinicName, specialty, consultationFee, availableDays, availableSlots } = req.body;
     try {
@@ -773,7 +1135,7 @@ exports.associateClinicDoctor = async (req, res) => {
                     clinic_id: resolvedClinicId || null,
                     speciality: specialty || existingUser.specialty || 'General Medicine',
                     qualifications: existingUser.qualification || getDefaultQualificationForSpecialty(specialty || 'General Medicine'),
-                    license_number: licenseNumber || 'MED-LIC-REG',
+                    license_number: licenseNumber || '',
                     experience_years: existingUser.experienceYears || 5,
                     availability_status: 'Available'
                 });
@@ -808,6 +1170,7 @@ exports.associateClinicDoctor = async (req, res) => {
 
 // 12. REMOVE DOCTOR FROM CLINIC (Preserves Global Doctor Account & Patient Records)
 exports.removeDoctorFromClinic = async (req, res) => {
+    if (!ensureClinicOrDoctorMutationAuth(req, res)) return;
     const { doctorId } = req.params;
     try {
         if (!doctorId) {

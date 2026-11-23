@@ -1,23 +1,80 @@
 services:
+  # 1. PRODUCTION BACKEND (Always-On Starter, Real SMS OTP Disabled On-Screen, Production Supabase Only)
   - type: web
     name: dentaguru-backend
-    env: node
-    plan: free
+    runtime: node
+    plan: starter
     rootDir: backend
     buildCommand: npm install
     startCommand: node src/server.js
     healthCheckPath: /health
+    autoDeploy: true
     envVars:
       - key: NODE_ENV
         value: production
+      - key: ALWAYS_ON_HOSTING
+        value: "true"
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_ANON_KEY
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      - key: TESTING_SUPABASE_URL
+        sync: false
       - key: JWT_SECRET
-        value: dentaguru_super_secret_jwt_key_2026
+        sync: false
       - key: REFRESH_SECRET
-        value: dentaguru_super_secret_refresh_key_2026
+        sync: false
+      - key: OTP_SALT
+        sync: false
+      - key: ADMIN_PHONE
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: FAST2SMS_API_KEY
+        sync: false
+      - key: FAST2SMS_ROUTE
+        value: q
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false
 
+  # 2. TESTING / STAGING BACKEND (Always-On Starter, Free On-Screen OTP for Allowlisted Test Numbers Only, Testing Supabase Only)
+  - type: web
+    name: dentaguru-backend-test
+    runtime: node
+    plan: starter
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node src/server.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: staging
+      - key: OTP_DELIVERY_MODE
+        value: on_screen
+      - key: ALWAYS_ON_HOSTING
+        value: "true"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: PRODUCTION_SUPABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: REFRESH_SECRET
+        sync: false
+      - key: OTP_SALT
+        sync: false
+      - key: ON_SCREEN_OTP_ALLOWLIST
+        sync: false
+      - key: ADMIN_PHONE
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false

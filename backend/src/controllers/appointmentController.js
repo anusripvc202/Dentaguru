@@ -1,6 +1,8 @@
-const { Appointment, Clinic, Dentist, User, Notification, MedicalRecord, Referral, DoctorAvailability, PatientAssignmentHistory, District, ASSIGNMENT_SOURCES, isDoctorRecordAvailable } = require('../models/Schemas');
+const { Appointment, Clinic, Dentist, User, Notification, MedicalRecord, Referral, DoctorAvailability, PatientAssignmentHistory, District, ASSIGNMENT_SOURCES, isDoctorRecordAvailable, resolveClinicIds, resolveDentistIds } = require('../models/Schemas');
 const { sendPushNotification } = require('../services/notificationService');
 const { generateTimeSlots } = require('./availabilityController');
+const { resolveClinicRecordAndDoctorIds } = require('./clinicController');
+const { sendDoctorBookingAlert, sendClinicBookingAlert, isWhatsAppProviderConfigured } = require('../services/whatsappService');
 
 function enrichAppointmentRecord(a) {
     if (!a || typeof a !== 'object') return a;
@@ -246,7 +248,22 @@ exports.bookAppointment = async (req, res) => {
             }
 
             const effectiveDentistId = resolvedDoctor?.id || dentistId || null;
-            const effectiveClinicId = clinicId || resolvedDoctor?.clinic_id || null;
+            let effectiveClinicId = null;
+            if (clinicId) {
+                const resolvedExplicitClinic = await resolveClinicIds(clinicId);
+                effectiveClinicId = resolvedExplicitClinic.clinicId || null;
+            }
+            if (!effectiveClinicId && resolvedDoctor?.clinic_id) {
+                effectiveClinicId = resolvedDoctor.clinic_id;
+            }
+            if (!effectiveClinicId && resolvedDoctor) {
+                const candidateClinicName = (resolvedDoctor.clinics?.clinic_name || resolvedDoctor.clinicName || '').toString().trim();
+                const lower = candidateClinicName.toLowerCase();
+                if (candidateClinicName && lower !== 'gs health practice' && lower !== 'independent practice') {
+                    const matchedClinic = await Clinic.findOne({ clinic_name: candidateClinicName }).catch(() => null);
+                    if (matchedClinic?.id) effectiveClinicId = matchedClinic.id;
+                }
+            }
 
             const appointment = await Appointment.create({
                 patient_id: targetPatientId,
@@ -333,17 +350,35 @@ exports.bookAppointment = async (req, res) => {
         const enrichedAppt = enrichAppointmentRecord(fullAppt || appointment);
         const patientDisplayName = enrichedAppt.patient_name || 'Patient';
         const doctorDisplayName = enrichedAppt.dentist_name || 'Selected Doctor';
-        const clinicDisplayName = enrichedAppt.clinic_name || 'GS Health Practice';
+        const resolvedClinicId = enrichedAppt.clinic_id || appointment.clinic_id || null;
+        const clinicDisplayName = enrichedAppt.clinic_name || 'GS HEALTH Practice';
         const effectiveTreatment = appointment.treatment || treatment || 'Medical Consultation';
 
-        // 🔔 1. Persistent Notification to Doctor
+        // 🔔 1. Persistent Notification to Concerned Doctor (Doctor-isolated)
         await Notification.create({
             recipient_role: 'Dentist',
             recipient_id: appointment.dentist_id || dentistId || 'ALL',
-            title: '📅 New Appointment Booked',
-            message: `${patientDisplayName} booked an appointment for ${effectiveTreatment} on ${requestedDateStr} at ${normalizedSlot}.`,
+            title: 'New Appointment Booking',
+            message: `${patientDisplayName} booked an appointment (${effectiveTreatment}) with you on ${requestedDateStr} at ${normalizedSlot}. Status: PENDING.`,
             type: 'appointment_request'
         });
+
+        // 🔔 1b. Persistent Notification to Associated Clinic (ONLY when doctor belongs to a clinic)
+        let clinicRecord = null;
+        let clinicUser = null;
+        if (resolvedClinicId) {
+            clinicRecord = await Clinic.findById(resolvedClinicId).catch(() => null);
+            if (clinicRecord?.user_id) {
+                clinicUser = await User.findById(clinicRecord.user_id).catch(() => null);
+            }
+            await Notification.create({
+                recipient_role: 'Clinic',
+                recipient_id: resolvedClinicId,
+                title: 'New Appointment Booking',
+                message: `${patientDisplayName} booked an appointment with ${doctorDisplayName} on ${requestedDateStr} at ${normalizedSlot}. Status: PENDING.`,
+                type: 'clinic_appointment_booked'
+            });
+        }
 
         // 🔔 2. Persistent Notification to Patient
         if (targetPatientId || appointment.patient_id) {
@@ -365,6 +400,61 @@ exports.bookAppointment = async (req, res) => {
             type: 'admin_appointment_booked'
         });
 
+        // 🔔 4. Push & External Mobile Alerts (without simulating external SMS/WhatsApp delivery)
+        let doctorExternalAlert = { success: false, providerConfigured: isWhatsAppProviderConfigured(), whatsappStatus: 'NotAttempted' };
+        let clinicExternalAlert = { success: false, providerConfigured: isWhatsAppProviderConfigured(), whatsappStatus: 'NotAttempted' };
+        try {
+            const targetDocId = appointment.dentist_id || dentistId;
+            if (targetDocId) {
+                const docRec = await Dentist.findById(targetDocId).catch(() => null);
+                const docUser = docRec?.users || (docRec?.user_id ? await User.findById(docRec.user_id).catch(() => null) : null);
+                const docPhone = docUser?.phone || docRec?.phone || '';
+                if (docUser?.device_token && !String(docUser.device_token).startsWith('{')) {
+                    await sendPushNotification(
+                        docUser.device_token,
+                        'New Appointment Booking',
+                        `${patientDisplayName} booked an appointment on ${requestedDateStr} at ${normalizedSlot}.`,
+                        { appointmentId: String(appointment.id), type: 'appointment_request' }
+                    );
+                }
+                if (docPhone) {
+                    doctorExternalAlert = await sendDoctorBookingAlert({
+                        doctorPhone: docPhone,
+                        doctorName: doctorDisplayName,
+                        patientName: patientDisplayName,
+                        appointmentDate: requestedDateStr,
+                        appointmentTime: normalizedSlot,
+                        appointmentType: effectiveTreatment,
+                        bookingId: String(appointment.id)
+                    });
+                }
+            }
+            if (resolvedClinicId) {
+                const clinicPhone = clinicRecord?.phone || clinicUser?.phone || '';
+                if (clinicUser?.device_token && !String(clinicUser.device_token).startsWith('{')) {
+                    await sendPushNotification(
+                        clinicUser.device_token,
+                        'New Appointment Booking',
+                        `${patientDisplayName} booked with ${doctorDisplayName} on ${requestedDateStr} at ${normalizedSlot}.`,
+                        { appointmentId: String(appointment.id), clinicId: String(resolvedClinicId), type: 'clinic_appointment_booked' }
+                    );
+                }
+                if (clinicPhone) {
+                    clinicExternalAlert = await sendClinicBookingAlert({
+                        clinicPhone,
+                        clinicName: clinicDisplayName,
+                        doctorName: doctorDisplayName,
+                        patientName: patientDisplayName,
+                        appointmentDate: requestedDateStr,
+                        appointmentTime: normalizedSlot,
+                        bookingId: String(appointment.id)
+                    });
+                }
+            }
+        } catch (extErr) {
+            console.warn('⚠️ External booking notification dispatch notice:', extErr.message);
+        }
+
         const patientAccountId = targetPatientId || (req.user && req.user.id);
         if (patientAccountId) {
             const patient = await User.findById(patientAccountId).catch(() => null);
@@ -381,7 +471,14 @@ exports.bookAppointment = async (req, res) => {
         res.status(201).json({
             success: true,
             message: 'Appointment request submitted successfully.',
-            appointment: enrichedAppt
+            appointment: enrichedAppt,
+            notificationStatus: {
+                inAppClinicNotified: Boolean(resolvedClinicId),
+                inAppDoctorNotified: true,
+                externalSmsWhatsappConfigured: isWhatsAppProviderConfigured(),
+                doctorExternalAlert,
+                clinicExternalAlert
+            }
         });
     } catch (err) {
         console.error('Booking Error:', err.message);
@@ -432,20 +529,69 @@ exports.getAppointments = async (req, res) => {
             query.dentist_id = { $in: possibleDocIds };
         }
 
-        if (clinicId) {
-            query.clinic_id = clinicId;
-        } else if (req.user && (req.user.role === 'Clinic' || req.user.role === 'clinic')) {
-            const clinic = await Clinic.findOne({ user_id: req.user.id });
-            if (clinic) query.clinic_id = clinic.id;
+        const callerRoleLower = (req.user?.role || '').toString().trim().toLowerCase();
+        const isCallerClinic = callerRoleLower === 'clinic' || callerRoleLower === 'clinic_admin';
+
+        if (isCallerClinic) {
+            // Strict clinic RBAC isolation: clinic user can only read bookings of its own clinic
+            const resolvedClinic = await resolveClinicRecordAndDoctorIds(req.user.id);
+            if (!resolvedClinic.clinicId) {
+                return res.json({ success: true, count: 0, appointments: [] });
+            }
+            query.clinic_id = resolvedClinic.clinicId;
+            query.clinic_dentist_ids = resolvedClinic.doctorIds;
+        } else if (clinicId) {
+            const resolvedClinic = await resolveClinicRecordAndDoctorIds(clinicId);
+            if (!resolvedClinic.clinicId) {
+                return res.json({ success: true, count: 0, appointments: [] });
+            }
+            query.clinic_id = resolvedClinic.clinicId;
+            query.clinic_dentist_ids = resolvedClinic.doctorIds;
         }
 
-        const isAdmin = req.user && (req.user.role === 'Admin' || req.user.role === 'admin' || req.user.role === 'Sub-Admin' || req.user.role === 'subadmin');
+        const isAdmin = req.user && (callerRoleLower === 'admin' || callerRoleLower === 'sub-admin' || callerRoleLower === 'subadmin' || callerRoleLower === 'superadmin' || callerRoleLower === 'primaryadmin');
         if (!isAdmin && !patientId && !dentistId && !clinicId && !req.user) {
             return res.json({ success: true, count: 0, appointments: [] });
         }
 
         const rawList = await Appointment.find(query);
-        const enrichedList = rawList.map(a => enrichAppointmentRecord(a));
+        const allReferrals = await Referral.find().catch(() => []);
+        const referralByApptId = new Map();
+        for (const r of (allReferrals || [])) {
+            if (r?.appointment_id) referralByApptId.set(String(r.appointment_id), r);
+        }
+
+        const enrichedList = await Promise.all(rawList.map(async (a) => {
+            const enriched = enrichAppointmentRecord(a);
+            const linkedRef = referralByApptId.get(String(a.id));
+            if (linkedRef) {
+                enriched.referral_id = linkedRef.id;
+                enriched.referral_source = linkedRef.referrer_patient_name || 'Patient Referral';
+            }
+            if (!enriched.dentist_name && a && a.dentist_id) {
+                try {
+                    const doc = await Dentist.findById(a.dentist_id).catch(() => null)
+                        || await Dentist.findOne({ user_id: a.dentist_id }).catch(() => null);
+                    const user = doc?.users || (doc?.user_id ? await User.findById(doc.user_id).catch(() => null) : null)
+                        || await User.findById(a.dentist_id).catch(() => null);
+                    const fallbackName = (user?.name || doc?.name || '').toString().trim();
+                    if (fallbackName) {
+                        const formatted = (fallbackName.toLowerCase().startsWith('dr.') || fallbackName.toLowerCase().startsWith('dr '))
+                            ? fallbackName
+                            : `Dr. ${fallbackName}`;
+                        enriched.dentist_name = formatted;
+                        if (enriched.selectedDoctor) {
+                            enriched.selectedDoctor.name = formatted;
+                            if (!enriched.selectedDoctor.specialty && (doc?.speciality || doc?.specialty)) {
+                                enriched.selectedDoctor.specialty = doc.speciality || doc.specialty;
+                                enriched.doctor_specialty = enriched.selectedDoctor.specialty;
+                            }
+                        }
+                    }
+                } catch (_) {}
+            }
+            return enriched;
+        }));
 
         res.json({ success: true, count: enrichedList.length, appointments: enrichedList });
     } catch (err) {
@@ -485,6 +631,17 @@ exports.acceptAppointment = async (req, res) => {
             message: `${docName} confirmed the appointment for ${patName} (${apptDateStr} at ${appointment.time_slot}).`,
             type: 'admin_appointment_confirmed'
         });
+
+        const confirmedClinicId = enriched.clinic_id || appointment.clinic_id;
+        if (confirmedClinicId) {
+            await Notification.create({
+                recipient_role: 'Clinic',
+                recipient_id: confirmedClinicId,
+                title: 'Appointment Confirmed',
+                message: `${docName} confirmed visit for ${patName} (${apptDateStr} at ${appointment.time_slot}).`,
+                type: 'clinic_appointment_confirmed'
+            });
+        }
 
         const patient = await User.findById(appointment.patient_id).catch(() => null);
         if (patient?.device_token && !String(patient.device_token).startsWith('{')) {
@@ -737,6 +894,17 @@ exports.cancelAppointment = async (req, res) => {
             type: 'admin_appointment_cancelled'
         });
 
+        const cancelledClinicId = enriched.clinic_id || appointment.clinic_id;
+        if (cancelledClinicId) {
+            await Notification.create({
+                recipient_role: 'Clinic',
+                recipient_id: cancelledClinicId,
+                title: 'Appointment Cancelled',
+                message: `Appointment for ${patName} with ${docName} (${apptDateStr} at ${appointment.time_slot}) was cancelled.`,
+                type: 'clinic_appointment_cancelled'
+            });
+        }
+
         const patient = await User.findById(appointment.patient_id).catch(() => null);
         if (patient?.device_token && !String(patient.device_token).startsWith('{')) {
             await sendPushNotification(
@@ -811,6 +979,17 @@ exports.completeConsultation = async (req, res) => {
             type: 'admin_consultation_completed'
         });
 
+        const completedClinicId = enriched.clinic_id || appointment.clinic_id;
+        if (completedClinicId) {
+            await Notification.create({
+                recipient_role: 'Clinic',
+                recipient_id: completedClinicId,
+                title: 'Consultation Completed',
+                message: `${docName} completed consultation for ${patName}.`,
+                type: 'clinic_consultation_completed'
+            });
+        }
+
         const patient = await User.findById(appointment.patient_id).catch(() => null);
         if (patient?.device_token && !String(patient.device_token).startsWith('{')) {
             await sendPushNotification(
@@ -852,12 +1031,18 @@ exports.getNotifications = async (req, res) => {
                 if (!effectiveUserId) {
                     effectiveUserId = req.user.id;
                 } else if (String(effectiveUserId) !== String(req.user.id)) {
-                    // For doctors, allow passing either their users.id or dentists.id
+                    // For doctors, allow passing only their own users.id or dentists.id
                     if (callerRoleLower === 'dentist' || callerRoleLower === 'doctor') {
-                        const doc = await Dentist.findById(req.user.id).catch(() => null);
-                        const allowedIds = new Set([String(req.user.id), String(doc?.id || ''), String(doc?.user_id || '')]);
+                        const resolvedDoc = await resolveDentistIds(req.user.id).catch(() => ({ allIds: [] }));
+                        const allowedIds = new Set([String(req.user.id), ...((resolvedDoc.allIds || []).map(String))]);
                         if (!allowedIds.has(String(effectiveUserId))) {
                             effectiveUserId = req.user.id;
+                        }
+                    } else if (callerRoleLower === 'clinic' || callerRoleLower === 'clinic_admin') {
+                        const resolvedClinic = await resolveClinicIds(req.user.id);
+                        const allowedIds = new Set((resolvedClinic.allIds || []).map(String));
+                        if (!allowedIds.has(String(effectiveUserId))) {
+                            effectiveUserId = resolvedClinic.clinicId || req.user.id;
                         }
                     } else {
                         effectiveUserId = req.user.id;

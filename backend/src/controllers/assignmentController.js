@@ -349,7 +349,7 @@ exports.getPatientTimeline = async (req, res) => {
             enrichedTimeline.push({
                 ...item,
                 doctor_name: doctor ? (doctor.name || doctor.users?.name || 'Dr. Specialist') : 'Dr. Specialist',
-                doctor_specialty: doctor ? (doctor.speciality || 'Dentist') : 'Specialist'
+                doctor_specialty: doctor ? (doctor.speciality || 'General Medicine') : 'Specialist'
             });
         }
 

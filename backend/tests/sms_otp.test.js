@@ -517,6 +517,7 @@ async function runTests() {
         const prevSupaUrl = process.env.SUPABASE_URL;
         const prevSupaService = process.env.SUPABASE_SERVICE_ROLE_KEY;
         const prevSupaAnon = process.env.SUPABASE_ANON_KEY;
+        const prevOtpSalt = process.env.OTP_SALT;
         const prevHttpsRequest = https.request;
         const prevClient = otpStoreService.supabaseClient;
 
@@ -594,6 +595,7 @@ async function runTests() {
             if (prevSupaUrl !== undefined) process.env.SUPABASE_URL = prevSupaUrl; else delete process.env.SUPABASE_URL;
             if (prevSupaService !== undefined) process.env.SUPABASE_SERVICE_ROLE_KEY = prevSupaService; else delete process.env.SUPABASE_SERVICE_ROLE_KEY;
             if (prevSupaAnon !== undefined) process.env.SUPABASE_ANON_KEY = prevSupaAnon; else delete process.env.SUPABASE_ANON_KEY;
+            if (prevOtpSalt !== undefined) process.env.OTP_SALT = prevOtpSalt; else delete process.env.OTP_SALT;
         }
     });
 
@@ -603,6 +605,7 @@ async function runTests() {
         const prevSupaUrl = process.env.SUPABASE_URL;
         const prevSupaService = process.env.SUPABASE_SERVICE_ROLE_KEY;
         const prevSupaAnon = process.env.SUPABASE_ANON_KEY;
+        const prevOtpSalt = process.env.OTP_SALT;
 
         process.env.NODE_ENV = 'development';
         process.env.OTP_DELIVERY_MODE = 'on_screen';
@@ -633,6 +636,7 @@ async function runTests() {
             if (prevSupaUrl !== undefined) process.env.SUPABASE_URL = prevSupaUrl; else delete process.env.SUPABASE_URL;
             if (prevSupaService !== undefined) process.env.SUPABASE_SERVICE_ROLE_KEY = prevSupaService; else delete process.env.SUPABASE_SERVICE_ROLE_KEY;
             if (prevSupaAnon !== undefined) process.env.SUPABASE_ANON_KEY = prevSupaAnon; else delete process.env.SUPABASE_ANON_KEY;
+            if (prevOtpSalt !== undefined) process.env.OTP_SALT = prevOtpSalt; else delete process.env.OTP_SALT;
         }
     });
 
@@ -644,6 +648,7 @@ async function runTests() {
         const prevSupaUrl = process.env.SUPABASE_URL;
         const prevSupaService = process.env.SUPABASE_SERVICE_ROLE_KEY;
         const prevSupaAnon = process.env.SUPABASE_ANON_KEY;
+        const prevOtpSalt = process.env.OTP_SALT;
         const prevHttpsRequest = https.request;
         const prevClient = otpStoreService.supabaseClient;
 
@@ -653,6 +658,7 @@ async function runTests() {
         process.env.SUPABASE_URL = 'https://prod-project.supabase.co';
         process.env.SUPABASE_SERVICE_ROLE_KEY = 'prod_service_key';
         process.env.SUPABASE_ANON_KEY = 'prod_anon_key';
+        process.env.OTP_SALT = 'strong_production_otp_salt_for_test_26_check!';
 
         let smsCalledInProd = false;
         https.request = (_opts, cb) => {
@@ -695,6 +701,7 @@ async function runTests() {
             if (prevSupaUrl !== undefined) process.env.SUPABASE_URL = prevSupaUrl; else delete process.env.SUPABASE_URL;
             if (prevSupaService !== undefined) process.env.SUPABASE_SERVICE_ROLE_KEY = prevSupaService; else delete process.env.SUPABASE_SERVICE_ROLE_KEY;
             if (prevSupaAnon !== undefined) process.env.SUPABASE_ANON_KEY = prevSupaAnon; else delete process.env.SUPABASE_ANON_KEY;
+            if (prevOtpSalt !== undefined) process.env.OTP_SALT = prevOtpSalt; else delete process.env.OTP_SALT;
         }
     });
 
@@ -755,6 +762,7 @@ async function runTests() {
         const prevSupaUrl = process.env.SUPABASE_URL;
         const prevSupaService = process.env.SUPABASE_SERVICE_ROLE_KEY;
         const prevSupaAnon = process.env.SUPABASE_ANON_KEY;
+        const prevOtpSalt = process.env.OTP_SALT;
         const prevProdUrl = process.env.PRODUCTION_SUPABASE_URL;
 
         process.env.NODE_ENV = 'development';
@@ -893,6 +901,504 @@ async function runTests() {
             SUPABASE_SERVICE_ROLE_KEY: 'prod_service_fixture',
         });
         assert.strictEqual(prodCfg.supabaseUrl, 'https://fommrwxpqzkcktweosgp.supabase.co');
+    });
+
+    await asyncTest('33. Staging on-screen OTP allowlist permits approved numbers (zero SMS) and blocks others; production always disables on-screen OTP', async () => {
+        const { isOnScreenOtpTestMode, isPhoneAllowedForOnScreenOtp } = require('../src/services/otpStoreService');
+        const auth = require('../src/controllers/authController');
+
+        const prevEnv = process.env.NODE_ENV;
+        const prevMode = process.env.OTP_DELIVERY_MODE;
+        const prevAllowlist = process.env.ON_SCREEN_OTP_ALLOWLIST;
+        const prevAdminPhone = process.env.ADMIN_PHONE;
+        const prevHttpsRequest = https.request;
+        const prevClient = otpStoreService.supabaseClient;
+        const prevSupaUrl = process.env.SUPABASE_URL;
+        const prevSupaService = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        const prevSupaAnon = process.env.SUPABASE_ANON_KEY;
+        const prevOtpSalt = process.env.OTP_SALT;
+
+        let smsDispatchAttempted = false;
+        https.request = () => {
+            smsDispatchAttempted = true;
+            throw new Error('SMS carrier must NOT be invoked in staging OTP_DELIVERY_MODE=on_screen');
+        };
+
+        const rpcChallenges = new Map();
+        otpStoreService.supabaseClient = {
+            rpc: async (fnName, params) => {
+                if (fnName === 'request_otp_challenge') {
+                    rpcChallenges.set(params.p_identifier, { hash: params.p_hashed_code, used: false });
+                    return { data: { allowed: true, status: 200, requestCount: 1 }, error: null };
+                }
+                if (fnName === 'verify_otp_challenge') {
+                    const rec = rpcChallenges.get(params.p_identifier);
+                    if (!rec || rec.used || rec.hash !== params.p_incoming_hash) {
+                        return { data: { valid: false, reason: 'INVALID_CODE', message: 'Invalid OTP.' }, error: null };
+                    }
+                    rec.used = true;
+                    return { data: { valid: true, reason: 'VERIFIED', message: 'Verified.' }, error: null };
+                }
+                return { data: { allowed: true }, error: null };
+            }
+        };
+
+        try {
+            process.env.NODE_ENV = 'staging';
+            process.env.OTP_DELIVERY_MODE = 'on_screen';
+            process.env.ON_SCREEN_OTP_ALLOWLIST = '+919281030535, 9000000088';
+            process.env.ADMIN_PHONE = '9281030535';
+            process.env.SUPABASE_URL = 'https://ojinzcdldwugpnxrnjcq.supabase.co';
+            process.env.SUPABASE_SERVICE_ROLE_KEY = 'staging_service_role_fixture';
+            process.env.SUPABASE_ANON_KEY = 'staging_anon_fixture';
+            process.env.OTP_SALT = 'strong_staging_otp_salt_for_test_33_allowlist!';
+
+            assert.strictEqual(isOnScreenOtpTestMode(), true);
+            assert.strictEqual(isPhoneAllowedForOnScreenOtp('9281030535'), true);
+            assert.strictEqual(isPhoneAllowedForOnScreenOtp('+91 9000000088'), true);
+            assert.strictEqual(isPhoneAllowedForOnScreenOtp('9888877777'), false);
+
+            // Approved test number receives on-screen OTP without calling Fast2SMS/Twilio
+            let status = 200;
+            let body = null;
+            await auth.requestOTP(
+                { body: { phone: '9000000088' } },
+                { status(c) { status = c; return this; }, json(b) { body = b; return this; } }
+            );
+            assert.strictEqual(status, 200);
+            assert.strictEqual(body.success, true);
+            assert.strictEqual(body.deliveryMode, 'on_screen');
+            assert.match(String(body.otp), /^\d{6}$/);
+            assert.strictEqual(smsDispatchAttempted, false, 'Zero external SMS requests should run in staging on-screen mode');
+
+            // Unlisted number in staging with allowlist MUST be rejected with 403 and NEVER expose OTP
+            status = 200;
+            body = null;
+            await auth.requestOTP(
+                { body: { phone: '9888877777' } },
+                { status(c) { status = c; return this; }, json(b) { body = b; return this; } }
+            );
+            assert.strictEqual(status, 403);
+            assert.strictEqual(body.success, false);
+            assert.strictEqual(body.otp, undefined);
+
+            // Production NEVER allows on-screen OTP even if env vars try to turn it on
+            process.env.NODE_ENV = 'production';
+            process.env.OTP_DELIVERY_MODE = 'on_screen';
+            assert.strictEqual(isOnScreenOtpTestMode(), false);
+            assert.strictEqual(isPhoneAllowedForOnScreenOtp('9281030535'), false);
+        } finally {
+            https.request = prevHttpsRequest;
+            otpStoreService.supabaseClient = prevClient;
+            if (prevEnv !== undefined) process.env.NODE_ENV = prevEnv; else delete process.env.NODE_ENV;
+            if (prevMode !== undefined) process.env.OTP_DELIVERY_MODE = prevMode; else delete process.env.OTP_DELIVERY_MODE;
+            if (prevAllowlist !== undefined) process.env.ON_SCREEN_OTP_ALLOWLIST = prevAllowlist; else delete process.env.ON_SCREEN_OTP_ALLOWLIST;
+            if (prevAdminPhone !== undefined) process.env.ADMIN_PHONE = prevAdminPhone; else delete process.env.ADMIN_PHONE;
+            if (prevSupaUrl !== undefined) process.env.SUPABASE_URL = prevSupaUrl; else delete process.env.SUPABASE_URL;
+            if (prevSupaService !== undefined) process.env.SUPABASE_SERVICE_ROLE_KEY = prevSupaService; else delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+            if (prevSupaAnon !== undefined) process.env.SUPABASE_ANON_KEY = prevSupaAnon; else delete process.env.SUPABASE_ANON_KEY;
+            if (prevOtpSalt !== undefined) process.env.OTP_SALT = prevOtpSalt; else delete process.env.OTP_SALT;
+        }
+    });
+
+    await asyncTest('34. Secrets helper fails fast in staging/production when secrets are missing or weak', async () => {
+        const {
+            getJwtSecret,
+            getRefreshSecret,
+            getOtpSalt,
+            validateCloudSecuritySecrets,
+        } = require('../src/config/secrets');
+
+        assert.throws(() => validateCloudSecuritySecrets({ NODE_ENV: 'staging' }), /Missing or weak JWT_SECRET/);
+        assert.throws(() => validateCloudSecuritySecrets({
+            NODE_ENV: 'production',
+            JWT_SECRET: 'supersecretjwtkey123',
+            REFRESH_SECRET: 'strong_refresh_secret_value_for_tests_32chars',
+            OTP_SALT: 'strong_otp_salt_value_for_tests_32chars',
+        }), /Missing or weak JWT_SECRET/);
+
+        assert.throws(() => getOtpSalt({
+            NODE_ENV: 'staging',
+            OTP_SALT: 'gs_health_otp_salt_2026',
+        }), /Missing or weak OTP_SALT/);
+
+        const strongEnv = {
+            NODE_ENV: 'staging',
+            JWT_SECRET: 'strong_test_jwt_secret_minimum_length_32chars!',
+            REFRESH_SECRET: 'strong_test_refresh_secret_minimum_length_32!',
+            OTP_SALT: 'strong_test_otp_salt_minimum_length_32chars!!',
+        };
+        assert.strictEqual(getJwtSecret(strongEnv), strongEnv.JWT_SECRET);
+        assert.strictEqual(getRefreshSecret(strongEnv), strongEnv.REFRESH_SECRET);
+        assert.strictEqual(getOtpSalt(strongEnv), strongEnv.OTP_SALT);
+        assert.strictEqual(validateCloudSecuritySecrets(strongEnv), true);
+
+        // Non-cloud dev/test returns non-empty cryptographic ephemeral secret when unset
+        const devJwt = getJwtSecret({ NODE_ENV: 'development' });
+        assert.ok(devJwt && devJwt.length >= 32 && devJwt !== 'supersecretjwtkey123');
+    });
+
+    await asyncTest('35. Database reset endpoint refuses execution in cloud environments or without explicit local opt-in', async () => {
+        const auth = require('../src/controllers/authController');
+        const prevEnv = process.env.NODE_ENV;
+        const prevResetFlag = process.env.ALLOW_DANGEROUS_DB_RESET;
+        try {
+            process.env.NODE_ENV = 'staging';
+            process.env.ALLOW_DANGEROUS_DB_RESET = 'true';
+            let status = 200;
+            let body = null;
+            await auth.resetDatabase({}, { status(c) { status = c; return this; }, json(b) { body = b; return this; } });
+            assert.strictEqual(status, 403);
+            assert.strictEqual(body.success, false);
+
+            process.env.NODE_ENV = 'development';
+            delete process.env.ALLOW_DANGEROUS_DB_RESET;
+            status = 200;
+            body = null;
+            await auth.resetDatabase({}, { status(c) { status = c; return this; }, json(b) { body = b; return this; } });
+            assert.strictEqual(status, 403);
+            assert.strictEqual(body.success, false);
+        } finally {
+            if (prevEnv !== undefined) process.env.NODE_ENV = prevEnv; else delete process.env.NODE_ENV;
+            if (prevResetFlag !== undefined) process.env.ALLOW_DANGEROUS_DB_RESET = prevResetFlag; else delete process.env.ALLOW_DANGEROUS_DB_RESET;
+        }
+    });
+
+    await asyncTest('36. /health returns HTTP 503 when DB is disconnected and HTTP 200 when healthy; ALWAYS_ON_HOSTING disables keep-alive ping', async () => {
+        const httpModule = require('http');
+        const app = require('../src/app');
+        const supabaseConfig = require('../src/config/supabase');
+        const { resolveKeepAliveUrl } = require('../src/server');
+
+        // Always-On hosting flag disables redundant self-ping
+        assert.strictEqual(
+            resolveKeepAliveUrl({
+                NODE_ENV: 'production',
+                ALWAYS_ON_HOSTING: 'true',
+                RENDER_EXTERNAL_URL: 'https://dentaguru-backend.onrender.com',
+            }),
+            null
+        );
+
+        const prevSupaUrl = process.env.SUPABASE_URL;
+        const origFrom = supabaseConfig.supabaseAdmin.from;
+        const server = httpModule.createServer(app);
+        await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+        const { port } = server.address();
+
+        const fetchHealth = () => new Promise((resolve, reject) => {
+            httpModule.get(`http://127.0.0.1:${port}/health`, (res) => {
+                let raw = '';
+                res.on('data', (chunk) => { raw += chunk; });
+                res.on('end', () => resolve({ status: res.statusCode, json: JSON.parse(raw) }));
+            }).on('error', reject);
+        });
+
+        try {
+            process.env.SUPABASE_URL = 'https://ojinzcdldwugpnxrnjcq.supabase.co';
+            supabaseConfig.supabaseAdmin.from = () => ({
+                select: async () => ({ error: new Error('Simulated DB connectivity failure') })
+            });
+            const unhealthy = await fetchHealth();
+            assert.strictEqual(unhealthy.status, 503);
+            assert.strictEqual(unhealthy.json.status, 'unhealthy');
+
+            supabaseConfig.supabaseAdmin.from = () => ({
+                select: async () => ({ error: null })
+            });
+            const healthy = await fetchHealth();
+            assert.strictEqual(healthy.status, 200);
+            assert.strictEqual(healthy.json.status, 'healthy');
+        } finally {
+            supabaseConfig.supabaseAdmin.from = origFrom;
+            if (prevSupaUrl !== undefined) process.env.SUPABASE_URL = prevSupaUrl; else delete process.env.SUPABASE_URL;
+            await new Promise((resolve) => server.close(resolve));
+        }
+    });
+
+    await asyncTest('37. WhatsApp/Twilio dispatch is hard-blocked in on-screen OTP testing mode even when credentials are present', async () => {
+        const whatsappService = require('../src/services/whatsappService');
+        const prevEnv = process.env.NODE_ENV;
+        const prevMode = process.env.OTP_DELIVERY_MODE;
+        const prevTwilioSid = process.env.TWILIO_ACCOUNT_SID;
+        const prevTwilioToken = process.env.TWILIO_AUTH_TOKEN;
+        const prevMetaToken = process.env.WHATSAPP_API_TOKEN;
+        const prevMetaPhoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+        const prevHttpsRequest = https.request;
+
+        let externalNetworkCalled = false;
+        https.request = () => {
+            externalNetworkCalled = true;
+            throw new Error('External WhatsApp API must never be called in on-screen OTP testing mode');
+        };
+
+        try {
+            process.env.NODE_ENV = 'staging';
+            process.env.OTP_DELIVERY_MODE = 'on_screen';
+            process.env.TWILIO_ACCOUNT_SID = 'AC_test_blocked_twilio_sid';
+            process.env.TWILIO_AUTH_TOKEN = 'test_blocked_twilio_token';
+            process.env.WHATSAPP_API_TOKEN = 'test_blocked_meta_token';
+            process.env.WHATSAPP_PHONE_NUMBER_ID = '1234567890';
+
+            const waRes = await whatsappService.dispatchWhatsApp({
+                to: '9281030535',
+                message: 'Testing mode block check',
+                templateName: 'TEST_TEMPLATE'
+            });
+            assert.strictEqual(waRes.success, false);
+            assert.strictEqual(waRes.blockedInTestMode, true);
+            assert.strictEqual(waRes.whatsappStatus, 'BlockedInTestingMode');
+            assert.strictEqual(externalNetworkCalled, false);
+        } finally {
+            https.request = prevHttpsRequest;
+            if (prevEnv !== undefined) process.env.NODE_ENV = prevEnv; else delete process.env.NODE_ENV;
+            if (prevMode !== undefined) process.env.OTP_DELIVERY_MODE = prevMode; else delete process.env.OTP_DELIVERY_MODE;
+            if (prevTwilioSid !== undefined) process.env.TWILIO_ACCOUNT_SID = prevTwilioSid; else delete process.env.TWILIO_ACCOUNT_SID;
+            if (prevTwilioToken !== undefined) process.env.TWILIO_AUTH_TOKEN = prevTwilioToken; else delete process.env.TWILIO_AUTH_TOKEN;
+            if (prevMetaToken !== undefined) process.env.WHATSAPP_API_TOKEN = prevMetaToken; else delete process.env.WHATSAPP_API_TOKEN;
+            if (prevMetaPhoneId !== undefined) process.env.WHATSAPP_PHONE_NUMBER_ID = prevMetaPhoneId; else delete process.env.WHATSAPP_PHONE_NUMBER_ID;
+        }
+    });
+
+    await asyncTest('38. Two-way Supabase environment separation: production refuses testing Supabase project URL', async () => {
+        const { resolveSupabaseConfig } = require('../src/config/supabase');
+
+        assert.throws(() => resolveSupabaseConfig({
+            NODE_ENV: 'production',
+            SUPABASE_URL: 'https://ojinzcdldwugpnxrnjcq.supabase.co',
+            SUPABASE_ANON_KEY: 'prod_anon_fixture',
+            SUPABASE_SERVICE_ROLE_KEY: 'prod_service_fixture',
+        }), /Production backend must never connect to testing Supabase project/);
+
+        assert.throws(() => resolveSupabaseConfig({
+            NODE_ENV: 'production',
+            SUPABASE_URL: 'https://custom-test-ref.supabase.co/',
+            TESTING_SUPABASE_URL: 'https://custom-test-ref.supabase.co',
+            SUPABASE_ANON_KEY: 'prod_anon_fixture',
+            SUPABASE_SERVICE_ROLE_KEY: 'prod_service_fixture',
+        }), /Production backend must never connect to testing Supabase project/);
+    });
+
+    await asyncTest('39. Cloud auth security: enforces verified OTP/password on login, rejects unsigned sb_direct_ tokens, and verifies all 4 user-role OTP login flows', async () => {
+        const httpModule = require('http');
+        const app = require('../src/app');
+        const Schemas = require('../src/models/Schemas');
+
+        const prevEnv = process.env.NODE_ENV;
+        const prevAdminPhone = process.env.ADMIN_PHONE;
+        const prevJwt = process.env.JWT_SECRET;
+        const prevRefresh = process.env.REFRESH_SECRET;
+        const prevSalt = process.env.OTP_SALT;
+        const origUserFindByMobile = Schemas.User.findByMobile;
+        const origUserFindOne = Schemas.User.findOne;
+        const origUserFindById = Schemas.User.findById;
+        const origUserUpdate = Schemas.User.findByIdAndUpdate;
+        const origDentistFindById = Schemas.Dentist.findById;
+        const origDentistFindOne = Schemas.Dentist.findOne;
+        const origClinicFindOne = Schemas.Clinic.findOne;
+        const origVerifyOtp = otpStoreService.verifyOtp;
+
+        const roleAccounts = [
+            { id: 'u-pat-1', name: 'Test Patient', email: 'pat@test.local', phone: '9000001111', role: 'Patient', status: 'ACTIVE' },
+            { id: 'u-doc-1', name: 'Dr. Test Doctor', email: 'doc@test.local', phone: '9000002222', role: 'DOCTOR', status: 'ACTIVE' },
+            { id: 'u-cli-1', name: 'Test Clinic', email: 'cli@test.local', phone: '9000003333', role: 'Clinic', status: 'ACTIVE' },
+            { id: 'u-adm-1', name: 'Main Admin', email: 'adm@test.local', phone: '9281030535', role: 'Admin', status: 'ACTIVE' },
+        ];
+
+        Schemas.User.findByMobile = async (phone) => {
+            const d = String(phone || '').replace(/\D/g, '').slice(-10);
+            return roleAccounts.find(u => u.phone === d) || null;
+        };
+        Schemas.User.findOne = async (q = {}) => {
+            if (q.phone) {
+                const d = String(q.phone).replace(/\D/g, '').slice(-10);
+                return roleAccounts.find(u => u.phone === d) || null;
+            }
+            if (q.email) {
+                return roleAccounts.find(u => u.email === String(q.email).toLowerCase()) || null;
+            }
+            if (q.role === 'Admin') {
+                return roleAccounts[3];
+            }
+            return null;
+        };
+        Schemas.User.findById = async (id) => roleAccounts.find(u => u.id === id) || null;
+        Schemas.User.findByIdAndUpdate = async (id) => roleAccounts.find(u => u.id === id) || null;
+        Schemas.Dentist.findById = async () => ({ id: 'dent-1', user_id: 'u-doc-1', speciality: 'Cardiology', availability_status: 'Available' });
+        Schemas.Dentist.findOne = async () => ({ id: 'dent-1', user_id: 'u-doc-1', speciality: 'Cardiology', availability_status: 'Available' });
+        Schemas.Clinic.findOne = async () => ({ id: 'clin-1', user_id: 'u-cli-1', clinic_name: 'Test Clinic', location: 'Hyderabad' });
+        otpStoreService.verifyOtp = async (_key, code) => ({
+            valid: String(code) === '654321',
+            message: String(code) === '654321' ? 'Verified' : 'Invalid OTP'
+        });
+
+        const server = httpModule.createServer(app);
+        await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+        const { port } = server.address();
+
+        const apiReq = (method, urlPath, headers = {}, body = null) => new Promise((resolve, reject) => {
+            const payload = body ? JSON.stringify(body) : null;
+            const req = httpModule.request({
+                hostname: '127.0.0.1',
+                port,
+                path: urlPath,
+                method,
+                headers: {
+                    ...(payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {}),
+                    ...headers,
+                }
+            }, (res) => {
+                let raw = '';
+                res.on('data', (c) => { raw += c; });
+                res.on('end', () => resolve({ status: res.statusCode, json: raw ? JSON.parse(raw) : {} }));
+            });
+            req.on('error', reject);
+            if (payload) req.write(payload);
+            req.end();
+        });
+
+        try {
+            process.env.NODE_ENV = 'staging';
+            process.env.ADMIN_PHONE = '9281030535';
+            process.env.JWT_SECRET = 'staging_strong_jwt_secret_for_role_auth_tests!';
+            process.env.REFRESH_SECRET = 'staging_strong_refresh_secret_for_role_auth!';
+            process.env.OTP_SALT = 'staging_strong_otp_salt_for_role_auth_tests!';
+
+            // 1. Login without OTP or password in staging MUST fail with 401
+            const noCreds = await apiReq('POST', '/api/v1/auth/login', {}, { phone: '9000001111' });
+            assert.strictEqual(noCreds.status, 401);
+            assert.strictEqual(noCreds.json.success, false);
+
+            // 2. All 4 roles (Patient, Doctor, Clinic, Admin) succeed with verified OTP and receive signed JWTs
+            for (const acc of roleAccounts) {
+                const loginRes = await apiReq('POST', '/api/v1/auth/login', {}, {
+                    phone: acc.phone,
+                    otp: '654321',
+                    role: acc.role === 'DOCTOR' ? 'Doctor' : acc.role,
+                });
+                assert.strictEqual(loginRes.status, 200, `Role ${acc.role} OTP login failed: ${JSON.stringify(loginRes.json)}`);
+                assert.strictEqual(loginRes.json.success, true);
+                assert.strictEqual(loginRes.json.user.id, acc.id);
+                assert.ok(loginRes.json.accessToken && !loginRes.json.accessToken.startsWith('sb_direct_'));
+            }
+
+            // 3. Unsigned synthetic token sb_direct_<userId> MUST be rejected in staging/production
+            const syntheticRes = await apiReq('GET', '/api/v1/admin/patients', {
+                Authorization: 'Bearer sb_direct_u-adm-1'
+            });
+            assert.strictEqual(syntheticRes.status, 401, 'Unsigned sb_direct_ token must not authenticate in cloud mode');
+        } finally {
+            Schemas.User.findByMobile = origUserFindByMobile;
+            Schemas.User.findOne = origUserFindOne;
+            Schemas.User.findById = origUserFindById;
+            Schemas.User.findByIdAndUpdate = origUserUpdate;
+            Schemas.Dentist.findById = origDentistFindById;
+            Schemas.Dentist.findOne = origDentistFindOne;
+            Schemas.Clinic.findOne = origClinicFindOne;
+            otpStoreService.verifyOtp = origVerifyOtp;
+            if (prevEnv !== undefined) process.env.NODE_ENV = prevEnv; else delete process.env.NODE_ENV;
+            if (prevAdminPhone !== undefined) process.env.ADMIN_PHONE = prevAdminPhone; else delete process.env.ADMIN_PHONE;
+            if (prevJwt !== undefined) process.env.JWT_SECRET = prevJwt; else delete process.env.JWT_SECRET;
+            if (prevRefresh !== undefined) process.env.REFRESH_SECRET = prevRefresh; else delete process.env.REFRESH_SECRET;
+            if (prevSalt !== undefined) process.env.OTP_SALT = prevSalt; else delete process.env.OTP_SALT;
+            await new Promise((resolve) => server.close(resolve));
+        }
+    });
+
+    await asyncTest('40. Administrative route guards & CORS allowlist enforcement in staging/production', async () => {
+        const httpModule = require('http');
+        const jwt = require('jsonwebtoken');
+        const app = require('../src/app');
+        const Schemas = require('../src/models/Schemas');
+        const { getJwtSecret } = require('../src/config/secrets');
+
+        // 40A: CORS allowlist evaluator
+        const cloudNoOriginEval = app.buildCorsOriginEvaluator({ NODE_ENV: 'production', CORS_ORIGIN: '' });
+        let corsAllowed = null;
+        cloudNoOriginEval('https://evil.example.com', (err, allow) => { corsAllowed = !err && allow; });
+        assert.strictEqual(corsAllowed, false, 'Unlisted browser origin must be blocked in production when CORS_ORIGIN is empty');
+
+        const cloudAllowlistEval = app.buildCorsOriginEvaluator({
+            NODE_ENV: 'staging',
+            CORS_ORIGIN: 'https://staging.gshealth.in, https://admin.gshealth.in/'
+        });
+        cloudAllowlistEval('https://staging.gshealth.in', (err, allow) => { corsAllowed = !err && allow; });
+        assert.strictEqual(corsAllowed, true, 'Allowlisted origin must be permitted');
+        cloudAllowlistEval('https://attacker.example.com', (err, allow) => { corsAllowed = !err && allow; });
+        assert.strictEqual(corsAllowed, false, 'Non-allowlisted origin must be rejected');
+
+        // 40B: Patient, Clinic, Dentist, and Specialty administrative route protections
+        const origFindById = Schemas.User.findById;
+        const patientUser = { id: 'pat-guard-1', name: 'Patient Guard', email: 'pat@guard.local', role: 'Patient', status: 'ACTIVE' };
+        Schemas.User.findById = async (id) => (id === patientUser.id ? patientUser : null);
+
+        const server = httpModule.createServer(app);
+        await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+        const { port } = server.address();
+
+        const patientToken = jwt.sign({ id: patientUser.id, role: 'Patient' }, getJwtSecret(), { expiresIn: '15m' });
+
+        const callRoute = (method, routePath, token = null) => new Promise((resolve, reject) => {
+            const req = httpModule.request({
+                hostname: '127.0.0.1',
+                port,
+                path: routePath,
+                method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                }
+            }, (res) => {
+                res.resume();
+                res.on('end', () => resolve(res.statusCode));
+            });
+            req.on('error', reject);
+            if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
+                req.write(JSON.stringify({ name: 'Unauthorized Attempt' }));
+            }
+            req.end();
+        });
+
+        try {
+            // Unauthenticated requests -> 401
+            assert.strictEqual(await callRoute('GET', '/api/v1/admin/patients'), 401);
+            assert.strictEqual(await callRoute('GET', '/api/v1/patients'), 401);
+            assert.strictEqual(await callRoute('DELETE', '/api/v1/clinics/c-1'), 401);
+            assert.strictEqual(await callRoute('DELETE', '/api/v1/dentists/d-1'), 401);
+            assert.strictEqual(await callRoute('POST', '/api/v1/specialties'), 401);
+            assert.strictEqual(await callRoute('GET', '/api/v1/admin/specialties'), 401);
+            assert.strictEqual(await callRoute('POST', '/api/v1/clinics'), 401);
+
+            // Authenticated Patient role -> 403 Forbidden across admin & clinic/doctor mutation endpoints
+            assert.strictEqual(await callRoute('GET', '/api/v1/admin/patients', patientToken), 403);
+            assert.strictEqual(await callRoute('DELETE', '/api/v1/clinics/c-1', patientToken), 403);
+            assert.strictEqual(await callRoute('DELETE', '/api/v1/dentists/d-1', patientToken), 403);
+            assert.strictEqual(await callRoute('POST', '/api/v1/specialties', patientToken), 403);
+            assert.strictEqual(await callRoute('GET', '/api/v1/admin/specialties', patientToken), 403);
+            assert.strictEqual(await callRoute('POST', '/api/v1/clinics', patientToken), 403);
+            assert.strictEqual(await callRoute('POST', '/api/v1/clinics/c-1/doctors', patientToken), 403);
+            assert.strictEqual(await callRoute('PUT', '/api/v1/dentists/d-1/profile', patientToken), 403);
+        } finally {
+            Schemas.User.findById = origFindById;
+            await new Promise((resolve) => server.close(resolve));
+        }
+    });
+
+    await asyncTest('41. render.yaml configures both Production and Testing Render Starter services with dashboard-managed secrets', async () => {
+        const renderYamlPath = path.resolve(__dirname, '../../render.yaml');
+        const renderYaml = fs.readFileSync(renderYamlPath, 'utf8');
+
+        assert.ok(renderYaml.includes('name: dentaguru-backend'), 'Must define production service dentaguru-backend');
+        assert.ok(renderYaml.includes('name: dentaguru-backend-test'), 'Must define testing service dentaguru-backend-test');
+        assert.strictEqual((renderYaml.match(/plan:\s*starter/g) || []).length, 2, 'Both services must use Render Starter plan');
+        assert.strictEqual((renderYaml.match(/rootDir:\s*backend/g) || []).length, 2, 'Both services must set rootDir: backend');
+        assert.strictEqual((renderYaml.match(/startCommand:\s*node src\/server\.js/g) || []).length, 2, 'Both services must set startCommand: node src/server.js');
+        assert.strictEqual((renderYaml.match(/healthCheckPath:\s*\/health/g) || []).length, 2, 'Both services must set healthCheckPath: /health');
+        assert.ok(renderYaml.includes('value: production'), 'Production service must set NODE_ENV=production');
+        assert.ok(renderYaml.includes('value: staging'), 'Testing service must set NODE_ENV=staging');
+        assert.ok(renderYaml.includes('key: OTP_DELIVERY_MODE\n        value: on_screen'), 'Testing service must set OTP_DELIVERY_MODE=on_screen');
+        assert.ok(renderYaml.includes('key: ON_SCREEN_OTP_ALLOWLIST\n        sync: false'), 'Testing service must declare ON_SCREEN_OTP_ALLOWLIST');
+        assert.ok(!renderYaml.includes('fommrwxpqzkcktweosgp'), 'render.yaml must never hardcode Supabase project refs or secrets');
     });
 
     console.log('\n=================================================');

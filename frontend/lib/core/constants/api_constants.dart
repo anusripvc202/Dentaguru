@@ -6,6 +6,9 @@ class ApiConstants {
   /// Live 24/7 Production Render Express Backend API URL (Connected to Production Supabase)
   static const String liveBackendUrl = 'https://dentaguru-backend.onrender.com/api/v1';
 
+  /// Live 24/7 Testing/Staging Render Express Backend API URL (Connected to Testing Supabase)
+  static const String stagingBackendUrl = 'https://dentaguru-backend-test.onrender.com/api/v1';
+
   /// Localhost Backend API URL (Debug builds only — Web / Desktop / iOS simulator)
   static const String localBackendUrl = 'http://localhost:5000/api/v1';
 
@@ -39,6 +42,9 @@ class ApiConstants {
 
   @visibleForTesting
   static bool? debugAllowOnScreenOtpOverride;
+
+  @visibleForTesting
+  static String? debugBaseUrlOverride;
 
   /// On-screen OTP testing display guard:
   /// - Release builds (`kReleaseMode`): NEVER allowed (unconditionally false).
@@ -92,6 +98,14 @@ class ApiConstants {
       }
     }
     return liveBackendUrl;
+  }
+
+  /// Returns true when the resolved backend base URL points to localhost, 127.0.0.1, or 10.0.2.2.
+  static bool get isUsingLocalhostBackend {
+    final normalized = baseUrl.trim().toLowerCase();
+    return normalized.contains('://localhost:') ||
+        normalized.contains('://127.0.0.1:') ||
+        normalized.contains('://10.0.2.2:');
   }
 
   /// Returns true when a non-release build is targeting a local or test backend URL.
@@ -200,7 +214,7 @@ class ApiConstants {
   /// - Release builds ALWAYS use live 24/7 production Render server
   /// - Non-release testing builds may override via TEST_API_URL or LOCAL_API_URL
   /// - Debug builds default to localhost:5000 on Web/Desktop and 10.0.2.2:5000 on Android emulator
-  static String get baseUrl => resolveBaseUrl();
+  static String get baseUrl => debugBaseUrlOverride ?? resolveBaseUrl();
 
   // Authentication Endpoints
   static String get login => '$baseUrl/auth/login';

@@ -4,6 +4,7 @@
  */
 
 const https = require('https');
+const { isOnScreenOtpTestMode } = require('./otpStoreService');
 
 /**
  * Format clean phone number with standard country code (default +91 if 10 digits)
@@ -15,19 +16,46 @@ const formatPhoneNumber = (phone) => {
     return digits;
 };
 
+const isWhatsAppProviderConfigured = () => {
+    const hasTwilio = Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN);
+    const hasMeta = Boolean(process.env.WHATSAPP_API_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID);
+    return hasTwilio || hasMeta;
+};
+
+const _recentDispatches = new Map();
+
 /**
- * Generic dispatcher for WhatsApp notifications.
- * Supports Twilio / Meta Cloud API credentials from environment, or resilient mock delivery logger.
+ * Generic dispatcher for WhatsApp/SMS notifications.
+ * Uses configured Twilio / Meta Cloud API credentials; never simulates delivery when unconfigured.
  */
-const dispatchWhatsApp = async ({ to, message, templateName, params }) => {
+const dispatchWhatsApp = async ({ to, message, templateName, dedupKey }) => {
     const formattedPhone = formatPhoneNumber(to);
     if (!formattedPhone) {
         console.warn('⚠️ WhatsApp dispatch: No valid recipient phone number provided.');
-        return { success: false, whatsappStatus: 'Failed', error: 'Invalid phone number' };
+        return { success: false, providerConfigured: isWhatsAppProviderConfigured(), whatsappStatus: 'NoRecipientPhone', error: 'Invalid or missing phone number' };
     }
 
-    console.log(`📱 [WhatsApp Outbound] To: +${formattedPhone} | Template: ${templateName || 'Custom'}`);
-    console.log(`💬 Message Content:\n${message}\n---`);
+    const effectiveDedup = dedupKey ? `${formattedPhone}|${templateName || 'Custom'}|${dedupKey}` : null;
+    if (effectiveDedup) {
+        const lastSent = _recentDispatches.get(effectiveDedup);
+        if (lastSent && Date.now() - lastSent < 60000) {
+            return { success: true, deduplicated: true, whatsappStatus: 'Deduplicated' };
+        }
+        _recentDispatches.set(effectiveDedup, Date.now());
+    }
+
+    // 0. On-Screen OTP Testing Mode (NODE_ENV !== 'production' && OTP_DELIVERY_MODE === 'on_screen'):
+    // Hard-block external Twilio and Meta WhatsApp API dispatches in testing mode.
+    if (isOnScreenOtpTestMode()) {
+        console.info(`🧪 [On-Screen OTP Test Mode] External WhatsApp/Twilio dispatch blocked for +${formattedPhone} (${templateName || 'Custom'}).`);
+        return {
+            success: false,
+            providerConfigured: false,
+            blockedInTestMode: true,
+            whatsappStatus: isWhatsAppProviderConfigured() ? 'BlockedInTestingMode' : 'NotConfigured',
+            error: 'External WhatsApp/Twilio dispatch is blocked in on-screen OTP testing mode.'
+        };
+    }
 
     // 1. Meta / Twilio WhatsApp Cloud Integration if configured
     const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
@@ -43,10 +71,10 @@ const dispatchWhatsApp = async ({ to, message, templateName, params }) => {
                 body: message,
             });
             console.log(`✅ WhatsApp delivered via Twilio SID: ${res.sid}`);
-            return { success: true, whatsappStatus: 'Sent', messageId: res.sid };
+            return { success: true, providerConfigured: true, whatsappStatus: 'Sent', messageId: res.sid };
         } catch (err) {
             console.error(`❌ Twilio WhatsApp send notice: ${err.message}`);
-            return { success: false, whatsappStatus: 'Failed', error: err.message };
+            return { success: false, providerConfigured: true, whatsappStatus: 'Failed', error: err.message };
         }
     }
 
@@ -88,22 +116,24 @@ const dispatchWhatsApp = async ({ to, message, templateName, params }) => {
 
             if (metaRes.statusCode >= 200 && metaRes.statusCode < 300) {
                 console.log(`✅ WhatsApp delivered via Meta API to +${formattedPhone}`);
-                return { success: true, whatsappStatus: 'Sent', response: metaRes.body };
+                return { success: true, providerConfigured: true, whatsappStatus: 'Sent', response: metaRes.body };
             } else {
                 console.warn(`⚠️ Meta API responded with status ${metaRes.statusCode}: ${metaRes.body}`);
-                return { success: false, whatsappStatus: 'Failed', error: metaRes.body };
+                return { success: false, providerConfigured: true, whatsappStatus: 'Failed', error: metaRes.body };
             }
         } catch (e) {
             console.error(`❌ Meta WhatsApp send notice: ${e.message}`);
-            return { success: false, whatsappStatus: 'Failed', error: e.message };
+            return { success: false, providerConfigured: true, whatsappStatus: 'Failed', error: e.message };
         }
     }
 
-    // 3. Reliable simulated delivery success (when external gateway credentials not configured)
+    // 3. External SMS / WhatsApp provider is not configured (do not simulate successful delivery)
+    console.info(`ℹ️ External WhatsApp/SMS provider not configured (skipped external send to +${formattedPhone} for ${templateName || 'Custom'}).`);
     return {
-        success: true,
-        whatsappStatus: 'Sent',
-        messageId: `WA-SIM-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
+        success: false,
+        providerConfigured: false,
+        whatsappStatus: 'NotConfigured',
+        error: 'External WhatsApp/SMS provider credentials are not configured.'
     };
 };
 
@@ -235,9 +265,85 @@ const sendReferralRejectedWhatsApp = async ({
     });
 };
 
+const sendDoctorBookingAlert = async ({
+    doctorPhone,
+    doctorName,
+    patientName,
+    appointmentDate,
+    appointmentTime,
+    appointmentType,
+    bookingId
+}) => {
+    const message = `GS HEALTH: New appointment booking (${appointmentType || 'Consultation'}) for ${doctorName || 'Doctor'}. Patient: ${patientName || 'Patient'}, Date: ${appointmentDate}, Time: ${appointmentTime}.`;
+    return await dispatchWhatsApp({
+        to: doctorPhone,
+        message,
+        templateName: 'DOCTOR_NEW_BOOKING',
+        dedupKey: bookingId || `${appointmentDate}|${appointmentTime}`
+    });
+};
+
+const sendClinicBookingAlert = async ({
+    clinicPhone,
+    clinicName,
+    doctorName,
+    patientName,
+    appointmentDate,
+    appointmentTime,
+    bookingId
+}) => {
+    const message = `GS HEALTH (${clinicName || 'Clinic'}): New appointment booking with ${doctorName || 'Doctor'}. Patient: ${patientName || 'Patient'}, Date: ${appointmentDate}, Time: ${appointmentTime}.`;
+    return await dispatchWhatsApp({
+        to: clinicPhone,
+        message,
+        templateName: 'CLINIC_NEW_BOOKING',
+        dedupKey: bookingId || `${appointmentDate}|${appointmentTime}`
+    });
+};
+
+const sendDoctorReferralAlert = async ({
+    doctorPhone,
+    doctorName,
+    patientName,
+    specialty,
+    referralDate,
+    referralId
+}) => {
+    const message = `GS HEALTH: New ${specialty || 'Specialist'} referral for ${doctorName || 'Doctor'}. Patient: ${patientName || 'Patient'}, Date: ${referralDate}. Open GS HEALTH Doctor Dashboard to review.`;
+    return await dispatchWhatsApp({
+        to: doctorPhone,
+        message,
+        templateName: 'DOCTOR_NEW_REFERRAL',
+        dedupKey: referralId
+    });
+};
+
+const sendClinicReferralAlert = async ({
+    clinicPhone,
+    clinicName,
+    doctorName,
+    specialty,
+    patientName,
+    referralDate,
+    referralId
+}) => {
+    const message = `GS HEALTH (${clinicName || 'Clinic'}): New patient referral to ${doctorName || 'Doctor'} (${specialty || 'Specialist'}). Patient: ${patientName || 'Patient'}, Date: ${referralDate}.`;
+    return await dispatchWhatsApp({
+        to: clinicPhone,
+        message,
+        templateName: 'CLINIC_NEW_REFERRAL',
+        dedupKey: referralId
+    });
+};
+
 module.exports = {
+    isWhatsAppProviderConfigured,
     dispatchWhatsApp,
     sendNewReferralWhatsApp,
     sendReferralAcceptedWhatsApp,
-    sendReferralRejectedWhatsApp
+    sendReferralRejectedWhatsApp,
+    sendDoctorBookingAlert,
+    sendClinicBookingAlert,
+    sendDoctorReferralAlert,
+    sendClinicReferralAlert
 };

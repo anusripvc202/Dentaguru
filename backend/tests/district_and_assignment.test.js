@@ -334,6 +334,18 @@ console.log('--- STARTING GS HEALTH DISTRICT & ASSIGNMENT AUDIT TESTS ---');
         assert.ok(hydReport.total_assignments >= 1, 'Hyderabad assignments aggregated.');
         console.log('✓ SUCCESS: Test 6 - Dynamic assignment statistics and district reports verified.');
 
+        // Cleanup temporary test rows created in gs-health-test
+        const { supabaseAdmin } = require('../src/config/supabase');
+        try {
+            await supabaseAdmin.from('dentists').delete().in('id', [testDoctor?.id, newDoctor?.id].filter(Boolean));
+            await supabaseAdmin.from('users').delete().in('id', [
+                effectiveSubAdminId,
+                subAdminId2,
+                patientMumbai?.id,
+                patientHyderabad?.id
+            ].filter(Boolean));
+        } catch (_) {}
+
         console.log('--- ALL GS HEALTH DISTRICT & ASSIGNMENT AUDIT TESTS PASSED SUCCESSFULLY (6/6) ---');
         process.exit(0);
     } catch (err) {

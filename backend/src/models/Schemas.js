@@ -68,6 +68,38 @@ const ASSIGNMENT_SOURCES = {
     SUB_ADMIN_ASSIGNMENT: 'SUB_ADMIN_ASSIGNMENT',
 };
 
+// Helper: unpack JSON metadata safely stored in users.device_token
+function _unpackUserRecord(record) {
+    if (!record) return record;
+    if (record.device_token && typeof record.device_token === 'string' && record.device_token.trim().startsWith('{')) {
+        try {
+            const meta = JSON.parse(record.device_token);
+            if (meta.languages && (!record.languages || record.languages.length === 0)) {
+                record.languages = meta.languages;
+            }
+            const colStatus = record.status ? String(record.status).trim().toUpperCase() : '';
+            const metaStatus = meta.status ? String(meta.status).trim().toUpperCase() : '';
+            if (!colStatus && metaStatus) {
+                record.status = metaStatus;
+            } else if (colStatus) {
+                record.status = colStatus;
+            }
+            if (meta.permissions && Array.isArray(meta.permissions) && (!record.permissions || record.permissions.length === 0)) {
+                record.permissions = meta.permissions;
+            }
+            if (meta.statusUpdatedAt && !record.status_updated_at) {
+                record.status_updated_at = meta.statusUpdatedAt;
+            }
+            if (meta.statusUpdatedBy && !record.status_updated_by) {
+                record.status_updated_by = meta.statusUpdatedBy;
+            }
+            if (meta.city && !record.city) record.city = meta.city;
+            if (meta.pincode && !record.pincode) record.pincode = meta.pincode;
+        } catch (_) { }
+    }
+    return record;
+}
+
 // 1. USER MODEL (Supabase PostgreSQL)
 const User = {
     async findOne(query) {
@@ -78,46 +110,86 @@ const User = {
         req = req.limit(1);
         const { data, error } = await req;
         if (error) throw error;
-        const record = (data && data.length > 0) ? data[0] : null;
-        if (record && record.device_token && typeof record.device_token === 'string' && record.device_token.startsWith('{')) {
-            try {
-                const meta = JSON.parse(record.device_token);
-                if (meta.languages && (!record.languages || record.languages.length === 0)) record.languages = meta.languages;
-            } catch (_) { }
-        }
-        if (record && (record.role === 'Sub-Admin' || record.role === 'SUB_ADMIN')) {
+        const record = _unpackUserRecord((data && data.length > 0) ? data[0] : null);
+        if (record && (record.role === 'Sub-Admin' || record.role === 'SUB_ADMIN' || record.role === 'SUB-ADMIN')) {
             if (!record.permissions || record.permissions.length === 0) {
                 record.permissions = await SubAdminPermission.getPermissionsForUser(record.id);
             }
-            if ((!record.permissions || record.permissions.length === 0) && record.device_token && record.device_token.startsWith('{')) {
-                try {
-                    const meta = JSON.parse(record.device_token);
-                    if (meta.permissions && Array.isArray(meta.permissions)) record.permissions = meta.permissions;
-                    if (meta.status && !record.status) record.status = meta.status;
-                } catch (_) { }
-            }
+            if (!record.status) record.status = 'ACTIVE';
         }
         return record;
+    },
+
+    async findByMobile(rawPhone) {
+        const clean = String(rawPhone || '').trim();
+        if (!clean) return null;
+        const digits = clean.replace(/[^0-9]/g, '');
+        const last10 = digits.length >= 10 ? digits.slice(-10) : digits;
+        const candidates = Array.from(new Set([
+            clean,
+            digits,
+            last10,
+            last10 ? `+91${last10}` : '',
+            last10 ? `91${last10}` : '',
+            last10 ? `0${last10}` : ''
+        ].filter(Boolean)));
+
+        for (const c of candidates) {
+            const found = await this.findOne({ phone: c });
+            if (found) return found;
+        }
+
+        if (last10 && last10.length >= 10) {
+            const { data } = await supabaseAdmin
+                .from('users')
+                .select('*')
+                .ilike('phone', `%${last10}%`)
+                .limit(5);
+            if (data && data.length > 0) {
+                const match = data.find(u => {
+                    const uDigits = String(u.phone || '').replace(/[^0-9]/g, '');
+                    return uDigits.length >= 10 && uDigits.slice(-10) === last10;
+                }) || data[0];
+                const unpacked = _unpackUserRecord(match);
+                if (unpacked && (unpacked.role === 'Sub-Admin' || unpacked.role === 'SUB_ADMIN' || unpacked.role === 'SUB-ADMIN')) {
+                    if (!unpacked.permissions || unpacked.permissions.length === 0) {
+                        unpacked.permissions = await SubAdminPermission.getPermissionsForUser(unpacked.id);
+                    }
+                    if (!unpacked.status) unpacked.status = 'ACTIVE';
+                }
+                return unpacked;
+            }
+        }
+        return null;
     },
 
 
     async find(query = {}) {
         const unpackUser = (u) => {
-            if (u && u.device_token && typeof u.device_token === 'string' && u.device_token.startsWith('{')) {
-                try {
-                    const meta = JSON.parse(u.device_token);
-                    if (meta.status && !u.status) u.status = meta.status;
-                    if (meta.permissions && (!u.permissions || u.permissions.length === 0)) u.permissions = meta.permissions;
-                    if (meta.languages && (!u.languages || u.languages.length === 0)) u.languages = meta.languages;
-                } catch (_) { }
+            const unpacked = _unpackUserRecord(u);
+            if (unpacked && (unpacked.role === 'Sub-Admin' || unpacked.role === 'SUB_ADMIN') && !unpacked.status) {
+                unpacked.status = 'ACTIVE';
             }
-            return u;
+            return unpacked;
+        };
+
+        const matchesRoleFilter = (userRole, roleQuery) => {
+            if (!roleQuery) return true;
+            const normUserRole = String(userRole || '').trim().toLowerCase();
+            if (typeof roleQuery === 'object' && Array.isArray(roleQuery.$in)) {
+                return roleQuery.$in.some(r => String(r || '').trim().toLowerCase() === normUserRole);
+            }
+            return normUserRole === String(roleQuery || '').trim().toLowerCase();
         };
 
         try {
             let req = supabaseAdmin.from('users').select('*');
             if (query.role) {
-                req = req.ilike('role', query.role);
+                if (typeof query.role === 'object' && Array.isArray(query.role.$in)) {
+                    req = req.in('role', query.role.$in);
+                } else {
+                    req = req.ilike('role', query.role);
+                }
             }
             for (const [key, val] of Object.entries(query)) {
                 if (key !== 'role') {
@@ -130,7 +202,7 @@ const User = {
                 const simple = await supabaseAdmin.from('users').select('*');
                 let result = simple.data || [];
                 if (query.role) {
-                    result = result.filter(u => u.role && u.role.toLowerCase() === query.role.toLowerCase());
+                    result = result.filter(u => matchesRoleFilter(u.role, query.role));
                 }
                 return result.map(unpackUser);
             }
@@ -140,7 +212,7 @@ const User = {
             const simple = await supabaseAdmin.from('users').select('*');
             let result = simple.data || [];
             if (query.role) {
-                result = result.filter(u => u.role && u.role.toLowerCase() === query.role.toLowerCase());
+                result = result.filter(u => matchesRoleFilter(u.role, query.role));
             }
             return result.map(unpackUser);
         }
@@ -149,25 +221,14 @@ const User = {
     async findById(id) {
         const { data, error } = await supabaseAdmin.from('users').select('*').eq('id', id).single();
         if (error) return null;
-        if (data && data.device_token && typeof data.device_token === 'string' && data.device_token.startsWith('{')) {
-            try {
-                const meta = JSON.parse(data.device_token);
-                if (meta.languages && (!data.languages || data.languages.length === 0)) data.languages = meta.languages;
-            } catch (_) { }
-        }
-        if (data && (data.role === 'Sub-Admin' || data.role === 'SUB_ADMIN')) {
-            if (!data.permissions || data.permissions.length === 0) {
-                data.permissions = await SubAdminPermission.getPermissionsForUser(data.id);
+        const record = _unpackUserRecord(data);
+        if (record && (record.role === 'Sub-Admin' || record.role === 'SUB_ADMIN')) {
+            if (!record.permissions || record.permissions.length === 0) {
+                record.permissions = await SubAdminPermission.getPermissionsForUser(record.id);
             }
-            if ((!data.permissions || data.permissions.length === 0) && data.device_token && data.device_token.startsWith('{')) {
-                try {
-                    const meta = JSON.parse(data.device_token);
-                    if (meta.permissions && Array.isArray(meta.permissions)) data.permissions = meta.permissions;
-                    if (meta.status && !data.status) data.status = meta.status;
-                } catch (_) { }
-            }
+            if (!record.status) record.status = 'ACTIVE';
         }
-        return data;
+        return record;
     },
 
     async create(userData) {
@@ -221,6 +282,7 @@ const User = {
             if (payload.city) safePayload.city = payload.city;
             if (payload.pincode) safePayload.pincode = payload.pincode;
             if (payload.state) safePayload.state = payload.state;
+            if (payload.status) safePayload.status = String(payload.status).trim().toUpperCase();
             if (payload.device_token) safePayload.device_token = payload.device_token;
             if (payload.biometric_token) safePayload.biometric_token = payload.biometric_token;
 
@@ -248,46 +310,74 @@ const User = {
             updateData.password = await hashPassword(updateData.password);
         }
         let updatedData = null;
+        const dbPayload = { ...updateData };
+        delete dbPayload.permissions;
+        delete dbPayload.languages;
+        delete dbPayload.status_updated_at;
+        delete dbPayload.status_updated_by;
+        if (dbPayload.status !== undefined) {
+            dbPayload.status = String(dbPayload.status).trim().toUpperCase();
+        }
+
         try {
-            const { data, error } = await supabaseAdmin.from('users').update(updateData).eq('id', id).select().maybeSingle();
-            if (error) throw error;
-            updatedData = data;
+            if (Object.keys(dbPayload).length > 0) {
+                const { data, error } = await supabaseAdmin.from('users').update(dbPayload).eq('id', id).select().maybeSingle();
+                if (error) throw error;
+                updatedData = data;
+            }
         } catch (err) {
-            const safeUpdate = { ...updateData };
-            delete safeUpdate.permissions;
-            delete safeUpdate.status;
+            // Strip optional schema columns that may not exist in legacy tables (e.g. updated_at, refresh_tokens)
+            const safeUpdate = { ...dbPayload };
+            delete safeUpdate.updated_at;
+            delete safeUpdate.refresh_tokens;
+            delete safeUpdate.status_updated_at;
+            delete safeUpdate.status_updated_by;
+            if (err && typeof err.message === 'string' && err.message.toLowerCase().includes('status')) {
+                delete safeUpdate.status;
+            }
             if (Object.keys(safeUpdate).length > 0) {
                 const { data, error } = await supabaseAdmin.from('users').update(safeUpdate).eq('id', id).select().maybeSingle();
                 if (error) throw error;
                 updatedData = data;
-            } else {
-                updatedData = await this.findById(id);
             }
         }
 
-        if (updateData.status || updateData.permissions || updateData.languages) {
+        if (updateData.status || updateData.permissions || updateData.languages || updateData.status_updated_at || updateData.status_updated_by || updateData.refresh_tokens !== undefined) {
             try {
                 const existing = await supabaseAdmin.from('users').select('device_token').eq('id', id).maybeSingle();
+                const rawDt = existing.data?.device_token;
                 let meta = {};
-                if (existing.data && existing.data.device_token && existing.data.device_token.startsWith('{')) {
-                    try { meta = JSON.parse(existing.data.device_token); } catch (_) { }
+                if (rawDt && typeof rawDt === 'string' && rawDt.trim().startsWith('{')) {
+                    try { meta = JSON.parse(rawDt); } catch (_) { }
+                } else if (rawDt && typeof rawDt === 'string' && rawDt.trim().length > 0) {
+                    meta.fcmToken = rawDt.trim();
                 }
-                if (updateData.status) meta.status = updateData.status;
+                if (updateData.status) meta.status = String(updateData.status).trim().toUpperCase();
                 if (updateData.permissions) meta.permissions = updateData.permissions;
                 if (updateData.languages) meta.languages = normalizeLanguagesList(updateData.languages);
-                if (!existing.data?.device_token || existing.data.device_token.startsWith('{')) {
-                    await supabaseAdmin.from('users').update({ device_token: JSON.stringify(meta) }).eq('id', id);
+                if (updateData.status_updated_at) meta.statusUpdatedAt = updateData.status_updated_at;
+                if (updateData.status_updated_by) meta.statusUpdatedBy = updateData.status_updated_by;
+                if (updateData.status === 'INACTIVE' || updateData.status === 'DEACTIVATED') {
+                    meta.revokedBefore = Date.now();
+                } else if (updateData.status === 'ACTIVE') {
+                    delete meta.revokedBefore;
                 }
+
+                await supabaseAdmin.from('users').update({ device_token: JSON.stringify(meta) }).eq('id', id);
+
                 if (updatedData) {
-                    if (updateData.status) updatedData.status = updateData.status;
-                    if (updateData.permissions) updatedData.permissions = updateData.permissions;
-                    if (updateData.languages) updatedData.languages = meta.languages;
+                    updatedData.device_token = JSON.stringify(meta);
                 }
             } catch (_) { }
         }
 
-        if (!updatedData) {
-            updatedData = await this.findById(id);
+        updatedData = _unpackUserRecord(updatedData || await this.findById(id));
+        if (updatedData) {
+            if (updateData.status) updatedData.status = String(updateData.status).trim().toUpperCase();
+            if (updateData.permissions) updatedData.permissions = updateData.permissions;
+            if (updateData.languages) updatedData.languages = normalizeLanguagesList(updateData.languages);
+            if (updateData.status_updated_at) updatedData.status_updated_at = updateData.status_updated_at;
+            if (updateData.status_updated_by) updatedData.status_updated_by = updateData.status_updated_by;
         }
 
         if (updateData.permissions && Array.isArray(updateData.permissions)) {
@@ -365,6 +455,19 @@ const _inMemoryDistricts = DEFAULT_DISTRICTS.map(d => ({
     updated_at: new Date().toISOString()
 }));
 
+function _syncDistrictToMemory(row) {
+    if (!row || !row.name) return row;
+    const idx = _inMemoryDistricts.findIndex(
+        d => d.id === row.id || d.name.toLowerCase() === String(row.name).toLowerCase()
+    );
+    if (idx !== -1) {
+        _inMemoryDistricts[idx] = { ..._inMemoryDistricts[idx], ...row };
+    } else {
+        _inMemoryDistricts.push(row);
+    }
+    return row;
+}
+
 const District = {
     async find(query = {}) {
         try {
@@ -373,10 +476,14 @@ const District = {
             if (query.state) req = req.eq('state', query.state);
             req = req.order('name', { ascending: true });
             const { data, error } = await req;
-            if (!error && data && data.length > 0) return data;
+            if (!error && data && data.length > 0) {
+                for (const row of data) {
+                    _syncDistrictToMemory(row);
+                }
+            }
         } catch (_) { }
 
-        // In-memory fallback
+        // Return merged district list from synced memory store
         let list = [..._inMemoryDistricts];
         if (query.is_active !== undefined) list = list.filter(d => d.is_active === query.is_active);
         if (query.state) list = list.filter(d => d.state.toLowerCase() === query.state.toLowerCase());
@@ -391,7 +498,7 @@ const District = {
         if (!id) return null;
         try {
             const { data, error } = await supabaseAdmin.from('districts').select('*').eq('id', id).maybeSingle();
-            if (!error && data) return data;
+            if (!error && data) return _syncDistrictToMemory(data);
         } catch (_) { }
         return _inMemoryDistricts.find(d => d.id === id) || null;
     },
@@ -403,7 +510,7 @@ const District = {
                 req = req.eq(k, v);
             }
             const { data, error } = await req.limit(1);
-            if (!error && data && data.length > 0) return data[0];
+            if (!error && data && data.length > 0) return _syncDistrictToMemory(data[0]);
         } catch (_) { }
         return _inMemoryDistricts.find(d => {
             return Object.entries(query).every(([k, v]) => d[k] === v);
@@ -589,24 +696,36 @@ const SubAdminDistrict = {
             }
         } catch (_) { }
 
-        // In-memory fallback
+        // In-memory fallback (resolves against synced _inMemoryDistricts and Supabase District.findById)
         const mappings = _inMemorySubAdminDistricts.filter(m => m.sub_admin_user_id === userId);
-        return mappings.map(m => _inMemoryDistricts.find(d => d.id === m.district_id)).filter(Boolean);
+        const resolved = [];
+        for (const m of mappings) {
+            const dist = _inMemoryDistricts.find(d => d.id === m.district_id)
+                || await District.findById(m.district_id);
+            if (dist) resolved.push(dist);
+        }
+        return resolved;
     },
 
     async getSubAdminsForDistrict(districtId) {
         if (!districtId) return [];
+        const dbIds = [];
         try {
             const { data, error } = await supabaseAdmin
                 .from('sub_admin_districts')
                 .select('sub_admin_user_id')
                 .eq('district_id', districtId);
-            if (!error && data) return data.map(d => d.sub_admin_user_id);
+            if (!error && Array.isArray(data)) {
+                for (const row of data) {
+                    if (row.sub_admin_user_id) dbIds.push(row.sub_admin_user_id);
+                }
+            }
         } catch (_) { }
 
-        return _inMemorySubAdminDistricts
+        const memIds = _inMemorySubAdminDistricts
             .filter(m => m.district_id === districtId)
             .map(m => m.sub_admin_user_id);
+        return [...new Set([...dbIds, ...memIds])];
     },
 
     async assignDistrictsToSubAdmin(userId, districtIds = [], assignedBy = null) {
@@ -760,6 +879,7 @@ const PatientAssignmentHistory = {
     },
 
     async getHistory(filters = {}) {
+        let dbRows = [];
         try {
             let req = supabaseAdmin.from('patient_assignment_history').select('*');
             if (filters.patientId) req = req.eq('patient_id', filters.patientId);
@@ -771,11 +891,17 @@ const PatientAssignmentHistory = {
             if (filters.status) req = req.eq('status', filters.status);
             req = req.order('created_at', { ascending: false });
             const { data, error } = await req;
-            if (!error && data) return data;
+            if (!error && Array.isArray(data)) {
+                dbRows = data;
+            }
         } catch (_) { }
 
-        // In-memory fallback
-        let list = [..._inMemoryAssignmentHistory];
+        // Merge Supabase rows with in-memory fallback records (deduplicated by id)
+        const seenIds = new Set(dbRows.map(r => r.id));
+        let list = [
+            ...dbRows,
+            ..._inMemoryAssignmentHistory.filter(h => !seenIds.has(h.id))
+        ];
         if (filters.patientId) list = list.filter(h => h.patient_id === filters.patientId);
         if (filters.doctorId) list = list.filter(h => h.doctor_id === filters.doctorId);
         if (filters.districtId) list = list.filter(h => h.district_id === filters.districtId);
@@ -824,27 +950,61 @@ const PatientAssignmentHistory = {
     }
 };
 
+// Helper: attach associated owner email/phone to clinic rows cleanly
+function _hydrateClinicRecord(c) {
+    if (!c) return c;
+    const u = Array.isArray(c.users) ? c.users[0] : c.users;
+    return {
+        ...c,
+        email: c.email || u?.email || '',
+        phone: c.phone || u?.phone || ''
+    };
+}
+
 // 2. CLINIC MODEL (Supabase PostgreSQL)
 const Clinic = {
     async findOne(query) {
-        let req = supabaseAdmin.from('clinics').select('*');
+        let req = supabaseAdmin.from('clinics').select('*, users(id, name, email, phone)');
         for (const [key, val] of Object.entries(query)) {
-            req = req.eq(key, val);
+            if (key === 'clinic_name' && typeof val === 'string') {
+                const safePattern = val.trim().replace(/[%_]/g, '\\$&');
+                req = req.ilike('clinic_name', safePattern);
+            } else {
+                req = req.eq(key, val);
+            }
         }
-        const { data, error } = await req.maybeSingle();
-        if (error) throw error;
-        return data;
+        let { data, error } = await req.limit(1);
+        if (error) {
+            let fallbackReq = supabaseAdmin.from('clinics').select('*');
+            for (const [key, val] of Object.entries(query)) {
+                if (key === 'clinic_name' && typeof val === 'string') {
+                    const safePattern = val.trim().replace(/[%_]/g, '\\$&');
+                    fallbackReq = fallbackReq.ilike('clinic_name', safePattern);
+                } else {
+                    fallbackReq = fallbackReq.eq(key, val);
+                }
+            }
+            const fb = await fallbackReq.limit(1);
+            if (fb.error) throw fb.error;
+            data = fb.data;
+        }
+        const row = Array.isArray(data) ? (data[0] || null) : data;
+        return _hydrateClinicRecord(row);
     },
 
     async findById(id) {
-        const { data, error } = await supabaseAdmin.from('clinics').select('*').eq('id', id).single();
-        if (error) return null;
-        return data;
+        let { data, error } = await supabaseAdmin.from('clinics').select('*, users(id, name, email, phone)').eq('id', id).single();
+        if (error) {
+            const fb = await supabaseAdmin.from('clinics').select('*').eq('id', id).single();
+            if (fb.error) return null;
+            data = fb.data;
+        }
+        return _hydrateClinicRecord(data);
     },
 
     async find(query = {}) {
         try {
-            let req = supabaseAdmin.from('clinics').select('*');
+            let req = supabaseAdmin.from('clinics').select('*, users(id, name, email, phone)');
             if (query.clinicName) {
                 req = req.ilike('clinic_name', `%${query.clinicName}%`);
             }
@@ -855,13 +1015,13 @@ const Clinic = {
             if (error) {
                 console.warn('⚠️ Clinic query error, falling back to simple select:', error.message);
                 const simple = await supabaseAdmin.from('clinics').select('*');
-                return simple.data || [];
+                return (simple.data || []).map(_hydrateClinicRecord);
             }
-            return data || [];
+            return (data || []).map(_hydrateClinicRecord);
         } catch (e) {
             console.warn('⚠️ Clinic query exception, falling back to simple select:', e.message);
             const simple = await supabaseAdmin.from('clinics').select('*');
-            return simple.data || [];
+            return (simple.data || []).map(_hydrateClinicRecord);
         }
     },
 
@@ -877,7 +1037,7 @@ const Clinic = {
             rating: clinicData.rating || 5.0,
             reviews_count: clinicData.reviews_count || clinicData.reviewsCount || 0,
             verified: clinicData.verified !== undefined ? clinicData.verified : true,
-            services: clinicData.services || clinicData.departments || ['General Dentistry', 'Gum Care', 'Root Canal'],
+            services: clinicData.services || clinicData.departments || ['General Medicine', 'General Consultation'],
             pricing: clinicData.pricing || [],
             latitude: clinicData.latitude || clinicData.coordinates?.coordinates?.[1] || null,
             longitude: clinicData.longitude || clinicData.coordinates?.coordinates?.[0] || null
@@ -1029,14 +1189,83 @@ function doctorMatchesLanguages(doctor, selectedLangsInput) {
 }
 
 function matchesSpecialtyQuery(doctorSpec, filterSpec) {
-    if (!filterSpec || filterSpec.trim().toLowerCase() === 'all') return true;
+    if (!filterSpec || filterSpec.trim().toLowerCase() === 'all' || filterSpec.trim().toLowerCase() === 'all specialties') return true;
     const f = filterSpec.trim().toLowerCase();
-    const d = (doctorSpec || 'General Dentistry').toString().trim().toLowerCase();
+    const d = (doctorSpec || 'General Medicine').toString().trim().toLowerCase();
     if (d === f || d.includes(f) || f.includes(d)) return true;
     if (f === 'dentistry' || f === 'dental') {
         return isDentalSpecialtyText(d);
     }
+    if (f.includes('orthodont') && d.includes('orthodont')) return true;
+    if (f.includes('general dentist') && (d.includes('general dentist') || d === 'dentistry' || d === 'dental')) return true;
+    if (f.includes('endodont') && d.includes('endodont')) return true;
+    if (f.includes('periodont') && d.includes('periodont')) return true;
+    if (f.includes('prosthodont') && d.includes('prosthodont')) return true;
+    if ((f.includes('pedodont') || f.includes('pediatric dentist')) && (d.includes('pedodont') || d.includes('pediatric dentist'))) return true;
+    if (f.includes('oral surg') && d.includes('oral')) return true;
     return false;
+}
+
+const GENERIC_PLACEHOLDER_LICENSES = new Set([
+    'med-lic-reg',
+    'med-lic-registered',
+    'pending',
+    'na',
+    'n/a',
+]);
+
+async function resolveMedicalSpecialtyRecord(rawSpecialty, rawSpecialtyId = null) {
+    const cleanInput = String(rawSpecialty || '').trim();
+    const cleanId = rawSpecialtyId && isUUID(String(rawSpecialtyId)) ? String(rawSpecialtyId).trim() : null;
+    try {
+        const list = await MedicalSpecialty.find({ activeOnly: true });
+        if (cleanId) {
+            const byId = list.find(s => String(s.id) === cleanId);
+            if (byId) {
+                return {
+                    specialty: cleanInput || byId.name,
+                    specialty_id: isUUID(String(byId.id)) ? byId.id : null,
+                    department: byId.department || `Department of ${byId.name}`
+                };
+            }
+        }
+        if (cleanInput) {
+            const lower = cleanInput.toLowerCase();
+            const exact = list.find(s =>
+                (s.name && s.name.toLowerCase() === lower) ||
+                (s.code && s.code.toLowerCase() === lower) ||
+                (Array.isArray(s.sub_specialties) && s.sub_specialties.some(sub => String(sub).toLowerCase() === lower))
+            );
+            if (exact) {
+                return {
+                    specialty: cleanInput,
+                    specialty_id: isUUID(String(exact.id)) ? exact.id : null,
+                    department: exact.department || `Department of ${exact.name}`
+                };
+            }
+            const { getSpecialtyClinicalConfig } = require('../config/specialtyClinicalConfig');
+            const cfg = getSpecialtyClinicalConfig(cleanInput);
+            if (cfg) {
+                const byCfg = list.find(s =>
+                    (s.code && cfg.code && s.code.toLowerCase() === cfg.code.toLowerCase()) ||
+                    (s.name && cfg.name && s.name.toLowerCase() === cfg.name.toLowerCase())
+                );
+                if (byCfg) {
+                    return {
+                        specialty: cleanInput,
+                        specialty_id: isUUID(String(byCfg.id)) ? byCfg.id : null,
+                        department: byCfg.department || `Department of ${byCfg.name}`
+                    };
+                }
+            }
+        }
+    } catch (_) { }
+    const fallbackSpec = (cleanInput && cleanInput.toLowerCase() !== 'dentist') ? cleanInput : 'General Medicine';
+    return {
+        specialty: fallbackSpec,
+        specialty_id: cleanId,
+        department: `Department of ${fallbackSpec}`
+    };
 }
 
 // 3. DENTIST / DOCTOR MODEL (Supabase PostgreSQL)
@@ -1093,9 +1322,6 @@ const Dentist = {
                 req = req.eq('availability_status', query.availability_status);
             }
             const rawSpec = query.speciality || query.specialty;
-            if (rawSpec && rawSpec.trim().toLowerCase() !== 'dentistry' && rawSpec.trim().toLowerCase() !== 'all') {
-                req = req.ilike('speciality', `%${rawSpec.trim()}%`);
-            }
             // clinic_id filter
             if (query.clinic_id) {
                 req = req.eq('clinic_id', query.clinic_id);
@@ -1152,23 +1378,43 @@ const Dentist = {
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
         const validUserId = (dentistData.user_id && uuidRegex.test(dentistData.user_id.toString())) ? dentistData.user_id.toString() : null;
         const validClinicId = (dentistData.clinic_id && uuidRegex.test(dentistData.clinic_id.toString())) ? dentistData.clinic_id.toString() : null;
-        const resolvedSpec = dentistData.speciality || dentistData.specialty || 'General Dentistry';
+        const rawSpecInput = (dentistData.speciality || dentistData.specialty || dentistData.specialtyName || '').toString().trim();
+        const specResolution = await resolveMedicalSpecialtyRecord(
+            rawSpecInput || 'General Medicine',
+            dentistData.specialty_id || dentistData.specialtyId || null
+        );
+        const resolvedSpec = specResolution.specialty;
         const resolvedQual = dentistData.qualifications || dentistData.qualification || getDefaultQualificationForSpecialty(resolvedSpec);
 
         const cleanLanguages = normalizeLanguagesList(dentistData.languages || dentistData.languagesKnown);
         const finalLanguages = cleanLanguages.length > 0 ? cleanLanguages : ['English'];
 
+        let candidateLic = String(dentistData.license_number || dentistData.licenseNumber || '').trim();
+        if (!candidateLic || GENERIC_PLACEHOLDER_LICENSES.has(candidateLic.toLowerCase())) {
+            candidateLic = `MED-LIC-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+        } else {
+            const existingByLic = await this.findOne({ license_number: candidateLic }).catch(() => null);
+            if (existingByLic && (!validUserId || existingByLic.user_id !== validUserId)) {
+                candidateLic = `${candidateLic}-${Date.now().toString().slice(-5)}-${Math.floor(100 + Math.random() * 900)}`;
+            }
+        }
+
         const payload = {
             user_id: validUserId,
             clinic_id: validClinicId,
             speciality: resolvedSpec,
-            license_number: dentistData.license_number || dentistData.licenseNumber || `REG-${validUserId ? validUserId.slice(0, 8) : Date.now()}`,
+            specialty_id: specResolution.specialty_id || null,
+            department: dentistData.department || specResolution.department || '',
+            license_number: candidateLic,
             experience_years: dentistData.experience_years || dentistData.experienceYears || 5,
             qualifications: resolvedQual,
             availability_status: dentistData.availability_status || dentistData.availabilityStatus || 'Available',
             verification_status: dentistData.verification_status || 'VERIFIED',
             languages: finalLanguages,
-            rating: dentistData.rating || 5.0
+            rating: dentistData.rating || 5.0,
+            reviews_count: dentistData.reviews_count ?? 0,
+            consultation_fee: (dentistData.consultation_fee || dentistData.consultationFee || '').toString(),
+            bio: (dentistData.bio || '').toString()
         };
         if (dentistData.state) payload.state = dentistData.state;
         if (dentistData.city) payload.city = dentistData.city;
@@ -1179,6 +1425,14 @@ const Dentist = {
             if (error) throw error;
             return data;
         } catch (err) {
+            if (err && err.message && err.message.toLowerCase().includes('dentists_license_number_key')) {
+                const retryPayload = {
+                    ...payload,
+                    license_number: `MED-LIC-${Date.now()}-${Math.floor(10000 + Math.random() * 90000)}`
+                };
+                const { data: retryData, error: retryErr } = await supabaseAdmin.from('dentists').insert(retryPayload).select().single();
+                if (!retryErr && retryData) return retryData;
+            }
             if (err && err.message && err.message.toLowerCase().includes('languages')) {
                 const { languages: _omitted, ...fallbackPayload } = payload;
                 const { data: retryData, error: retryErr } = await supabaseAdmin.from('dentists').insert(fallbackPayload).select().single();
@@ -1193,7 +1447,16 @@ const Dentist = {
         if (!id) return null;
         const str = String(id).trim();
         const payload = {};
-        if (updateData.speciality || updateData.specialty) payload.speciality = updateData.speciality || updateData.specialty;
+        const rawSpecUpdate = (updateData.speciality || updateData.specialty || updateData.specialtyName || '').toString().trim();
+        if (rawSpecUpdate || updateData.specialty_id || updateData.specialtyId) {
+            const specRes = await resolveMedicalSpecialtyRecord(
+                rawSpecUpdate,
+                updateData.specialty_id || updateData.specialtyId || null
+            );
+            if (rawSpecUpdate) payload.speciality = specRes.specialty;
+            if (specRes.specialty_id) payload.specialty_id = specRes.specialty_id;
+            if (specRes.department) payload.department = specRes.department;
+        }
         if (updateData.qualifications || updateData.qualification) payload.qualifications = updateData.qualifications || updateData.qualification;
         if (updateData.experience_years !== undefined || updateData.experienceYears !== undefined) {
             payload.experience_years = parseInt(updateData.experience_years ?? updateData.experienceYears, 10) || 5;
@@ -1204,6 +1467,12 @@ const Dentist = {
         }
         if (updateData.verification_status || updateData.verificationStatus) {
             payload.verification_status = updateData.verification_status || updateData.verificationStatus;
+        }
+        if (updateData.consultation_fee !== undefined || updateData.consultationFee !== undefined) {
+            payload.consultation_fee = String(updateData.consultation_fee ?? updateData.consultationFee ?? '');
+        }
+        if (updateData.bio !== undefined) {
+            payload.bio = String(updateData.bio ?? '');
         }
         if (updateData.clinic_id !== undefined) payload.clinic_id = updateData.clinic_id;
         if (updateData.city !== undefined) payload.city = updateData.city;
@@ -1281,7 +1550,12 @@ async function resolveDentistIds(input) {
     if (!dentistTableId) {
         try {
             const clean = str.replace(/^dr\.?\s+/i, '').trim();
-            const { data: u } = await supabaseAdmin.from('users').select('id').or(`email.eq.${str},name.eq.${str},name.ilike.%${clean}%`).limit(1).maybeSingle();
+            const { data: u } = await supabaseAdmin
+                .from('users')
+                .select('id')
+                .or(`email.eq.${str},name.eq.${str},name.ilike.${clean}`)
+                .limit(1)
+                .maybeSingle();
             if (u) {
                 userTableId = u.id;
                 const { data: d } = await supabaseAdmin.from('dentists').select('id, user_id').eq('user_id', u.id).maybeSingle();
@@ -1341,18 +1615,56 @@ async function resolveDentistUuid(input) {
     return dentistTableId;
 }
 
-async function resolveClinicUuid(input) {
-    if (!input) return null;
-    const str = String(input).trim();
-    if (isUUID(str)) return str;
-
-    try {
-        let c = await Clinic.findOne({ clinic_name: str });
-        if (c && c.id) return c.id;
-    } catch (e) {
-        console.error('Error resolving clinic UUID:', e.message);
+async function resolveClinicIds(input) {
+    if (!input) {
+        return { clinicRecord: null, clinicId: null, clinicUserId: null, clinicName: '', allIds: [] };
     }
-    return null;
+    const str = String(input).trim();
+    if (!str) {
+        return { clinicRecord: null, clinicId: null, clinicUserId: null, clinicName: '', allIds: [] };
+    }
+
+    let clinic = null;
+    try {
+        if (isUUID(str)) {
+            const { data } = await supabaseAdmin
+                .from('clinics')
+                .select('*')
+                .or(`id.eq.${str},user_id.eq.${str}`)
+                .limit(1)
+                .maybeSingle();
+            if (data) clinic = data;
+        }
+        if (!clinic) {
+            const { data } = await supabaseAdmin
+                .from('clinics')
+                .select('*')
+                .ilike('clinic_name', str)
+                .limit(1)
+                .maybeSingle();
+            if (data) clinic = data;
+        }
+    } catch (e) {
+        console.error('Error resolving clinic IDs:', e.message);
+    }
+
+    const ids = new Set([str]);
+    if (clinic?.id) ids.add(String(clinic.id));
+    if (clinic?.user_id) ids.add(String(clinic.user_id));
+    if (clinic?.clinic_name) ids.add(String(clinic.clinic_name).trim());
+
+    return {
+        clinicRecord: clinic,
+        clinicId: clinic?.id || (isUUID(str) ? str : null),
+        clinicUserId: clinic?.user_id || null,
+        clinicName: (clinic?.clinic_name || '').toString().trim(),
+        allIds: Array.from(ids),
+    };
+}
+
+async function resolveClinicUuid(input) {
+    const resolved = await resolveClinicIds(input);
+    return resolved.clinicId;
 }
 
 // 4. APPOINTMENT MODEL (Supabase PostgreSQL)
@@ -1432,9 +1744,33 @@ const Appointment = {
         }
         const cId = query.clinic_id || query.clinicId;
         if (cId) {
-            const resolvedC = await resolveClinicUuid(cId);
-            if (resolvedC) {
+            const { clinicId: resolvedC, clinicRecord } = await resolveClinicIds(cId);
+            if (!resolvedC) {
+                return [];
+            }
+            const clinicDocIds = new Set();
+            try {
+                const { data: docsByClinic } = await supabaseAdmin
+                    .from('dentists')
+                    .select('id')
+                    .eq('clinic_id', resolvedC);
+                for (const d of (docsByClinic || [])) {
+                    if (d?.id) clinicDocIds.add(String(d.id));
+                }
+            } catch (_) { }
+            // Also accept explicit pre-resolved dentist IDs passed by caller (e.g. name-matched legacy rows)
+            if (Array.isArray(query.clinic_dentist_ids)) {
+                for (const id of query.clinic_dentist_ids) {
+                    if (id && isUUID(String(id))) clinicDocIds.add(String(id));
+                }
+            }
+            const docIdList = Array.from(clinicDocIds);
+            if (docIdList.length > 0 && isUUID(resolvedC)) {
+                req = req.or(`clinic_id.eq.${resolvedC},dentist_id.in.(${docIdList.join(',')})`);
+            } else if (isUUID(resolvedC)) {
                 req = req.eq('clinic_id', resolvedC);
+            } else if (clinicRecord?.id) {
+                req = req.eq('clinic_id', clinicRecord.id);
             } else {
                 return [];
             }
@@ -1487,10 +1823,15 @@ const MedicalRecord = {
             ? recordData.lab_report_urls
             : (Array.isArray(recordData.labReportUrls) ? recordData.labReportUrls : []);
 
+        const rawAppt = recordData.appointment_id || recordData.appointmentId;
+        const apptUuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const validApptId = (rawAppt && apptUuidRegex.test(String(rawAppt).trim())) ? String(rawAppt).trim() : null;
+
         const payload = {
             patient_id: patientId,
             dentist_id: dentistId,
-            diagnosis: recordData.diagnosis || recordData.title || 'Dental Health Record',
+            ...(validApptId ? { appointment_id: validApptId } : {}),
+            diagnosis: recordData.diagnosis || recordData.title || 'Medical Health Record',
             notes: notesVal,
             prescriptions: prescriptionsVal,
             xray_urls: xrayUrls,
@@ -1595,6 +1936,11 @@ const normalizeChatRoomId = (roomId) => {
 
 const ChatMessage = {
     async create(messageData) {
+        const cleanMessage = (messageData.message || '').toString().trim();
+        if (!cleanMessage) {
+            throw new Error('Message text cannot be empty.');
+        }
+
         const rawSender = messageData.sender_id || messageData.senderId || '';
         let senderId = null;
 
@@ -1620,11 +1966,30 @@ const ChatMessage = {
 
         const normalizedRoom = normalizeChatRoomId(messageData.room_id || messageData.roomId);
 
+        // Deduplicate rapid double-submits (same room, sender, and message within 3 seconds)
+        try {
+            const sinceIso = new Date(Date.now() - 3000).toISOString();
+            let dupReq = supabaseAdmin
+                .from('chat_messages')
+                .select('*, sender:users!sender_id(id, name, email, role), receiver:users!receiver_id(id, name, email, role)')
+                .eq('room_id', normalizedRoom)
+                .eq('message', cleanMessage)
+                .gte('created_at', sinceIso)
+                .limit(1);
+            if (senderId) {
+                dupReq = dupReq.eq('sender_id', senderId);
+            }
+            const { data: dupRows } = await dupReq;
+            if (dupRows && dupRows.length > 0) {
+                return dupRows[0];
+            }
+        } catch (_) { }
+
         const payload = {
             room_id: normalizedRoom,
             sender_id: senderId || null,
             receiver_id: receiverId || null,
-            message: messageData.message || '',
+            message: cleanMessage,
             type: messageData.type || 'text',
             read: messageData.read ?? false
         };
@@ -1639,9 +2004,13 @@ const ChatMessage = {
 
     async find(query = {}, options = {}) {
         // Enforce DB/Query-Level Access Control if caller user is passed in options
-        if (options.user) {
-            const role = (options.user.role || '').toString().trim().toLowerCase();
-            const isSubAdmin = role === 'sub-admin' || role === 'subadmin' || role === 'sub_admin';
+        let isMainAdmin = true;
+        let callerRole = '';
+        let callerUser = options.user || null;
+        if (callerUser) {
+            callerRole = (callerUser.role || '').toString().trim().toLowerCase();
+            isMainAdmin = callerRole === 'admin' || callerRole === 'primaryadmin' || callerRole === 'primary_admin' || callerRole === 'superadmin' || callerRole === 'super_admin' || callerUser.email === 'admin@dentaguru.com';
+            const isSubAdmin = callerRole === 'sub-admin' || callerRole === 'subadmin' || callerRole === 'sub_admin';
 
             // Sub-Admins NEVER receive chat messages
             if (isSubAdmin) {
@@ -1662,17 +2031,51 @@ const ChatMessage = {
             if (typeof resolvedS === 'string' && resolvedS.length > 0) req = req.eq('sender_id', resolvedS);
         }
         const { data, error } = await req.order('created_at', { ascending: true });
+        let rows = data || [];
         if (error) {
             // Fallback to simple sender select if receiver foreign key is missing
             const fallback = await supabaseAdmin.from('chat_messages').select('*, sender:users!sender_id(id, name, email, role)').order('created_at', { ascending: true });
-            let msgs = fallback.data || [];
+            rows = fallback.data || [];
             if (rawRoom) {
                 const norm = normalizeChatRoomId(rawRoom);
-                msgs = msgs.filter(m => normalizeChatRoomId(m.room_id) === norm);
+                rows = rows.filter(m => normalizeChatRoomId(m.room_id) === norm);
             }
-            return msgs;
         }
-        return data || [];
+
+        // If caller is non-admin (Patient / Doctor) and requested unscoped listing, restrict to authorized conversations
+        if (callerUser && !isMainAdmin && !rawRoom) {
+            const allowedConvs = await this.getConversations(callerUser);
+            const allowedRoomSet = new Set(allowedConvs.map(c => normalizeChatRoomId(c.roomId)));
+            rows = rows.filter(m =>
+                allowedRoomSet.has(normalizeChatRoomId(m.room_id)) ||
+                m.sender_id === callerUser.id ||
+                m.receiver_id === callerUser.id
+            );
+        }
+
+        return rows;
+    },
+
+    async markAsRead({ roomId, userId }) {
+        if (!roomId) return 0;
+        const normalized = normalizeChatRoomId(roomId);
+        const hyphenated = normalized.replace(/_/g, '-');
+        try {
+            let req = supabaseAdmin
+                .from('chat_messages')
+                .update({ read: true })
+                .eq('read', false)
+                .or(`room_id.eq.${normalized},room_id.eq.${hyphenated},room_id.eq.${roomId}`);
+            if (userId) {
+                req = req.or(`sender_id.is.null,sender_id.neq.${userId}`);
+            }
+            const { data, error } = await req.select('id');
+            if (error) throw error;
+            return (data || []).length;
+        } catch (err) {
+            console.warn('⚠️ markAsRead warning:', err.message);
+            return 0;
+        }
     },
 
     async getConversations(user) {
@@ -1722,7 +2125,7 @@ const ChatMessage = {
                     lastMessageType: msg.type,
                     lastMessageTime: msg.created_at,
                     lastSenderName: msg.sender?.name || (msg.type === 'doctor' ? 'Doctor' : 'Patient'),
-                    lastSenderRole: msg.sender?.role || (msg.type === 'doctor' ? 'Dentist' : 'Patient'),
+                    lastSenderRole: msg.sender?.role || (msg.type === 'doctor' ? 'DOCTOR' : 'Patient'),
                     doctorName: null,
                     patientName: null,
                     totalMessages: 0,
@@ -1740,7 +2143,8 @@ const ChatMessage = {
             if (msg.receiver_id) thread.receiverIds.add(msg.receiver_id);
 
             // Resolve doctor name from messages
-            if (!thread.doctorName && (msg.type === 'doctor' || msg.sender?.role === 'Dentist')) {
+            const msgSenderRoleLower = String(msg.sender?.role || '').trim().toLowerCase();
+            if (!thread.doctorName && (msg.type === 'doctor' || msgSenderRoleLower === 'dentist' || msgSenderRoleLower === 'doctor')) {
                 let dName = msg.sender?.name || '';
                 if (dName && !dName.toLowerCase().startsWith('dr.') && !dName.toLowerCase().startsWith('dr ')) {
                     dName = `Dr. ${dName}`;
@@ -1872,6 +2276,42 @@ const ChatMessage = {
                 const threadHasUser = (thread.senderIds && thread.senderIds.has(user.id)) ||
                     (thread.receiverIds && thread.receiverIds.has(user.id));
                 if (threadHasUser || roomNorm.includes(userNameNorm) || (user?.id && roomNorm.includes(user.id))) {
+                    conversations.push(conversation);
+                }
+            } else if (role === 'clinic' || role === 'clinic_admin') {
+                // Clinic can view threads belonging to doctors affiliated with this clinic
+                if (!this._clinicDocNamesCache || this._clinicDocCacheFor !== user.id) {
+                    this._clinicDocCacheFor = user.id;
+                    this._clinicDocNamesCache = new Set();
+                    this._clinicDocIdsCache = new Set();
+                    try {
+                        const cResolved = await resolveClinicIds(user.id);
+                        const cId = cResolved.clinicId;
+                        if (cId) {
+                            const { data: clinicDocs } = await supabaseAdmin
+                                .from('dentists')
+                                .select('id, user_id, users(name)')
+                                .eq('clinic_id', cId);
+                            for (const d of (clinicDocs || [])) {
+                                if (d.id) this._clinicDocIdsCache.add(d.id);
+                                if (d.user_id) this._clinicDocIdsCache.add(d.user_id);
+                                const du = Array.isArray(d.users) ? d.users[0] : d.users;
+                                const dName = (du?.name || '').replace(/^Dr\.\s*/i, '').trim().toLowerCase();
+                                if (dName) this._clinicDocNamesCache.add(dName);
+                            }
+                        }
+                    } catch (_) { }
+                }
+                const threadHasClinicDoc = Array.from(this._clinicDocIdsCache || []).some(cid =>
+                    (thread.senderIds && thread.senderIds.has(cid)) ||
+                    (thread.receiverIds && thread.receiverIds.has(cid))
+                );
+                const docNameLower = resolvedDoc.replace(/^Dr\.\s*/i, '').trim().toLowerCase();
+                const roomLower = roomId.toLowerCase();
+                const nameMatchesClinicDoc = Array.from(this._clinicDocNamesCache || []).some(dn =>
+                    dn.length > 0 && (docNameLower.includes(dn) || roomLower.includes(dn))
+                );
+                if (threadHasClinicDoc || nameMatchesClinicDoc) {
                     conversations.push(conversation);
                 }
             }
@@ -2185,12 +2625,18 @@ const Notification = {
 
             const isAdminRole = normRole === 'admin' || normRole === 'sub-admin' || normRole === 'subadmin' || normRole === 'primaryadmin' || normRole === 'superadmin';
             const isDoctorRole = normRole === 'dentist' || normRole === 'doctor';
+            const isClinicRole = normRole === 'clinic' || normRole === 'clinic_admin';
             const isPatientRole = normRole === 'patient';
 
             if (isDoctorRole && rawUserId) {
                 const { dentistTableId, userTableId, allIds } = await resolveDentistIds(rawUserId);
                 if (dentistTableId) candidateUserIds.add(String(dentistTableId));
                 if (userTableId) candidateUserIds.add(String(userTableId));
+                for (const id of (allIds || [])) candidateUserIds.add(String(id));
+            } else if (isClinicRole && rawUserId) {
+                const { clinicId, clinicUserId, allIds } = await resolveClinicIds(rawUserId);
+                if (clinicId) candidateUserIds.add(String(clinicId));
+                if (clinicUserId) candidateUserIds.add(String(clinicUserId));
                 for (const id of (allIds || [])) candidateUserIds.add(String(id));
             } else if (isPatientRole && rawUserId) {
                 const resolvedP = await resolveUserUuid(rawUserId);
@@ -2215,8 +2661,17 @@ const Notification = {
 
                 if (isDoctorRole) {
                     const roleMatches = nRole === 'dentist' || nRole === 'doctor' || nRole === 'all';
-                    if (rawUserId && candidateUserIds.has(nRecId)) return true;
-                    if (roleMatches && (nRecUpper === 'ALL' || (!rawUserId && nRole !== 'admin'))) return true;
+                    if (!rawUserId) return false;
+                    if (roleMatches && candidateUserIds.has(nRecId)) return true;
+                    if (roleMatches && nRecUpper === 'ALL') return true;
+                    return false;
+                }
+
+                if (isClinicRole) {
+                    const roleMatches = nRole === 'clinic' || nRole === 'clinic_admin' || nRole === 'all';
+                    if (rawUserId && roleMatches && candidateUserIds.has(nRecId)) return true;
+                    if (rawUserId && nRole === 'clinic' && candidateUserIds.has(nRecId)) return true;
+                    if (roleMatches && nRecUpper === 'ALL_CLINICS') return true;
                     return false;
                 }
 
@@ -2353,20 +2808,26 @@ const Referral = {
         const referredPatientId = rawReferredPatientId ? (await resolveUserUuid(rawReferredPatientId) || rawReferredPatientId) : null;
 
         const rawDoctorId = referralData.doctor_id || referralData.doctorId || referralData.assigned_doctor_id || referralData.assignedDoctorId || null;
+        const rawClinicId = referralData.clinic_id || referralData.clinicId || null;
         let doctorId = null;
+        let resolvedDoctorClinicId = null;
         if (rawDoctorId && isUUID(rawDoctorId)) {
             try {
                 const { data: dRow } = await supabaseAdmin
                     .from('dentists')
-                    .select('id')
+                    .select('id, clinic_id')
                     .or(`id.eq.${rawDoctorId},user_id.eq.${rawDoctorId}`)
                     .limit(1)
                     .maybeSingle();
                 if (dRow?.id) {
                     doctorId = dRow.id;
+                    resolvedDoctorClinicId = dRow.clinic_id || null;
                 }
             } catch (_) { }
         }
+        const clinicId = (rawClinicId && isUUID(rawClinicId))
+            ? rawClinicId
+            : (resolvedDoctorClinicId || await resolveClinicUuid(rawClinicId || referralData.doctor_clinic_name || referralData.doctorClinicName));
 
         const payload = {
             id,
@@ -2382,9 +2843,11 @@ const Referral = {
             referred_patient_pincode: referralData.referred_patient_pincode || referralData.referredPatientPincode || '',
             referred_patient_location: referralData.referred_patient_location || referralData.referredPatientLocation || '',
             required_specialist: referralData.required_specialist || referralData.requiredSpecialist || '',
+            specialty: referralData.specialty || referralData.required_specialist || referralData.requiredSpecialist || '',
             clinical_complaint: referralData.clinical_complaint || referralData.clinicalComplaint || '',
             doctor_id: doctorId,
             assigned_doctor_id: doctorId,
+            clinic_id: clinicId || null,
             status: referralData.status || referralData.referralStatus || 'Pending',
             rejection_reason: referralData.rejection_reason || referralData.rejectionReason || null,
             whatsapp_status: referralData.whatsapp_status || referralData.whatsappStatus || 'Pending',
@@ -2398,18 +2861,20 @@ const Referral = {
         try {
             const { data, error } = await supabaseAdmin.from('referrals').insert(payload).select().single();
             if (!error && data) {
-                const existingIdx = _inMemoryReferrals.findIndex(r => r.id === data.id);
-                if (existingIdx !== -1) _inMemoryReferrals[existingIdx] = data;
-                else _inMemoryReferrals.unshift(data);
-                return data;
+                const enrichedData = { ...data, clinic_id: data.clinic_id || clinicId || null };
+                const existingIdx = _inMemoryReferrals.findIndex(r => r.id === enrichedData.id);
+                if (existingIdx !== -1) _inMemoryReferrals[existingIdx] = enrichedData;
+                else _inMemoryReferrals.unshift(enrichedData);
+                return enrichedData;
             }
             if (error) {
                 console.warn('⚠️ Supabase Referrals primary insert notice:', error.message);
                 const safePayload = /** @type {Record<string, any>} */ ({ ...payload });
                 delete safePayload.assigned_doctor_id;
+                delete safePayload.clinic_id;
                 const { data: d2, error: e2 } = await supabaseAdmin.from('referrals').insert(safePayload).select().single();
                 if (!e2 && d2) {
-                    const merged = { ...payload, ...d2 };
+                    const merged = { ...payload, ...d2, clinic_id: clinicId || null };
                     _inMemoryReferrals.unshift(merged);
                     return merged;
                 }
@@ -2437,7 +2902,15 @@ const Referral = {
                 req = req.or(`referrer_patient_id.eq.${refIdRaw},referrer_id.eq.${refIdRaw}`);
             }
             if (docIdRaw) {
-                req = req.or(`doctor_id.eq.${docIdRaw},assigned_doctor_id.eq.${docIdRaw}`);
+                const docIdList = Array.isArray(docIdRaw?.$in)
+                    ? docIdRaw.$in.map(v => String(v || '').trim()).filter(Boolean)
+                    : [String(docIdRaw).trim()].filter(Boolean);
+                if (docIdList.length > 0) {
+                    const docOr = docIdList
+                        .map(dId => `doctor_id.eq.${dId},assigned_doctor_id.eq.${dId}`)
+                        .join(',');
+                    req = req.or(docOr);
+                }
             }
             if (patIdRaw) {
                 req = req.or(`referred_patient_id.eq.${patIdRaw},referred_user_id.eq.${patIdRaw}`);
@@ -2474,7 +2947,13 @@ const Referral = {
             filtered = filtered.filter(r => (r.referrer_patient_id === refIdRaw || r.referrer_id === refIdRaw));
         }
         if (docIdRaw) {
-            filtered = filtered.filter(r => (r.doctor_id === docIdRaw || r.assigned_doctor_id === docIdRaw));
+            const docIdList = Array.isArray(docIdRaw?.$in)
+                ? docIdRaw.$in.map(v => String(v || '').trim()).filter(Boolean)
+                : [String(docIdRaw).trim()].filter(Boolean);
+            filtered = filtered.filter(r =>
+                docIdList.includes(String(r.doctor_id || '').trim()) ||
+                docIdList.includes(String(r.assigned_doctor_id || '').trim())
+            );
         }
         if (patIdRaw) {
             filtered = filtered.filter(r => (r.referred_patient_id === patIdRaw || r.referred_user_id === patIdRaw));
@@ -2489,1074 +2968,1077 @@ const Referral = {
     },
 
     async findById(id) {
-                                                    if (!id) return null;
-                                                    try {
-                                                        const { data, error } = await supabaseAdmin
-                                                            .from('referrals')
-                                                            .select('*, referrer:users!referrer_patient_id(id, name, email, phone), doctor:dentists!doctor_id(id, speciality, users(name, email, phone), clinics(clinic_name, location))')
-                                                            .eq('id', id)
-                                                            .maybeSingle();
-                                                        if (!error && data) return data;
-                                                        const simple = await supabaseAdmin.from('referrals').select('*').eq('id', id).maybeSingle();
-                                                        if (simple.data) return simple.data;
-                                                    } catch (_) { }
+        if (!id) return null;
+        try {
+            const { data, error } = await supabaseAdmin
+                .from('referrals')
+                .select('*, referrer:users!referrer_patient_id(id, name, email, phone), doctor:dentists!doctor_id(id, speciality, users(name, email, phone), clinics(clinic_name, location))')
+                .eq('id', id)
+                .maybeSingle();
+            if (!error && data) return data;
+            const simple = await supabaseAdmin.from('referrals').select('*').eq('id', id).maybeSingle();
+            if (simple.data) return simple.data;
+        } catch (_) { }
 
-                                                    return _inMemoryReferrals.find(r => r.id === id) || null;
-                                                },
+        return _inMemoryReferrals.find(r => r.id === id) || null;
+    },
 
     async findByIdAndUpdate(id, updateData) {
-                                                    const payload = {
-                                                        ...updateData,
-                                                        updated_at: new Date().toISOString()
-                                                    };
-                                                    try {
-                                                        const { data, error } = await supabaseAdmin
-                                                            .from('referrals')
-                                                            .update(payload)
-                                                            .eq('id', id)
-                                                            .select()
-                                                            .maybeSingle();
-                                                        if (!error && data) {
-                                                            const idx = _inMemoryReferrals.findIndex(r => r.id === id);
-                                                            if (idx !== -1) _inMemoryReferrals[idx] = { ..._inMemoryReferrals[idx], ...data };
-                                                            return data;
-                                                        }
-                                                    } catch (e) {
-                                                        console.warn('⚠️ Supabase referral update notice:', e.message);
-                                                    }
+        const payload = {
+            ...updateData,
+            updated_at: new Date().toISOString()
+        };
+        try {
+            const { data, error } = await supabaseAdmin
+                .from('referrals')
+                .update(payload)
+                .eq('id', id)
+                .select()
+                .maybeSingle();
+            if (!error && data) {
+                const idx = _inMemoryReferrals.findIndex(r => r.id === id);
+                if (idx !== -1) _inMemoryReferrals[idx] = { ..._inMemoryReferrals[idx], ...data };
+                return data;
+            }
+        } catch (e) {
+            console.warn('⚠️ Supabase referral update notice:', e.message);
+        }
 
-                                                    const idx = _inMemoryReferrals.findIndex(r => r.id === id);
-                                                    if (idx !== -1) {
-                                                        Object.assign(_inMemoryReferrals[idx], payload);
-                                                        return _inMemoryReferrals[idx];
-                                                    }
-                                                    return null;
-                                                },
+        const idx = _inMemoryReferrals.findIndex(r => r.id === id);
+        if (idx !== -1) {
+            Object.assign(_inMemoryReferrals[idx], payload);
+            return _inMemoryReferrals[idx];
+        }
+        return null;
+    },
 
     async findByIdAndDelete(id) {
-                                                    if (!id) return null;
-                                                    try {
-                                                        await supabaseAdmin.from('referrals').delete().eq('id', id);
-                                                    } catch (e) {
-                                                        console.warn('⚠️ Supabase referral delete notice:', e.message);
-                                                    }
+        if (!id) return null;
+        try {
+            await supabaseAdmin.from('referrals').delete().eq('id', id);
+        } catch (e) {
+            console.warn('⚠️ Supabase referral delete notice:', e.message);
+        }
 
-                                                    const idx = _inMemoryReferrals.findIndex(r => r.id === id);
-                                                    if (idx !== -1) {
-                                                        const removed = _inMemoryReferrals.splice(idx, 1)[0];
-                                                        return removed;
-                                                    }
-                                                    return { id };
-                                                },
+        const idx = _inMemoryReferrals.findIndex(r => r.id === id);
+        if (idx !== -1) {
+            const removed = _inMemoryReferrals.splice(idx, 1)[0];
+            return removed;
+        }
+        return { id };
+    },
 
     async checkDuplicate(referrerPatientId, referredPatientMobile, doctorId) {
-                                                    if (!referrerPatientId || !referredPatientMobile || !doctorId) return null;
-                                                    try {
-                                                        const { data } = await supabaseAdmin
-                                                            .from('referrals')
-                                                            .select('*')
-                                                            .eq('referrer_patient_id', referrerPatientId)
-                                                            .eq('referred_patient_mobile', referredPatientMobile)
-                                                            .eq('doctor_id', doctorId)
-                                                            .eq('status', 'Pending')
-                                                            .limit(1);
-                                                        if (data && data.length > 0) return data[0];
-                                                    } catch (_) { }
+        if (!referrerPatientId || !referredPatientMobile || !doctorId) return null;
+        try {
+            const { data } = await supabaseAdmin
+                .from('referrals')
+                .select('*')
+                .eq('referrer_patient_id', referrerPatientId)
+                .eq('referred_patient_mobile', referredPatientMobile)
+                .eq('doctor_id', doctorId)
+                .eq('status', 'Pending')
+                .limit(1);
+            if (data && data.length > 0) return data[0];
+        } catch (_) { }
 
-                                                    return _inMemoryReferrals.find(r =>
-                                                        (r.referrer_patient_id === referrerPatientId || r.referrer_id === referrerPatientId) &&
-                                                        r.referred_patient_mobile === referredPatientMobile &&
-                                                        (r.doctor_id === doctorId || r.assigned_doctor_id === doctorId) &&
-                                                        r.status === 'Pending'
-                                                    ) || null;
-                                                },
+        return _inMemoryReferrals.find(r =>
+            (r.referrer_patient_id === referrerPatientId || r.referrer_id === referrerPatientId) &&
+            r.referred_patient_mobile === referredPatientMobile &&
+            (r.doctor_id === doctorId || r.assigned_doctor_id === doctorId) &&
+            r.status === 'Pending'
+        ) || null;
+    },
 
     async updateStatusForReferredUser(referredUserId, newStatus, extra = {}) {
-                                                    const payload = {
-                                                        status: newStatus,
-                                                        updated_at: new Date().toISOString(),
-                                                        ...extra
-                                                    };
+        const payload = {
+            status: newStatus,
+            updated_at: new Date().toISOString(),
+            ...extra
+        };
 
-                                                    try {
-                                                        const { data, error } = await supabaseAdmin
-                                                            .from('referrals')
-                                                            .update(payload)
-                                                            .or(`referred_patient_id.eq.${referredUserId},referred_user_id.eq.${referredUserId}`)
-                                                            .select();
-                                                        if (!error && data && data.length > 0) {
-                                                            return data[0];
-                                                        }
-                                                    } catch (_) { }
+        try {
+            const { data, error } = await supabaseAdmin
+                .from('referrals')
+                .update(payload)
+                .or(`referred_patient_id.eq.${referredUserId},referred_user_id.eq.${referredUserId}`)
+                .select();
+            if (!error && data && data.length > 0) {
+                return data[0];
+            }
+        } catch (_) { }
 
-                                                    for (const item of _inMemoryReferrals) {
-                                                        if (item.referred_patient_id === referredUserId || item.referred_user_id === referredUserId) {
-                                                            Object.assign(item, payload);
-                                                            return item;
-                                                        }
-                                                    }
-                                                    return null;
-                                                }
-                                            };
+        for (const item of _inMemoryReferrals) {
+            if (item.referred_patient_id === referredUserId || item.referred_user_id === referredUserId) {
+                Object.assign(item, payload);
+                return item;
+            }
+        }
+        return null;
+    }
+};
 
-                                            // 12. PATIENT SAVED DOCTORS MODEL (Supabase PostgreSQL + In-Memory Fallback)
-                                            const _inMemoryPatientDoctors = [];
+// 12. PATIENT SAVED DOCTORS MODEL (Supabase PostgreSQL + In-Memory Fallback)
+const _inMemoryPatientDoctors = [];
 
-                                            const PatientDoctor = {
-                                                async getDoctorsForPatient(patientId) {
-                                                    if (!patientId) return [];
-                                                    const cleanPId = patientId.toString().trim();
-                                                    try {
-                                                        const { data, error } = await supabaseAdmin
-                                                            .from('patient_doctors')
-                                                            .select('doctor_id, created_at')
-                                                            .eq('patient_id', cleanPId);
-                                                        if (!error && data) {
-                                                            return data.map(d => d.doctor_id);
-                                                        }
-                                                    } catch (_) { }
+const PatientDoctor = {
+    async getDoctorsForPatient(patientId) {
+        if (!patientId) return [];
+        const cleanPId = patientId.toString().trim();
+        try {
+            const { data, error } = await supabaseAdmin
+                .from('patient_doctors')
+                .select('doctor_id, created_at')
+                .eq('patient_id', cleanPId);
+            if (!error && data) {
+                return data.map(d => d.doctor_id);
+            }
+        } catch (_) { }
 
-                                                    return _inMemoryPatientDoctors
-                                                        .filter(r => r.patient_id === cleanPId)
-                                                        .map(r => r.doctor_id);
-                                                },
+        return _inMemoryPatientDoctors
+            .filter(r => r.patient_id === cleanPId)
+            .map(r => r.doctor_id);
+    },
 
-                                                async addDoctorForPatient(patientId, doctorId) {
-                                                    if (!patientId || !doctorId) return { success: false, message: 'Missing patientId or doctorId' };
-                                                    const cleanPId = patientId.toString().trim();
-                                                    const cleanDId = doctorId.toString().trim();
+    async addDoctorForPatient(patientId, doctorId) {
+        if (!patientId || !doctorId) return { success: false, message: 'Missing patientId or doctorId' };
+        const cleanPId = patientId.toString().trim();
+        const cleanDId = doctorId.toString().trim();
 
-                                                    try {
-                                                        const { data, error } = await supabaseAdmin
-                                                            .from('patient_doctors')
-                                                            .upsert({ patient_id: cleanPId, doctor_id: cleanDId }, { onConflict: 'patient_id,doctor_id' })
-                                                            .select();
-                                                        if (!error) {
-                                                            return { success: true, data: data?.[0] };
-                                                        }
-                                                    } catch (e) {
-                                                        console.warn('⚠️ Supabase patient_doctors insert warning:', e.message);
-                                                    }
+        try {
+            const { data, error } = await supabaseAdmin
+                .from('patient_doctors')
+                .upsert({ patient_id: cleanPId, doctor_id: cleanDId }, { onConflict: 'patient_id,doctor_id' })
+                .select();
+            if (!error) {
+                return { success: true, data: data?.[0] };
+            }
+        } catch (e) {
+            console.warn('⚠️ Supabase patient_doctors insert warning:', e.message);
+        }
 
-                                                    const existing = _inMemoryPatientDoctors.find(r => r.patient_id === cleanPId && r.doctor_id === cleanDId);
-                                                    if (!existing) {
-                                                        _inMemoryPatientDoctors.push({
-                                                            id: `pd_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-                                                            patient_id: cleanPId,
-                                                            doctor_id: cleanDId,
-                                                            created_at: new Date().toISOString()
-                                                        });
-                                                    }
-                                                    return { success: true };
-                                                },
+        const existing = _inMemoryPatientDoctors.find(r => r.patient_id === cleanPId && r.doctor_id === cleanDId);
+        if (!existing) {
+            _inMemoryPatientDoctors.push({
+                id: `pd_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+                patient_id: cleanPId,
+                doctor_id: cleanDId,
+                created_at: new Date().toISOString()
+            });
+        }
+        return { success: true };
+    },
 
-                                                async removeDoctorForPatient(patientId, doctorId) {
-                                                    if (!patientId || !doctorId) return { success: false, message: 'Missing patientId or doctorId' };
-                                                    const cleanPId = patientId.toString().trim();
-                                                    const cleanDId = doctorId.toString().trim();
+    async removeDoctorForPatient(patientId, doctorId) {
+        if (!patientId || !doctorId) return { success: false, message: 'Missing patientId or doctorId' };
+        const cleanPId = patientId.toString().trim();
+        const cleanDId = doctorId.toString().trim();
 
-                                                    try {
-                                                        const { error } = await supabaseAdmin
-                                                            .from('patient_doctors')
-                                                            .delete()
-                                                            .eq('patient_id', cleanPId)
-                                                            .eq('doctor_id', cleanDId);
-                                                        if (!error) {
-                                                            return { success: true };
-                                                        }
-                                                    } catch (e) {
-                                                        console.warn('⚠️ Supabase patient_doctors delete warning:', e.message);
-                                                    }
+        try {
+            const { error } = await supabaseAdmin
+                .from('patient_doctors')
+                .delete()
+                .eq('patient_id', cleanPId)
+                .eq('doctor_id', cleanDId);
+            if (!error) {
+                return { success: true };
+            }
+        } catch (e) {
+            console.warn('⚠️ Supabase patient_doctors delete warning:', e.message);
+        }
 
-                                                    const idx = _inMemoryPatientDoctors.findIndex(r => r.patient_id === cleanPId && r.doctor_id === cleanDId);
-                                                    if (idx !== -1) {
-                                                        _inMemoryPatientDoctors.splice(idx, 1);
-                                                    }
-                                                    return { success: true };
-                                                }
-                                            };
+        const idx = _inMemoryPatientDoctors.findIndex(r => r.patient_id === cleanPId && r.doctor_id === cleanDId);
+        if (idx !== -1) {
+            _inMemoryPatientDoctors.splice(idx, 1);
+        }
+        return { success: true };
+    }
+};
 
-                                            // 12. DOCTOR AVAILABILITY MODEL (Doctor Slots, Working Hours, Blocked Dates, Weekly Schedule)
-                                            const _inMemoryAvailability = [];
-                                            const _inMemorySchedule = new Map();
+// 12. DOCTOR AVAILABILITY MODEL (Doctor Slots, Working Hours, Blocked Dates, Weekly Schedule)
+const _inMemoryAvailability = [];
+const _inMemorySchedule = new Map();
 
-                                            const FULL_WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-                                            const SHORT_TO_FULL_WEEKDAY = {
-                                                mon: 'Monday', monday: 'Monday',
-                                                tue: 'Tuesday', tues: 'Tuesday', tuesday: 'Tuesday',
-                                                wed: 'Wednesday', wednesday: 'Wednesday',
-                                                thu: 'Thursday', thur: 'Thursday', thurs: 'Thursday', thursday: 'Thursday',
-                                                fri: 'Friday', friday: 'Friday',
-                                                sat: 'Saturday', saturday: 'Saturday',
-                                                sun: 'Sunday', sunday: 'Sunday',
-                                            };
+const FULL_WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const SHORT_TO_FULL_WEEKDAY = {
+    mon: 'Monday', monday: 'Monday',
+    tue: 'Tuesday', tues: 'Tuesday', tuesday: 'Tuesday',
+    wed: 'Wednesday', wednesday: 'Wednesday',
+    thu: 'Thursday', thur: 'Thursday', thurs: 'Thursday', thursday: 'Thursday',
+    fri: 'Friday', friday: 'Friday',
+    sat: 'Saturday', saturday: 'Saturday',
+    sun: 'Sunday', sunday: 'Sunday',
+};
 
-                                            function extractDateYmd(raw) {
-                                                if (!raw) return '';
-                                                if (raw instanceof Date) {
-                                                    const y = raw.getFullYear();
-                                                    const m = String(raw.getMonth() + 1).padStart(2, '0');
-                                                    const d = String(raw.getDate()).padStart(2, '0');
-                                                    return `${y}-${m}-${d}`;
-                                                }
-                                                const str = String(raw).trim();
-                                                const match = str.match(/^(\d{4}-\d{2}-\d{2})/);
-                                                if (match) return match[1];
-                                                const parsed = new Date(str);
-                                                if (!Number.isNaN(parsed.getTime())) {
-                                                    return parsed.toISOString().split('T')[0];
-                                                }
-                                                return '';
-                                            }
+function extractDateYmd(raw) {
+    if (!raw) return '';
+    if (raw instanceof Date) {
+        const y = raw.getFullYear();
+        const m = String(raw.getMonth() + 1).padStart(2, '0');
+        const d = String(raw.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+    const str = String(raw).trim();
+    const match = str.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (match) return match[1];
+    const parsed = new Date(str);
+    if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toISOString().split('T')[0];
+    }
+    return '';
+}
 
-                                            function getWeekdayNameFromYmd(ymd) {
-                                                const clean = extractDateYmd(ymd);
-                                                if (!clean) return '';
-                                                const [y, m, d] = clean.split('-').map(n => parseInt(n, 10));
-                                                const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
-                                                const idx = dt.getUTCDay(); // 0=Sun..6=Sat
-                                                return ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][idx] || '';
-                                            }
+function getWeekdayNameFromYmd(ymd) {
+    const clean = extractDateYmd(ymd);
+    if (!clean) return '';
+    const [y, m, d] = clean.split('-').map(n => parseInt(n, 10));
+    const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+    const idx = dt.getUTCDay(); // 0=Sun..6=Sat
+    return ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][idx] || '';
+}
 
-                                            function normalizeWorkingDays(rawDays) {
-                                                let arr = [];
-                                                if (Array.isArray(rawDays)) {
-                                                    arr = rawDays;
-                                                } else if (typeof rawDays === 'string') {
-                                                    const trimmed = rawDays.trim();
-                                                    if (trimmed.startsWith('[')) {
-                                                        try {
-                                                            const parsed = JSON.parse(trimmed);
-                                                            if (Array.isArray(parsed)) arr = parsed;
-                                                        } catch (_) {
-                                                            arr = trimmed.split(',');
-                                                        }
-                                                    } else if (trimmed) {
-                                                        arr = trimmed.split(',');
-                                                    }
-                                                }
-                                                const out = [];
-                                                for (const item of arr) {
-                                                    const key = String(item || '').trim().toLowerCase();
-                                                    const mapped = SHORT_TO_FULL_WEEKDAY[key];
-                                                    if (mapped && !out.includes(mapped)) out.push(mapped);
-                                                }
-                                                // Order Mon..Sun cleanly
-                                                return FULL_WEEKDAYS.filter(d => out.includes(d));
-                                            }
+function normalizeWorkingDays(rawDays) {
+    let arr = [];
+    if (Array.isArray(rawDays)) {
+        arr = rawDays;
+    } else if (typeof rawDays === 'string') {
+        const trimmed = rawDays.trim();
+        if (trimmed.startsWith('[')) {
+            try {
+                const parsed = JSON.parse(trimmed);
+                if (Array.isArray(parsed)) arr = parsed;
+            } catch (_) {
+                arr = trimmed.split(',');
+            }
+        } else if (trimmed) {
+            arr = trimmed.split(',');
+        }
+    }
+    const out = [];
+    for (const item of arr) {
+        const key = String(item || '').trim().toLowerCase();
+        const mapped = SHORT_TO_FULL_WEEKDAY[key];
+        if (mapped && !out.includes(mapped)) out.push(mapped);
+    }
+    // Order Mon..Sun cleanly
+    return FULL_WEEKDAYS.filter(d => out.includes(d));
+}
 
-                                            const DEFAULT_DOCTOR_SCHEDULE = {
-                                                workingDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
-                                                startTime: '09:00 AM',
-                                                endTime: '05:00 PM',
-                                                slotDurationMinutes: 30,
-                                                hasBreak: true,
-                                                breakStartTime: '01:00 PM',
-                                                breakEndTime: '02:00 PM',
-                                                isConfigured: false,
-                                            };
+const DEFAULT_DOCTOR_SCHEDULE = {
+    workingDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
+    startTime: '09:00 AM',
+    endTime: '05:00 PM',
+    slotDurationMinutes: 30,
+    hasBreak: true,
+    breakStartTime: '01:00 PM',
+    breakEndTime: '02:00 PM',
+    isConfigured: false,
+};
 
-                                            function sanitizeSchedulePayload(raw = {}, fallback = DEFAULT_DOCTOR_SCHEDULE) {
-                                                const workingDays = normalizeWorkingDays(raw.workingDays ?? raw.working_days);
-                                                const hasBreakVal = raw.hasBreak !== undefined
-                                                    ? Boolean(raw.hasBreak)
-                                                    : (raw.has_break !== undefined ? Boolean(raw.has_break) : (raw.breakStartTime ? true : fallback.hasBreak));
-                                                const breakStart = hasBreakVal
-                                                    ? String(raw.breakStartTime || raw.break_start_time || fallback.breakStartTime || '01:00 PM').trim()
-                                                    : null;
-                                                const breakEnd = hasBreakVal
-                                                    ? String(raw.breakEndTime || raw.break_end_time || fallback.breakEndTime || '02:00 PM').trim()
-                                                    : null;
-                                                const dur = parseInt(raw.slotDurationMinutes || raw.slot_duration_minutes || fallback.slotDurationMinutes, 10);
-                                                return {
-                                                    workingDays: workingDays.length > 0 ? workingDays : [...fallback.workingDays],
-                                                    startTime: String(raw.startTime || raw.start_time || fallback.startTime || '09:00 AM').trim(),
-                                                    endTime: String(raw.endTime || raw.end_time || fallback.endTime || '05:00 PM').trim(),
-                                                    slotDurationMinutes: [15, 30, 45, 60].includes(dur) ? dur : (dur > 0 ? dur : 30),
-                                                    hasBreak: hasBreakVal,
-                                                    breakStartTime: breakStart,
-                                                    breakEndTime: breakEnd,
-                                                    isConfigured: raw.isConfigured !== undefined ? Boolean(raw.isConfigured) : Boolean(fallback.isConfigured),
-                                                    updatedAt: raw.updatedAt || new Date().toISOString(),
-                                                };
-                                            }
+function sanitizeSchedulePayload(raw = {}, fallback = DEFAULT_DOCTOR_SCHEDULE) {
+    const workingDays = normalizeWorkingDays(raw.workingDays ?? raw.working_days);
+    const hasBreakVal = raw.hasBreak !== undefined
+        ? Boolean(raw.hasBreak)
+        : (raw.has_break !== undefined ? Boolean(raw.has_break) : (raw.breakStartTime ? true : fallback.hasBreak));
+    const breakStart = hasBreakVal
+        ? String(raw.breakStartTime || raw.break_start_time || fallback.breakStartTime || '01:00 PM').trim()
+        : null;
+    const breakEnd = hasBreakVal
+        ? String(raw.breakEndTime || raw.break_end_time || fallback.breakEndTime || '02:00 PM').trim()
+        : null;
+    const dur = parseInt(raw.slotDurationMinutes || raw.slot_duration_minutes || fallback.slotDurationMinutes, 10);
+    return {
+        workingDays: workingDays.length > 0 ? workingDays : [...fallback.workingDays],
+        startTime: String(raw.startTime || raw.start_time || fallback.startTime || '09:00 AM').trim(),
+        endTime: String(raw.endTime || raw.end_time || fallback.endTime || '05:00 PM').trim(),
+        slotDurationMinutes: [15, 30, 45, 60].includes(dur) ? dur : (dur > 0 ? dur : 30),
+        hasBreak: hasBreakVal,
+        breakStartTime: breakStart,
+        breakEndTime: breakEnd,
+        isConfigured: raw.isConfigured !== undefined ? Boolean(raw.isConfigured) : Boolean(fallback.isConfigured),
+        updatedAt: raw.updatedAt || new Date().toISOString(),
+    };
+}
 
-                                            const DoctorAvailability = {
-                                                extractDateYmd,
-                                                getWeekdayNameFromYmd,
-                                                normalizeWorkingDays,
+const DoctorAvailability = {
+    extractDateYmd,
+    getWeekdayNameFromYmd,
+    normalizeWorkingDays,
 
-                                                async resolveCanonicalIds(dentistId) {
-                                                    if (!dentistId) return { canonicalId: null, dentistTableId: null, userTableId: null, idsToMatch: [] };
-                                                    let dentistTableId = null;
-                                                    let userTableId = null;
-                                                    try {
-                                                        const resolved = await resolveDentistIds(dentistId);
-                                                        dentistTableId = resolved.dentistTableId || null;
-                                                        userTableId = resolved.userTableId || null;
-                                                    } catch (_) { }
-                                                    const canonicalId = dentistTableId || dentistId;
-                                                    const idsToMatch = [...new Set([dentistId, dentistTableId, userTableId].filter(Boolean))];
-                                                    return { canonicalId, dentistTableId, userTableId, idsToMatch };
-                                                },
+    async resolveCanonicalIds(dentistId) {
+        if (!dentistId) return { canonicalId: null, dentistTableId: null, userTableId: null, idsToMatch: [] };
+        let dentistTableId = null;
+        let userTableId = null;
+        try {
+            const resolved = await resolveDentistIds(dentistId);
+            dentistTableId = resolved.dentistTableId || null;
+            userTableId = resolved.userTableId || null;
+        } catch (_) { }
+        const canonicalId = dentistTableId || dentistId;
+        const idsToMatch = [...new Set([dentistId, dentistTableId, userTableId].filter(Boolean))];
+        return { canonicalId, dentistTableId, userTableId, idsToMatch };
+    },
 
-                                                async getSchedule(dentistId) {
-                                                    if (!dentistId) return { ...DEFAULT_DOCTOR_SCHEDULE };
-                                                    const { canonicalId, dentistTableId, userTableId, idsToMatch } = await this.resolveCanonicalIds(dentistId);
-                                                    // Check users.device_token metadata first (persistent Supabase source of truth)
-                                                    const targetUserId = userTableId || (dentistTableId ? null : dentistId);
-                                                    if (targetUserId) {
-                                                        try {
-                                                            const { data: uRow } = await supabaseAdmin
-                                                                .from('users')
-                                                                .select('id, device_token')
-                                                                .eq('id', targetUserId)
-                                                                .maybeSingle();
-                                                            if (uRow && uRow.device_token && typeof uRow.device_token === 'string' && uRow.device_token.startsWith('{')) {
-                                                                const meta = JSON.parse(uRow.device_token);
-                                                                if (meta && meta.schedule && typeof meta.schedule === 'object') {
-                                                                    return sanitizeSchedulePayload({ ...meta.schedule, isConfigured: meta.schedule.isConfigured !== false });
-                                                                }
-                                                            }
-                                                        } catch (e) {
-                                                            console.warn('⚠️ DoctorAvailability.getSchedule Supabase notice:', e.message);
-                                                        }
-                                                    }
-                                                    // Fallback: look up user via dentists.user_id if userTableId wasn't resolved
-                                                    if (!targetUserId && isUUID(canonicalId)) {
-                                                        try {
-                                                            const { data: dRow } = await supabaseAdmin
-                                                                .from('dentists')
-                                                                .select('user_id')
-                                                                .or(`id.eq.${canonicalId},user_id.eq.${canonicalId}`)
-                                                                .limit(1)
-                                                                .maybeSingle();
-                                                            if (dRow?.user_id) {
-                                                                const { data: uRow } = await supabaseAdmin
-                                                                    .from('users')
-                                                                    .select('id, device_token')
-                                                                    .eq('id', dRow.user_id)
-                                                                    .maybeSingle();
-                                                                if (uRow?.device_token && typeof uRow.device_token === 'string' && uRow.device_token.startsWith('{')) {
-                                                                    const meta = JSON.parse(uRow.device_token);
-                                                                    if (meta && meta.schedule && typeof meta.schedule === 'object') {
-                                                                        return sanitizeSchedulePayload({ ...meta.schedule, isConfigured: meta.schedule.isConfigured !== false });
-                                                                    }
-                                                                }
-                                                            }
-                                                        } catch (_) { }
-                                                    }
+    async getSchedule(dentistId) {
+        if (!dentistId) return { ...DEFAULT_DOCTOR_SCHEDULE };
+        const { canonicalId, dentistTableId, userTableId, idsToMatch } = await this.resolveCanonicalIds(dentistId);
+        // Check users.device_token metadata first (persistent Supabase source of truth)
+        const targetUserId = userTableId || (dentistTableId ? null : dentistId);
+        if (targetUserId) {
+            try {
+                const { data: uRow } = await supabaseAdmin
+                    .from('users')
+                    .select('id, device_token')
+                    .eq('id', targetUserId)
+                    .maybeSingle();
+                if (uRow && uRow.device_token && typeof uRow.device_token === 'string' && uRow.device_token.startsWith('{')) {
+                    const meta = JSON.parse(uRow.device_token);
+                    if (meta && meta.schedule && typeof meta.schedule === 'object') {
+                        return sanitizeSchedulePayload({ ...meta.schedule, isConfigured: meta.schedule.isConfigured !== false });
+                    }
+                }
+            } catch (e) {
+                console.warn('⚠️ DoctorAvailability.getSchedule Supabase notice:', e.message);
+            }
+        }
+        // Fallback: look up user via dentists.user_id if userTableId wasn't resolved
+        if (!targetUserId && isUUID(canonicalId)) {
+            try {
+                const { data: dRow } = await supabaseAdmin
+                    .from('dentists')
+                    .select('user_id')
+                    .or(`id.eq.${canonicalId},user_id.eq.${canonicalId}`)
+                    .limit(1)
+                    .maybeSingle();
+                if (dRow?.user_id) {
+                    const { data: uRow } = await supabaseAdmin
+                        .from('users')
+                        .select('id, device_token')
+                        .eq('id', dRow.user_id)
+                        .maybeSingle();
+                    if (uRow?.device_token && typeof uRow.device_token === 'string' && uRow.device_token.startsWith('{')) {
+                        const meta = JSON.parse(uRow.device_token);
+                        if (meta && meta.schedule && typeof meta.schedule === 'object') {
+                            return sanitizeSchedulePayload({ ...meta.schedule, isConfigured: meta.schedule.isConfigured !== false });
+                        }
+                    }
+                }
+            } catch (_) { }
+        }
 
-                                                    for (const k of idsToMatch) {
-                                                        if (_inMemorySchedule.has(k)) {
-                                                            return sanitizeSchedulePayload(_inMemorySchedule.get(k));
-                                                        }
-                                                    }
-                                                    return { ...DEFAULT_DOCTOR_SCHEDULE };
-                                                },
+        for (const k of idsToMatch) {
+            if (_inMemorySchedule.has(k)) {
+                return sanitizeSchedulePayload(_inMemorySchedule.get(k));
+            }
+        }
+        return { ...DEFAULT_DOCTOR_SCHEDULE };
+    },
 
-                                                async saveSchedule(dentistId, scheduleData = {}) {
-                                                    if (!dentistId) return { ...DEFAULT_DOCTOR_SCHEDULE };
-                                                    const { canonicalId, dentistTableId, userTableId, idsToMatch } = await this.resolveCanonicalIds(dentistId);
-                                                    const existing = await this.getSchedule(dentistId);
-                                                    const nextSchedule = sanitizeSchedulePayload({ ...scheduleData, isConfigured: true }, existing);
+    async saveSchedule(dentistId, scheduleData = {}) {
+        if (!dentistId) return { ...DEFAULT_DOCTOR_SCHEDULE };
+        const { canonicalId, dentistTableId, userTableId, idsToMatch } = await this.resolveCanonicalIds(dentistId);
+        const existing = await this.getSchedule(dentistId);
+        const nextSchedule = sanitizeSchedulePayload({ ...scheduleData, isConfigured: true }, existing);
 
-                                                    for (const k of idsToMatch) {
-                                                        _inMemorySchedule.set(k, nextSchedule);
-                                                    }
+        for (const k of idsToMatch) {
+            _inMemorySchedule.set(k, nextSchedule);
+        }
 
-                                                    let targetUserId = userTableId;
-                                                    if (!targetUserId && isUUID(dentistTableId || dentistId)) {
-                                                        try {
-                                                            const { data: dRow } = await supabaseAdmin
-                                                                .from('dentists')
-                                                                .select('user_id')
-                                                                .or(`id.eq.${dentistTableId || dentistId},user_id.eq.${dentistId}`)
-                                                                .limit(1)
-                                                                .maybeSingle();
-                                                            if (dRow?.user_id) targetUserId = dRow.user_id;
-                                                        } catch (_) { }
-                                                    }
+        let targetUserId = userTableId;
+        if (!targetUserId && isUUID(dentistTableId || dentistId)) {
+            try {
+                const { data: dRow } = await supabaseAdmin
+                    .from('dentists')
+                    .select('user_id')
+                    .or(`id.eq.${dentistTableId || dentistId},user_id.eq.${dentistId}`)
+                    .limit(1)
+                    .maybeSingle();
+                if (dRow?.user_id) targetUserId = dRow.user_id;
+            } catch (_) { }
+        }
 
-                                                    if (targetUserId) {
-                                                        try {
-                                                            const { data: uRow } = await supabaseAdmin
-                                                                .from('users')
-                                                                .select('id, device_token')
-                                                                .eq('id', targetUserId)
-                                                                .maybeSingle();
-                                                            let meta = {};
-                                                            if (uRow?.device_token && typeof uRow.device_token === 'string' && uRow.device_token.startsWith('{')) {
-                                                                try { meta = JSON.parse(uRow.device_token); } catch (_) { }
-                                                            }
-                                                            meta.schedule = nextSchedule;
-                                                            await supabaseAdmin
-                                                                .from('users')
-                                                                .update({ device_token: JSON.stringify(meta) })
-                                                                .eq('id', targetUserId);
-                                                        } catch (e) {
-                                                            console.warn('⚠️ DoctorAvailability.saveSchedule Supabase notice:', e.message);
-                                                        }
-                                                    }
-                                                    return nextSchedule;
-                                                },
+        if (targetUserId) {
+            try {
+                const { data: uRow } = await supabaseAdmin
+                    .from('users')
+                    .select('id, device_token')
+                    .eq('id', targetUserId)
+                    .maybeSingle();
+                let meta = {};
+                if (uRow?.device_token && typeof uRow.device_token === 'string' && uRow.device_token.startsWith('{')) {
+                    try { meta = JSON.parse(uRow.device_token); } catch (_) { }
+                }
+                meta.schedule = nextSchedule;
+                await supabaseAdmin
+                    .from('users')
+                    .update({ device_token: JSON.stringify(meta) })
+                    .eq('id', targetUserId);
+            } catch (e) {
+                console.warn('⚠️ DoctorAvailability.saveSchedule Supabase notice:', e.message);
+            }
+        }
+        return nextSchedule;
+    },
 
-                                                async findOne(query = {}) {
-                                                    const dentistId = query.dentist_id || query.dentistId;
-                                                    const cleanDate = extractDateYmd(query.date);
-                                                    if (!dentistId || !cleanDate) return null;
+    async findOne(query = {}) {
+        const dentistId = query.dentist_id || query.dentistId;
+        const cleanDate = extractDateYmd(query.date);
+        if (!dentistId || !cleanDate) return null;
 
-                                                    const { idsToMatch } = await this.resolveCanonicalIds(dentistId);
+        const { idsToMatch } = await this.resolveCanonicalIds(dentistId);
 
-                                                    try {
-                                                        let req = supabaseAdmin
-                                                            .from('doctor_availability')
-                                                            .select('*')
-                                                            .eq('date', cleanDate);
-                                                        if (idsToMatch.length === 1) {
-                                                            req = req.eq('dentist_id', idsToMatch[0]);
-                                                        } else {
-                                                            req = req.in('dentist_id', idsToMatch);
-                                                        }
-                                                        const { data, error } = await req.limit(1).maybeSingle();
-                                                        if (!error && data) return data;
-                                                    } catch (e) {
-                                                        console.warn('⚠️ DoctorAvailability.findOne Supabase notice:', e.message);
-                                                    }
+        try {
+            let req = supabaseAdmin
+                .from('doctor_availability')
+                .select('*')
+                .eq('date', cleanDate);
+            if (idsToMatch.length === 1) {
+                req = req.eq('dentist_id', idsToMatch[0]);
+            } else {
+                req = req.in('dentist_id', idsToMatch);
+            }
+            const { data, error } = await req.limit(1).maybeSingle();
+            if (!error && data) return data;
+        } catch (e) {
+            console.warn('⚠️ DoctorAvailability.findOne Supabase notice:', e.message);
+        }
 
-                                                    return _inMemoryAvailability.find(a =>
-                                                        (idsToMatch.includes(a.dentist_id) || idsToMatch.includes(a.dentistId)) &&
-                                                        extractDateYmd(a.date) === cleanDate
-                                                    ) || null;
-                                                },
+        return _inMemoryAvailability.find(a =>
+            (idsToMatch.includes(a.dentist_id) || idsToMatch.includes(a.dentistId)) &&
+            extractDateYmd(a.date) === cleanDate
+        ) || null;
+    },
 
-                                                async find(query = {}) {
-                                                    const dentistId = query.dentist_id || query.dentistId;
-                                                    const cleanFilterDate = query.date ? extractDateYmd(query.date) : null;
-                                                    const { idsToMatch } = dentistId ? await this.resolveCanonicalIds(dentistId) : { idsToMatch: [] };
-                                                    try {
-                                                        let req = supabaseAdmin.from('doctor_availability').select('*');
-                                                        if (idsToMatch.length === 1) req = req.eq('dentist_id', idsToMatch[0]);
-                                                        else if (idsToMatch.length > 1) req = req.in('dentist_id', idsToMatch);
-                                                        if (cleanFilterDate) req = req.eq('date', cleanFilterDate);
-                                                        if (query.is_blocked !== undefined) req = req.eq('is_blocked', Boolean(query.is_blocked));
-                                                        const { data, error } = await req.order('date', { ascending: true });
-                                                        if (!error && Array.isArray(data)) {
-                                                            // Deduplicate by normalized date
-                                                            const byDate = new Map();
-                                                            for (const row of data) {
-                                                                const dKey = extractDateYmd(row.date);
-                                                                if (!dKey) continue;
-                                                                if (!byDate.has(dKey) || row.is_blocked) {
-                                                                    byDate.set(dKey, { ...row, date: dKey });
-                                                                }
-                                                            }
-                                                            return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
-                                                        }
-                                                    } catch (e) {
-                                                        console.warn('⚠️ DoctorAvailability.find Supabase notice:', e.message);
-                                                    }
+    async find(query = {}) {
+        const dentistId = query.dentist_id || query.dentistId;
+        const cleanFilterDate = query.date ? extractDateYmd(query.date) : null;
+        const { idsToMatch } = dentistId ? await this.resolveCanonicalIds(dentistId) : { idsToMatch: [] };
+        try {
+            let req = supabaseAdmin.from('doctor_availability').select('*');
+            if (idsToMatch.length === 1) req = req.eq('dentist_id', idsToMatch[0]);
+            else if (idsToMatch.length > 1) req = req.in('dentist_id', idsToMatch);
+            if (cleanFilterDate) req = req.eq('date', cleanFilterDate);
+            if (query.is_blocked !== undefined) req = req.eq('is_blocked', Boolean(query.is_blocked));
+            const { data, error } = await req.order('date', { ascending: true });
+            if (!error && Array.isArray(data)) {
+                // Deduplicate by normalized date
+                const byDate = new Map();
+                for (const row of data) {
+                    const dKey = extractDateYmd(row.date);
+                    if (!dKey) continue;
+                    if (!byDate.has(dKey) || row.is_blocked) {
+                        byDate.set(dKey, { ...row, date: dKey });
+                    }
+                }
+                return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+            }
+        } catch (e) {
+            console.warn('⚠️ DoctorAvailability.find Supabase notice:', e.message);
+        }
 
-                                                    const filtered = _inMemoryAvailability.filter(a => {
-                                                        if (idsToMatch.length > 0 && !idsToMatch.includes(a.dentist_id) && !idsToMatch.includes(a.dentistId)) return false;
-                                                        if (cleanFilterDate && extractDateYmd(a.date) !== cleanFilterDate) return false;
-                                                        if (query.is_blocked !== undefined && Boolean(a.is_blocked) !== Boolean(query.is_blocked)) return false;
-                                                        return true;
-                                                    });
-                                                    return filtered.sort((a, b) => extractDateYmd(a.date).localeCompare(extractDateYmd(b.date)));
-                                                },
+        const filtered = _inMemoryAvailability.filter(a => {
+            if (idsToMatch.length > 0 && !idsToMatch.includes(a.dentist_id) && !idsToMatch.includes(a.dentistId)) return false;
+            if (cleanFilterDate && extractDateYmd(a.date) !== cleanFilterDate) return false;
+            if (query.is_blocked !== undefined && Boolean(a.is_blocked) !== Boolean(query.is_blocked)) return false;
+            return true;
+        });
+        return filtered.sort((a, b) => extractDateYmd(a.date).localeCompare(extractDateYmd(b.date)));
+    },
 
-                                                async upsert(availData) {
-                                                    const rawDentistId = availData.dentist_id || availData.dentistId;
-                                                    const cleanDate = extractDateYmd(availData.date);
-                                                    const { canonicalId, dentistTableId, idsToMatch } = await this.resolveCanonicalIds(rawDentistId);
-                                                    const targetDentistId = dentistTableId || canonicalId || rawDentistId;
+    async upsert(availData) {
+        const rawDentistId = availData.dentist_id || availData.dentistId;
+        const cleanDate = extractDateYmd(availData.date);
+        const { canonicalId, dentistTableId, idsToMatch } = await this.resolveCanonicalIds(rawDentistId);
+        const targetDentistId = dentistTableId || canonicalId || rawDentistId;
 
-                                                    const slots = Array.isArray(availData.slots) ? [...new Set(availData.slots.map(s => String(s).trim()).filter(Boolean))] : [];
-                                                    const isBlocked = Boolean(availData.is_blocked ?? availData.isBlocked ?? false);
-                                                    const blockedReason = isBlocked ? (availData.blocked_reason || availData.blockedReason || 'Doctor on Leave / Clinic Closed') : null;
-                                                    const startTime = availData.start_time || availData.startTime || '09:00 AM';
-                                                    const endTime = availData.end_time || availData.endTime || '05:00 PM';
-                                                    const slotDuration = parseInt(availData.slot_duration_minutes || availData.slotDurationMinutes, 10) || 30;
-                                                    const dayOfWeek = String(availData.day_of_week || availData.dayOfWeek || getWeekdayNameFromYmd(cleanDate) || '').slice(0, 20);
+        const slots = Array.isArray(availData.slots) ? [...new Set(availData.slots.map(s => String(s).trim()).filter(Boolean))] : [];
+        const isBlocked = Boolean(availData.is_blocked ?? availData.isBlocked ?? false);
+        const blockedReason = isBlocked ? (availData.blocked_reason || availData.blockedReason || 'Doctor on Leave / Clinic Closed') : null;
+        const startTime = availData.start_time || availData.startTime || '09:00 AM';
+        const endTime = availData.end_time || availData.endTime || '05:00 PM';
+        const slotDuration = parseInt(availData.slot_duration_minutes || availData.slotDurationMinutes, 10) || 30;
+        const dayOfWeek = String(availData.day_of_week || availData.dayOfWeek || getWeekdayNameFromYmd(cleanDate) || '').slice(0, 20);
 
-                                                    const payload = {
-                                                        id: availData.id || `avail-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-                                                        dentist_id: targetDentistId,
-                                                        date: cleanDate,
-                                                        day_of_week: dayOfWeek,
-                                                        start_time: startTime,
-                                                        end_time: endTime,
-                                                        slot_duration_minutes: slotDuration,
-                                                        slots: slots,
-                                                        is_blocked: isBlocked,
-                                                        blocked_reason: blockedReason,
-                                                        updated_at: new Date().toISOString()
-                                                    };
+        const payload = {
+            id: availData.id || `avail-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            dentist_id: targetDentistId,
+            date: cleanDate,
+            day_of_week: dayOfWeek,
+            start_time: startTime,
+            end_time: endTime,
+            slot_duration_minutes: slotDuration,
+            slots: slots,
+            is_blocked: isBlocked,
+            blocked_reason: blockedReason,
+            updated_at: new Date().toISOString()
+        };
 
-                                                    try {
-                                                        if (isUUID(targetDentistId)) {
-                                                            const { data, error } = await supabaseAdmin
-                                                                .from('doctor_availability')
-                                                                .upsert({
-                                                                    dentist_id: targetDentistId,
-                                                                    date: cleanDate,
-                                                                    day_of_week: dayOfWeek,
-                                                                    start_time: startTime,
-                                                                    end_time: endTime,
-                                                                    slot_duration_minutes: slotDuration,
-                                                                    slots: slots,
-                                                                    is_blocked: isBlocked,
-                                                                    blocked_reason: blockedReason,
-                                                                    updated_at: payload.updated_at
-                                                                }, { onConflict: 'dentist_id,date' })
-                                                                .select()
-                                                                .single();
-                                                            if (!error && data) return data;
-                                                            if (error) {
-                                                                console.warn('⚠️ DoctorAvailability.upsert Supabase error:', error.message);
-                                                            }
-                                                        }
-                                                    } catch (e) {
-                                                        console.warn('⚠️ DoctorAvailability.upsert Supabase notice:', e.message);
-                                                    }
+        try {
+            if (isUUID(targetDentistId)) {
+                const { data, error } = await supabaseAdmin
+                    .from('doctor_availability')
+                    .upsert({
+                        dentist_id: targetDentistId,
+                        date: cleanDate,
+                        day_of_week: dayOfWeek,
+                        start_time: startTime,
+                        end_time: endTime,
+                        slot_duration_minutes: slotDuration,
+                        slots: slots,
+                        is_blocked: isBlocked,
+                        blocked_reason: blockedReason,
+                        updated_at: payload.updated_at
+                    }, { onConflict: 'dentist_id,date' })
+                    .select()
+                    .single();
+                if (!error && data) return data;
+                if (error) {
+                    console.warn('⚠️ DoctorAvailability.upsert Supabase error:', error.message);
+                }
+            }
+        } catch (e) {
+            console.warn('⚠️ DoctorAvailability.upsert Supabase notice:', e.message);
+        }
 
-                                                    const idx = _inMemoryAvailability.findIndex(a =>
-                                                        (idsToMatch.includes(a.dentist_id) || idsToMatch.includes(a.dentistId)) && extractDateYmd(a.date) === cleanDate
-                                                    );
-                                                    if (idx !== -1) {
-                                                        _inMemoryAvailability[idx] = { ..._inMemoryAvailability[idx], ...payload };
-                                                        return _inMemoryAvailability[idx];
-                                                    } else {
-                                                        _inMemoryAvailability.push(payload);
-                                                        return payload;
-                                                    }
-                                                },
+        const idx = _inMemoryAvailability.findIndex(a =>
+            (idsToMatch.includes(a.dentist_id) || idsToMatch.includes(a.dentistId)) && extractDateYmd(a.date) === cleanDate
+        );
+        if (idx !== -1) {
+            _inMemoryAvailability[idx] = { ..._inMemoryAvailability[idx], ...payload };
+            return _inMemoryAvailability[idx];
+        } else {
+            _inMemoryAvailability.push(payload);
+            return payload;
+        }
+    },
 
-                                                async deleteOne(query = {}) {
-                                                    const rawDentistId = query.dentist_id || query.dentistId;
-                                                    const cleanDate = extractDateYmd(query.date);
-                                                    const { idsToMatch } = await this.resolveCanonicalIds(rawDentistId);
-                                                    try {
-                                                        if (idsToMatch.length > 0 && cleanDate) {
-                                                            const uuidIds = idsToMatch.filter(id => isUUID(id));
-                                                            if (uuidIds.length > 0) {
-                                                                await supabaseAdmin
-                                                                    .from('doctor_availability')
-                                                                    .delete()
-                                                                    .in('dentist_id', uuidIds)
-                                                                    .eq('date', cleanDate);
-                                                            }
-                                                        }
-                                                    } catch (e) {
-                                                        console.warn('⚠️ DoctorAvailability.deleteOne Supabase notice:', e.message);
-                                                    }
+    async deleteOne(query = {}) {
+        const rawDentistId = query.dentist_id || query.dentistId;
+        const cleanDate = extractDateYmd(query.date);
+        const { idsToMatch } = await this.resolveCanonicalIds(rawDentistId);
+        try {
+            if (idsToMatch.length > 0 && cleanDate) {
+                const uuidIds = idsToMatch.filter(id => isUUID(id));
+                if (uuidIds.length > 0) {
+                    await supabaseAdmin
+                        .from('doctor_availability')
+                        .delete()
+                        .in('dentist_id', uuidIds)
+                        .eq('date', cleanDate);
+                }
+            }
+        } catch (e) {
+            console.warn('⚠️ DoctorAvailability.deleteOne Supabase notice:', e.message);
+        }
 
-                                                    for (let i = _inMemoryAvailability.length - 1; i >= 0; i--) {
-                                                        const a = _inMemoryAvailability[i];
-                                                        if ((idsToMatch.includes(a.dentist_id) || idsToMatch.includes(a.dentistId)) && extractDateYmd(a.date) === cleanDate) {
-                                                            _inMemoryAvailability.splice(i, 1);
-                                                        }
-                                                    }
-                                                    return { success: true };
-                                                }
-                                            };
+        for (let i = _inMemoryAvailability.length - 1; i >= 0; i--) {
+            const a = _inMemoryAvailability[i];
+            if ((idsToMatch.includes(a.dentist_id) || idsToMatch.includes(a.dentistId)) && extractDateYmd(a.date) === cleanDate) {
+                _inMemoryAvailability.splice(i, 1);
+            }
+        }
+        return { success: true };
+    }
+};
 
-                                            // 13. MEDICAL SPECIALTIES MODEL (Dynamic Multi-Specialty Healthcare Configuration)
-                                            const DEFAULT_MEDICAL_SPECIALTIES = [
-                                                {
-                                                    id: 'spec-general-medicine',
-                                                    code: 'GEN_MED',
-                                                    name: 'General Medicine',
-                                                    department: 'Department of Internal & General Medicine',
-                                                    description: 'Primary care, internal medicine, acute & chronic illnesses, fever, and preventive health checkups.',
-                                                    icon: 'medical_services',
-                                                    default_qualifications: 'MBBS, MD (General Medicine)',
-                                                    consultation_types: ['General Consultation', 'Fever & Viral Infection', 'Diabetes & Blood Pressure Review', 'Preventive Health Checkup', 'Chronic Illness Follow-up'],
-                                                    sub_specialties: ['Internal Medicine', 'Family Medicine'],
-                                                    is_active: true,
-                                                    display_order: 1
-                                                },
-                                                {
-                                                    id: 'spec-cardiology',
-                                                    code: 'CARDIO',
-                                                    name: 'Cardiology',
-                                                    department: 'Department of Cardiology & Vascular Sciences',
-                                                    description: 'Diagnosis and treatment of heart conditions, hypertension, arrhythmias, and cardiovascular diseases.',
-                                                    icon: 'MonitorHeart',
-                                                    default_qualifications: 'MBBS, MD, DM (Cardiology)',
-                                                    consultation_types: ['Cardiac Consultation', 'ECG & Echo Review', 'Hypertension & Lipid Management', 'Chest Pain Evaluation', 'Post-Angioplasty Follow-up'],
-                                                    sub_specialties: ['Interventional Cardiology', 'Electrophysiology'],
-                                                    is_active: true,
-                                                    display_order: 2
-                                                },
-                                                {
-                                                    id: 'spec-dermatology',
-                                                    code: 'DERM',
-                                                    name: 'Dermatology',
-                                                    department: 'Department of Dermatology, Venereology & Cosmetology',
-                                                    description: 'Skin, hair, nail disorders, acne, eczema, psoriasis, and clinical dermatological procedures.',
-                                                    icon: 'FaceRetouchingNatural',
-                                                    default_qualifications: 'MBBS, MD (Dermatology, Venereology & Leprosy)',
-                                                    consultation_types: ['Skin & Acne Consultation', 'Hair Fall & Scalp Evaluation', 'Allergy & Rash Treatment', 'Eczema / Psoriasis Care', 'Cosmetic Dermatology'],
-                                                    sub_specialties: ['Clinical Dermatology', 'Cosmetology', 'Trichology'],
-                                                    is_active: true,
-                                                    display_order: 3
-                                                },
-                                                {
-                                                    id: 'spec-neurology',
-                                                    code: 'NEURO',
-                                                    name: 'Neurology',
-                                                    department: 'Department of Neurology & Neurosciences',
-                                                    description: 'Disorders of the brain, spinal cord, peripheral nerves, migraine, epilepsy, and stroke care.',
-                                                    icon: 'Psychology',
-                                                    default_qualifications: 'MBBS, MD, DM (Neurology)',
-                                                    consultation_types: ['Neurological Consultation', 'Migraine & Headache Clinic', 'Epilepsy & Seizure Management', 'Stroke Recovery & Neuropathy', 'Memory & Movement Disorders'],
-                                                    sub_specialties: ['Stroke Medicine', 'Epileptology'],
-                                                    is_active: true,
-                                                    display_order: 4
-                                                },
-                                                {
-                                                    id: 'spec-orthopedics',
-                                                    code: 'ORTHO',
-                                                    name: 'Orthopedics',
-                                                    department: 'Department of Orthopedics & Joint Replacement',
-                                                    description: 'Bone, joint, ligament, spine, sports injuries, arthritis, and fracture management.',
-                                                    icon: 'AccessibilityNew',
-                                                    default_qualifications: 'MBBS, MS (Orthopedics)',
-                                                    consultation_types: ['Bone & Joint Consultation', 'Back & Spine Pain Evaluation', 'Sports Injury & Ligament Care', 'Arthritis & Knee Replacement Review', 'Fracture & Trauma Follow-up'],
-                                                    sub_specialties: ['Joint Replacement', 'Spine Surgery', 'Sports Medicine'],
-                                                    is_active: true,
-                                                    display_order: 5
-                                                },
-                                                {
-                                                    id: 'spec-pediatrics',
-                                                    code: 'PEDIA',
-                                                    name: 'Pediatrics',
-                                                    department: 'Department of Pediatrics & Child Health',
-                                                    description: 'Comprehensive medical care for infants, children, and adolescents including vaccinations and growth tracking.',
-                                                    icon: 'ChildCare',
-                                                    default_qualifications: 'MBBS, MD (Pediatrics), DCH',
-                                                    consultation_types: ['Child Health Consultation', 'Vaccination & Immunization', 'Growth & Nutrition Assessment', 'Pediatric Fever & Infection', 'Newborn & Infant Care'],
-                                                    sub_specialties: ['Neonatology', 'Pediatric Critical Care'],
-                                                    is_active: true,
-                                                    display_order: 6
-                                                },
-                                                {
-                                                    id: 'spec-gynecology',
-                                                    code: 'GYNEC',
-                                                    name: 'Gynecology',
-                                                    department: 'Department of Obstetrics & Gynecology',
-                                                    description: 'Women\'s reproductive health, pregnancy care, prenatal checkups, PCOS, and gynecological wellness.',
-                                                    icon: 'PregnantWoman',
-                                                    default_qualifications: 'MBBS, MS / DGO (Obstetrics & Gynecology)',
-                                                    consultation_types: ['Gynecology Consultation', 'Antenatal / Pregnancy Checkup', 'PCOS & Hormonal Evaluation', 'Menstrual Health Clinic', 'Postnatal & Fertility Care'],
-                                                    sub_specialties: ['Obstetrics', 'Fetal Medicine', 'Reproductive Medicine'],
-                                                    is_active: true,
-                                                    display_order: 7
-                                                },
-                                                {
-                                                    id: 'spec-ent',
-                                                    code: 'ENT',
-                                                    name: 'ENT',
-                                                    department: 'Department of Otorhinolaryngology (Ear, Nose & Throat)',
-                                                    description: 'Ear infections, hearing loss, sinusitis, tonsillitis, throat disorders, and vertigo management.',
-                                                    icon: 'Hearing',
-                                                    default_qualifications: 'MBBS, MS (ENT)',
-                                                    consultation_types: ['ENT Consultation', 'Ear Pain & Hearing Assessment', 'Sinusitis & Nasal Allergy', 'Throat & Tonsil Infection', 'Vertigo & Balance Evaluation'],
-                                                    sub_specialties: ['Otology', 'Rhinology', 'Laryngology'],
-                                                    is_active: true,
-                                                    display_order: 8
-                                                },
-                                                {
-                                                    id: 'spec-ophthalmology',
-                                                    code: 'OPHTHAL',
-                                                    name: 'Ophthalmology',
-                                                    department: 'Department of Ophthalmology & Vision Sciences',
-                                                    description: 'Comprehensive eye exams, cataract, glaucoma, retina care, and vision correction.',
-                                                    icon: 'Visibility',
-                                                    default_qualifications: 'MBBS, MS (Ophthalmology)',
-                                                    consultation_types: ['Comprehensive Eye Exam', 'Cataract & Lens Consultation', 'Retina & Diabetic Eye Screening', 'Glaucoma Evaluation', 'Dry Eye & Vision Correction'],
-                                                    sub_specialties: ['Retina', 'Cornea', 'Glaucoma'],
-                                                    is_active: true,
-                                                    display_order: 9
-                                                },
-                                                {
-                                                    id: 'spec-oncology',
-                                                    code: 'ONCO',
-                                                    name: 'Oncology',
-                                                    department: 'Department of Oncology & Cancer Care',
-                                                    description: 'Medical, surgical, and radiation oncology consultations, cancer screening, and follow-up care.',
-                                                    icon: 'Biotech',
-                                                    default_qualifications: 'MBBS, MD, DM (Medical Oncology) / MCh',
-                                                    consultation_types: ['Oncology Consultation', 'Cancer Screening & Prevention', 'Chemotherapy / Immunotherapy Review', 'Second Opinion & Tumor Board', 'Survivorship Follow-up'],
-                                                    sub_specialties: ['Medical Oncology', 'Surgical Oncology', 'Radiation Oncology'],
-                                                    is_active: true,
-                                                    display_order: 10
-                                                },
-                                                {
-                                                    id: 'spec-urology',
-                                                    code: 'URO',
-                                                    name: 'Urology',
-                                                    department: 'Department of Urology & Renal Sciences',
-                                                    description: 'Kidney stones, urinary tract infections, prostate health, and reconstructive urology.',
-                                                    icon: 'WaterDrop',
-                                                    default_qualifications: 'MBBS, MS, MCh (Urology)',
-                                                    consultation_types: ['Urology Consultation', 'Kidney Stone Evaluation', 'Urinary Tract Infection (UTI)', 'Prostate Health Screening', 'Bladder & Renal Follow-up'],
-                                                    sub_specialties: ['Endourology', 'Andrology', 'Uro-Oncology'],
-                                                    is_active: true,
-                                                    display_order: 11
-                                                },
-                                                {
-                                                    id: 'spec-psychiatry',
-                                                    code: 'PSYCH',
-                                                    name: 'Psychiatry',
-                                                    department: 'Department of Psychiatry & Behavioral Sciences',
-                                                    description: 'Mental health consultations, anxiety, depression, stress management, sleep disorders, and counseling.',
-                                                    icon: 'SelfImprovement',
-                                                    default_qualifications: 'MBBS, MD (Psychiatry)',
-                                                    consultation_types: ['Psychiatric Consultation', 'Anxiety & Stress Management', 'Depression & Mood Clinic', 'Sleep Disorder Evaluation', 'Behavioral & De-addiction Support'],
-                                                    sub_specialties: ['Adult Psychiatry', 'Child & Adolescent Psychiatry'],
-                                                    is_active: true,
-                                                    display_order: 12
-                                                },
-                                                {
-                                                    id: 'spec-gastroenterology',
-                                                    code: 'GASTRO',
-                                                    name: 'Gastroenterology',
-                                                    department: 'Department of Gastroenterology & Hepatology',
-                                                    description: 'Digestive tract, stomach, liver, pancreas, acidity, IBS, and endoscopy consultations.',
-                                                    icon: 'MedicationLiquid',
-                                                    default_qualifications: 'MBBS, MD, DM (Gastroenterology)',
-                                                    consultation_types: ['Gastroenterology Consultation', 'Acidity, Reflux & Ulcer Care', 'Liver & Hepatology Evaluation', 'IBS & Digestive Disorder Clinic', 'Endoscopy / Colonoscopy Review'],
-                                                    sub_specialties: ['Hepatology', 'Therapeutic Endoscopy'],
-                                                    is_active: true,
-                                                    display_order: 13
-                                                },
-                                                {
-                                                    id: 'spec-pulmonology',
-                                                    code: 'PULMO',
-                                                    name: 'Pulmonology',
-                                                    department: 'Department of Pulmonology & Respiratory Medicine',
-                                                    description: 'Asthma, COPD, bronchitis, sleep apnea, lung infections, and allergy management.',
-                                                    icon: 'Air',
-                                                    default_qualifications: 'MBBS, MD (Pulmonary Medicine)',
-                                                    consultation_types: ['Pulmonology Consultation', 'Asthma & Allergy Clinic', 'Chronic Cough & COPD Care', 'Sleep Apnea & Breathing Study', 'Post-Infection Lung Recovery'],
-                                                    sub_specialties: ['Interventional Pulmonology', 'Sleep Medicine'],
-                                                    is_active: true,
-                                                    display_order: 14
-                                                },
-                                                {
-                                                    id: 'spec-endocrinology',
-                                                    code: 'ENDO',
-                                                    name: 'Endocrinology',
-                                                    department: 'Department of Endocrinology, Diabetes & Metabolism',
-                                                    description: 'Diabetes mellitus, thyroid disorders, hormonal imbalances, osteoporosis, and metabolic care.',
-                                                    icon: 'Bloodtype',
-                                                    default_qualifications: 'MBBS, MD, DM (Endocrinology)',
-                                                    consultation_types: ['Endocrinology Consultation', 'Comprehensive Diabetes Management', 'Thyroid Disorder Clinic', 'PCOS & Adrenal Hormone Review', 'Metabolic & Bone Density Care'],
-                                                    sub_specialties: ['Diabetology', 'Thyroid & Metabolic Medicine'],
-                                                    is_active: true,
-                                                    display_order: 15
-                                                },
-                                                {
-                                                    id: 'spec-dentistry',
-                                                    code: 'DENTAL',
-                                                    name: 'Dentistry',
-                                                    department: 'Department of Dental Sciences & Oral Healthcare',
-                                                    description: 'General dentistry, orthodontics, endodontics, root canal, periodontics, prosthodontics, and oral surgery.',
-                                                    icon: 'HealthAndSafety',
-                                                    default_qualifications: 'BDS, MDS',
-                                                    consultation_types: ['General Consultation', 'Dental Pain / Toothache', 'Tooth Decay / Cavity', 'Root Canal Consultation', 'Orthodontics / Braces', 'Periodontics / Gum Care', 'Tooth Extraction', 'Dental Cleaning & Scaling'],
-                                                    sub_specialties: ['General Dentistry', 'Orthodontics', 'Endodontics', 'Periodontics', 'Prosthodontics', 'Pediatric Dentistry', 'Cosmetic Dentistry', 'Oral & Maxillofacial Surgery', 'Oral Surgery'],
-                                                    is_active: true,
-                                                    display_order: 16
-                                                }
-                                            ];
+// 13. MEDICAL SPECIALTIES MODEL (Dynamic Multi-Specialty Healthcare Configuration)
+const DEFAULT_MEDICAL_SPECIALTIES = [
+    {
+        id: 'spec-general-medicine',
+        code: 'GEN_MED',
+        name: 'General Medicine',
+        department: 'Department of Internal & General Medicine',
+        description: 'Primary care, internal medicine, acute & chronic illnesses, fever, and preventive health checkups.',
+        icon: 'medical_services',
+        default_qualifications: 'MBBS, MD (General Medicine)',
+        consultation_types: ['General Consultation', 'Fever & Viral Infection', 'Diabetes & Blood Pressure Review', 'Preventive Health Checkup', 'Chronic Illness Follow-up'],
+        sub_specialties: ['Internal Medicine', 'Family Medicine'],
+        is_active: true,
+        display_order: 1
+    },
+    {
+        id: 'spec-cardiology',
+        code: 'CARDIO',
+        name: 'Cardiology',
+        department: 'Department of Cardiology & Vascular Sciences',
+        description: 'Diagnosis and treatment of heart conditions, hypertension, arrhythmias, and cardiovascular diseases.',
+        icon: 'MonitorHeart',
+        default_qualifications: 'MBBS, MD, DM (Cardiology)',
+        consultation_types: ['Cardiac Consultation', 'ECG & Echo Review', 'Hypertension & Lipid Management', 'Chest Pain Evaluation', 'Post-Angioplasty Follow-up'],
+        sub_specialties: ['Interventional Cardiology', 'Electrophysiology'],
+        is_active: true,
+        display_order: 2
+    },
+    {
+        id: 'spec-dermatology',
+        code: 'DERM',
+        name: 'Dermatology',
+        department: 'Department of Dermatology, Venereology & Cosmetology',
+        description: 'Skin, hair, nail disorders, acne, eczema, psoriasis, and clinical dermatological procedures.',
+        icon: 'FaceRetouchingNatural',
+        default_qualifications: 'MBBS, MD (Dermatology, Venereology & Leprosy)',
+        consultation_types: ['Skin & Acne Consultation', 'Hair Fall & Scalp Evaluation', 'Allergy & Rash Treatment', 'Eczema / Psoriasis Care', 'Cosmetic Dermatology'],
+        sub_specialties: ['Clinical Dermatology', 'Cosmetology', 'Trichology'],
+        is_active: true,
+        display_order: 3
+    },
+    {
+        id: 'spec-neurology',
+        code: 'NEURO',
+        name: 'Neurology',
+        department: 'Department of Neurology & Neurosciences',
+        description: 'Disorders of the brain, spinal cord, peripheral nerves, migraine, epilepsy, and stroke care.',
+        icon: 'Psychology',
+        default_qualifications: 'MBBS, MD, DM (Neurology)',
+        consultation_types: ['Neurological Consultation', 'Migraine & Headache Clinic', 'Epilepsy & Seizure Management', 'Stroke Recovery & Neuropathy', 'Memory & Movement Disorders'],
+        sub_specialties: ['Stroke Medicine', 'Epileptology'],
+        is_active: true,
+        display_order: 4
+    },
+    {
+        id: 'spec-orthopedics',
+        code: 'ORTHO',
+        name: 'Orthopedics',
+        department: 'Department of Orthopedics & Joint Replacement',
+        description: 'Bone, joint, ligament, spine, sports injuries, arthritis, and fracture management.',
+        icon: 'AccessibilityNew',
+        default_qualifications: 'MBBS, MS (Orthopedics)',
+        consultation_types: ['Bone & Joint Consultation', 'Back & Spine Pain Evaluation', 'Sports Injury & Ligament Care', 'Arthritis & Knee Replacement Review', 'Fracture & Trauma Follow-up'],
+        sub_specialties: ['Joint Replacement', 'Spine Surgery', 'Sports Medicine'],
+        is_active: true,
+        display_order: 5
+    },
+    {
+        id: 'spec-pediatrics',
+        code: 'PEDIA',
+        name: 'Pediatrics',
+        department: 'Department of Pediatrics & Child Health',
+        description: 'Comprehensive medical care for infants, children, and adolescents including vaccinations and growth tracking.',
+        icon: 'ChildCare',
+        default_qualifications: 'MBBS, MD (Pediatrics), DCH',
+        consultation_types: ['Child Health Consultation', 'Vaccination & Immunization', 'Growth & Nutrition Assessment', 'Pediatric Fever & Infection', 'Newborn & Infant Care'],
+        sub_specialties: ['Neonatology', 'Pediatric Critical Care'],
+        is_active: true,
+        display_order: 6
+    },
+    {
+        id: 'spec-gynecology',
+        code: 'GYNEC',
+        name: 'Gynecology',
+        department: 'Department of Obstetrics & Gynecology',
+        description: 'Women\'s reproductive health, pregnancy care, prenatal checkups, PCOS, and gynecological wellness.',
+        icon: 'PregnantWoman',
+        default_qualifications: 'MBBS, MS / DGO (Obstetrics & Gynecology)',
+        consultation_types: ['Gynecology Consultation', 'Antenatal / Pregnancy Checkup', 'PCOS & Hormonal Evaluation', 'Menstrual Health Clinic', 'Postnatal & Fertility Care'],
+        sub_specialties: ['Obstetrics', 'Fetal Medicine', 'Reproductive Medicine'],
+        is_active: true,
+        display_order: 7
+    },
+    {
+        id: 'spec-ent',
+        code: 'ENT',
+        name: 'ENT',
+        department: 'Department of Otorhinolaryngology (Ear, Nose & Throat)',
+        description: 'Ear infections, hearing loss, sinusitis, tonsillitis, throat disorders, and vertigo management.',
+        icon: 'Hearing',
+        default_qualifications: 'MBBS, MS (ENT)',
+        consultation_types: ['ENT Consultation', 'Ear Pain & Hearing Assessment', 'Sinusitis & Nasal Allergy', 'Throat & Tonsil Infection', 'Vertigo & Balance Evaluation'],
+        sub_specialties: ['Otology', 'Rhinology', 'Laryngology'],
+        is_active: true,
+        display_order: 8
+    },
+    {
+        id: 'spec-ophthalmology',
+        code: 'OPHTHAL',
+        name: 'Ophthalmology',
+        department: 'Department of Ophthalmology & Vision Sciences',
+        description: 'Comprehensive eye exams, cataract, glaucoma, retina care, and vision correction.',
+        icon: 'Visibility',
+        default_qualifications: 'MBBS, MS (Ophthalmology)',
+        consultation_types: ['Comprehensive Eye Exam', 'Cataract & Lens Consultation', 'Retina & Diabetic Eye Screening', 'Glaucoma Evaluation', 'Dry Eye & Vision Correction'],
+        sub_specialties: ['Retina', 'Cornea', 'Glaucoma'],
+        is_active: true,
+        display_order: 9
+    },
+    {
+        id: 'spec-oncology',
+        code: 'ONCO',
+        name: 'Oncology',
+        department: 'Department of Oncology & Cancer Care',
+        description: 'Medical, surgical, and radiation oncology consultations, cancer screening, and follow-up care.',
+        icon: 'Biotech',
+        default_qualifications: 'MBBS, MD, DM (Medical Oncology) / MCh',
+        consultation_types: ['Oncology Consultation', 'Cancer Screening & Prevention', 'Chemotherapy / Immunotherapy Review', 'Second Opinion & Tumor Board', 'Survivorship Follow-up'],
+        sub_specialties: ['Medical Oncology', 'Surgical Oncology', 'Radiation Oncology'],
+        is_active: true,
+        display_order: 10
+    },
+    {
+        id: 'spec-urology',
+        code: 'URO',
+        name: 'Urology',
+        department: 'Department of Urology & Renal Sciences',
+        description: 'Kidney stones, urinary tract infections, prostate health, and reconstructive urology.',
+        icon: 'WaterDrop',
+        default_qualifications: 'MBBS, MS, MCh (Urology)',
+        consultation_types: ['Urology Consultation', 'Kidney Stone Evaluation', 'Urinary Tract Infection (UTI)', 'Prostate Health Screening', 'Bladder & Renal Follow-up'],
+        sub_specialties: ['Endourology', 'Andrology', 'Uro-Oncology'],
+        is_active: true,
+        display_order: 11
+    },
+    {
+        id: 'spec-psychiatry',
+        code: 'PSYCH',
+        name: 'Psychiatry',
+        department: 'Department of Psychiatry & Behavioral Sciences',
+        description: 'Mental health consultations, anxiety, depression, stress management, sleep disorders, and counseling.',
+        icon: 'SelfImprovement',
+        default_qualifications: 'MBBS, MD (Psychiatry)',
+        consultation_types: ['Psychiatric Consultation', 'Anxiety & Stress Management', 'Depression & Mood Clinic', 'Sleep Disorder Evaluation', 'Behavioral & De-addiction Support'],
+        sub_specialties: ['Adult Psychiatry', 'Child & Adolescent Psychiatry'],
+        is_active: true,
+        display_order: 12
+    },
+    {
+        id: 'spec-gastroenterology',
+        code: 'GASTRO',
+        name: 'Gastroenterology',
+        department: 'Department of Gastroenterology & Hepatology',
+        description: 'Digestive tract, stomach, liver, pancreas, acidity, IBS, and endoscopy consultations.',
+        icon: 'MedicationLiquid',
+        default_qualifications: 'MBBS, MD, DM (Gastroenterology)',
+        consultation_types: ['Gastroenterology Consultation', 'Acidity, Reflux & Ulcer Care', 'Liver & Hepatology Evaluation', 'IBS & Digestive Disorder Clinic', 'Endoscopy / Colonoscopy Review'],
+        sub_specialties: ['Hepatology', 'Therapeutic Endoscopy'],
+        is_active: true,
+        display_order: 13
+    },
+    {
+        id: 'spec-pulmonology',
+        code: 'PULMO',
+        name: 'Pulmonology',
+        department: 'Department of Pulmonology & Respiratory Medicine',
+        description: 'Asthma, COPD, bronchitis, sleep apnea, lung infections, and allergy management.',
+        icon: 'Air',
+        default_qualifications: 'MBBS, MD (Pulmonary Medicine)',
+        consultation_types: ['Pulmonology Consultation', 'Asthma & Allergy Clinic', 'Chronic Cough & COPD Care', 'Sleep Apnea & Breathing Study', 'Post-Infection Lung Recovery'],
+        sub_specialties: ['Interventional Pulmonology', 'Sleep Medicine'],
+        is_active: true,
+        display_order: 14
+    },
+    {
+        id: 'spec-endocrinology',
+        code: 'ENDO',
+        name: 'Endocrinology',
+        department: 'Department of Endocrinology, Diabetes & Metabolism',
+        description: 'Diabetes mellitus, thyroid disorders, hormonal imbalances, osteoporosis, and metabolic care.',
+        icon: 'Bloodtype',
+        default_qualifications: 'MBBS, MD, DM (Endocrinology)',
+        consultation_types: ['Endocrinology Consultation', 'Comprehensive Diabetes Management', 'Thyroid Disorder Clinic', 'PCOS & Adrenal Hormone Review', 'Metabolic & Bone Density Care'],
+        sub_specialties: ['Diabetology', 'Thyroid & Metabolic Medicine'],
+        is_active: true,
+        display_order: 15
+    },
+    {
+        id: 'spec-dentistry',
+        code: 'DENTAL',
+        name: 'Dentistry',
+        department: 'Department of Dental Sciences & Oral Healthcare',
+        description: 'General dentistry, orthodontics, endodontics, root canal, periodontics, prosthodontics, and oral surgery.',
+        icon: 'HealthAndSafety',
+        default_qualifications: 'BDS, MDS',
+        consultation_types: ['General Consultation', 'Dental Pain / Toothache', 'Tooth Decay / Cavity', 'Root Canal Consultation', 'Orthodontics / Braces', 'Periodontics / Gum Care', 'Tooth Extraction', 'Dental Cleaning & Scaling'],
+        sub_specialties: ['General Dentistry', 'Orthodontics', 'Endodontics', 'Periodontics', 'Prosthodontics', 'Pediatric Dentistry', 'Cosmetic Dentistry', 'Oral & Maxillofacial Surgery', 'Oral Surgery'],
+        is_active: true,
+        display_order: 16
+    }
+];
 
-                                            const _inMemorySpecialties = DEFAULT_MEDICAL_SPECIALTIES.map(s => ({
-                                                ...s,
-                                                created_at: new Date().toISOString(),
-                                                updated_at: new Date().toISOString()
-                                            }));
+const _inMemorySpecialties = DEFAULT_MEDICAL_SPECIALTIES.map(s => ({
+    ...s,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+}));
 
-                                            const MedicalSpecialty = {
-                                                async find(query = {}) {
-                                                    const onlyActive = query.is_active === true || query.activeOnly === true;
-                                                    try {
-                                                        let req = supabaseAdmin.from('medical_specialties').select('*');
-                                                        if (onlyActive) {
-                                                            req = req.eq('is_active', true);
-                                                        }
-                                                        const { data, error } = await req.order('display_order', { ascending: true });
-                                                        if (!error && data && data.length > 0) {
-                                                            // Sync in-memory cache with DB rows
-                                                            for (const row of data) {
-                                                                const idx = _inMemorySpecialties.findIndex(
-                                                                    m => m.code === row.code || m.name.toLowerCase() === (row.name || '').toLowerCase() || m.id === row.id
-                                                                );
-                                                                if (idx !== -1) {
-                                                                    _inMemorySpecialties[idx] = { ..._inMemorySpecialties[idx], ...row };
-                                                                } else {
-                                                                    _inMemorySpecialties.push(row);
-                                                                }
-                                                            }
-                                                            return data;
-                                                        }
-                                                    } catch (_) { }
+const MedicalSpecialty = {
+    async find(query = {}) {
+        const onlyActive = query.is_active === true || query.activeOnly === true;
+        try {
+            let req = supabaseAdmin.from('medical_specialties').select('*');
+            if (onlyActive) {
+                req = req.eq('is_active', true);
+            }
+            const { data, error } = await req.order('display_order', { ascending: true });
+            if (!error && data && data.length > 0) {
+                // Sync in-memory cache with DB rows
+                for (const row of data) {
+                    const idx = _inMemorySpecialties.findIndex(
+                        m => m.code === row.code || m.name.toLowerCase() === (row.name || '').toLowerCase() || m.id === row.id
+                    );
+                    if (idx !== -1) {
+                        _inMemorySpecialties[idx] = { ..._inMemorySpecialties[idx], ...row };
+                    } else {
+                        _inMemorySpecialties.push(row);
+                    }
+                }
+                return data;
+            }
+        } catch (_) { }
 
-                                                    let list = [..._inMemorySpecialties];
-                                                    if (onlyActive) {
-                                                        list = list.filter(s => s.is_active !== false);
-                                                    }
-                                                    list.sort((a, b) => (a.display_order || 100) - (b.display_order || 100));
-                                                    return list;
-                                                },
+        let list = [..._inMemorySpecialties];
+        if (onlyActive) {
+            list = list.filter(s => s.is_active !== false);
+        }
+        list.sort((a, b) => (a.display_order || 100) - (b.display_order || 100));
+        return list;
+    },
 
-                                                async findById(idOrCodeOrName) {
-                                                    if (!idOrCodeOrName) return null;
-                                                    const target = String(idOrCodeOrName).trim();
-                                                    try {
-                                                        if (isUUID(target)) {
-                                                            const { data, error } = await supabaseAdmin.from('medical_specialties').select('*').eq('id', target).maybeSingle();
-                                                            if (!error && data) return data;
-                                                        } else {
-                                                            const { data, error } = await supabaseAdmin
-                                                                .from('medical_specialties')
-                                                                .select('*')
-                                                                .or(`code.ilike.${target},name.ilike.${target}`)
-                                                                .maybeSingle();
-                                                            if (!error && data) return data;
-                                                        }
-                                                    } catch (_) { }
+    async findById(idOrCodeOrName) {
+        if (!idOrCodeOrName) return null;
+        const target = String(idOrCodeOrName).trim();
+        try {
+            if (isUUID(target)) {
+                const { data, error } = await supabaseAdmin.from('medical_specialties').select('*').eq('id', target).maybeSingle();
+                if (!error && data) return data;
+            } else {
+                const { data, error } = await supabaseAdmin
+                    .from('medical_specialties')
+                    .select('*')
+                    .or(`code.ilike.${target},name.ilike.${target}`)
+                    .maybeSingle();
+                if (!error && data) return data;
+            }
+        } catch (_) { }
 
-                                                    const lower = target.toLowerCase();
-                                                    return _inMemorySpecialties.find(
-                                                        s => s.id === target || (s.code && s.code.toLowerCase() === lower) || (s.name && s.name.toLowerCase() === lower)
-                                                    ) || null;
-                                                },
+        const lower = target.toLowerCase();
+        return _inMemorySpecialties.find(
+            s => s.id === target || (s.code && s.code.toLowerCase() === lower) || (s.name && s.name.toLowerCase() === lower)
+        ) || null;
+    },
 
-                                                async create(specData) {
-                                                    const name = (specData.name || '').toString().trim();
-                                                    if (!name) throw new Error('Specialty name is required.');
-                                                    const code = (specData.code || name.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '')).substring(0, 40);
-                                                    const now = new Date().toISOString();
+    async create(specData) {
+        const name = (specData.name || '').toString().trim();
+        if (!name) throw new Error('Specialty name is required.');
+        const code = (specData.code || name.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '')).substring(0, 40);
+        const now = new Date().toISOString();
 
-                                                    const payload = {
-                                                        code,
-                                                        name,
-                                                        department: specData.department || `Department of ${name}`,
-                                                        description: specData.description || `${name} consultations, diagnostics, and specialized care.`,
-                                                        icon: specData.icon || 'medical_services',
-                                                        default_qualifications: specData.default_qualifications || specData.defaultQualifications || getDefaultQualificationForSpecialty(name),
-                                                        consultation_types: Array.isArray(specData.consultation_types || specData.consultationTypes)
-                                                            ? (specData.consultation_types || specData.consultationTypes)
-                                                            : ['General Consultation', `${name} Specialist Evaluation`, 'Follow-up Consultation'],
-                                                        sub_specialties: Array.isArray(specData.sub_specialties || specData.subSpecialties)
-                                                            ? (specData.sub_specialties || specData.subSpecialties)
-                                                            : [],
-                                                        is_active: specData.is_active !== undefined ? Boolean(specData.is_active) : (specData.isActive !== undefined ? Boolean(specData.isActive) : true),
-                                                        display_order: parseInt(specData.display_order ?? specData.displayOrder, 10) || (_inMemorySpecialties.length + 1),
-                                                        updated_at: now
-                                                    };
+        const payload = {
+            code,
+            name,
+            department: specData.department || `Department of ${name}`,
+            description: specData.description || `${name} consultations, diagnostics, and specialized care.`,
+            icon: specData.icon || 'medical_services',
+            default_qualifications: specData.default_qualifications || specData.defaultQualifications || getDefaultQualificationForSpecialty(name),
+            consultation_types: Array.isArray(specData.consultation_types || specData.consultationTypes)
+                ? (specData.consultation_types || specData.consultationTypes)
+                : ['General Consultation', `${name} Specialist Evaluation`, 'Follow-up Consultation'],
+            sub_specialties: Array.isArray(specData.sub_specialties || specData.subSpecialties)
+                ? (specData.sub_specialties || specData.subSpecialties)
+                : [],
+            is_active: specData.is_active !== undefined ? Boolean(specData.is_active) : (specData.isActive !== undefined ? Boolean(specData.isActive) : true),
+            display_order: parseInt(specData.display_order ?? specData.displayOrder, 10) || (_inMemorySpecialties.length + 1),
+            updated_at: now
+        };
 
-                                                    try {
-                                                        const { data, error } = await supabaseAdmin
-                                                            .from('medical_specialties')
-                                                            .upsert(payload, { onConflict: 'code' })
-                                                            .select()
-                                                            .single();
-                                                        if (!error && data) {
-                                                            const idx = _inMemorySpecialties.findIndex(s => s.code === data.code || s.name.toLowerCase() === data.name.toLowerCase());
-                                                            if (idx !== -1) _inMemorySpecialties[idx] = data;
-                                                            else _inMemorySpecialties.push(data);
-                                                            return data;
-                                                        }
-                                                    } catch (_) { }
+        try {
+            const { data, error } = await supabaseAdmin
+                .from('medical_specialties')
+                .upsert(payload, { onConflict: 'code' })
+                .select()
+                .single();
+            if (!error && data) {
+                const idx = _inMemorySpecialties.findIndex(s => s.code === data.code || s.name.toLowerCase() === data.name.toLowerCase());
+                if (idx !== -1) _inMemorySpecialties[idx] = data;
+                else _inMemorySpecialties.push(data);
+                return data;
+            }
+        } catch (_) { }
 
-                                                    const existingIdx = _inMemorySpecialties.findIndex(
-                                                        s => s.code.toLowerCase() === code.toLowerCase() || s.name.toLowerCase() === name.toLowerCase()
-                                                    );
-                                                    const fullRecord = {
-                                                        id: existingIdx !== -1 ? _inMemorySpecialties[existingIdx].id : `spec-${code.toLowerCase()}-${Date.now()}`,
-                                                        ...payload,
-                                                        created_at: existingIdx !== -1 ? _inMemorySpecialties[existingIdx].created_at : now
-                                                    };
-                                                    if (existingIdx !== -1) {
-                                                        _inMemorySpecialties[existingIdx] = fullRecord;
-                                                    } else {
-                                                        _inMemorySpecialties.push(fullRecord);
-                                                    }
-                                                    return fullRecord;
-                                                },
+        const existingIdx = _inMemorySpecialties.findIndex(
+            s => s.code.toLowerCase() === code.toLowerCase() || s.name.toLowerCase() === name.toLowerCase()
+        );
+        const fullRecord = {
+            id: existingIdx !== -1 ? _inMemorySpecialties[existingIdx].id : `spec-${code.toLowerCase()}-${Date.now()}`,
+            ...payload,
+            created_at: existingIdx !== -1 ? _inMemorySpecialties[existingIdx].created_at : now
+        };
+        if (existingIdx !== -1) {
+            _inMemorySpecialties[existingIdx] = fullRecord;
+        } else {
+            _inMemorySpecialties.push(fullRecord);
+        }
+        return fullRecord;
+    },
 
-                                                async findByIdAndUpdate(id, updateData) {
-                                                    if (!id) return null;
-                                                    const target = String(id).trim();
-                                                    const now = new Date().toISOString();
+    async findByIdAndUpdate(id, updateData) {
+        if (!id) return null;
+        const target = String(id).trim();
+        const now = new Date().toISOString();
 
-                                                    const patch = { updated_at: now };
-                                                    if (updateData.name !== undefined) patch.name = String(updateData.name).trim();
-                                                    if (updateData.code !== undefined) patch.code = String(updateData.code).trim().toUpperCase();
-                                                    if (updateData.department !== undefined) patch.department = String(updateData.department).trim();
-                                                    if (updateData.description !== undefined) patch.description = String(updateData.description).trim();
-                                                    if (updateData.icon !== undefined) patch.icon = String(updateData.icon).trim();
-                                                    if (updateData.default_qualifications !== undefined || updateData.defaultQualifications !== undefined) {
-                                                        patch.default_qualifications = String(updateData.default_qualifications ?? updateData.defaultQualifications).trim();
-                                                    }
-                                                    if (updateData.consultation_types !== undefined || updateData.consultationTypes !== undefined) {
-                                                        const ct = updateData.consultation_types ?? updateData.consultationTypes;
-                                                        patch.consultation_types = Array.isArray(ct) ? ct : String(ct).split(',').map(s => s.trim()).filter(Boolean);
-                                                    }
-                                                    if (updateData.sub_specialties !== undefined || updateData.subSpecialties !== undefined) {
-                                                        const ss = updateData.sub_specialties ?? updateData.subSpecialties;
-                                                        patch.sub_specialties = Array.isArray(ss) ? ss : String(ss).split(',').map(s => s.trim()).filter(Boolean);
-                                                    }
-                                                    if (updateData.is_active !== undefined || updateData.isActive !== undefined) {
-                                                        patch.is_active = Boolean(updateData.is_active ?? updateData.isActive);
-                                                    }
-                                                    if (updateData.display_order !== undefined || updateData.displayOrder !== undefined) {
-                                                        patch.display_order = parseInt(updateData.display_order ?? updateData.displayOrder, 10) || 100;
-                                                    }
+        const patch = { updated_at: now };
+        if (updateData.name !== undefined) patch.name = String(updateData.name).trim();
+        if (updateData.code !== undefined) patch.code = String(updateData.code).trim().toUpperCase();
+        if (updateData.department !== undefined) patch.department = String(updateData.department).trim();
+        if (updateData.description !== undefined) patch.description = String(updateData.description).trim();
+        if (updateData.icon !== undefined) patch.icon = String(updateData.icon).trim();
+        if (updateData.default_qualifications !== undefined || updateData.defaultQualifications !== undefined) {
+            patch.default_qualifications = String(updateData.default_qualifications ?? updateData.defaultQualifications).trim();
+        }
+        if (updateData.consultation_types !== undefined || updateData.consultationTypes !== undefined) {
+            const ct = updateData.consultation_types ?? updateData.consultationTypes;
+            patch.consultation_types = Array.isArray(ct) ? ct : String(ct).split(',').map(s => s.trim()).filter(Boolean);
+        }
+        if (updateData.sub_specialties !== undefined || updateData.subSpecialties !== undefined) {
+            const ss = updateData.sub_specialties ?? updateData.subSpecialties;
+            patch.sub_specialties = Array.isArray(ss) ? ss : String(ss).split(',').map(s => s.trim()).filter(Boolean);
+        }
+        if (updateData.is_active !== undefined || updateData.isActive !== undefined) {
+            patch.is_active = Boolean(updateData.is_active ?? updateData.isActive);
+        }
+        if (updateData.display_order !== undefined || updateData.displayOrder !== undefined) {
+            patch.display_order = parseInt(updateData.display_order ?? updateData.displayOrder, 10) || 100;
+        }
 
-                                                    try {
-                                                        let req = supabaseAdmin.from('medical_specialties').update(patch);
-                                                        if (isUUID(target)) {
-                                                            req = req.eq('id', target);
-                                                        } else {
-                                                            req = req.or(`code.eq.${target},name.ilike.${target}`);
-                                                        }
-                                                        const { data, error } = await req.select().maybeSingle();
-                                                        if (!error && data) {
-                                                            const idx = _inMemorySpecialties.findIndex(
-                                                                s => s.id === target || s.code === data.code || s.name.toLowerCase() === data.name.toLowerCase()
-                                                            );
-                                                            if (idx !== -1) _inMemorySpecialties[idx] = { ..._inMemorySpecialties[idx], ...data };
-                                                            return data;
-                                                        }
-                                                    } catch (_) { }
+        try {
+            let req = supabaseAdmin.from('medical_specialties').update(patch);
+            if (isUUID(target)) {
+                req = req.eq('id', target);
+            } else {
+                req = req.or(`code.eq.${target},name.ilike.${target}`);
+            }
+            const { data, error } = await req.select().maybeSingle();
+            if (!error && data) {
+                const idx = _inMemorySpecialties.findIndex(
+                    s => s.id === target || s.code === data.code || s.name.toLowerCase() === data.name.toLowerCase()
+                );
+                if (idx !== -1) _inMemorySpecialties[idx] = { ..._inMemorySpecialties[idx], ...data };
+                return data;
+            }
+        } catch (_) { }
 
-                                                    const lower = target.toLowerCase();
-                                                    const idx = _inMemorySpecialties.findIndex(
-                                                        s => s.id === target || (s.code && s.code.toLowerCase() === lower) || (s.name && s.name.toLowerCase() === lower)
-                                                    );
-                                                    if (idx !== -1) {
-                                                        _inMemorySpecialties[idx] = { ..._inMemorySpecialties[idx], ...patch };
-                                                        return _inMemorySpecialties[idx];
-                                                    }
-                                                    return null;
-                                                },
+        const lower = target.toLowerCase();
+        const idx = _inMemorySpecialties.findIndex(
+            s => s.id === target || (s.code && s.code.toLowerCase() === lower) || (s.name && s.name.toLowerCase() === lower)
+        );
+        if (idx !== -1) {
+            _inMemorySpecialties[idx] = { ..._inMemorySpecialties[idx], ...patch };
+            return _inMemorySpecialties[idx];
+        }
+        return null;
+    },
 
-                                                async deleteOne(id) {
-                                                    if (!id) return null;
-                                                    const target = String(id).trim();
-                                                    try {
-                                                        if (isUUID(target)) {
-                                                            await supabaseAdmin.from('medical_specialties').delete().eq('id', target);
-                                                        } else {
-                                                            await supabaseAdmin.from('medical_specialties').delete().or(`code.eq.${target},name.ilike.${target}`);
-                                                        }
-                                                    } catch (_) { }
+    async deleteOne(id) {
+        if (!id) return null;
+        const target = String(id).trim();
+        try {
+            if (isUUID(target)) {
+                await supabaseAdmin.from('medical_specialties').delete().eq('id', target);
+            } else {
+                await supabaseAdmin.from('medical_specialties').delete().or(`code.eq.${target},name.ilike.${target}`);
+            }
+        } catch (_) { }
 
-                                                    const lower = target.toLowerCase();
-                                                    const idx = _inMemorySpecialties.findIndex(
-                                                        s => s.id === target || (s.code && s.code.toLowerCase() === lower) || (s.name && s.name.toLowerCase() === lower)
-                                                    );
-                                                    if (idx !== -1) {
-                                                        return _inMemorySpecialties.splice(idx, 1)[0];
-                                                    }
-                                                    return { id: target };
-                                                }
-                                            };
+        const lower = target.toLowerCase();
+        const idx = _inMemorySpecialties.findIndex(
+            s => s.id === target || (s.code && s.code.toLowerCase() === lower) || (s.name && s.name.toLowerCase() === lower)
+        );
+        if (idx !== -1) {
+            return _inMemorySpecialties.splice(idx, 1)[0];
+        }
+        return { id: target };
+    }
+};
 
-                                            /**
-                                             * Canonical Doctor Availability helpers (reuses existing `dentists.availability_status` column)
-                                             * - ON  => 'Available'
-                                             * - OFF => 'Unavailable' (also treats legacy 'Offline', 'Inactive', 'On Leave', 'OFF', 'Suspended' as OFF)
-                                             */
-                                            const UNAVAILABLE_STATUS_VALUES = new Set([
-                                                'unavailable',
-                                                'offline',
-                                                'inactive',
-                                                'on leave',
-                                                'on_leave',
-                                                'off',
-                                                'false',
-                                                'disabled',
-                                                'suspended'
-                                            ]);
+/**
+ * Canonical Doctor Availability helpers (reuses existing `dentists.availability_status` column)
+ * - ON  => 'Available'
+ * - OFF => 'Unavailable' (also treats legacy 'Offline', 'Inactive', 'On Leave', 'OFF', 'Suspended' as OFF)
+ */
+const UNAVAILABLE_STATUS_VALUES = new Set([
+    'unavailable',
+    'offline',
+    'inactive',
+    'on leave',
+    'on_leave',
+    'off',
+    'false',
+    'disabled',
+    'suspended'
+]);
 
-                                            function isDoctorAvailableStatus(status) {
-                                                if (status === false) return false;
-                                                if (status === true || status === null || status === undefined) return true;
-                                                const normalized = String(status).trim().toLowerCase();
-                                                if (!normalized) return true;
-                                                return !UNAVAILABLE_STATUS_VALUES.has(normalized);
-                                            }
+function isDoctorAvailableStatus(status) {
+    if (status === false) return false;
+    if (status === true || status === null || status === undefined) return true;
+    const normalized = String(status).trim().toLowerCase();
+    if (!normalized) return true;
+    return !UNAVAILABLE_STATUS_VALUES.has(normalized);
+}
 
-                                            function isDoctorRecordAvailable(doctor) {
-                                                if (!doctor) return false;
-                                                const verStatus = String(doctor.verification_status || doctor.verificationStatus || '').trim().toUpperCase();
-                                                if (verStatus === 'SUSPENDED') return false;
-                                                const rawStatus = doctor.availability_status !== undefined
-                                                    ? doctor.availability_status
-                                                    : doctor.status;
-                                                return isDoctorAvailableStatus(rawStatus);
-                                            }
+function isDoctorRecordAvailable(doctor) {
+    if (!doctor) return false;
+    const verStatus = String(doctor.verification_status || doctor.verificationStatus || '').trim().toUpperCase();
+    if (verStatus === 'SUSPENDED') return false;
+    const rawStatus = doctor.availability_status !== undefined
+        ? doctor.availability_status
+        : doctor.status;
+    return isDoctorAvailableStatus(rawStatus);
+}
 
-                                            function normalizeAvailabilityStatus(input) {
-                                                if (typeof input === 'boolean') {
-                                                    return input ? 'Available' : 'Unavailable';
-                                                }
-                                                const normalized = String(input ?? '').trim().toLowerCase();
-                                                if (!normalized) return null;
-                                                if (normalized === 'on' || normalized === 'true' || normalized === 'available' || normalized === 'online' || normalized === 'active') {
-                                                    return 'Available';
-                                                }
-                                                if (UNAVAILABLE_STATUS_VALUES.has(normalized)) {
-                                                    return 'Unavailable';
-                                                }
-                                                return null;
-                                            }
+function normalizeAvailabilityStatus(input) {
+    if (typeof input === 'boolean') {
+        return input ? 'Available' : 'Unavailable';
+    }
+    const normalized = String(input ?? '').trim().toLowerCase();
+    if (!normalized) return null;
+    if (normalized === 'on' || normalized === 'true' || normalized === 'available' || normalized === 'online' || normalized === 'active') {
+        return 'Available';
+    }
+    if (UNAVAILABLE_STATUS_VALUES.has(normalized)) {
+        return 'Unavailable';
+    }
+    return null;
+}
 
-                                            module.exports = {
-                                                User,
-                                                SubAdminPermission,
-                                                PERMISSION_CONSTANTS,
-                                                Clinic,
-                                                Dentist,
-                                                Appointment,
-                                                MedicalRecord,
-                                                ChatMessage,
-                                                PatientProblemRequest,
-                                                DentistSuggestion,
-                                                Notification,
-                                                AuditLog,
-                                                Referral,
-                                                PatientDoctor,
-                                                DoctorAvailability,
-                                                MedicalSpecialty,
-                                                DEFAULT_MEDICAL_SPECIALTIES,
-                                                District,
-                                                DEFAULT_DISTRICTS,
-                                                SubAdminDistrict,
-                                                PermissionChangeHistory,
-                                                PatientAssignmentHistory,
-                                                ASSIGNMENT_SOURCES,
-                                                isDentalSpecialtyText,
-                                                getDefaultQualificationForSpecialty,
-                                                matchesSpecialtyQuery,
-                                                normalizeLanguagesList,
-                                                parseLanguageFilters,
-                                                extractDoctorLanguages,
-                                                doctorMatchesLanguages,
-                                                isDoctorAvailableStatus,
-                                                isDoctorRecordAvailable,
-                                                normalizeAvailabilityStatus,
-                                                resolveUserUuid,
-                                                resolveDentistIds,
-                                                comparePassword
-                                            };
+module.exports = {
+    User,
+    SubAdminPermission,
+    PERMISSION_CONSTANTS,
+    Clinic,
+    Dentist,
+    Appointment,
+    MedicalRecord,
+    ChatMessage,
+    PatientProblemRequest,
+    DentistSuggestion,
+    Notification,
+    AuditLog,
+    Referral,
+    PatientDoctor,
+    DoctorAvailability,
+    MedicalSpecialty,
+    DEFAULT_MEDICAL_SPECIALTIES,
+    District,
+    DEFAULT_DISTRICTS,
+    SubAdminDistrict,
+    PermissionChangeHistory,
+    PatientAssignmentHistory,
+    ASSIGNMENT_SOURCES,
+    isDentalSpecialtyText,
+    getDefaultQualificationForSpecialty,
+    resolveMedicalSpecialtyRecord,
+    matchesSpecialtyQuery,
+    normalizeLanguagesList,
+    parseLanguageFilters,
+    extractDoctorLanguages,
+    doctorMatchesLanguages,
+    isDoctorAvailableStatus,
+    isDoctorRecordAvailable,
+    normalizeAvailabilityStatus,
+    resolveUserUuid,
+    resolveDentistIds,
+    resolveClinicIds,
+    resolveClinicUuid,
+    comparePassword
+};
 
 
 

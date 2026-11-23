@@ -3,9 +3,10 @@ require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 const { User, Dentist } = require('../models/Schemas');
 const authController = require('../controllers/authController');
 const jwt = require('jsonwebtoken');
+const { getJwtSecret, getRefreshSecret } = require('../config/secrets');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'supersecretjwtkey123';
-const REFRESH_SECRET = process.env.REFRESH_SECRET || 'supersecretrefreshkey456';
+const JWT_SECRET = getJwtSecret();
+const REFRESH_SECRET = getRefreshSecret();
 
 async function runMultiDeviceDoctorTest() {
     console.log('====================================================');

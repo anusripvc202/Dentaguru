@@ -2,6 +2,7 @@ const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 const { User } = require('../models/Schemas');
 const jwt = require('jsonwebtoken');
+const { getJwtSecret } = require('../config/secrets');
 
 async function testLogin() {
     try {
@@ -21,7 +22,7 @@ async function testLogin() {
         if (isMatch) {
             const token = jwt.sign(
                 { id: user.id, role: user.role, email: user.email },
-                process.env.JWT_SECRET || 'fallback_secret',
+                getJwtSecret(),
                 { expiresIn: '7d' }
             );
             console.log('✅ Generated JWT Token successfully!');

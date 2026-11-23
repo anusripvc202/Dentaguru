@@ -1,16 +1,16 @@
 const { PatientProblemRequest, DentistSuggestion, Dentist, User, Notification, PatientAssignmentHistory, District, SubAdminDistrict, ASSIGNMENT_SOURCES, isDoctorRecordAvailable } = require('../models/Schemas');
 const { sendPushNotification } = require('../services/notificationService');
 
-// 1. PATIENT: CREATE DENTAL PROBLEM REQUEST
+// 1. PATIENT: CREATE MULTI-SPECIALTY CONSULTATION / TRIAGE REQUEST
 exports.createProblemRequest = async (req, res) => {
-    const { problemCategory, problemDescription, symptoms, preferredLocation, attachments, patientName, patientPhone } = req.body;
+    const { problemCategory, problemDescription, symptoms, preferredLocation, attachments, patientName, patientPhone, specialty, speciality, appointmentId } = req.body;
     try {
         const patientId = req.user ? req.user.id : req.body.patientId;
         const patientUser = patientId ? await User.findById(patientId) : null;
 
         let realName = patientName || (patientUser ? patientUser.name : '');
         if (!realName || realName.trim().toLowerCase() === 'patient') {
-            realName = 'anusha';
+            realName = (patientUser && patientUser.name) ? patientUser.name : 'Patient';
         }
         let realPhone = patientPhone || (patientUser ? patientUser.phone : '');
         let realCity = req.body.city || (patientUser ? patientUser.city : '') || '';
@@ -18,6 +18,7 @@ exports.createProblemRequest = async (req, res) => {
         let realState = req.body.state || (patientUser ? patientUser.state : '') || '';
 
         const preferredDoctorId = req.body.preferredDoctorId || req.body.suggested_dentist_id;
+        let resolvedSpecialty = String(specialty || speciality || '').trim();
         if (preferredDoctorId) {
             const targetDoc = await Dentist.findById(preferredDoctorId);
             if (targetDoc && !isDoctorRecordAvailable(targetDoc)) {
@@ -28,9 +29,19 @@ exports.createProblemRequest = async (req, res) => {
                     message: 'Doctor is currently unavailable and not accepting new consultation requests.'
                 });
             }
+            if (!resolvedSpecialty && targetDoc) {
+                resolvedSpecialty = String(targetDoc.speciality || targetDoc.specialty || '').trim();
+            }
         }
         const isDirectReferral = !!preferredDoctorId;
         const initialStatus = isDirectReferral ? 'DENTIST_ASSIGNED' : 'PENDING_ADMIN_REVIEW';
+
+        const effectiveCategory = problemCategory || (resolvedSpecialty ? `${resolvedSpecialty} Consultation` : 'General Medical Consultation');
+        const effectiveSymptoms = [
+            resolvedSpecialty ? `Specialty: ${resolvedSpecialty}` : '',
+            appointmentId ? `Appointment: ${appointmentId}` : '',
+            symptoms || ''
+        ].filter(Boolean).join(' • ');
 
         const request = await PatientProblemRequest.create({
             patient_id: patientId,
@@ -39,9 +50,10 @@ exports.createProblemRequest = async (req, res) => {
             city: realCity,
             pincode: realPincode,
             state: realState,
-            problem_category: problemCategory || 'General Medical Consultation',
+            specialty: resolvedSpecialty || undefined,
+            problem_category: effectiveCategory,
             problem_description: problemDescription || '',
-            symptoms: symptoms || '',
+            symptoms: effectiveSymptoms,
             preferred_location: preferredLocation || null,
             attachments: attachments || [],
             status: initialStatus,
@@ -183,10 +195,10 @@ exports.getAdminProblemRequests = async (req, res) => {
 
             let realName = r.patient_name || r.patientName;
             if ((!realName || realName.trim().toLowerCase() === 'patient') && u) {
-                realName = u.name || (u.email ? u.email.split('@')[0] : 'anusha');
+                realName = u.name || (u.email ? u.email.split('@')[0] : 'Patient');
             }
             if (!realName || realName.trim().toLowerCase() === 'patient') {
-                realName = patientUsers.length > 0 ? (patientUsers[0].name || 'anusha') : 'anusha';
+                realName = 'Patient';
             }
 
             let realPhone = r.patient_phone || r.patientPhone;
@@ -202,7 +214,7 @@ exports.getAdminProblemRequests = async (req, res) => {
             const dUser = d.users || {};
             const dClinic = d.clinics || {};
             const docName = dUser.name ? (dUser.name.startsWith('Dr.') ? dUser.name : `Dr. ${dUser.name}`) : (r.assigned_doctor_name || '');
-            const docSpecialty = d.speciality || d.specialty || r.assigned_doctor_specialty || 'General Dentistry';
+            const docSpecialty = d.speciality || d.specialty || r.assigned_doctor_specialty || 'General Medicine';
             const docClinic = dClinic.clinic_name || r.assigned_doctor_clinic || 'GS HEALTH Care Center';
 
             return {

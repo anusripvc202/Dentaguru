@@ -104,6 +104,17 @@ class SupabaseService {
   /// Get active Supabase client instance
   SupabaseClient get client => Supabase.instance.client;
 
+  /// Safely read the current Supabase client without throwing when Supabase
+  /// has not been initialized (e.g., isolated local-backend-only debug runs or tests).
+  static SupabaseClient? get safeClient {
+    if (!_isInitialized) return null;
+    try {
+      return Supabase.instance.client;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Safely read the current Supabase Auth user without throwing when Supabase
   /// has not been initialized (e.g., isolated local-backend-only debug runs or tests).
   static User? get safeCurrentUser {

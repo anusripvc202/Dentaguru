@@ -4,6 +4,7 @@
 // =============================================================================
 
 const { District, SubAdminDistrict, User } = require('../models/Schemas');
+const { isCloudEnv } = require('../config/secrets');
 
 // 1. GET ALL ACTIVE DISTRICTS (Public & Authenticated)
 exports.getDistricts = async (req, res) => {
@@ -144,6 +145,16 @@ exports.toggleDistrictStatus = async (req, res) => {
 exports.getSubAdminDistricts = async (req, res) => {
     try {
         const { id } = req.params; // Sub-admin user ID
+        if (req.user) {
+            const roleLower = (req.user.role || '').toString().trim().toLowerCase();
+            const isMainAdmin = roleLower === 'admin' || roleLower === 'primaryadmin' || roleLower === 'primary_admin' || roleLower === 'superadmin' || roleLower === 'super_admin';
+            const isOwnerSubAdmin = String(req.user.id || '').trim() === String(id || '').trim();
+            if (!isMainAdmin && !isOwnerSubAdmin) {
+                return res.status(403).json({ success: false, message: 'Access Denied: You can only view your own assigned districts.' });
+            }
+        } else if (isCloudEnv() || (req.headers && !req.headers['x-user-id'] && !req.headers.authorization)) {
+            return res.status(401).json({ success: false, message: 'Authentication required.' });
+        }
         const districts = await SubAdminDistrict.getDistrictsForSubAdmin(id);
         res.json({
             success: true,

@@ -45,13 +45,17 @@ exports.getConversations = async (req, res) => {
 // - Sub-Admin: 403 Forbidden (handled by middleware)
 // - Dentist/Patient: only their authorized rooms
 exports.getMessages = async (req, res) => {
-    const { roomId } = req.query;
+    const { roomId, markRead } = req.query;
     try {
         const user = req.user;
         const role = (user?.role || '').toString().trim().toLowerCase();
         const isMainAdmin = role === 'admin' || role === 'primaryadmin' || role === 'primary_admin' || role === 'superadmin' || role === 'super_admin' || user?.email === 'admin@dentaguru.com';
 
         const messages = await ChatMessage.find(roomId ? { room_id: roomId } : {}, { user });
+
+        if (roomId && user && (markRead === 'true' || markRead === '1')) {
+            await ChatMessage.markAsRead({ roomId, userId: user.id }).catch(() => { });
+        }
 
         // Record Audit Log when Main Admin inspects a specific patient conversation
         if (isMainAdmin && user && roomId) {
@@ -85,19 +89,29 @@ exports.getMessages = async (req, res) => {
 exports.sendMessage = async (req, res) => {
     const { roomId, senderId, receiverId, message, type, senderRole } = req.body;
     try {
-        const sStr = String(senderId || '').toLowerCase();
-        const isDoc = type === 'doctor' || senderRole === 'Dentist' || sStr.startsWith('dr.') || sStr.includes('doctor') || sStr.includes('dentist');
-        const msgType = isDoc ? 'doctor' : (type === 'patient' ? 'patient' : 'text');
+        const trimmedMsg = (message || '').toString().trim();
+        if (!trimmedMsg) {
+            return res.status(400).json({
+                success: false,
+                message: 'Message text cannot be empty.'
+            });
+        }
+
+        const effectiveSenderId = (req.user && req.user.id) ? req.user.id : (senderId || null);
+        const effRole = (req.user?.role || senderRole || '').toString().trim().toLowerCase();
+        const sStr = String(senderId || req.user?.name || '').toLowerCase();
+        const isDoc = type === 'doctor' || effRole === 'dentist' || effRole === 'doctor' || sStr.startsWith('dr.') || sStr.includes('doctor') || sStr.includes('dentist');
+        const msgType = isDoc ? 'doctor' : (type === 'patient' || effRole === 'patient' ? 'patient' : (type === 'admin' || effRole.includes('admin') ? 'admin' : 'text'));
 
         const chat = await ChatMessage.create({
             room_id: roomId || 'GENERAL-CHAT',
-            sender_id: senderId || (req.user ? req.user.id : null),
+            sender_id: effectiveSenderId,
             receiver_id: receiverId || null,
-            message: message || '',
+            message: trimmedMsg,
             type: msgType
         });
 
-        console.log(`💬 Chat message saved in Supabase 'chat_messages' table: "${message}"`);
+        console.log(`💬 Chat message saved in Supabase 'chat_messages' table: "${trimmedMsg}"`);
         res.status(201).json({
             success: true,
             message: 'Chat message sent and saved to database successfully.',
@@ -106,6 +120,28 @@ exports.sendMessage = async (req, res) => {
     } catch (err) {
         console.error('Send Chat Error:', err.message);
         res.status(500).json({ success: false, message: 'Failed to save chat message to database.' });
+    }
+};
+
+// 3b. MARK CHAT ROOM MESSAGES AS READ
+exports.markRoomRead = async (req, res) => {
+    const roomId = req.body?.roomId || req.query?.roomId;
+    try {
+        if (!roomId) {
+            return res.status(400).json({ success: false, message: 'roomId is required.' });
+        }
+        const updatedCount = await ChatMessage.markAsRead({
+            roomId,
+            userId: req.user?.id || null
+        });
+        res.json({
+            success: true,
+            updatedCount,
+            message: 'Conversation marked as read.'
+        });
+    } catch (err) {
+        console.error('Mark Chat Read Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to mark messages as read.' });
     }
 };
 

@@ -87,10 +87,46 @@ try {
         assert.strictEqual(patientAuthStatus, 403, 'Patient cannot save doctor availability (403 Forbidden).');
         console.log('✓ SUCCESS: Patient role rejected with 403 when modifying doctor slots.');
 
-        // Retrieve an active dentist and patient from Supabase for live DB testing
-        const dentistsInDb = await Dentist.find({});
+        // Retrieve or seed an active dentist and patient in the test Supabase project for live DB testing
+        const testSuffix = Date.now().toString().slice(-6);
+        let seededDoctorUser = null;
+        let seededDentist = null;
+        let seededPatientUser = null;
+
+        try {
+            seededDoctorUser = await User.create({
+                name: `Dr. ApiTest ${testSuffix}`,
+                email: `apitest.doc.${testSuffix}@gshealth-test.local`,
+                password: `TestPass_${testSuffix}`,
+                phone: `9881${testSuffix}`,
+                role: 'DOCTOR',
+                city: 'Hyderabad',
+                pincode: '500081'
+            });
+            seededDentist = await Dentist.create({
+                user_id: seededDoctorUser.id,
+                speciality: 'General Medicine',
+                qualifications: 'MBBS, MD',
+                license_number: `API-TEST-LIC-${testSuffix}`,
+                experience_years: 6,
+                availability_status: 'Available',
+                city: 'Hyderabad',
+                pincode: '500081'
+            });
+            seededPatientUser = await User.create({
+                name: `Patient ApiTest ${testSuffix}`,
+                email: `apitest.pat.${testSuffix}@gshealth-test.local`,
+                password: `TestPass_${testSuffix}`,
+                phone: `9771${testSuffix}`,
+                role: 'Patient',
+                city: 'Hyderabad',
+                pincode: '500081'
+            });
+        } catch (_) {}
+
+        const dentistsInDb = seededDentist ? [seededDentist] : await Dentist.find({});
         const testDoctorId = (dentistsInDb && dentistsInDb.length > 0) ? dentistsInDb[0].id : 'doc-test-1';
-        const usersInDb = await User.find({});
+        const usersInDb = seededPatientUser ? [seededPatientUser] : await User.find({});
         const testPatientId = (usersInDb && usersInDb.length > 0) ? usersInDb[0].id : 'a0000000-0000-0000-0000-000000000001';
         const testDate = '2026-12-05';
 
@@ -285,17 +321,72 @@ try {
             await Dentist.findByIdAndUpdate(sampleDoc.id, { clinic_id: originalClinicId });
         }
 
+        // Clean up temporary seeded test rows
+        const { supabaseAdmin } = require('../src/config/supabase');
+        try {
+            if (seededDentist?.id) {
+                await supabaseAdmin.from('notifications').delete().eq('recipient_id', seededDentist.id);
+                await supabaseAdmin.from('dentists').delete().eq('id', seededDentist.id);
+            }
+            if (seededPatientUser?.id) {
+                await supabaseAdmin.from('notifications').delete().eq('recipient_id', seededPatientUser.id);
+                await supabaseAdmin.from('users').delete().eq('id', seededPatientUser.id);
+            }
+            if (seededDoctorUser?.id) {
+                await supabaseAdmin.from('notifications').delete().eq('recipient_id', seededDoctorUser.id);
+                await supabaseAdmin.from('users').delete().eq('id', seededDoctorUser.id);
+            }
+        } catch (_) {}
+
     } catch (err) {
         console.error('✗ ERROR: Availability test failed:', err);
         process.exit(1);
     }
 
-    // 3. Validate Express Server Routing configuration
+    // 3. Validate Express Server Routing configuration & CORS headers (including x-user-id for Flutter Web)
     try {
         const routes = app._router.stack
             .filter(r => r.route || (r.name === 'router' && r.handle.stack))
             .length;
         assert.ok(routes > 0, 'Express routing middleware mounted successfully.');
+
+        const http = require('http');
+        const server = http.createServer(app);
+        await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+        const { port } = server.address();
+        try {
+            const corsRes = await new Promise((resolve, reject) => {
+                const req = http.request(
+                    {
+                        hostname: '127.0.0.1',
+                        port,
+                        path: '/api/v1/referrals',
+                        method: 'OPTIONS',
+                        headers: {
+                            Origin: 'http://localhost:52114',
+                            'Access-Control-Request-Method': 'POST',
+                            'Access-Control-Request-Headers': 'content-type,x-user-id',
+                        },
+                    },
+                    (res) => {
+                        res.resume();
+                        resolve({ statusCode: res.statusCode, headers: res.headers });
+                    }
+                );
+                req.on('error', reject);
+                req.end();
+            });
+            assert.strictEqual(corsRes.statusCode, 204, 'CORS preflight should return 204.');
+            const allowHeaders = String(corsRes.headers['access-control-allow-headers'] || '').toLowerCase();
+            assert.ok(
+                allowHeaders.includes('x-user-id'),
+                `Expected Access-Control-Allow-Headers to include x-user-id, got: ${allowHeaders}`
+            );
+            console.log('✓ SUCCESS: Express CORS preflight allows x-user-id header for Web referrals & uploads.');
+        } finally {
+            await new Promise((resolve) => server.close(resolve));
+        }
+
         console.log('✓ SUCCESS: Express routes compiled and loaded.');
     } catch (error) {
         console.error('✗ ERROR: Route validation failed:', error.message);

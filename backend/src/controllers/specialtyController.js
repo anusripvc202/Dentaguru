@@ -4,14 +4,28 @@ const {
     Appointment,
     Referral,
     PatientProblemRequest,
-    matchesSpecialtyQuery
+    matchesSpecialtyQuery,
+    isDoctorRecordAvailable
 } = require('../models/Schemas');
+const {
+    getSpecialtyClinicalConfig,
+    analyzeSymptomsForSpecialty
+} = require('../config/specialtyClinicalConfig');
 
 // 1. GET MEDICAL SPECIALTIES (Public / Patient / Doctor / Admin)
 exports.getSpecialties = async (req, res) => {
     try {
         const activeOnly = req.query.activeOnly === 'true' || req.query.is_active === 'true';
-        const specialties = await MedicalSpecialty.find({ activeOnly });
+        const rawSpecialties = await MedicalSpecialty.find({ activeOnly });
+        const specialties = rawSpecialties.map(spec => {
+            const clinical = getSpecialtyClinicalConfig(spec.name);
+            return {
+                ...spec,
+                triageCategories: clinical.triageCategories,
+                symptomHint: clinical.symptomHint,
+                prescriptionSchema: clinical.prescriptionSchema
+            };
+        });
         res.json({
             success: true,
             count: specialties.length,
@@ -20,6 +34,123 @@ exports.getSpecialties = async (req, res) => {
     } catch (err) {
         console.error('Get Specialties Error:', err.message);
         res.status(500).json({ success: false, message: 'Failed to fetch medical specialties.' });
+    }
+};
+
+// 1b. GET DYNAMIC CLINICAL CONFIG FOR A SPECIALTY OR DOCTOR
+exports.getSpecialtyClinicalConfigEndpoint = async (req, res) => {
+    try {
+        let requestedSpecialty = (req.query.specialty || req.query.speciality || '').trim();
+        let resolvedDoctor = null;
+        const doctorId = (req.query.doctorId || req.query.dentistId || '').trim();
+
+        if (doctorId) {
+            resolvedDoctor = await Dentist.findById(doctorId);
+            if (resolvedDoctor) {
+                requestedSpecialty = (resolvedDoctor.speciality || resolvedDoctor.specialty || requestedSpecialty || 'General Medicine').trim();
+            }
+        }
+
+        const clinical = getSpecialtyClinicalConfig(requestedSpecialty || 'General Medicine');
+        res.json({
+            success: true,
+            specialty: clinical.name,
+            specialtyCode: clinical.code,
+            doctorId: resolvedDoctor?.id || doctorId || null,
+            doctorName: resolvedDoctor?.users?.name || resolvedDoctor?.name || null,
+            triageCategories: clinical.triageCategories,
+            symptomHint: clinical.symptomHint,
+            selfCareGuidance: clinical.selfCareGuidance,
+            emergencyWarning: clinical.emergencyWarning,
+            prescriptionSchema: clinical.prescriptionSchema
+        });
+    } catch (err) {
+        console.error('Get Specialty Clinical Config Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to fetch specialty clinical configuration.' });
+    }
+};
+
+// 1c. AI HEALTH TRIAGE — MULTI-SPECIALTY SYMPTOM ANALYSIS & SPECIALIST MATCHING
+exports.analyzeAiTriage = async (req, res) => {
+    try {
+        const {
+            specialty,
+            speciality,
+            doctorId,
+            dentistId,
+            category,
+            symptoms,
+            severity = 'Moderate',
+            duration = '2-3 days'
+        } = req.body || {};
+
+        if (!symptoms || !String(symptoms).trim()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Please describe your symptoms for triage guidance.'
+            });
+        }
+
+        let effectiveSpecialty = String(specialty || speciality || '').trim();
+        let resolvedDoctor = null;
+        const targetDoctorId = String(doctorId || dentistId || '').trim();
+
+        if (targetDoctorId) {
+            resolvedDoctor = await Dentist.findById(targetDoctorId);
+            if (resolvedDoctor) {
+                effectiveSpecialty = String(resolvedDoctor.speciality || resolvedDoctor.specialty || effectiveSpecialty || 'General Medicine').trim();
+            }
+        }
+
+        if (!effectiveSpecialty) {
+            effectiveSpecialty = 'General Medicine';
+        }
+
+        const triage = analyzeSymptomsForSpecialty({
+            specialty: effectiveSpecialty,
+            category,
+            symptoms,
+            severity,
+            duration
+        });
+
+        // Match registered doctors for the selected specialty
+        const allDoctors = await Dentist.find({});
+        const matchingDoctors = allDoctors
+            .filter(d => matchesSpecialtyQuery(d.speciality || d.specialty, triage.recommendedSpecialty))
+            .map(d => {
+                const u = d.users || {};
+                const c = d.clinics || {};
+                const rawName = d.name || u.name || 'Specialist';
+                return {
+                    id: d.id,
+                    userId: d.user_id || u.id || '',
+                    name: rawName.startsWith('Dr.') ? rawName : `Dr. ${rawName}`,
+                    specialty: d.speciality || d.specialty || triage.recommendedSpecialty,
+                    qualification: d.qualifications || d.qualification || 'MBBS, MD',
+                    clinicName: c.clinic_name || d.clinicName || 'GS HEALTH Clinic',
+                    city: d.city || u.city || '',
+                    availability_status: d.availability_status || 'Available',
+                    isAvailable: isDoctorRecordAvailable(d),
+                    rating: d.rating || 5.0
+                };
+            });
+
+        res.json({
+            success: true,
+            triage,
+            doctorContext: resolvedDoctor
+                ? {
+                    id: resolvedDoctor.id,
+                    name: resolvedDoctor.users?.name || resolvedDoctor.name || 'Doctor',
+                    specialty: resolvedDoctor.speciality || resolvedDoctor.specialty || triage.specialty
+                }
+                : null,
+            matchingDoctors
+        });
+    } catch (err) {
+        console.error('AI Triage Analysis Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to run multi-specialty triage analysis.' });
     }
 };
 

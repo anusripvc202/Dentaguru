@@ -1,19 +1,192 @@
 const { Referral, User, Appointment, Dentist, Clinic, Notification, PatientProblemRequest, isDoctorRecordAvailable } = require('../models/Schemas');
+const { isCloudEnv } = require('../config/secrets');
 const { sendPushNotification } = require('../services/notificationService');
 const {
     sendNewReferralWhatsApp,
     sendReferralAcceptedWhatsApp,
-    sendReferralRejectedWhatsApp
+    sendReferralRejectedWhatsApp,
+    sendDoctorReferralAlert,
+    sendClinicReferralAlert,
+    isWhatsAppProviderConfigured
 } = require('../services/whatsappService');
+const { resolveClinicRecordAndDoctorIds } = require('./clinicController');
 
 /**
  * Helper to extract user ID from authenticated request
  */
 const getUserIdFromReq = (req) => {
     if (req.user && req.user.id) return req.user.id;
-    if (req.query && req.query.userId) return req.query.userId;
     if (req.headers && req.headers['x-user-id']) return req.headers['x-user-id'];
+    if (req.query && req.query.userId) return req.query.userId;
     return null;
+};
+
+const isAdminRoleString = (role) => {
+    const r = String(role || '').trim().toLowerCase();
+    return r === 'admin' || r === 'sub-admin' || r === 'subadmin' || r === 'sub_admin' || r === 'primaryadmin' || r === 'superadmin' || r === 'super_admin';
+};
+
+const isDoctorRoleString = (role) => {
+    const r = String(role || '').trim().toLowerCase();
+    return r === 'dentist' || r === 'doctor';
+};
+
+const isClinicRoleString = (role) => {
+    const r = String(role || '').trim().toLowerCase();
+    return r === 'clinic' || r === 'clinic_admin';
+};
+
+/**
+ * Resolve authenticated caller identity (prefer verified req.user; fall back to x-user-id header only if req.user is absent).
+ */
+const resolveCallerIdentity = async (req) => {
+    if (req.user && req.user.id) {
+        return {
+            id: String(req.user.id).trim(),
+            role: String(req.user.role || '').trim(),
+            fromJwt: true
+        };
+    }
+    if (isCloudEnv()) {
+        return null;
+    }
+    const headerUserId = (req.headers && req.headers['x-user-id']) ? String(req.headers['x-user-id']).trim() : '';
+    if (!headerUserId) return null;
+
+    const user = await User.findById(headerUserId).catch(() => null);
+    if (user && user.id) {
+        return {
+            id: String(user.id).trim(),
+            role: String(user.role || '').trim(),
+            fromJwt: false
+        };
+    }
+    const doc = await Dentist.findById(headerUserId).catch(() => null)
+        || await Dentist.findOne({ user_id: headerUserId }).catch(() => null);
+    if (doc) {
+        const linkedUser = doc.user_id ? await User.findById(doc.user_id).catch(() => null) : null;
+        return {
+            id: String(doc.user_id || doc.id || headerUserId).trim(),
+            role: String(linkedUser?.role || 'DOCTOR').trim(),
+            fromJwt: false
+        };
+    }
+    const clinic = await Clinic.findById(headerUserId).catch(() => null)
+        || await Clinic.findOne({ user_id: headerUserId }).catch(() => null);
+    if (clinic) {
+        return {
+            id: String(clinic.user_id || clinic.id || headerUserId).trim(),
+            role: 'Clinic',
+            fromJwt: false
+        };
+    }
+    return { id: headerUserId, role: '', fromJwt: false };
+};
+
+/**
+ * Resolve strict IDs (dentists.id & dentists.user_id ONLY) for a single doctor — never clinic or other doctors.
+ */
+const resolveStrictDoctorIds = async (doctorOrUserId) => {
+    const id = String(doctorOrUserId || '').trim();
+    const allIds = new Set();
+    if (!id) return { dentistId: null, userId: null, allIds };
+    allIds.add(id);
+
+    let doc = await Dentist.findById(id).catch(() => null);
+    if (!doc) {
+        doc = await Dentist.findOne({ user_id: id }).catch(() => null);
+    }
+    if (doc?.id) allIds.add(String(doc.id).trim());
+    if (doc?.user_id) allIds.add(String(doc.user_id).trim());
+
+    return {
+        dentistId: doc?.id ? String(doc.id).trim() : null,
+        userId: doc?.user_id ? String(doc.user_id).trim() : null,
+        allIds
+    };
+};
+
+const isReferralAssignedToDoctor = (ref, doctorIdSet) => {
+    if (!ref || !doctorIdSet || doctorIdSet.size === 0) return false;
+    const primary = ref.doctor_id ? String(ref.doctor_id).trim() : '';
+    const assigned = ref.assigned_doctor_id ? String(ref.assigned_doctor_id).trim() : '';
+    return (primary && doctorIdSet.has(primary)) || (assigned && doctorIdSet.has(assigned));
+};
+
+/**
+ * Enforce backend RBAC & ownership before reading or mutating a referral record.
+ * @returns {Promise<{ ok: true, caller: { id: string, role: string, fromJwt: boolean }, status?: number, message?: string } | { ok: false, status: number, message: string, caller?: any }>}
+ */
+const authorizeReferralAccess = async (req, ref, { forStatusMutation = false } = {}) => {
+    const caller = await resolveCallerIdentity(req);
+    if (!caller || !caller.id) {
+        return { ok: false, status: 401, message: 'Authentication required to access referral records.' };
+    }
+
+    if (isAdminRoleString(caller.role)) {
+        return { ok: true, caller };
+    }
+
+    if (isDoctorRoleString(caller.role)) {
+        const { allIds } = await resolveStrictDoctorIds(caller.id);
+        if (isReferralAssignedToDoctor(ref, allIds)) {
+            return { ok: true, caller };
+        }
+        if (!forStatusMutation) {
+            const refCreatorIds = [ref.referrer_patient_id, ref.referrer_id].filter(Boolean).map(v => String(v).trim());
+            if (refCreatorIds.some(cid => allIds.has(cid))) {
+                return { ok: true, caller };
+            }
+        }
+        return {
+            ok: false,
+            status: 403,
+            message: 'Access Denied: You are not authorized to access or update another doctor\'s patient referral.'
+        };
+    }
+
+    if (isClinicRoleString(caller.role)) {
+        const resolvedClinic = await resolveClinicRecordAndDoctorIds(caller.id);
+        const clinicDocIds = new Set((resolvedClinic?.doctorIds || []).map(String));
+        const refClinicId = ref.clinic_id ? String(ref.clinic_id).trim() : '';
+        const refDocId = String(ref.doctor_id || ref.assigned_doctor_id || '').trim();
+        const belongsToClinic = Boolean(resolvedClinic?.clinicId) && (
+            (refClinicId && refClinicId === String(resolvedClinic.clinicId)) ||
+            (refDocId && clinicDocIds.has(refDocId))
+        );
+        if (belongsToClinic) {
+            return { ok: true, caller };
+        }
+        return {
+            ok: false,
+            status: 403,
+            message: 'Access Denied: This referral belongs to another clinic.'
+        };
+    }
+
+    if (forStatusMutation) {
+        return {
+            ok: false,
+            status: 403,
+            message: 'Access Denied: Only the intended specialist doctor or authorized clinic can update referral status.'
+        };
+    }
+
+    const participantIds = [
+        ref.referrer_patient_id,
+        ref.referrer_id,
+        ref.referred_patient_id,
+        ref.referred_user_id
+    ].filter(Boolean).map(v => String(v).trim());
+    if (participantIds.includes(caller.id)) {
+        return { ok: true, caller };
+    }
+
+    return {
+        ok: false,
+        status: 403,
+        message: 'Access Denied: You are not authorized to view this referral.'
+    };
 };
 
 /**
@@ -46,12 +219,18 @@ const populateReferralData = async (ref) => {
                 doctor = {
                     id: userDoc.id,
                     user_id: userDoc.id,
+                    clinic_id: null,
                     name: userDoc.name,
                     phone: userDoc.phone,
                     city: userDoc.city,
                     pincode: userDoc.pincode,
                     specialty: userDoc.specialty,
+                    speciality: userDoc.specialty,
                     clinic_name: userDoc.clinic_name,
+                    clinics: null,
+                    clinic_address: '',
+                    location: '',
+                    languages: userDoc.languages || ['English'],
                     users: userDoc
                 };
             }
@@ -81,7 +260,7 @@ const populateReferralData = async (ref) => {
     const clinicName = ref.doctor_clinic_name || ref.doctorClinicName || clinic?.clinic_name || doctor?.clinics?.clinic_name || doctor?.clinic_name || 'GS HEALTH Partner Clinic';
 
     let referrerName = referrer?.name || 'Patient Referrer';
-    if (referrer && (referrer.role === 'Dentist' || referrer.role === 'dentist')) {
+    if (referrer && isDoctorRoleString(referrer.role)) {
         if (!referrerName.startsWith('Dr.') && !referrerName.startsWith('Dr ')) {
             referrerName = `Dr. ${referrerName}`;
         }
@@ -106,8 +285,9 @@ const populateReferralData = async (ref) => {
 
         requiredSpecialist: ref.required_specialist || docSpecialty,
         clinicalComplaint: ref.clinical_complaint || '',
-        
+
         doctorId: doctorId,
+        clinicId: ref.clinic_id || doctor?.clinic_id || clinic?.id || null,
         doctorName: formattedDoctorName,
         doctorSpecialty: docSpecialty,
         doctorClinicName: clinicName,
@@ -156,7 +336,7 @@ exports.createReferral = async (req, res) => {
                     loggedInUserId = asDentist.user_id;
                 }
             }
-        } catch (_) {}
+        } catch (_) { }
 
         const {
             referredPatientName,
@@ -210,7 +390,8 @@ exports.createReferral = async (req, res) => {
         }
 
         // Enforce Doctor Availability ON/OFF strictly on backend before creating a new referral
-        const targetReferralDoc = await Dentist.findById(doctorId);
+        const targetReferralDoc = await Dentist.findById(doctorId).catch(() => null)
+            || await Dentist.findOne({ user_id: doctorId }).catch(() => null);
         if (targetReferralDoc && !isDoctorRecordAvailable(targetReferralDoc)) {
             return res.status(409).json({
                 success: false,
@@ -276,12 +457,12 @@ exports.createReferral = async (req, res) => {
         // 3. Fetch Referrer & Doctor Details
         const referrerUser = await User.findById(loggedInUserId);
         let referrerName = referrerUser?.name || 'Patient';
-        if (referrerUser && (referrerUser.role === 'Dentist' || referrerUser.role === 'dentist')) {
+        if (referrerUser && isDoctorRoleString(referrerUser.role)) {
             if (!referrerName.startsWith('Dr.') && !referrerName.startsWith('Dr ')) {
                 referrerName = `Dr. ${referrerName}`;
             }
         }
-        
+
         let doctor = await Dentist.findById(doctorId);
         if (!doctor) doctor = await Dentist.findOne({ user_id: doctorId });
         if (!doctor) doctor = await Dentist.findOne({ id: doctorId });
@@ -291,22 +472,36 @@ exports.createReferral = async (req, res) => {
                 doctor = {
                     id: userDoc.id,
                     user_id: userDoc.id,
+                    clinic_id: null,
                     name: userDoc.name,
                     phone: userDoc.phone,
                     city: userDoc.city,
                     pincode: userDoc.pincode,
                     specialty: userDoc.specialty,
+                    speciality: userDoc.specialty,
                     clinic_name: userDoc.clinic_name,
-                    clinic_address: userDoc.address,
+                    clinics: null,
+                    clinic_address: userDoc.address || '',
+                    location: '',
+                    languages: userDoc.languages || ['English'],
                     users: userDoc
                 };
             }
         }
-        
+
         let clinic = null;
         if (doctor?.clinic_id) {
-            clinic = await Clinic.findById(doctor.clinic_id);
+            clinic = await Clinic.findById(doctor.clinic_id).catch(() => null);
         }
+        const candidateClinicName = (incomingClinicName || clinic?.clinic_name || doctor?.clinics?.clinic_name || doctor?.clinic_name || '').toString().trim();
+        const candidateClinicLower = candidateClinicName.toLowerCase();
+        if (!clinic && candidateClinicName &&
+            candidateClinicLower !== 'gs health partner clinic' &&
+            candidateClinicLower !== 'gs health practice' &&
+            candidateClinicLower !== 'independent practice') {
+            clinic = await Clinic.findOne({ clinic_name: candidateClinicName }).catch(() => null);
+        }
+        const resolvedClinicId = clinic?.id || doctor?.clinic_id || null;
         let doctorName = incomingDocName || doctor?.users?.name || doctor?.name || 'Specialist';
         if (incomingDocName && incomingDocName.trim() && incomingDocName !== 'Dr. Specialist' && incomingDocName !== 'Doctor') {
             doctorName = incomingDocName.trim();
@@ -318,15 +513,16 @@ exports.createReferral = async (req, res) => {
         const formattedDoctorName = (doctorName.toLowerCase().startsWith('dr.') || doctorName.toLowerCase().startsWith('dr '))
             ? doctorName
             : `Dr. ${doctorName}`;
-        const doctorClinic = incomingClinicName || clinic?.clinic_name || doctor?.clinics?.clinic_name || doctor?.clinic_name || 'GS HEALTH Partner Clinic';
+        const doctorClinic = candidateClinicName || 'GS HEALTH Partner Clinic';
         const doctorSpecialty = doctor?.speciality || doctor?.specialty || requiredSpecialist;
         const doctorLocation = incomingLocation || doctor?.clinic_address || doctor?.clinics?.location || clinic?.address || clinic?.location || '';
         const doctorCity = incomingCity || doctor?.city || clinic?.city || '';
         const doctorPincode = incomingPincode || doctor?.pincode || clinic?.pincode || '';
         const doctorPhone = incomingPhone || doctor?.users?.phone || doctor?.phone || '';
 
-        // 4. Create Referral Record (store canonical dentist.id so FK & doctor queries always match)
+        // 4. Create Referral Record (store canonical dentist.id & clinic.id so FK, clinic & doctor queries match)
         const canonicalDoctorId = doctor?.id || doctorId;
+        const referralTimestamp = new Date().toISOString();
         const newReferralRecord = await Referral.create({
             referrer_patient_id: loggedInUserId,
             referred_patient_id: linkedPatientId,
@@ -343,6 +539,7 @@ exports.createReferral = async (req, res) => {
             clinical_complaint: clinicalComplaint.trim(),
             doctor_id: canonicalDoctorId,
             assigned_doctor_id: canonicalDoctorId,
+            clinic_id: resolvedClinicId,
             doctor_name: formattedDoctorName,
             doctor_clinic_name: doctorClinic,
             doctor_location: doctorLocation,
@@ -351,11 +548,15 @@ exports.createReferral = async (req, res) => {
             doctor_phone: doctorPhone,
             status: 'Pending',
             whatsapp_status: 'Pending',
-            referral_date: new Date().toISOString()
+            referral_date: referralTimestamp
         });
 
-        // 5. Create In-App Notifications for Receiving Doctor, Referred Patient & Admin
+        // 5. Create In-App Notifications for Receiving Doctor, Associated Clinic, Referred Patient & Admin
         const doctorRecipientId = doctor?.user_id || doctor?.id || canonicalDoctorId;
+        const refDateOnly = referralTimestamp.split('T')[0];
+        const hasNamedClinic = Boolean(resolvedClinicId) &&
+            doctorClinic.toLowerCase() !== 'gs health partner clinic' &&
+            doctorClinic.toLowerCase() !== 'gs health practice';
         try {
             await Notification.create({
                 recipient_role: 'Dentist',
@@ -363,8 +564,18 @@ exports.createReferral = async (req, res) => {
                 referral_id: newReferralRecord.id,
                 type: 'NEW_REFERRAL',
                 title: 'New Patient Referral',
-                message: `${referrerName} has referred ${referredPatientName.trim()} to you.`
+                message: `You have received a new patient referral for ${referredPatientName.trim()} (${doctorSpecialty})${hasNamedClinic ? ' at ' + doctorClinic : ''} on ${refDateOnly}. Status: Pending.`
             });
+            if (resolvedClinicId) {
+                await Notification.create({
+                    recipient_role: 'Clinic',
+                    recipient_id: resolvedClinicId,
+                    referral_id: newReferralRecord.id,
+                    type: 'clinic_new_referral',
+                    title: 'New Patient Referral',
+                    message: `A patient has referred ${formattedDoctorName}, ${doctorSpecialty} for ${referredPatientName.trim()} on ${refDateOnly}. Status: Pending.`
+                });
+            }
             if (linkedPatientId) {
                 await Notification.create({
                     recipient_role: 'Patient',
@@ -383,15 +594,51 @@ exports.createReferral = async (req, res) => {
                 title: 'New Patient Referral Submitted',
                 message: `${referrerName} referred ${referredPatientName.trim()} to ${formattedDoctorName}.`
             });
-        } catch (_) {}
+        } catch (_) { }
 
-        // Send Push Notification to Doctor if Device Token present
+        // Send Push & Registered Mobile Alerts to Concerned Doctor and Clinic (no simulated SMS/WhatsApp)
         if (doctor?.users?.device_token && typeof doctor.users.device_token === 'string' && !doctor.users.device_token.startsWith('{')) {
             sendPushNotification(
                 doctor.users.device_token,
                 'New Patient Referral',
-                `${referrerName} referred a patient to you.`
-            ).catch(() => {});
+                `${referredPatientName.trim()} referred for ${doctorSpecialty}.`
+            ).catch(() => { });
+        }
+        let doctorMobileAlert = { success: false, providerConfigured: isWhatsAppProviderConfigured(), whatsappStatus: 'NotAttempted' };
+        let clinicMobileAlert = { success: false, providerConfigured: isWhatsAppProviderConfigured(), whatsappStatus: 'NotAttempted' };
+        if (doctorPhone) {
+            doctorMobileAlert = await sendDoctorReferralAlert({
+                doctorPhone,
+                doctorName: formattedDoctorName,
+                patientName: referredPatientName.trim(),
+                specialty: doctorSpecialty,
+                referralDate: refDateOnly,
+                referralId: String(newReferralRecord.id)
+            }).catch(() => doctorMobileAlert);
+        }
+        if (resolvedClinicId) {
+            try {
+                const clinicUser = clinic?.user_id ? await User.findById(clinic.user_id).catch(() => null) : null;
+                const clinicPhone = clinic?.phone || clinicUser?.phone || '';
+                if (clinicUser?.device_token && typeof clinicUser.device_token === 'string' && !clinicUser.device_token.startsWith('{')) {
+                    sendPushNotification(
+                        clinicUser.device_token,
+                        'New Patient Referral',
+                        `Patient ${referredPatientName.trim()} referred to ${formattedDoctorName} (${doctorSpecialty}).`
+                    ).catch(() => { });
+                }
+                if (clinicPhone) {
+                    clinicMobileAlert = await sendClinicReferralAlert({
+                        clinicPhone,
+                        clinicName: doctorClinic,
+                        doctorName: formattedDoctorName,
+                        specialty: doctorSpecialty,
+                        patientName: referredPatientName.trim(),
+                        referralDate: refDateOnly,
+                        referralId: String(newReferralRecord.id)
+                    }).catch(() => clinicMobileAlert);
+                }
+            } catch (_) { }
         }
 
         // 6. Send WhatsApp Notification to REFERRED PATIENT (Section 14 & 17)
@@ -427,7 +674,14 @@ exports.createReferral = async (req, res) => {
             success: true,
             message: 'Referral submitted successfully.',
             referral: populated,
-            whatsappNotification: waResult
+            whatsappNotification: waResult,
+            notificationStatus: {
+                inAppDoctorNotified: true,
+                inAppClinicNotified: Boolean(resolvedClinicId),
+                externalSmsWhatsappConfigured: isWhatsAppProviderConfigured(),
+                doctorMobileAlert,
+                clinicMobileAlert
+            }
         });
     } catch (err) {
         console.error('❌ Error creating referral:', err);
@@ -508,33 +762,49 @@ exports.getMyReferrals = async (req, res) => {
 
 /**
  * 3. GET DOCTOR REFERRALS (Receiving Doctor View)
- * Isolated view: doctor only sees referrals assigned to them (Section 10 & 21)
+ * Strict Doctor Isolation: uses authenticated doctor identity ONLY.
+ * Never returns another doctor's or clinic-wide referrals.
  */
 exports.getDoctorReferrals = async (req, res) => {
     try {
-        const doctorUserId = getUserIdFromReq(req) || req.query.doctorId;
-        if (!doctorUserId) {
-            return res.status(400).json({
+        const caller = await resolveCallerIdentity(req);
+        if (!caller || !caller.id) {
+            return res.status(401).json({
                 success: false,
-                message: 'Doctor ID is required.'
+                message: 'Authentication required to fetch doctor referrals.'
             });
         }
 
-        // Resolve doctor table ID
-        let doctor = await Dentist.findById(doctorUserId);
-        if (!doctor) {
-            doctor = await Dentist.findOne({ user_id: doctorUserId });
+        const callerIsAdmin = isAdminRoleString(caller.role);
+        const callerIsDoctor = !caller.role || isDoctorRoleString(caller.role);
+
+        if (!callerIsAdmin && !callerIsDoctor) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access Denied: Only authorized doctors can access doctor referrals.'
+            });
         }
 
-        const docIds = [doctorUserId];
-        if (doctor?.id) docIds.push(doctor.id);
-        if (doctor?.user_id) docIds.push(doctor.user_id);
+        const requestedDoctorId = (req.query?.doctorId || req.query?.userId || '').toString().trim();
 
-        const allReferrals = await Referral.find();
-        const doctorReferrals = allReferrals.filter(r => {
-            const assigned = r.doctor_id || r.assigned_doctor_id;
-            return docIds.includes(assigned);
-        });
+        let targetLookupId = caller.id;
+        if (callerIsAdmin && requestedDoctorId) {
+            targetLookupId = requestedDoctorId;
+        }
+
+        const { allIds: docIdSet } = await resolveStrictDoctorIds(targetLookupId);
+
+        // Reject attempts by Doctor A to pass ?doctorId=<Doctor B>
+        if (!callerIsAdmin && requestedDoctorId && !docIdSet.has(requestedDoctorId)) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access Denied: You are not authorized to view another doctor\'s patient referrals.'
+            });
+        }
+
+        const idArray = Array.from(docIdSet);
+        const scopedReferrals = await Referral.find({ doctor_id: { $in: idArray } });
+        const doctorReferrals = (scopedReferrals || []).filter(r => isReferralAssignedToDoctor(r, docIdSet));
 
         const populated = [];
         for (const r of doctorReferrals) {
@@ -552,6 +822,72 @@ exports.getDoctorReferrals = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'Failed to fetch doctor referrals: ' + err.message
+        });
+    }
+};
+
+/**
+ * 3b. GET CLINIC REFERRALS (Receiving Clinic View - Strict Multi-Clinic Isolation)
+ */
+exports.getClinicReferrals = async (req, res) => {
+    try {
+        const callerRoleLower = (req.user?.role || '').toString().trim().toLowerCase();
+        const isCallerClinic = callerRoleLower === 'clinic' || callerRoleLower === 'clinic_admin';
+        const rawClinicIdentifier = isCallerClinic
+            ? req.user.id
+            : (req.query.clinicId || req.query.clinicName || getUserIdFromReq(req));
+
+        if (!rawClinicIdentifier) {
+            return res.status(400).json({
+                success: false,
+                message: 'Clinic ID or Clinic Name is required to fetch clinic referrals.'
+            });
+        }
+
+        const resolved = await resolveClinicRecordAndDoctorIds(rawClinicIdentifier);
+        if (!resolved.clinicId) {
+            return res.status(200).json({
+                success: true,
+                count: 0,
+                clinicId: null,
+                clinicName: resolved.clinicName || '',
+                referrals: []
+            });
+        }
+
+        const clinicDocIds = new Set(resolved.doctorIds);
+        const targetClinicLower = resolved.clinicName.toLowerCase();
+        const allReferrals = await Referral.find();
+
+        const clinicReferrals = (allReferrals || []).filter(r => {
+            if (r.clinic_id && String(r.clinic_id) === String(resolved.clinicId)) return true;
+            const assignedDocId = String(r.doctor_id || r.assigned_doctor_id || '').trim();
+            if (assignedDocId && clinicDocIds.has(assignedDocId)) return true;
+            const docClinicId = String(r.doctor?.clinic_id || '').trim();
+            if (docClinicId && docClinicId === String(resolved.clinicId)) return true;
+            const refClinicName = (r.doctor_clinic_name || r.doctorClinicName || r.doctor?.clinics?.clinic_name || '').toString().trim().toLowerCase();
+            if (targetClinicLower && refClinicName && refClinicName === targetClinicLower) return true;
+            return false;
+        });
+
+        const populated = [];
+        for (const r of clinicReferrals) {
+            const item = await populateReferralData(r);
+            if (item) populated.push(item);
+        }
+
+        return res.status(200).json({
+            success: true,
+            count: populated.length,
+            clinicId: resolved.clinicId,
+            clinicName: resolved.clinicName,
+            referrals: populated
+        });
+    } catch (err) {
+        console.error('❌ Error fetching clinic referrals:', err);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to fetch clinic referrals: ' + err.message
         });
     }
 };
@@ -601,7 +937,7 @@ exports.getReferralsForReferredPatient = async (req, res) => {
 };
 
 /**
- * 5. GET SINGLE REFERRAL (Section 11)
+ * 5. GET SINGLE REFERRAL (Section 11 — Enforces Ownership/RBAC)
  */
 exports.getReferralById = async (req, res) => {
     try {
@@ -611,6 +947,14 @@ exports.getReferralById = async (req, res) => {
             return res.status(404).json({
                 success: false,
                 message: 'Referral not found.'
+            });
+        }
+
+        const auth = await authorizeReferralAccess(req, ref, { forStatusMutation: false });
+        if (!auth.ok) {
+            return res.status(auth.status || 403).json({
+                success: false,
+                message: auth.message
             });
         }
 
@@ -628,7 +972,7 @@ exports.getReferralById = async (req, res) => {
 };
 
 /**
- * 6. ACCEPT REFERRAL (Doctor Accepts Referral - Section 12 & 15)
+ * 6. ACCEPT REFERRAL (Intended Doctor or Authorized Clinic Only - Section 12 & 15)
  */
 exports.acceptReferral = async (req, res) => {
     try {
@@ -640,6 +984,11 @@ exports.acceptReferral = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Referral not found.' });
         }
 
+        const auth = await authorizeReferralAccess(req, ref, { forStatusMutation: true });
+        if (!auth.ok) {
+            return res.status(auth.status || 403).json({ success: false, message: auth.message });
+        }
+
         // 1. Update status to Accepted
         const updated = await Referral.findByIdAndUpdate(referralId, {
             status: 'Accepted',
@@ -649,11 +998,17 @@ exports.acceptReferral = async (req, res) => {
         // 1b. Ensure consultation appointment exists for this accepted referral
         const patientId = ref.referred_patient_id || ref.referred_user_id;
         const doctorId = ref.doctor_id || ref.assigned_doctor_id;
+        let docClinicId = ref.clinic_id || null;
+        if (!docClinicId && doctorId) {
+            const docRec = await Dentist.findById(doctorId).catch(() => null);
+            docClinicId = docRec?.clinic_id || null;
+        }
         if (patientId && doctorId) {
             try {
                 const appt = await Appointment.create({
                     patient_id: patientId,
                     dentist_id: doctorId,
+                    clinic_id: docClinicId,
                     appointment_date: new Date().toISOString().split('T')[0],
                     time_slot: confirmedTimeSlot || '10:00 AM',
                     treatment: ref.required_specialist || 'Specialist Consultation',
@@ -668,7 +1023,10 @@ exports.acceptReferral = async (req, res) => {
             }
         }
 
-        const populated = await populateReferralData(updated);
+        const populated = await populateReferralData(updated || ref);
+        if (!populated) {
+            return res.status(500).json({ success: false, message: 'Failed to populate accepted referral.' });
+        }
 
         // 2. Notify Referrer Patient (Section 12)
         const referrerId = ref.referrer_patient_id || ref.referrer_id;
@@ -684,7 +1042,7 @@ exports.acceptReferral = async (req, res) => {
         }
 
         // 3. Send WhatsApp Notification to REFERRED PATIENT (Section 15)
-        let waResult = { success: false };
+        let waResult = { success: false, whatsappStatus: 'Pending' };
         try {
             waResult = await sendReferralAcceptedWhatsApp({
                 referredPatientName: populated.referredPatientName,
@@ -714,7 +1072,7 @@ exports.acceptReferral = async (req, res) => {
 };
 
 /**
- * 7. REJECT REFERRAL (Doctor Rejects Referral - Section 13 & 16)
+ * 7. REJECT REFERRAL (Intended Doctor or Authorized Clinic Only - Section 13 & 16)
  */
 exports.rejectReferral = async (req, res) => {
     try {
@@ -727,13 +1085,21 @@ exports.rejectReferral = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Referral not found.' });
         }
 
+        const auth = await authorizeReferralAccess(req, ref, { forStatusMutation: true });
+        if (!auth.ok) {
+            return res.status(auth.status || 403).json({ success: false, message: auth.message });
+        }
+
         // 1. Update status to Rejected with reason
         const updated = await Referral.findByIdAndUpdate(referralId, {
             status: 'Rejected',
             rejection_reason: finalReason
         });
 
-        const populated = await populateReferralData(updated);
+        const populated = await populateReferralData(updated || ref);
+        if (!populated) {
+            return res.status(500).json({ success: false, message: 'Failed to populate rejected referral.' });
+        }
 
         // 2. Notify Referrer Patient (Section 13)
         const referrerId = ref.referrer_patient_id || ref.referrer_id;
@@ -749,7 +1115,7 @@ exports.rejectReferral = async (req, res) => {
         }
 
         // 3. Send WhatsApp Notification to REFERRED PATIENT (Section 16)
-        let waResult = { success: false };
+        let waResult = { success: false, whatsappStatus: 'Pending' };
         try {
             waResult = await sendReferralRejectedWhatsApp({
                 referredPatientName: populated.referredPatientName,
@@ -815,13 +1181,18 @@ exports.checkPatientExists = async (req, res) => {
 };
 
 /**
- * 9. NOTIFY WHATSAPP MANUAL TRIGGER (Section 25)
+ * 9. NOTIFY WHATSAPP MANUAL TRIGGER (Section 25 — Owner RBAC enforced)
  */
 exports.notifyWhatsApp = async (req, res) => {
     try {
         const { referralId } = req.params;
         const ref = await Referral.findById(referralId);
         if (!ref) return res.status(404).json({ success: false, message: 'Referral not found' });
+
+        const auth = await authorizeReferralAccess(req, ref, { forStatusMutation: false });
+        if (!auth.ok) {
+            return res.status(auth.status || 403).json({ success: false, message: auth.message });
+        }
 
         const populated = await populateReferralData(ref);
         const waResult = await sendNewReferralWhatsApp({
@@ -852,10 +1223,24 @@ exports.notifyWhatsApp = async (req, res) => {
 };
 
 /**
- * 10. GET ALL REFERRALS (Admin Management Table)
+ * 10. GET ALL REFERRALS (Admin Management Table — Strictly Admin/Sub-Admin Only)
  */
 exports.getAllReferralsAdmin = async (req, res) => {
     try {
+        const caller = await resolveCallerIdentity(req);
+        if (!caller || !caller.id) {
+            return res.status(401).json({
+                success: false,
+                message: 'Authentication required for admin referrals.'
+            });
+        }
+        if (!isAdminRoleString(caller.role)) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access Denied: Only Admins may retrieve platform-wide referrals.'
+            });
+        }
+
         const rawReferrals = await Referral.find();
         const populatedList = [];
 
@@ -879,12 +1264,26 @@ exports.getAllReferralsAdmin = async (req, res) => {
 };
 
 /**
- * 11. GET ADMIN REFERRAL GROWTH ANALYTICS
+ * 11. GET ADMIN REFERRAL GROWTH ANALYTICS (Strictly Admin/Sub-Admin Only)
  */
 exports.getAdminReferralAnalytics = async (req, res) => {
     try {
+        const caller = await resolveCallerIdentity(req);
+        if (!caller || !caller.id) {
+            return res.status(401).json({
+                success: false,
+                message: 'Authentication required for admin referral analytics.'
+            });
+        }
+        if (!isAdminRoleString(caller.role)) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access Denied: Only Admins may view platform referral analytics.'
+            });
+        }
+
         const rawReferrals = await Referral.find();
-        
+
         let totalReferrals = rawReferrals.length;
         let totalRegistered = 0;
         let totalConsultations = 0;
@@ -968,12 +1367,19 @@ exports.deleteReferral = async (req, res) => {
 
         const ref = await Referral.findById(referralId);
         if (ref) {
+            const auth = await authorizeReferralAccess(req, ref, { forStatusMutation: false });
+            if (!auth.ok) {
+                return res.status(auth.status || 403).json({
+                    success: false,
+                    message: auth.message
+                });
+            }
             await Referral.findByIdAndDelete(referralId);
         } else {
             // Also attempt deletion on patient_problem_requests
             try {
                 await PatientProblemRequest.findByIdAndDelete(referralId);
-            } catch (_) {}
+            } catch (_) { }
         }
 
         return res.status(200).json({
@@ -988,4 +1394,3 @@ exports.deleteReferral = async (req, res) => {
         });
     }
 };
-

@@ -11,6 +11,8 @@ import 'package:http/testing.dart';
 
 void main() {
   tearDown(() {
+    ApiConstants.debugBaseUrlOverride = null;
+    ApiConstants.debugAllowOnScreenOtpOverride = null;
     SupabaseService.resetForTesting();
   });
 
@@ -216,6 +218,76 @@ void main() {
       // Static source check confirming the hardcoded localhost fallback was removed
       final apiServiceSource = File('lib/core/services/api_service.dart').readAsStringSync();
       expect(apiServiceSource.contains('http://localhost:5000/api/v1/clinics'), isFalse);
+    });
+
+    test('6. Staging TEST_API_URL resolves cloud testing URL without localhost fallback in requestOtp/verifyOtp', () async {
+      final stagingUrl = ApiConstants.resolveBaseUrl(
+        isRelease: false,
+        isDebug: true,
+        isWeb: false,
+        platform: TargetPlatform.android,
+        testApiUrl: ApiConstants.stagingBackendUrl,
+        localApiUrl: '',
+      );
+      expect(stagingUrl, 'https://dentaguru-backend-test.onrender.com/api/v1');
+
+      ApiConstants.debugBaseUrlOverride = stagingUrl;
+      ApiConstants.debugAllowOnScreenOtpOverride = true;
+      expect(ApiConstants.isUsingLocalhostBackend, isFalse);
+
+      final otpCandidates = ApiService.candidateEndpointUrls('/auth/otp/request');
+      expect(otpCandidates.length, 1);
+      expect(
+        otpCandidates.first.toString(),
+        'https://dentaguru-backend-test.onrender.com/api/v1/auth/otp/request',
+      );
+      expect(otpCandidates.any((u) => u.host == 'localhost' || u.host == '127.0.0.1'), isFalse);
+
+      // Staging requestOtp calls ONLY staging backend & returns on-screen OTP
+      final attemptedUrls = <Uri>[];
+      final stagingOtpClient = MockClient((request) async {
+        attemptedUrls.add(request.url);
+        return http.Response(
+          jsonEncode({
+            'success': true,
+            'message': 'Verification code ready on screen (testing mode).',
+            'otp': '654321',
+            'deliveryMode': 'on_screen',
+            'isAdmin': false,
+          }),
+          200,
+        );
+      });
+
+      final otpResult = await ApiService().requestOtp(
+        phone: '9281030535',
+        client: stagingOtpClient,
+      );
+      expect(otpResult['success'], isTrue);
+      expect(otpResult['deliveryMode'], 'on_screen');
+      expect(otpResult['otp'], '654321');
+      expect(attemptedUrls.length, 1);
+      expect(
+        attemptedUrls.first.toString(),
+        'https://dentaguru-backend-test.onrender.com/api/v1/auth/otp/request',
+      );
+
+      // On network failure against cloud staging URL, must NOT retry localhost or generate local fake OTP
+      final failedUrls = <Uri>[];
+      final failClient = MockClient((request) async {
+        failedUrls.add(request.url);
+        throw const SocketException('Staging unreachable');
+      });
+
+      final failResult = await ApiService().requestOtp(
+        phone: '9281030535',
+        client: failClient,
+      );
+      expect(failResult['success'], isFalse);
+      expect(failResult['otp'], isNull);
+      expect(failResult['message'], contains('Unable to reach testing OTP backend'));
+      expect(failedUrls.length, 1);
+      expect(failedUrls.first.host, 'dentaguru-backend-test.onrender.com');
     });
   });
 }
