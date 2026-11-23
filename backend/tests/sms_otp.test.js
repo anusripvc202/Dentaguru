@@ -1413,11 +1413,23 @@ async function runTests() {
         const Schemas = require('../src/models/Schemas');
         const { getJwtSecret } = require('../src/config/secrets');
 
-        // 40A: CORS allowlist evaluator
+        // 40A: CORS allowlist & staging loopback preflight evaluator
+        const corsMiddleware = require('cors');
+        const expressLib = require('express');
         const cloudNoOriginEval = app.buildCorsOriginEvaluator({ NODE_ENV: 'production', CORS_ORIGIN: '' });
         let corsAllowed = null;
         cloudNoOriginEval('https://evil.example.com', (err, allow) => { corsAllowed = !err && allow; });
         assert.strictEqual(corsAllowed, false, 'Unlisted browser origin must be blocked in production when CORS_ORIGIN is empty');
+        cloudNoOriginEval('http://localhost:54321', (err, allow) => { corsAllowed = !err && allow; });
+        assert.strictEqual(corsAllowed, false, 'Production must block localhost origins when CORS_ORIGIN is empty');
+
+        const stagingNoOriginEval = app.buildCorsOriginEvaluator({ NODE_ENV: 'staging', CORS_ORIGIN: '' });
+        stagingNoOriginEval('http://localhost:54321', (err, allow) => { corsAllowed = !err && allow; });
+        assert.strictEqual(corsAllowed, true, 'Staging must allow Flutter Web localhost origin');
+        stagingNoOriginEval('http://127.0.0.1:61234', (err, allow) => { corsAllowed = !err && allow; });
+        assert.strictEqual(corsAllowed, true, 'Staging must allow Flutter Web 127.0.0.1 origin');
+        stagingNoOriginEval('https://attacker.example.com', (err, allow) => { corsAllowed = !err && allow; });
+        assert.strictEqual(corsAllowed, false, 'Staging must block untrusted public origins');
 
         const cloudAllowlistEval = app.buildCorsOriginEvaluator({
             NODE_ENV: 'staging',
@@ -1425,8 +1437,55 @@ async function runTests() {
         });
         cloudAllowlistEval('https://staging.gshealth.in', (err, allow) => { corsAllowed = !err && allow; });
         assert.strictEqual(corsAllowed, true, 'Allowlisted origin must be permitted');
+        cloudAllowlistEval('http://localhost:54321', (err, allow) => { corsAllowed = !err && allow; });
+        assert.strictEqual(corsAllowed, true, 'Staging allowlist still permits local Flutter Web loopback origin');
         cloudAllowlistEval('https://attacker.example.com', (err, allow) => { corsAllowed = !err && allow; });
         assert.strictEqual(corsAllowed, false, 'Non-allowlisted origin must be rejected');
+
+        // Verify live OPTIONS preflight in staging returns 204 + Access-Control-Allow-Origin + x-staging-otp-key (never 500)
+        const stagingApp = expressLib();
+        const stagingCorsOpts = {
+            origin: app.buildCorsOriginEvaluator({ NODE_ENV: 'staging', CORS_ORIGIN: '' }),
+            methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+            allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With', 'x-user-id', 'X-User-Id', 'x-staging-otp-key', 'X-Staging-Otp-Key'],
+            credentials: true,
+        };
+        stagingApp.use(corsMiddleware(stagingCorsOpts));
+        stagingApp.options('*', corsMiddleware(stagingCorsOpts));
+        const preflightServer = httpModule.createServer(stagingApp);
+        await new Promise((resolve) => preflightServer.listen(0, '127.0.0.1', resolve));
+        try {
+            const pPort = preflightServer.address().port;
+            const runOptions = (origin) => new Promise((resolve, reject) => {
+                const req = httpModule.request({
+                    hostname: '127.0.0.1',
+                    port: pPort,
+                    path: '/api/v1/auth/otp/request',
+                    method: 'OPTIONS',
+                    headers: {
+                        Origin: origin,
+                        'Access-Control-Request-Method': 'POST',
+                        'Access-Control-Request-Headers': 'content-type,x-staging-otp-key',
+                    },
+                }, (res) => {
+                    res.resume();
+                    res.on('end', () => resolve({ status: res.statusCode, headers: res.headers }));
+                });
+                req.on('error', reject);
+                req.end();
+            });
+
+            const localPreflight = await runOptions('http://localhost:54321');
+            assert.strictEqual(localPreflight.status, 204);
+            assert.strictEqual(localPreflight.headers['access-control-allow-origin'], 'http://localhost:54321');
+            assert.ok(String(localPreflight.headers['access-control-allow-headers'] || '').toLowerCase().includes('x-staging-otp-key'));
+
+            const evilPreflight = await runOptions('https://attacker.example.com');
+            assert.notStrictEqual(evilPreflight.status, 500, 'Disallowed origin must never trigger 500 Internal Server Error');
+            assert.strictEqual(evilPreflight.headers['access-control-allow-origin'], undefined);
+        } finally {
+            await new Promise((resolve) => preflightServer.close(resolve));
+        }
 
         // 40B: Patient, Clinic, Dentist, and Specialty administrative route protections
         const origFindById = Schemas.User.findById;

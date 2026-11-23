@@ -225,9 +225,9 @@ void main() {
       final stagingUrl = ApiConstants.resolveBaseUrl(
         isRelease: false,
         isDebug: true,
-        isWeb: false,
+        isWeb: true,
         platform: TargetPlatform.android,
-        testApiUrl: ApiConstants.stagingBackendUrl,
+        testApiUrl: '${ApiConstants.stagingBackendUrl}/',
         localApiUrl: '',
       );
       expect(stagingUrl, 'https://dentaguru-backend-test.onrender.com/api/v1');

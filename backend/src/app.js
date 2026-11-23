@@ -12,6 +12,11 @@ app.set('trust proxy', 1);
 // ─────────────────────────────────────────────
 // 1. CORS & PARSING MIDDLEWARE
 // ─────────────────────────────────────────────
+function isLoopbackOrigin(origin) {
+    if (!origin) return false;
+    return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(String(origin).trim());
+}
+
 function buildCorsOriginEvaluator(env = process.env) {
     const rawOrigins = (env.CORS_ORIGIN || '').trim();
     const allowlist = rawOrigins
@@ -20,14 +25,20 @@ function buildCorsOriginEvaluator(env = process.env) {
         .filter(o => o.length > 0 && o !== '*');
 
     const nodeEnv = (env.NODE_ENV || 'development').trim().toLowerCase();
-    const isCloud = nodeEnv === 'production' || nodeEnv === 'staging';
+    const isStaging = nodeEnv === 'staging';
+    const isCloud = nodeEnv === 'production' || isStaging;
 
     if (allowlist.length === 0) {
         if (isCloud && rawOrigins !== '*') {
-            console.warn(`⚠️ [${nodeEnv}] CORS_ORIGIN is not set; browser cross-origin requests will be restricted to native mobile/non-origin clients.`);
+            if (!isStaging) {
+                console.warn(`⚠️ [${nodeEnv}] CORS_ORIGIN is not set; browser cross-origin requests will be restricted to native mobile/non-origin clients.`);
+            }
             return (origin, callback) => {
                 if (!origin) return callback(null, true);
-                return callback(new Error('Origin not allowed by CORS policy.'), false);
+                if (isStaging && isLoopbackOrigin(origin)) {
+                    return callback(null, true);
+                }
+                return callback(null, false);
             };
         }
         return '*';
@@ -36,10 +47,10 @@ function buildCorsOriginEvaluator(env = process.env) {
     return (origin, callback) => {
         if (!origin) return callback(null, true);
         const normalized = origin.trim().replace(/\/+$/, '');
-        if (allowlist.includes(normalized)) {
+        if (allowlist.includes(normalized) || (isStaging && isLoopbackOrigin(normalized))) {
             return callback(null, true);
         }
-        return callback(new Error('Origin not allowed by CORS policy.'), false);
+        return callback(null, false);
     };
 }
 

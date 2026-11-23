@@ -136,7 +136,8 @@ class ApiConstants {
     if (!isRelease) {
       final TargetPlatform effectivePlatform = platform ?? defaultTargetPlatform;
       final bool isAndroidNative = !isWeb && effectivePlatform == TargetPlatform.android;
-      final String configured = testApiUrl.trim().isNotEmpty ? testApiUrl.trim() : localApiUrl.trim();
+      final String configured = (testApiUrl.trim().isNotEmpty ? testApiUrl.trim() : localApiUrl.trim())
+          .replaceAll(RegExp(r'/+$'), '');
       if (configured.isNotEmpty) {
         if (isAndroidNative && configured.contains('://localhost:')) {
           return configured.replaceFirst('://localhost:', '://10.0.2.2:');

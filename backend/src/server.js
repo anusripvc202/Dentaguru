@@ -46,11 +46,20 @@ function resolveKeepAliveUrl(env = process.env) {
 }
 
 function getSocketCorsOrigin(env = process.env) {
+    const nodeEnv = (env.NODE_ENV || 'development').trim().toLowerCase();
     const raw = (env.CORS_ORIGIN || '').trim();
+    const loopbackRegex = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
     if (!raw || raw === '*') {
-        return isCloudEnv(env) ? false : '*';
+        if (nodeEnv === 'staging') {
+            return [loopbackRegex];
+        }
+        return nodeEnv === 'production' ? false : '*';
     }
-    return raw.split(',').map(s => s.trim().replace(/\/+$/, '')).filter(Boolean);
+    const configured = raw.split(',').map(s => s.trim().replace(/\/+$/, '')).filter(Boolean);
+    if (nodeEnv === 'staging') {
+        return [...configured, loopbackRegex];
+    }
+    return configured;
 }
 
 function startServer() {
