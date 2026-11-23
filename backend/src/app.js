@@ -46,7 +46,7 @@ function buildCorsOriginEvaluator(env = process.env) {
 const corsOptions = {
     origin: buildCorsOriginEvaluator(process.env),
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With', 'x-user-id', 'X-User-Id'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With', 'x-user-id', 'X-User-Id', 'x-staging-otp-key', 'X-Staging-Otp-Key'],
     credentials: true
 };
 app.use(cors(corsOptions));

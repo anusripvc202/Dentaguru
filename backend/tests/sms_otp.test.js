@@ -903,13 +903,14 @@ async function runTests() {
         assert.strictEqual(prodCfg.supabaseUrl, 'https://fommrwxpqzkcktweosgp.supabase.co');
     });
 
-    await asyncTest('33. Staging on-screen OTP allowlist permits approved numbers (zero SMS) and blocks others; production always disables on-screen OTP', async () => {
+    await asyncTest('33. Staging dynamic on-screen OTP accepts any valid phone with STAGING_OTP_ACCESS_KEY (zero SMS), rejects missing/bad key, and production disables it', async () => {
         const { isOnScreenOtpTestMode, isPhoneAllowedForOnScreenOtp } = require('../src/services/otpStoreService');
         const auth = require('../src/controllers/authController');
 
         const prevEnv = process.env.NODE_ENV;
         const prevMode = process.env.OTP_DELIVERY_MODE;
         const prevAllowlist = process.env.ON_SCREEN_OTP_ALLOWLIST;
+        const prevStagingKey = process.env.STAGING_OTP_ACCESS_KEY;
         const prevAdminPhone = process.env.ADMIN_PHONE;
         const prevHttpsRequest = https.request;
         const prevClient = otpStoreService.supabaseClient;
@@ -943,10 +944,12 @@ async function runTests() {
             }
         };
 
+        const stagingKeyValue = 'staging_secret_key_for_dynamic_otp_tests_2026!';
         try {
             process.env.NODE_ENV = 'staging';
             process.env.OTP_DELIVERY_MODE = 'on_screen';
-            process.env.ON_SCREEN_OTP_ALLOWLIST = '+919281030535, 9000000088';
+            delete process.env.ON_SCREEN_OTP_ALLOWLIST;
+            process.env.STAGING_OTP_ACCESS_KEY = stagingKeyValue;
             process.env.ADMIN_PHONE = '9281030535';
             process.env.SUPABASE_URL = 'https://ojinzcdldwugpnxrnjcq.supabase.co';
             process.env.SUPABASE_SERVICE_ROLE_KEY = 'staging_service_role_fixture';
@@ -954,35 +957,105 @@ async function runTests() {
             process.env.OTP_SALT = 'strong_staging_otp_salt_for_test_33_allowlist!';
 
             assert.strictEqual(isOnScreenOtpTestMode(), true);
-            assert.strictEqual(isPhoneAllowedForOnScreenOtp('9281030535'), true);
-            assert.strictEqual(isPhoneAllowedForOnScreenOtp('+91 9000000088'), true);
-            assert.strictEqual(isPhoneAllowedForOnScreenOtp('9888877777'), false);
+            // Dynamic mobile numbers (no fixed allowlist in staging)
+            assert.strictEqual(isPhoneAllowedForOnScreenOtp('9888877777'), true);
+            assert.strictEqual(isPhoneAllowedForOnScreenOtp('+91 7012345678'), true);
+            assert.strictEqual(isPhoneAllowedForOnScreenOtp('12345'), false);
 
-            // Approved test number receives on-screen OTP without calling Fast2SMS/Twilio
+            // 1. Missing or invalid staging key header MUST be rejected with 403 and expose ZERO OTP
             let status = 200;
             let body = null;
             await auth.requestOTP(
-                { body: { phone: '9000000088' } },
+                { body: { phone: '9888877777' }, headers: {} },
                 { status(c) { status = c; return this; }, json(b) { body = b; return this; } }
             );
-            assert.strictEqual(status, 200);
-            assert.strictEqual(body.success, true);
-            assert.strictEqual(body.deliveryMode, 'on_screen');
-            assert.match(String(body.otp), /^\d{6}$/);
-            assert.strictEqual(smsDispatchAttempted, false, 'Zero external SMS requests should run in staging on-screen mode');
+            assert.strictEqual(status, 403);
+            assert.strictEqual(body.success, false);
+            assert.strictEqual(body.code, 'STAGING_OTP_KEY_REQUIRED');
+            assert.strictEqual(body.otp, undefined);
 
-            // Unlisted number in staging with allowlist MUST be rejected with 403 and NEVER expose OTP
             status = 200;
             body = null;
             await auth.requestOTP(
-                { body: { phone: '9888877777' } },
+                { body: { phone: '9888877777' }, headers: { 'x-staging-otp-key': 'wrong-key-value' } },
                 { status(c) { status = c; return this; }, json(b) { body = b; return this; } }
             );
             assert.strictEqual(status, 403);
             assert.strictEqual(body.success, false);
             assert.strictEqual(body.otp, undefined);
 
-            // Production NEVER allows on-screen OTP even if env vars try to turn it on
+            // 2. Arbitrary valid mobile number with valid staging key receives on-screen OTP without calling Fast2SMS/Twilio
+            for (const testPhone of ['9888877777', '+917012345678']) {
+                status = 200;
+                body = null;
+                await auth.requestOTP(
+                    { body: { phone: testPhone }, headers: { 'x-staging-otp-key': stagingKeyValue } },
+                    { status(c) { status = c; return this; }, json(b) { body = b; return this; } }
+                );
+                assert.strictEqual(status, 200);
+                assert.strictEqual(body.success, true);
+                assert.strictEqual(body.deliveryMode, 'on_screen');
+                assert.match(String(body.otp), /^\d{6}$/);
+                assert.strictEqual(smsDispatchAttempted, false, 'Zero external SMS requests should run in staging on-screen mode');
+
+                // Verify HMAC-hashed single-use OTP check works end-to-end
+                const v1 = await otpStoreService.verifyOtp(testPhone, body.otp);
+                assert.strictEqual(v1.valid, true);
+                const v2 = await otpStoreService.verifyOtp(testPhone, body.otp);
+                assert.strictEqual(v2.valid, false, 'Replay attempt must be rejected');
+            }
+
+            // 3. Staging OTP rate-limit/cooldown & forgotPassword staging key guard
+            const Schemas = require('../src/models/Schemas');
+            const origFindOne = Schemas.User.findOne;
+            const origRpc = otpStoreService.supabaseClient.rpc;
+            try {
+                Schemas.User.findOne = async () => ({ id: 'u-reset-1', phone: '9888877777', email: 'u@test.local' });
+                otpStoreService.supabaseClient = {
+                    rpc: async (fnName, params) => {
+                        if (fnName === 'request_otp_challenge') {
+                            if (params.p_identifier === '9777766666') {
+                                return { data: { allowed: false, status: 429, reason: 'COOLDOWN', message: 'Please wait 30 seconds.' }, error: null };
+                            }
+                            return { data: { allowed: true, status: 200, requestCount: 1 }, error: null };
+                        }
+                        return { data: { allowed: true }, error: null };
+                    }
+                };
+
+                // Cooldown preserved in staging
+                status = 200; body = null;
+                await auth.requestOTP(
+                    { body: { phone: '9777766666' }, headers: { 'x-staging-otp-key': stagingKeyValue } },
+                    { status(c) { status = c; return this; }, json(b) { body = b; return this; } }
+                );
+                assert.strictEqual(status, 429);
+                assert.strictEqual(body.otp, undefined);
+
+                // forgotPassword rejects missing staging key with 403 and serves OTP with valid key (zero SMS)
+                status = 200; body = null;
+                await auth.forgotPassword(
+                    { body: { phone: '9888877777' }, headers: {} },
+                    { status(c) { status = c; return this; }, json(b) { body = b; return this; } }
+                );
+                assert.strictEqual(status, 403);
+                assert.strictEqual(body.otp, undefined);
+
+                status = 200; body = null;
+                await auth.forgotPassword(
+                    { body: { phone: '9888877777' }, headers: { 'x-staging-otp-key': stagingKeyValue } },
+                    { status(c) { status = c; return this; }, json(b) { body = b; return this; } }
+                );
+                assert.strictEqual(status, 200);
+                assert.strictEqual(body.deliveryMode, 'on_screen');
+                assert.match(String(body.otp), /^\d{6}$/);
+                assert.strictEqual(smsDispatchAttempted, false);
+            } finally {
+                Schemas.User.findOne = origFindOne;
+                otpStoreService.supabaseClient = { rpc: origRpc };
+            }
+
+            // 4. Even with STAGING_OTP_ACCESS_KEY set, production NEVER activates on-screen OTP
             process.env.NODE_ENV = 'production';
             process.env.OTP_DELIVERY_MODE = 'on_screen';
             assert.strictEqual(isOnScreenOtpTestMode(), false);
@@ -993,6 +1066,7 @@ async function runTests() {
             if (prevEnv !== undefined) process.env.NODE_ENV = prevEnv; else delete process.env.NODE_ENV;
             if (prevMode !== undefined) process.env.OTP_DELIVERY_MODE = prevMode; else delete process.env.OTP_DELIVERY_MODE;
             if (prevAllowlist !== undefined) process.env.ON_SCREEN_OTP_ALLOWLIST = prevAllowlist; else delete process.env.ON_SCREEN_OTP_ALLOWLIST;
+            if (prevStagingKey !== undefined) process.env.STAGING_OTP_ACCESS_KEY = prevStagingKey; else delete process.env.STAGING_OTP_ACCESS_KEY;
             if (prevAdminPhone !== undefined) process.env.ADMIN_PHONE = prevAdminPhone; else delete process.env.ADMIN_PHONE;
             if (prevSupaUrl !== undefined) process.env.SUPABASE_URL = prevSupaUrl; else delete process.env.SUPABASE_URL;
             if (prevSupaService !== undefined) process.env.SUPABASE_SERVICE_ROLE_KEY = prevSupaService; else delete process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -1006,10 +1080,20 @@ async function runTests() {
             getJwtSecret,
             getRefreshSecret,
             getOtpSalt,
+            getStagingOtpAccessKey,
+            isAuthorizedStagingOtpRequest,
             validateCloudSecuritySecrets,
         } = require('../src/config/secrets');
 
         assert.throws(() => validateCloudSecuritySecrets({ NODE_ENV: 'staging' }), /Missing or weak JWT_SECRET/);
+        assert.throws(() => validateCloudSecuritySecrets({
+            NODE_ENV: 'staging',
+            OTP_DELIVERY_MODE: 'on_screen',
+            JWT_SECRET: 'strong_jwt_secret_value_for_tests_32chars!',
+            REFRESH_SECRET: 'strong_refresh_secret_value_for_tests_32chars',
+            OTP_SALT: 'strong_otp_salt_value_for_tests_32chars',
+        }), /Missing or weak STAGING_OTP_ACCESS_KEY/);
+
         assert.throws(() => validateCloudSecuritySecrets({
             NODE_ENV: 'production',
             JWT_SECRET: 'supersecretjwtkey123',
@@ -1022,16 +1106,33 @@ async function runTests() {
             OTP_SALT: 'gs_health_otp_salt_2026',
         }), /Missing or weak OTP_SALT/);
 
+        // Production never exposes or accepts STAGING_OTP_ACCESS_KEY
+        assert.strictEqual(getStagingOtpAccessKey({
+            NODE_ENV: 'production',
+            STAGING_OTP_ACCESS_KEY: 'staging_secret_should_never_activate_in_prod!',
+        }), null);
+
         const strongEnv = {
             NODE_ENV: 'staging',
+            OTP_DELIVERY_MODE: 'on_screen',
             JWT_SECRET: 'strong_test_jwt_secret_minimum_length_32chars!',
             REFRESH_SECRET: 'strong_test_refresh_secret_minimum_length_32!',
             OTP_SALT: 'strong_test_otp_salt_minimum_length_32chars!!',
+            STAGING_OTP_ACCESS_KEY: 'strong_staging_otp_access_key_32chars_min!!',
         };
         assert.strictEqual(getJwtSecret(strongEnv), strongEnv.JWT_SECRET);
         assert.strictEqual(getRefreshSecret(strongEnv), strongEnv.REFRESH_SECRET);
         assert.strictEqual(getOtpSalt(strongEnv), strongEnv.OTP_SALT);
+        assert.strictEqual(getStagingOtpAccessKey(strongEnv), strongEnv.STAGING_OTP_ACCESS_KEY);
         assert.strictEqual(validateCloudSecuritySecrets(strongEnv), true);
+        assert.strictEqual(
+            isAuthorizedStagingOtpRequest({ headers: { 'x-staging-otp-key': strongEnv.STAGING_OTP_ACCESS_KEY } }, strongEnv).authorized,
+            true
+        );
+        assert.strictEqual(
+            isAuthorizedStagingOtpRequest({ headers: { 'x-staging-otp-key': 'wrong_key' } }, strongEnv).authorized,
+            false
+        );
 
         // Non-cloud dev/test returns non-empty cryptographic ephemeral secret when unset
         const devJwt = getJwtSecret({ NODE_ENV: 'development' });
@@ -1397,7 +1498,8 @@ async function runTests() {
         assert.ok(renderYaml.includes('value: production'), 'Production service must set NODE_ENV=production');
         assert.ok(renderYaml.includes('value: staging'), 'Testing service must set NODE_ENV=staging');
         assert.ok(renderYaml.includes('key: OTP_DELIVERY_MODE\n        value: on_screen'), 'Testing service must set OTP_DELIVERY_MODE=on_screen');
-        assert.ok(renderYaml.includes('key: ON_SCREEN_OTP_ALLOWLIST\n        sync: false'), 'Testing service must declare ON_SCREEN_OTP_ALLOWLIST');
+        assert.ok(renderYaml.includes('key: STAGING_OTP_ACCESS_KEY\n        sync: false'), 'Testing service must declare STAGING_OTP_ACCESS_KEY');
+        assert.ok(!renderYaml.includes('ON_SCREEN_OTP_ALLOWLIST'), 'Staging render config must not restrict phones via ON_SCREEN_OTP_ALLOWLIST');
         assert.ok(!renderYaml.includes('fommrwxpqzkcktweosgp'), 'render.yaml must never hardcode Supabase project refs or secrets');
     });
 

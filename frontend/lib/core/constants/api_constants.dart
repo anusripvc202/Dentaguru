@@ -34,6 +34,10 @@ class ApiConstants {
   static const String _testSupabaseUrl = String.fromEnvironment('TEST_SUPABASE_URL', defaultValue: '');
   static const String _testSupabaseAnonKey = String.fromEnvironment('TEST_SUPABASE_ANON_KEY', defaultValue: '');
 
+  /// Staging-only OTP access key supplied via --dart-define=STAGING_OTP_ACCESS_KEY=... for internal staging QA builds ONLY.
+  /// Never hardcoded in source code and never compiled/sent in public release builds (`kReleaseMode`).
+  static const String _stagingOtpAccessKey = String.fromEnvironment('STAGING_OTP_ACCESS_KEY', defaultValue: '');
+
   /// Explicit compile-time testing flag for profile builds (false by default).
   static const bool _profileOtpTestDisplayFlag = bool.fromEnvironment('OTP_TEST_DISPLAY', defaultValue: false);
 
@@ -46,6 +50,9 @@ class ApiConstants {
   @visibleForTesting
   static String? debugBaseUrlOverride;
 
+  @visibleForTesting
+  static String? debugStagingOtpAccessKeyOverride;
+
   /// On-screen OTP testing display guard:
   /// - Release builds (`kReleaseMode`): NEVER allowed (unconditionally false).
   /// - Profile builds (`kProfileMode`): Disabled by default (`false` unless explicitly opted in).
@@ -55,6 +62,52 @@ class ApiConstants {
     if (debugAllowOnScreenOtpOverride != null) return debugAllowOnScreenOtpOverride!;
     if (kDebugMode) return _debugOtpTestDisplayFlag;
     return _profileOtpTestDisplayFlag;
+  }
+
+  /// Resolves the staging-only OTP access key header value:
+  /// - Public release builds (`kReleaseMode`): ALWAYS empty (never exposed or sent).
+  /// - When targeting the production backend URL: ALWAYS empty.
+  /// - When on-screen OTP display is disabled: ALWAYS empty.
+  /// - Non-release staging QA builds targeting a non-production backend: returns compile-time STAGING_OTP_ACCESS_KEY if provided.
+  static String resolveStagingOtpAccessKey({
+    bool isRelease = kReleaseMode,
+    bool? allowOnScreenOtp,
+    bool isDebug = kDebugMode,
+    bool isWeb = kIsWeb,
+    TargetPlatform? platform,
+    String testApiUrl = _testApiUrl,
+    String localApiUrl = _localApiUrl,
+    String? baseUrlOverride,
+    String stagingOtpAccessKey = _stagingOtpAccessKey,
+  }) {
+    if (isRelease) return '';
+    final bool canDisplay = allowOnScreenOtp ?? allowOnScreenOtpDisplay;
+    if (!canDisplay) return '';
+
+    final String effectiveUrl = (baseUrlOverride ??
+            resolveBaseUrl(
+              isRelease: isRelease,
+              isDebug: isDebug,
+              isWeb: isWeb,
+              platform: platform,
+              testApiUrl: testApiUrl,
+              localApiUrl: localApiUrl,
+            ))
+        .trim()
+        .toLowerCase();
+    if (effectiveUrl == liveBackendUrl.trim().toLowerCase()) {
+      return '';
+    }
+    return stagingOtpAccessKey.trim();
+  }
+
+  /// Compile-time staging OTP secret key for non-release internal QA builds (`''` in public/release builds).
+  static String get stagingOtpAccessKey {
+    if (kReleaseMode) return '';
+    return resolveStagingOtpAccessKey(
+      baseUrlOverride: debugBaseUrlOverride,
+      stagingOtpAccessKey: debugStagingOtpAccessKeyOverride ?? _stagingOtpAccessKey,
+    );
   }
 
   /// Returns true if the supplied Supabase URL or anon key belongs to the production Supabase project.

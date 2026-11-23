@@ -75,10 +75,11 @@ function getOnScreenOtpAllowlist(env = process.env) {
 }
 
 /**
- * Check whether the target phone is approved for on-screen OTP display:
- * - Production: ALWAYS false.
- * - Staging or explicit ON_SCREEN_OTP_ALLOWLIST: strictly restricted to allowlisted 10-digit numbers.
- * - Local development / unit tests when ON_SCREEN_OTP_ALLOWLIST is unset: allowed for testing.
+ * Check whether the target phone is permitted for on-screen OTP display:
+ * - Production: ALWAYS false (on-screen OTP is hard-disabled in production).
+ * - Staging (NODE_ENV=staging): Dynamic for ANY valid mobile number (>=10 digits);
+ *   fixed phone allowlist restriction is removed and protected via STAGING_OTP_ACCESS_KEY.
+ * - Local dev / tests: allows any valid mobile number (unless ON_SCREEN_OTP_ALLOWLIST is explicitly set outside staging).
  */
 function isPhoneAllowedForOnScreenOtp(phone, env = process.env) {
     const nodeEnv = (env.NODE_ENV || 'development').trim().toLowerCase();
@@ -88,9 +89,13 @@ function isPhoneAllowedForOnScreenOtp(phone, env = process.env) {
     const normPhone = normalizeKey(phone);
     if (!normPhone || normPhone.length < 10) return false;
 
+    if (nodeEnv === 'staging') {
+        return true;
+    }
+
     const explicitRaw = (env.ON_SCREEN_OTP_ALLOWLIST || '').trim();
-    const allowlist = getOnScreenOtpAllowlist(env);
-    if (nodeEnv === 'staging' || explicitRaw.length > 0) {
+    if (explicitRaw.length > 0) {
+        const allowlist = getOnScreenOtpAllowlist(env);
         return allowlist.has(normPhone);
     }
     return true;

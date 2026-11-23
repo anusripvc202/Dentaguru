@@ -13,6 +13,7 @@ void main() {
   tearDown(() {
     ApiConstants.debugBaseUrlOverride = null;
     ApiConstants.debugAllowOnScreenOtpOverride = null;
+    ApiConstants.debugStagingOtpAccessKeyOverride = null;
     SupabaseService.resetForTesting();
   });
 
@@ -233,6 +234,7 @@ void main() {
 
       ApiConstants.debugBaseUrlOverride = stagingUrl;
       ApiConstants.debugAllowOnScreenOtpOverride = true;
+      ApiConstants.debugStagingOtpAccessKeyOverride = 'staging_qa_secret_key_example_2026!';
       expect(ApiConstants.isUsingLocalhostBackend, isFalse);
 
       final otpCandidates = ApiService.candidateEndpointUrls('/auth/otp/request');
@@ -243,10 +245,12 @@ void main() {
       );
       expect(otpCandidates.any((u) => u.host == 'localhost' || u.host == '127.0.0.1'), isFalse);
 
-      // Staging requestOtp calls ONLY staging backend & returns on-screen OTP
+      // Staging requestOtp calls ONLY staging backend with x-staging-otp-key & returns on-screen OTP for any valid phone
       final attemptedUrls = <Uri>[];
+      final capturedHeaders = <Map<String, String>>[];
       final stagingOtpClient = MockClient((request) async {
         attemptedUrls.add(request.url);
+        capturedHeaders.add(request.headers);
         return http.Response(
           jsonEncode({
             'success': true,
@@ -260,7 +264,7 @@ void main() {
       });
 
       final otpResult = await ApiService().requestOtp(
-        phone: '9281030535',
+        phone: '9888877777',
         client: stagingOtpClient,
       );
       expect(otpResult['success'], isTrue);
@@ -271,6 +275,27 @@ void main() {
         attemptedUrls.first.toString(),
         'https://dentaguru-backend-test.onrender.com/api/v1/auth/otp/request',
       );
+      expect(capturedHeaders.first['x-staging-otp-key'], 'staging_qa_secret_key_example_2026!');
+
+      // Release builds and production URLs MUST NEVER emit or send STAGING_OTP_ACCESS_KEY
+      expect(
+        ApiConstants.resolveStagingOtpAccessKey(
+          isRelease: true,
+          allowOnScreenOtp: true,
+          baseUrlOverride: stagingUrl,
+          stagingOtpAccessKey: 'staging_qa_secret_key_example_2026!',
+        ),
+        isEmpty,
+      );
+      expect(
+        ApiConstants.resolveStagingOtpAccessKey(
+          isRelease: false,
+          allowOnScreenOtp: true,
+          baseUrlOverride: ApiConstants.liveBackendUrl,
+          stagingOtpAccessKey: 'staging_qa_secret_key_example_2026!',
+        ),
+        isEmpty,
+      );
 
       // On network failure against cloud staging URL, must NOT retry localhost or generate local fake OTP
       final failedUrls = <Uri>[];
@@ -280,7 +305,7 @@ void main() {
       });
 
       final failResult = await ApiService().requestOtp(
-        phone: '9281030535',
+        phone: '9888877777',
         client: failClient,
       );
       expect(failResult['success'], isFalse);

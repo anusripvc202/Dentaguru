@@ -5,7 +5,7 @@ const { User, Dentist, Clinic, Referral, Notification, PatientProblemRequest, co
 const admin = require('firebase-admin');
 const { sendOtpEmail } = require('../services/emailService');
 const { sendRealSmsOtp, normalizePhoneNumber } = require('../services/smsService');
-const { isCloudEnv, getJwtSecret, getRefreshSecret } = require('../config/secrets');
+const { isCloudEnv, getJwtSecret, getRefreshSecret, isAuthorizedStagingOtpRequest } = require('../config/secrets');
 
 // Helper: Generate JWT tokens
 const generateTokens = (user) => {
@@ -1428,6 +1428,27 @@ async function verifyStoredOtp(identifier, code) {
     return otpStoreService.verifyOtp(identifier, code);
 }
 
+function ensureAuthorizedStagingOtp(req, res, phoneToCheck = null) {
+    if (!isOnScreenOtpTestMode()) return true;
+    const stagingAuth = isAuthorizedStagingOtpRequest(req);
+    if (!stagingAuth.authorized) {
+        res.status(403).json({
+            success: false,
+            code: 'STAGING_OTP_KEY_REQUIRED',
+            message: 'Valid staging OTP access key is required for on-screen OTP testing.'
+        });
+        return false;
+    }
+    if (phoneToCheck && !isPhoneAllowedForOnScreenOtp(phoneToCheck)) {
+        res.status(403).json({
+            success: false,
+            message: 'On-screen testing OTP is restricted to approved testing numbers.'
+        });
+        return false;
+    }
+    return true;
+}
+
 // 3. OTP VERIFICATION SERVICE (Mobile SMS - Email OTP handled directly by Supabase Auth with Resend SMTP)
 exports.requestOTP = async (req, res) => {
     const { phone, email } = req.body;
@@ -1453,11 +1474,8 @@ exports.requestOTP = async (req, res) => {
         const authorizedAdminPhone = await getAuthorizedAdminPhone();
         const isAdmin = Boolean(authorizedAdminPhone && normalizedPhone === authorizedAdminPhone);
 
-        if (isOnScreenOtpTestMode() && !isPhoneAllowedForOnScreenOtp(pNum)) {
-            return res.status(403).json({
-                success: false,
-                message: 'On-screen testing OTP is restricted to approved testing numbers.'
-            });
+        if (!ensureAuthorizedStagingOtp(req, res, pNum)) {
+            return;
         }
 
         const realOtp = generateRandomOtp();
@@ -1680,6 +1698,10 @@ exports.forgotPassword = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Email address or phone number is required.' });
         }
 
+        if (!ensureAuthorizedStagingOtp(req, res)) {
+            return;
+        }
+
         let user = await User.findOne({ email: identifier });
         if (!user) {
             user = await User.findOne({ phone: identifier });
@@ -1689,11 +1711,8 @@ exports.forgotPassword = async (req, res) => {
             return res.status(404).json({ success: false, message: 'No registered account found with that email or phone number.' });
         }
 
-        if (isOnScreenOtpTestMode() && user.phone && !isPhoneAllowedForOnScreenOtp(user.phone)) {
-            return res.status(403).json({
-                success: false,
-                message: 'On-screen testing OTP is restricted to approved testing numbers.'
-            });
+        if (!ensureAuthorizedStagingOtp(req, res, user.phone || null)) {
+            return;
         }
 
         const realOtp = generateRandomOtp();

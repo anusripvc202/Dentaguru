@@ -793,7 +793,11 @@ class ApiService {
       try {
         debugPrint('🌐 Sending requestOtp to: $url');
 
-        final headers = {'Content-Type': 'application/json'};
+        final String stagingOtpKey = ApiConstants.stagingOtpAccessKey;
+        final headers = <String, String>{
+          'Content-Type': 'application/json',
+          if (stagingOtpKey.isNotEmpty) 'x-staging-otp-key': stagingOtpKey,
+        };
         final payload = jsonEncode({'phone': phone, 'email': email});
         final response = await (client != null
                 ? client.post(url, headers: headers, body: payload)
@@ -815,6 +819,7 @@ class ApiService {
           return {
             'success': false,
             'status': response.statusCode,
+            if (data['code'] != null) 'code': data['code'],
             'message': data['message'] ?? 'Failed to send OTP SMS. Please check your mobile number.',
             'isAdmin': data['isAdmin'] == true,
           };
@@ -982,9 +987,14 @@ class ApiService {
   Future<Map<String, dynamic>> forgotPassword({required String email, String? phone}) async {
     try {
       final url = Uri.parse('${ApiConstants.baseUrl}/auth/forgot-password');
+      final String stagingOtpKey = ApiConstants.stagingOtpAccessKey;
+      final headers = <String, String>{
+        'Content-Type': 'application/json',
+        if (stagingOtpKey.isNotEmpty) 'x-staging-otp-key': stagingOtpKey,
+      };
       final response = await http.post(
         url,
-        headers: {'Content-Type': 'application/json'},
+        headers: headers,
         body: jsonEncode({'email': email, if (phone != null) 'phone': phone}),
       ).timeout(const Duration(seconds: 8));
 

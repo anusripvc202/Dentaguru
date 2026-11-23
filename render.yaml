@@ -39,7 +39,7 @@ services:
       - key: FIREBASE_SERVICE_ACCOUNT
         sync: false
 
-  # 2. TESTING / STAGING BACKEND (Always-On Starter, Free On-Screen OTP for Allowlisted Test Numbers Only, Testing Supabase Only)
+  # 2. TESTING / STAGING BACKEND (Always-On Starter, Dynamic On-Screen OTP via STAGING_OTP_ACCESS_KEY, Testing Supabase Only)
   - type: web
     name: dentaguru-backend-test
     runtime: node
@@ -70,7 +70,7 @@ services:
         sync: false
       - key: OTP_SALT
         sync: false
-      - key: ON_SCREEN_OTP_ALLOWLIST
+      - key: STAGING_OTP_ACCESS_KEY
         sync: false
       - key: ADMIN_PHONE
         sync: false

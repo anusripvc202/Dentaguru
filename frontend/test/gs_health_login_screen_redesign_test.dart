@@ -217,10 +217,50 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
 
+      // Production/release guard never displays on-screen OTP
       expect(find.text('Enter your code'), findsOneWidget);
       expect(find.byKey(const Key('login_onscreen_otp_banner')), findsNothing);
       expect(find.textContaining('482915'), findsNothing);
       expect(find.byKey(const Key('login_otp_fill_button')), findsNothing);
+    });
+
+    testWidgets('Staging dynamic OTP works for any arbitrary valid 10-digit mobile number and displays OTP banner', (WidgetTester tester) async {
+      ApiConstants.debugAllowOnScreenOtpOverride = true;
+      String? requestedPhone;
+      ApiService.debugRequestOtpOverride = ({required String phone, String email = ''}) async {
+        requestedPhone = phone;
+        return {
+          'success': true,
+          'message': 'Verification code ready on screen (testing mode).',
+          'otp': '731904',
+          'deliveryMode': 'on_screen',
+          'isAdmin': false,
+        };
+      };
+
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 2.5;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(
+        const ProviderScope(
+          child: MaterialApp(
+            home: AuthScreen(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextFormField).first, '9888877777');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Send code'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+
+      expect(requestedPhone, '9888877777');
+      expect(find.byKey(const Key('login_onscreen_otp_banner')), findsOneWidget);
+      expect(find.text('Your verification code: 731904'), findsOneWidget);
     });
 
     testWidgets('Renders Responsive Two-Column Layout on Desktop Viewport (>900px)', (WidgetTester tester) async {
