@@ -1,21 +1,30 @@
 import 'package:flutter/material.dart';
+import '../../../../core/constants/booking_rules_config.dart';
+import '../../../../core/models/medical_specialty_model.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/models/doctor_availability.dart';
+import '../../../../core/models/specialty_clinical_config.dart';
 
 class BookVisitFlowDialog extends StatefulWidget {
   final DoctorModel? preselectedDoctor;
+  final String? initialSpecialtyFilter;
+  final String initialConsultationMode;
   final VoidCallback? onBookingSuccess;
 
   const BookVisitFlowDialog({
     super.key,
     this.preselectedDoctor,
+    this.initialSpecialtyFilter,
+    this.initialConsultationMode = 'In-Person',
     this.onBookingSuccess,
   });
 
   static Future<void> show(
     BuildContext context, {
     DoctorModel? preselectedDoctor,
+    String? initialSpecialtyFilter,
+    String initialConsultationMode = 'In-Person',
     VoidCallback? onBookingSuccess,
   }) {
     return showDialog<void>(
@@ -23,6 +32,8 @@ class BookVisitFlowDialog extends StatefulWidget {
       barrierDismissible: false,
       builder: (ctx) => BookVisitFlowDialog(
         preselectedDoctor: preselectedDoctor,
+        initialSpecialtyFilter: initialSpecialtyFilter,
+        initialConsultationMode: initialConsultationMode,
         onBookingSuccess: onBookingSuccess,
       ),
     );
@@ -43,14 +54,15 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
   String _doctorSearchQuery = '';
   String _selectedSpecialtyFilter = 'All';
 
-  // Step 2: Date & Slot
+  // Step 2: Mode, Date & Slot
+  late String _selectedConsultationMode; // 'In-Person' or 'Online'
   DateTime _selectedDate = DateTime.now().add(const Duration(days: 1));
   String? _selectedTimeSlot;
   DoctorAvailabilityModel? _doctorAvailability;
   Map<String, DoctorAvailabilityModel> _configuredDateMap = {};
   bool _isLoadingSlots = false;
 
-  // Step 3: Reason & Symptoms
+  // Step 3: Reason & Symptoms (dynamic per selected doctor's specialty)
   String _selectedCategory = 'Routine Medical Checkup';
   final TextEditingController _symptomsController = TextEditingController();
   String _selectedSeverity = 'Mild';
@@ -59,35 +71,44 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
   bool _isSubmitting = false;
   String? _errorMessage;
 
-  static const List<String> _specialtyFilters = [
-    'All',
-    'General Dentistry',
-    'Orthodontics',
-    'Periodontics',
-    'Endodontics',
-    'Prosthodontics',
-    'Oral & Maxillofacial Surgery',
-    'Pediatric Dentistry',
-  ];
+  List<String> get _specialtyFilters => [
+        'All',
+        ...SpecialtyClinicalConfig.allSelectableSpecialties(
+          activeSpecialties: _patientService.activeSpecialties,
+          registeredDoctorSpecialties: _patientService.allDoctors.map((d) => d.specialty),
+        ),
+      ];
 
-  static const List<String> _categories = [
-    'Routine Medical Checkup',
-    'Toothache & Cold Sensitivity',
-    'Teeth Cleaning & Whitening',
-    'Bleeding Gums & Swelling',
-    'Cavity & Dental Filling',
-    'Wisdom Tooth Pain',
-    'Aligners & Braces Adjustment',
-    'Root Canal Treatment',
-    'Dental Implants Consultation',
-    'Other Medical Concern',
-  ];
+  SpecialtyClinicalProfile get _activeClinicalProfile {
+    final targetSpec = _selectedDoctor?.specialty.trim().isNotEmpty == true
+        ? _selectedDoctor!.specialty
+        : (_selectedSpecialtyFilter != 'All' ? _selectedSpecialtyFilter : 'General Medicine');
+    return SpecialtyClinicalConfig.forSpecialty(targetSpec);
+  }
+
+  List<String> get _categories {
+    final list = List<String>.from(_activeClinicalProfile.triageCategories);
+    if (!list.contains('Routine Medical Checkup')) {
+      list.add('Routine Medical Checkup');
+    }
+    if (!list.contains('Other Medical Concern')) {
+      list.add('Other Medical Concern');
+    }
+    return list;
+  }
 
   @override
   void initState() {
     super.initState();
+    _selectedConsultationMode = widget.initialConsultationMode.toLowerCase().contains('online')
+        ? 'Online'
+        : 'In-Person';
+    if (widget.initialSpecialtyFilter != null && widget.initialSpecialtyFilter!.trim().isNotEmpty) {
+      _selectedSpecialtyFilter = widget.initialSpecialtyFilter!.trim();
+    }
     if (widget.preselectedDoctor != null && widget.preselectedDoctor!.isAvailable) {
       _selectedDoctor = widget.preselectedDoctor;
+      _selectedCategory = _categories.first;
       _currentStep = 2; // Jump directly to Date & Slot if doctor preselected
       _loadDoctorAvailability();
     } else if (widget.preselectedDoctor != null && !widget.preselectedDoctor!.isAvailable) {
@@ -112,7 +133,11 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
     });
 
     try {
-      final avail = await _patientService.getDoctorAvailability(docId, _selectedDate);
+      final avail = await _patientService.getDoctorAvailability(
+        docId,
+        _selectedDate,
+        consultationType: _selectedConsultationMode,
+      );
       final blocked = await _patientService.getBlockedDates(docId);
       if (mounted) {
         setState(() {
@@ -141,23 +166,63 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
     super.dispose();
   }
 
-  // Helper to check if a specific time slot is already booked for this doctor
+  // Helper to check if a specific time slot overlaps an active appointment (unified Online + In-Person calendar + buffer)
   bool _isSlotBooked(String slot) {
     if (_selectedDoctor == null) return false;
     final docId = _selectedDoctor!.id.isNotEmpty ? _selectedDoctor!.id : _selectedDoctor!.userId;
     final dateStr = _formatDateIsoLocal(_selectedDate);
+    final candStart = BookingRulesConfig.parseClockSlotMinutes(slot);
+    final candDur = BookingRulesConfig.durationForMode(_selectedConsultationMode);
+    final candBuf = BookingRulesConfig.bufferForMode(_selectedConsultationMode);
+    final candEnd = candStart != null ? candStart + candDur + candBuf : null;
+
+    if (_doctorAvailability != null) {
+      if (_doctorAvailability!.bookedSlots.any((b) => b.trim().toLowerCase() == slot.trim().toLowerCase())) {
+        return true;
+      }
+      if (candStart != null && candEnd != null) {
+        for (final b in _doctorAvailability!.blockedSlots) {
+          final bStart = int.tryParse(b['startMin']?.toString() ?? '') ??
+              BookingRulesConfig.parseClockSlotMinutes(b['startTime']?.toString() ?? b['slot']?.toString() ?? '');
+          final bEnd = int.tryParse(b['endMin']?.toString() ?? '') ??
+              BookingRulesConfig.parseClockSlotMinutes(b['endTime']?.toString() ?? '') ??
+              (bStart != null ? bStart + BookingRulesConfig.defaultSlotIntervalMinutes : null);
+          if (bStart != null && bEnd != null && BookingRulesConfig.intervalsOverlap(candStart, candStart + candDur, bStart, bEnd)) {
+            return true;
+          }
+        }
+        for (final occ in _doctorAvailability!.occupiedIntervals) {
+          final oStart = int.tryParse(occ['startMin']?.toString() ?? '');
+          final oEnd = int.tryParse(occ['occupiedEndMin']?.toString() ?? '');
+          if (oStart != null && oEnd != null && BookingRulesConfig.intervalsOverlap(candStart, candEnd, oStart, oEnd)) {
+            return true;
+          }
+        }
+      }
+    }
 
     for (final req in _patientService.requests) {
       final s = req.status.toUpperCase();
-      if (s == 'CANCELLED' || s == 'REJECTED') continue;
+      if (s == 'CANCELLED' || s == 'REJECTED' || s == 'NO_SHOW') continue;
       final reqDocId = req.assignedDoctorId ?? '';
       final reqDate = req.confirmedDate?.split('T').first ?? '';
       final reqSlot = (req.confirmedTimeSlot ?? '').trim();
 
-      if ((reqDocId == docId || req.assignedDoctorName == _selectedDoctor!.name) &&
-          reqDate == dateStr &&
-          reqSlot.toLowerCase() == slot.toLowerCase()) {
-        return true;
+      if ((reqDocId == docId || req.assignedDoctorName == _selectedDoctor!.name) && reqDate == dateStr) {
+        if (reqSlot.toLowerCase() == slot.toLowerCase()) {
+          return true;
+        }
+        if (candStart != null && candEnd != null) {
+          final existStart = BookingRulesConfig.parseClockSlotMinutes(reqSlot);
+          if (existStart != null) {
+            final existDur = req.durationMinutes ?? BookingRulesConfig.durationForMode(req.displayConsultationMode);
+            final existBuf = req.bufferMinutes ?? BookingRulesConfig.bufferForMode(req.displayConsultationMode);
+            final existEnd = existStart + existDur + existBuf + req.delayMinutes;
+            if (BookingRulesConfig.intervalsOverlap(candStart, candEnd, existStart, existEnd)) {
+              return true;
+            }
+          }
+        }
       }
     }
     return false;
@@ -259,8 +324,11 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
           doc.name.toLowerCase().contains(_doctorSearchQuery.toLowerCase()) ||
           doc.specialty.toLowerCase().contains(_doctorSearchQuery.toLowerCase()) ||
           doc.clinicName.toLowerCase().contains(_doctorSearchQuery.toLowerCase());
-      final matchesSpecialty = _selectedSpecialtyFilter == 'All' ||
-          doc.specialty.toLowerCase() == _selectedSpecialtyFilter.toLowerCase();
+      final matchesSpecialty = MedicalSpecialtyModel.matchesSpecialtyFilter(
+        doc.specialty,
+        _selectedSpecialtyFilter,
+        specialties: _patientService.specialties,
+      );
       return matchesQuery && matchesSpecialty;
     }).toList();
 
@@ -376,6 +444,7 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
                         onTap: () {
                           setState(() {
                             _selectedDoctor = doc;
+                            _selectedCategory = _categories.first;
                             _selectedTimeSlot = null; // reset slot on doctor change
                           });
                           _loadDoctorAvailability();
@@ -556,19 +625,155 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
             const SizedBox(height: 16),
           ],
 
+          // Consultation Mode Selector (In-Person vs Online)
+          const Text(
+            'Consultation Type',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  key: const Key('booking_mode_in_person'),
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () {
+                    setState(() {
+                      _selectedConsultationMode = 'In-Person';
+                      _selectedTimeSlot = null;
+                    });
+                    _loadDoctorAvailability();
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                    decoration: BoxDecoration(
+                      color: _selectedConsultationMode == 'In-Person'
+                          ? AppTheme.primaryBlue
+                          : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: _selectedConsultationMode == 'In-Person'
+                            ? AppTheme.primaryBlue
+                            : const Color(0xFFCBD5E1),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.local_hospital_outlined,
+                          size: 16,
+                          color: _selectedConsultationMode == 'In-Person' ? Colors.white : AppTheme.primaryBlue,
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            'In-Person',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.bold,
+                              color: _selectedConsultationMode == 'In-Person' ? Colors.white : AppTheme.textDark,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: InkWell(
+                  key: const Key('booking_mode_online'),
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () {
+                    setState(() {
+                      _selectedConsultationMode = 'Online';
+                      _selectedTimeSlot = null;
+                    });
+                    _loadDoctorAvailability();
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                    decoration: BoxDecoration(
+                      color: _selectedConsultationMode == 'Online'
+                          ? AppTheme.primaryBlue
+                          : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: _selectedConsultationMode == 'Online'
+                            ? AppTheme.primaryBlue
+                            : const Color(0xFFCBD5E1),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.videocam_outlined,
+                          size: 16,
+                          color: _selectedConsultationMode == 'Online' ? Colors.white : AppTheme.primaryBlue,
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            'Online Consultation',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.bold,
+                              color: _selectedConsultationMode == 'Online' ? Colors.white : AppTheme.textDark,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Container(
+            key: const Key('booking_hybrid_duration_hint'),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.schedule_rounded, size: 14, color: AppTheme.gsNavy),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '$_selectedConsultationMode duration: ${BookingRulesConfig.durationForMode(_selectedConsultationMode)} mins (+${BookingRulesConfig.bufferForMode(_selectedConsultationMode)}m buffer)',
+                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
           // Date Selection Section
           const Text('1. Select Appointment Date', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark)),
           const SizedBox(height: 8),
 
-          // Horizontal Date Selector (Next 14 Days)
+          // Horizontal Date Selector (Today + Next 14 Days)
           SizedBox(
             height: 78,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              itemCount: 14,
+              itemCount: 15,
               separatorBuilder: (_, __) => const SizedBox(width: 8),
               itemBuilder: (context, idx) {
-                final date = DateTime.now().add(Duration(days: idx + 1));
+                final nowRef = BookingRulesConfig.debugNowOverride ?? DateTime.now();
+                final baseDay = DateTime(nowRef.year, nowRef.month, nowRef.day);
+                final date = baseDay.add(Duration(days: idx));
                 final dKey = _formatDateIsoLocal(date);
                 final isDateBlocked = _configuredDateMap[dKey]?.isBlocked == true;
                 final isSelected = date.year == _selectedDate.year &&
@@ -686,7 +891,10 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
                 ],
               ),
             )
-          else if ((_doctorAvailability?.allSlots.isEmpty ?? true))
+          else if (BookingRulesConfig.filterBookableSlotsForDate(
+                _selectedDate,
+                _doctorAvailability?.allSlots ?? const <String>[],
+              ).isEmpty)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(16),
@@ -695,14 +903,14 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: const Color(0xFFE2E8F0)),
               ),
-              child: const Row(
+              child: Row(
                 children: [
-                  Icon(Icons.event_busy_rounded, color: AppTheme.textMuted, size: 20),
-                  SizedBox(width: 10),
+                  const Icon(Icons.event_busy_rounded, color: AppTheme.textMuted, size: 20),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'No published consultation slots available for this doctor on this date. Please select another date.',
-                      style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                      'No bookable slots remaining for this date (minimum ${BookingRulesConfig.minAdvanceBookingMinutes}-minute advance booking applies). Please select another date.',
+                      style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
                     ),
                   ),
                 ],
@@ -712,7 +920,10 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
             Wrap(
               spacing: 10,
               runSpacing: 10,
-              children: (_doctorAvailability!.allSlots).map((slot) {
+              children: BookingRulesConfig.filterBookableSlotsForDate(
+                _selectedDate,
+                _doctorAvailability!.allSlots,
+              ).map((slot) {
                 final isBooked = (_doctorAvailability?.bookedSlots.any((b) => b.trim().toLowerCase() == slot.trim().toLowerCase()) ?? false) || _isSlotBooked(slot);
                 final isSelected = _selectedTimeSlot == slot;
 
@@ -817,7 +1028,8 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
           const SizedBox(height: 8),
 
           DropdownButtonFormField<String>(
-            initialValue: _selectedCategory,
+            key: ValueKey('booking_category_${_activeClinicalProfile.code}'),
+            initialValue: _categories.contains(_selectedCategory) ? _selectedCategory : _categories.first,
             isExpanded: true,
             decoration: InputDecoration(
               filled: true,
@@ -837,7 +1049,7 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
             controller: _symptomsController,
             maxLines: 3,
             decoration: InputDecoration(
-              hintText: 'e.g. Mild pain when drinking cold water, noticed slight swelling since yesterday...',
+              hintText: _activeClinicalProfile.symptomHint,
               filled: true,
               fillColor: const Color(0xFFF8FAFC),
               contentPadding: const EdgeInsets.all(12),
@@ -974,17 +1186,23 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
                 ),
                 const Divider(height: 18, color: Color(0xFFF1F5F9)),
                 _buildSummaryRow(
-                  icon: Icons.local_hospital_rounded,
-                  label: 'Clinic',
-                  value: _selectedDoctor?.clinicName.isNotEmpty == true ? _selectedDoctor!.clinicName : 'GS HEALTH Clinic',
-                  subValue: _selectedDoctor?.clinicAddress,
+                  icon: _selectedConsultationMode == 'Online'
+                      ? Icons.videocam_rounded
+                      : Icons.local_hospital_rounded,
+                  label: 'Consultation Mode',
+                  value: _selectedConsultationMode == 'Online'
+                      ? 'Online Consultation'
+                      : 'In-Person Consultation',
+                  subValue: _selectedDoctor?.clinicName.isNotEmpty == true
+                      ? _selectedDoctor!.clinicName
+                      : 'Verified Healthcare Practice',
                 ),
                 const Divider(height: 18, color: Color(0xFFF1F5F9)),
                 _buildSummaryRow(
                   icon: Icons.calendar_today_rounded,
                   label: 'Date & Time',
                   value: _formatDate(_selectedDate),
-                  subValue: _selectedTimeSlot ?? '10:00 AM',
+                  subValue: _selectedTimeSlot ?? '',
                 ),
                 const Divider(height: 18, color: Color(0xFFF1F5F9)),
                 _buildSummaryRow(
@@ -1006,10 +1224,10 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
                 _buildSummaryRow(
                   icon: Icons.payments_rounded,
                   label: 'Consultation Fee',
-                  value: _selectedDoctor?.consultationFee.isNotEmpty == true
-                      ? '₹${_selectedDoctor!.consultationFee}'
-                      : '₹500',
-                  subValue: 'Pay at clinic during visit',
+                  value: BookingRulesConfig.formatRealFee(_selectedDoctor?.consultationFee),
+                  subValue: _selectedConsultationMode == 'Online'
+                      ? 'Online consultation fee'
+                      : 'Pay at clinic during visit',
                 ),
               ],
             ),
@@ -1149,6 +1367,7 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
         date: dateStr,
         timeSlot: _selectedTimeSlot!,
         treatment: _selectedCategory,
+        consultationMode: _selectedConsultationMode,
         symptoms: _symptomsController.text.trim(),
       );
 

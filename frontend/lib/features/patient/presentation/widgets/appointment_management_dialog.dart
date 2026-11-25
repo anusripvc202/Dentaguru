@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../core/constants/booking_rules_config.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/services/patient_problem_service.dart';
 
@@ -83,19 +84,40 @@ class _AppointmentManagementDialogState extends State<AppointmentManagementDialo
     final docId = widget.appointment.assignedDoctorId ?? '';
     final docName = widget.appointment.assignedDoctorName ?? '';
     final dateStr = _newDate.toIso8601String().split('T').first;
+    final candidateStart = BookingRulesConfig.parseClockSlotMinutes(slot);
+    final candidateMode = BookingRulesConfig.normalizeConsultationMode(
+      widget.appointment.consultationMode ?? widget.appointment.problemCategory,
+    );
+    final candidateOccupied = (widget.appointment.durationMinutes ?? BookingRulesConfig.durationForMode(candidateMode)) +
+        (widget.appointment.bufferMinutes ?? BookingRulesConfig.bufferForMode(candidateMode));
 
     for (final req in _patientService.requests) {
       if (req.id == widget.appointment.id) continue;
       final s = req.status.toUpperCase();
-      if (s == 'CANCELLED' || s == 'REJECTED') continue;
+      if (s == 'CANCELLED' || s == 'REJECTED' || s == 'NO_SHOW' || s == 'COMPLETED') continue;
       final reqDocId = req.assignedDoctorId ?? '';
       final reqDate = req.confirmedDate?.split('T').first ?? '';
       final reqSlot = (req.confirmedTimeSlot ?? '').trim();
 
-      if ((reqDocId == docId || req.assignedDoctorName == docName) &&
-          reqDate == dateStr &&
-          reqSlot.toLowerCase() == slot.toLowerCase()) {
-        return true;
+      if ((reqDocId == docId || req.assignedDoctorName == docName) && reqDate == dateStr) {
+        if (reqSlot.toLowerCase() == slot.toLowerCase()) return true;
+        final existingStart = BookingRulesConfig.parseClockSlotMinutes(reqSlot);
+        if (candidateStart != null && existingStart != null) {
+          final existingMode = BookingRulesConfig.normalizeConsultationMode(
+            req.consultationMode ?? req.problemCategory,
+          );
+          final existingOccupied = (req.durationMinutes ?? BookingRulesConfig.durationForMode(existingMode)) +
+              (req.bufferMinutes ?? BookingRulesConfig.bufferForMode(existingMode)) +
+              req.delayMinutes;
+          if (BookingRulesConfig.intervalsOverlap(
+            candidateStart,
+            candidateStart + candidateOccupied,
+            existingStart,
+            existingStart + existingOccupied,
+          )) {
+            return true;
+          }
+        }
       }
     }
     return false;
@@ -236,7 +258,90 @@ class _AppointmentManagementDialogState extends State<AppointmentManagementDialo
           _buildDetailItem(Icons.notes_rounded, 'Symptoms / Notes', req.problemDescription),
         ],
         const SizedBox(height: 10),
-        _buildDetailItem(Icons.payments_rounded, 'Consultation Fee', '₹500 (Pay at clinic)'),
+        _buildDetailItem(
+          req.displayConsultationMode == 'Online'
+              ? Icons.videocam_outlined
+              : Icons.local_hospital_outlined,
+          'Consultation Mode',
+          '${req.displayConsultationMode} Consultation',
+        ),
+        const SizedBox(height: 10),
+        _buildDetailItem(
+          Icons.payments_rounded,
+          'Consultation Fee',
+          BookingRulesConfig.formatRealFee(
+            req.displayConsultationFee,
+            emptyFallback: 'As per clinic tariff',
+          ),
+        ),
+        if (req.delayMinutes > 0 || (req.estimatedStartTime != null && req.estimatedStartTime!.isNotEmpty)) ...[
+          const SizedBox(height: 14),
+          Container(
+            key: const Key('appointment_delay_notice_card'),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEF3C7),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFF59E0B)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.schedule_send_rounded, size: 18, color: Color(0xFFB45309)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        req.estimatedStartTime != null && req.estimatedStartTime!.isNotEmpty
+                            ? 'Doctor running ~${req.delayMinutes}m late • Est. start: ${req.estimatedStartTime}'
+                            : 'Doctor running ~${req.delayMinutes} mins late',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 12.5,
+                          color: Color(0xFF92400E),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    OutlinedButton(
+                      key: const Key('delay_action_wait_btn'),
+                      onPressed: _isProcessing ? null : () => _handleDelayChoice('WAIT'),
+                      child: Text(
+                        req.patientDelayChoice == 'WAIT' ? 'Waiting ✓' : 'Wait',
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    OutlinedButton(
+                      key: const Key('delay_action_request_reschedule_btn'),
+                      onPressed: _isProcessing
+                          ? null
+                          : () {
+                              setState(() {
+                                _mode = AppointmentManagementMode.reschedule;
+                                _errorMessage = null;
+                              });
+                              _handleDelayChoice('REQUEST_RESCHEDULE', popAfter: false);
+                            },
+                      child: const Text('Request Reschedule', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                    ),
+                    OutlinedButton(
+                      key: const Key('delay_action_switch_doctor_btn'),
+                      onPressed: _isProcessing ? null : _handleSwitchDoctorSuggestions,
+                      child: const Text('Switch Doctor', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 20),
 
         // Action Buttons if appointment is active
@@ -308,31 +413,26 @@ class _AppointmentManagementDialogState extends State<AppointmentManagementDialo
   }
 
   Widget _buildStatusBadge(String status) {
-    final s = status.toUpperCase();
-    final isConfirmed = s == 'CONFIRMED' || s == 'ACCEPTED';
-    final isCancelled = s == 'CANCELLED' || s == 'REJECTED';
-    final isRescheduled = s == 'RESCHEDULED';
+    final label = BookingRulesConfig.formatAppointmentStatusLabel(status);
+    final isPositive = label == 'Confirmed' || label == 'Completed';
+    final isNeutralInfo = label == 'Rescheduled' || label == 'Pending';
 
-    final bg = isConfirmed
-        ? const Color(0x14012A58)
-        : isCancelled
-            ? const Color(0x14FE3434)
-            : isRescheduled
-                ? const Color(0x14012A58)
-                : const Color(0x14FE3434);
-    final text = isConfirmed
-        ? const Color(0xFF012A58)
-        : isCancelled
-            ? const Color(0xFFFE3434)
-            : isRescheduled
-                ? const Color(0xFF012A58)
-                : const Color(0xFFFE3434);
+    final bg = isPositive
+        ? const Color(0xFFECFDF5)
+        : isNeutralInfo
+            ? const Color(0x14012A58)
+            : const Color(0x14FE3434);
+    final text = isPositive
+        ? const Color(0xFF047857)
+        : isNeutralInfo
+            ? const Color(0xFF012A58)
+            : const Color(0xFFFE3434);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
       child: Text(
-        status.isEmpty ? 'Pending' : status,
+        label,
         style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: text),
       ),
     );
@@ -581,6 +681,65 @@ class _AppointmentManagementDialogState extends State<AppointmentManagementDialo
         _errorMessage = 'Error cancelling: $e';
       });
     }
+  }
+
+  Future<void> _handleDelayChoice(String action, {bool popAfter = true}) async {
+    setState(() {
+      _isProcessing = true;
+      _errorMessage = null;
+    });
+    try {
+      final res = await _patientService.submitPatientDelayResponse(
+        appointmentId: widget.appointment.id,
+        action: action,
+      );
+      if (!mounted) return;
+      setState(() => _isProcessing = false);
+      if (res['success'] == true) {
+        widget.onUpdated?.call();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res['message']?.toString() ?? 'Response saved.'),
+            backgroundColor: AppTheme.gsNavy,
+          ),
+        );
+        if (popAfter) Navigator.of(context).pop();
+      } else {
+        setState(() => _errorMessage = res['message']?.toString() ?? 'Failed to submit response.');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isProcessing = false;
+        _errorMessage = 'Failed to submit response: $e';
+      });
+    }
+  }
+
+  Future<void> _handleSwitchDoctorSuggestions() async {
+    setState(() {
+      _isProcessing = true;
+      _errorMessage = null;
+    });
+    final res = await _patientService.submitPatientDelayResponse(
+      appointmentId: widget.appointment.id,
+      action: 'SWITCH_DOCTOR',
+    );
+    if (!mounted) return;
+    setState(() => _isProcessing = false);
+    final alts = (res['alternateDoctors'] is List)
+        ? (res['alternateDoctors'] as List).whereType<Map>().toList()
+        : const <Map>[];
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          alts.isNotEmpty
+              ? '${alts.length} alternate doctor(s) available: ${alts.take(2).map((d) => d['name']).join(', ')}'
+              : 'You can browse alternate available doctors in Find Doctors.',
+        ),
+        backgroundColor: AppTheme.gsNavy,
+      ),
+    );
   }
 }
 

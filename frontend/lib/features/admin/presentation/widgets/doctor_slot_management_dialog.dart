@@ -66,6 +66,7 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
 
   List<String> _slots = [];
   List<String> _bookedSlots = [];
+  List<Map<String, dynamic>> _blockedSlots = [];
   bool _isLoading = false;
   bool _isSaving = false;
   bool _isTogglingBlock = false;
@@ -266,6 +267,7 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
 
         _slots = List<String>.from(avail.allSlots);
         _bookedSlots = List<String>.from(avail.bookedSlots);
+        _blockedSlots = List<Map<String, dynamic>>.from(avail.blockedSlots);
         _existingAppointmentsOnDate = _bookedSlots.length;
         if (_slots.isEmpty && !_isBlocked) {
           _slots = _service.generateTimeSlots(
@@ -425,6 +427,47 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
       } else {
         _statusIsError = true;
         _statusMessage = '⚠️ ${res['message'] ?? 'Failed to unblock date $dateStr.'}';
+      }
+    });
+  }
+
+  Future<void> _toggleManualSlotBlock(String slotStr, bool currentlyBlocked) async {
+    if (_selectedDoctor == null) return;
+    final docId = _selectedDoctor!.id.isNotEmpty ? _selectedDoctor!.id : _selectedDoctor!.userId;
+
+    setState(() {
+      _isLoading = true;
+      _statusMessage = null;
+    });
+
+    final res = currentlyBlocked
+        ? await _service.unblockDoctorTimeSlot(
+            doctorId: docId,
+            date: _selectedDate,
+            startTime: slotStr,
+          )
+        : await _service.blockDoctorTimeSlot(
+            doctorId: docId,
+            date: _selectedDate,
+            startTime: slotStr,
+            reason: 'Manually Blocked',
+          );
+
+    if (!mounted) return;
+    setState(() {
+      _isLoading = false;
+      if (res['success'] == true) {
+        final rawBlocked = (res['blockedSlots'] as List<dynamic>?) ?? const [];
+        _blockedSlots = rawBlocked
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+        _statusIsError = false;
+        _statusMessage = currentlyBlocked
+            ? '✓ Unblocked slot $slotStr.'
+            : '✓ Blocked slot $slotStr.';
+      } else {
+        _statusIsError = true;
+        _statusMessage = '⚠️ ${res['message'] ?? 'Failed to update slot $slotStr.'}';
       }
     });
   }
@@ -1535,20 +1578,27 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
                                   runSpacing: 8,
                                   children: _slots.map((s) {
                                     final isBooked = _bookedSlots.any((b) => b.trim().toLowerCase() == s.trim().toLowerCase());
-                                    return Chip(
+                                    final isManuallyBlocked = _blockedSlots.any((b) =>
+                                        (b['startTime'] ?? b['slot'] ?? '').toString().trim().toLowerCase() == s.trim().toLowerCase());
+                                    final chipText = isBooked
+                                        ? '$s (Booked)'
+                                        : (isManuallyBlocked ? '$s (Blocked)' : s);
+                                    return InputChip(
+                                      key: Key('slot_chip_${s.replaceAll(' ', '_')}'),
                                       label: Text(
-                                        isBooked ? '$s (Booked)' : s,
+                                        chipText,
                                         style: TextStyle(
                                           fontSize: 11,
                                           fontWeight: FontWeight.bold,
-                                          color: isBooked ? const Color(0xFFFE3434) : const Color(0xFF012A58),
+                                          color: (isBooked || isManuallyBlocked) ? const Color(0xFFFE3434) : const Color(0xFF012A58),
                                         ),
                                       ),
-                                      backgroundColor: isBooked ? const Color(0x14FE3434) : const Color(0x14012A58),
+                                      backgroundColor: (isBooked || isManuallyBlocked) ? const Color(0x14FE3434) : const Color(0x14012A58),
                                       shape: RoundedRectangleBorder(
                                         borderRadius: BorderRadius.circular(8),
-                                        side: BorderSide(color: isBooked ? const Color(0x40FE3434) : const Color(0x40012A58)),
+                                        side: BorderSide(color: (isBooked || isManuallyBlocked) ? const Color(0x40FE3434) : const Color(0x40012A58)),
                                       ),
+                                      onPressed: isBooked ? null : () => _toggleManualSlotBlock(s, isManuallyBlocked),
                                       deleteIcon: isBooked ? null : const Icon(Icons.close_rounded, size: 14),
                                       onDeleted: isBooked
                                           ? null
@@ -1558,6 +1608,13 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
                                     );
                                   }).toList(),
                                 ),
+                              if (_slots.isNotEmpty) ...[
+                                const SizedBox(height: 6),
+                                const Text(
+                                  'Tip: Tap any open slot chip to manually block/unblock that time slot without cancelling existing bookings.',
+                                  style: TextStyle(fontSize: 10.5, color: AppTheme.textMuted),
+                                ),
+                              ],
                               const SizedBox(height: 12),
 
                               // 6. Custom Slot Input

@@ -9,10 +9,15 @@ import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/services/session_service.dart';
 import '../../../../core/utils/record_file_helper.dart';
+import '../../../../core/utils/prescription_pdf_generator.dart';
+import '../../../../core/models/specialty_clinical_config.dart';
+import '../../../../core/constants/booking_rules_config.dart';
 import '../../../../core/widgets/whatsapp_chat_modal.dart';
 import '../widgets/referred_patients_sheet.dart';
 import '../widgets/book_visit_flow_dialog.dart';
+import '../widgets/book_consultation_fab.dart';
 import '../widgets/appointment_management_dialog.dart';
+import '../widgets/gs_health_patient_sponsored_banner.dart';
 import '../../../../core/widgets/need_help_card.dart';
 import 'find_doctors_screen.dart';
 import 'refer_a_friend_screen.dart';
@@ -43,7 +48,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     _patientService.addListener(_onServiceUpdate);
     _patientService.syncAllDataFromApi();
     _patientService.syncAppointmentsFromApi();
-    _patientService.syncDoctorsFromApi(includeUnavailable: false);
+    _patientService.syncDoctorsFromApi(includeUnavailable: true);
     _patientService.syncReferralsFromApi();
     _patientService.syncNotificationsFromApi(role: 'Patient');
 
@@ -842,6 +847,11 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
         switchOutCurve: Curves.easeInCubic,
         child: _buildCurrentTab(),
       ),
+      floatingActionButton: (_currentIndex == 0 || _currentIndex == 2)
+          ? BookConsultationFab(
+              onPressed: () => _openBookVisitFlow(context),
+            )
+          : null,
       bottomNavigationBar: _currentIndex == 4
           ? null
           : Container(
@@ -887,7 +897,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               onAllowed: () {
                 setState(() => _currentIndex = index);
                 if (index == 1) {
-                  _patientService.syncDoctorsFromApi(includeUnavailable: false);
+                  _patientService.syncDoctorsFromApi(includeUnavailable: true);
                 } else if (index == 2) {
                   _patientService.syncAppointmentsFromApi();
                   _patientService.syncProblemRequestsFromApi();
@@ -946,15 +956,160 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   // ==========================================
   // TAB 1: REDESIGNED GS HEALTH HOME TAB
   // ==========================================
-  Widget _buildHomeTab() {
-    final requests = _patientService.requests;
+  bool _isUpcomingAppointmentStatus(String status) {
+    final s = status.trim().toUpperCase();
+    return s != 'COMPLETED' &&
+        s != 'CANCELLED' &&
+        s != 'CANCELED' &&
+        s != 'REJECTED' &&
+        s != 'NO_SHOW' &&
+        s != 'NO SHOW' &&
+        s != 'CLOSED' &&
+        s != 'EXPIRED' &&
+        s != 'DECLINED';
+  }
 
-    final upcomingRequests = requests.where((r) {
-      final s = r.status.toUpperCase();
-      return s != 'COMPLETED' && s != 'CANCELLED' && s != 'REJECTED';
-    }).toList();
-    final hasUpcoming = upcomingRequests.isNotEmpty;
-    final nextVisit = hasUpcoming ? upcomingRequests.first : null;
+  DateTime _resolveAppointmentStartDateTime(PatientConsultationRequest req) {
+    DateTime baseDate = _resolveAppointmentDateTime(req);
+    final rawDate = (req.confirmedDate ?? '').trim();
+    if (rawDate.isNotEmpty) {
+      final parsedIso = DateTime.tryParse(rawDate);
+      if (parsedIso != null) {
+        baseDate = parsedIso.isUtc ? parsedIso.toLocal() : parsedIso;
+      } else {
+        final dmy = RegExp(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$').firstMatch(rawDate);
+        if (dmy != null) {
+          final day = int.tryParse(dmy.group(1) ?? '');
+          final month = int.tryParse(dmy.group(2) ?? '');
+          final year = int.tryParse(dmy.group(3) ?? '');
+          if (day != null && month != null && year != null) {
+            baseDate = DateTime(year, month, day);
+          }
+        }
+      }
+    }
+
+    final slot = (req.confirmedTimeSlot ?? '').trim();
+    if (slot.isNotEmpty) {
+      final timeMatch = RegExp(r'(\d{1,2}):(\d{2})\s*(AM|PM)?', caseSensitive: false).firstMatch(slot);
+      if (timeMatch != null) {
+        var hour = int.tryParse(timeMatch.group(1) ?? '') ?? 0;
+        final minute = int.tryParse(timeMatch.group(2) ?? '') ?? 0;
+        final period = (timeMatch.group(3) ?? '').toUpperCase();
+        if (period == 'PM' && hour < 12) {
+          hour += 12;
+        } else if (period == 'AM' && hour == 12) {
+          hour = 0;
+        }
+        return DateTime(baseDate.year, baseDate.month, baseDate.day, hour, minute);
+      }
+    }
+    return baseDate;
+  }
+
+  PatientConsultationRequest? _selectNextUpcomingVisit(
+    List<PatientConsultationRequest> patientRequests,
+  ) {
+    final activeRequests = patientRequests
+        .where((r) => _isUpcomingAppointmentStatus(r.status))
+        .toList();
+    if (activeRequests.isEmpty) return null;
+
+    final now = DateTime.now();
+    final todayStart = DateTime(now.year, now.month, now.day);
+
+    final futureUpcoming = <PatientConsultationRequest>[];
+    final earlierActive = <PatientConsultationRequest>[];
+
+    for (final req in activeRequests) {
+      final startDt = _resolveAppointmentStartDateTime(req);
+      final hasSlot = (req.confirmedTimeSlot ?? '').trim().isNotEmpty;
+      final isUpcoming = hasSlot
+          ? !startDt.isBefore(now)
+          : !DateTime(startDt.year, startDt.month, startDt.day).isBefore(todayStart);
+      if (isUpcoming) {
+        futureUpcoming.add(req);
+      } else {
+        earlierActive.add(req);
+      }
+    }
+
+    if (futureUpcoming.isNotEmpty) {
+      futureUpcoming.sort((a, b) {
+        final cmp = _resolveAppointmentStartDateTime(a)
+            .compareTo(_resolveAppointmentStartDateTime(b));
+        if (cmp != 0) return cmp;
+        return a.submittedAt.compareTo(b.submittedAt);
+      });
+      return futureUpcoming.first;
+    }
+
+    earlierActive.sort((a, b) {
+      final cmp = _resolveAppointmentStartDateTime(b)
+          .compareTo(_resolveAppointmentStartDateTime(a));
+      if (cmp != 0) return cmp;
+      return b.submittedAt.compareTo(a.submittedAt);
+    });
+    return earlierActive.first;
+  }
+
+  String _resolveHeroDoctorName(PatientConsultationRequest visit) {
+    final raw = visit.displayDoctorName.trim();
+    final lower = raw.toLowerCase();
+    if (raw.isEmpty ||
+        lower == 'null' ||
+        lower == 'dr. specialist' ||
+        lower == 'selected doctor' ||
+        lower == 'doctor') {
+      return '';
+    }
+    if (lower.startsWith('dr.') || lower.startsWith('dr ')) {
+      return raw;
+    }
+    return 'Dr. $raw';
+  }
+
+  String _formatHeroAppointmentStatusLine(PatientConsultationRequest visit) {
+    final rawStatus = visit.status.trim();
+    final upper = rawStatus.toUpperCase();
+    String statusLabel;
+    if (upper == 'CONFIRMED' ||
+        upper == 'ACCEPTED' ||
+        upper == 'BOOKED' ||
+        upper == 'APPROVED' ||
+        upper == 'DOCTOR ASSIGNED') {
+      statusLabel = 'Confirmed';
+    } else if (upper == 'RESCHEDULED') {
+      statusLabel = 'Rescheduled';
+    } else if (upper == 'SCHEDULED') {
+      statusLabel = 'Scheduled';
+    } else if (upper == 'IN_PROGRESS' || upper == 'IN PROGRESS' || upper == 'ONGOING') {
+      statusLabel = 'In Progress';
+    } else if (upper.contains('PENDING') || upper == 'REQUESTED') {
+      statusLabel = 'Pending';
+    } else if (rawStatus.isNotEmpty) {
+      statusLabel = rawStatus[0].toUpperCase() + rawStatus.substring(1).toLowerCase();
+    } else {
+      statusLabel = 'Scheduled';
+    }
+
+    final slot = (visit.confirmedTimeSlot ?? '').trim();
+    final hasValidSlot = slot.isNotEmpty &&
+        slot.toLowerCase() != 'null' &&
+        slot.toLowerCase() != 'pending review';
+    if (hasValidSlot) {
+      return '$statusLabel for $slot';
+    }
+    if (statusLabel == 'Confirmed') {
+      return 'Confirmed appointment';
+    }
+    return '$statusLabel confirmation';
+  }
+
+  Widget _buildHomeTab() {
+    final myRequests = _getPatientRequests();
+    final nextVisit = _selectNextUpcomingVisit(myRequests);
+    final hasUpcoming = nextVisit != null;
 
     return FadeTransition(
       opacity: _fadeAnimation,
@@ -981,7 +1136,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               _buildTalkToDentistCard(),
               const SizedBox(height: 16),
 
-              // 4. Sponsored Banner ("SPONSORED" - "GS IMPLANTS")
+              // 4. Sponsored Banner (Dynamic GS HEALTH multi-specialty healthcare ads)
               _buildSponsoredBanner(),
               const SizedBox(height: 20),
 
@@ -1001,6 +1156,10 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                 _buildNextVisitCard(),
                 const SizedBox(height: 16),
               ],
+
+              // 7b. Prescriptions, Diagnostics & Recent/Previous Visits Overview
+              _buildPatientHealthOverviewSection(myRequests),
+              const SizedBox(height: 16),
 
               // 8. 24/7 Support Card
               const NeedHelpCard(),
@@ -1101,8 +1260,11 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                     const SizedBox(height: 8),
                     Text(
                       hasUpcoming
-                          ? (nextVisit?.problemCategory ?? 'Scheduled Visit')
+                          ? ((nextVisit?.problemCategory.trim().isNotEmpty ?? false)
+                              ? nextVisit!.problemCategory.trim()
+                              : 'Scheduled Visit')
                           : 'No upcoming visits',
+                      key: const Key('hero_appointment_title'),
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 21,
@@ -1112,15 +1274,38 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
+                    if (hasUpcoming && nextVisit != null) ...[
+                      Builder(
+                        builder: (context) {
+                          final doctorName = _resolveHeroDoctorName(nextVisit);
+                          if (doctorName.isEmpty) {
+                            return const SizedBox.shrink();
+                          }
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              doctorName,
+                              key: const Key('hero_appointment_doctor_name'),
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.96),
+                                fontSize: 15,
+                                height: 1.25,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: -0.1,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          );
+                        },
+                      ),
+                    ],
                     const SizedBox(height: 4),
                     Text(
-                      hasUpcoming
-                          ? (nextVisit?.confirmedTimeSlot != null && nextVisit!.confirmedTimeSlot!.isNotEmpty
-                              ? 'Confirmed for ${nextVisit.confirmedTimeSlot}'
-                              : (nextVisit?.assignedDoctorName != null && nextVisit!.assignedDoctorName!.isNotEmpty && nextVisit.assignedDoctorName != 'null'
-                                  ? 'With Dr. ${nextVisit.assignedDoctorName}'
-                                  : 'Pending specialist assignment & confirmation.'))
+                      hasUpcoming && nextVisit != null
+                          ? _formatHeroAppointmentStatusLine(nextVisit)
                           : 'Book a verified doctor near you in under a minute.',
+                      key: const Key('hero_appointment_status_time'),
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: 0.92),
                         fontSize: 12.5,
@@ -1338,136 +1523,32 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   }
 
   Widget _buildSponsoredBanner() {
-    return InkWell(
-      onTap: () {
+    return GsHealthPatientSponsoredBanner(
+      activeSpecialties: _patientService.activeSpecialties,
+      availableDoctors: _patientService.availableDoctors,
+      onAdTap: (ad) {
         _guardServiceAccess(
           context,
-          serviceTitle: 'Sponsored Care',
+          serviceTitle: ad.title,
           onAllowed: () {
+            if (ad.destination == GsSponsoredDestination.aiTriage) {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const AiTriageScreen()),
+              );
+              return;
+            }
             Navigator.of(context).push(
               MaterialPageRoute(
-                builder: (_) => const FindDoctorsScreen(initialSpecialty: 'Implantology'),
+                builder: (_) => FindDoctorsScreen(
+                  initialSpecialty: ad.destination == GsSponsoredDestination.findDoctorsSpecialty
+                      ? (ad.targetSpecialty ?? 'All')
+                      : 'All',
+                ),
               ),
             );
           },
         );
       },
-      borderRadius: BorderRadius.circular(20),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Color(0xFFE2E8F0),
-              Color(0xFFCBD5E1),
-            ],
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1E293B),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: const Text(
-                'SPONSORED',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 9.5,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.8,
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.8),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFF94A3B8), width: 1),
-                  ),
-                  child: const Center(
-                    child: Icon(
-                      Icons.health_and_safety_rounded,
-                      color: AppTheme.gsNavy,
-                      size: 26,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'GS IMPLANTS',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w900,
-                          color: Color(0xFF0F172A),
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                      Text(
-                        'DEDICATED TO EXCELLENCE',
-                        style: TextStyle(
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF64748B),
-                          letterSpacing: 0.8,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            const Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Expanded(
-                  child: Text(
-                    'Most economic dental implants',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF1E293B),
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                SizedBox(width: 8),
-                Icon(
-                  Icons.open_in_new_rounded,
-                  color: Color(0xFF475569),
-                  size: 20,
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -2001,27 +2082,56 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   }
 
   Widget _buildSingleScheduledVisitCard(PatientConsultationRequest assignedReq, {required bool isFirst}) {
-    final docName = assignedReq.assignedDoctorName ?? 'Attending Specialist';
-    final clinicName = assignedReq.assignedDoctorClinic ?? '';
+    final matchedDoc = assignedReq.resolvedDoctor;
+    final resolvedDocName = assignedReq.displayDoctorName;
+    final docName = resolvedDocName.isNotEmpty
+        ? (resolvedDocName.toLowerCase().startsWith('dr.') || resolvedDocName.toLowerCase().startsWith('dr ')
+            ? resolvedDocName
+            : 'Dr. $resolvedDocName')
+        : 'Attending Specialist';
+    final docSpecialty = assignedReq.displayDoctorSpecialty.trim().isNotEmpty
+        ? assignedReq.displayDoctorSpecialty.trim()
+        : assignedReq.problemCategory;
+    final clinicName = assignedReq.displayDoctorClinic;
+    final realFee = assignedReq.displayConsultationFee;
+    final consultationMode = assignedReq.displayConsultationMode;
+    final isOnlineMode = consultationMode == 'Online';
     final statusUpper = assignedReq.status.toUpperCase();
-    final isConfirmed = statusUpper == 'CONFIRMED' || statusUpper == 'ACCEPTED' || statusUpper == 'DOCTOR SUGGESTED';
+    final isConfirmed = statusUpper == 'CONFIRMED' ||
+        statusUpper == 'ACCEPTED' ||
+        statusUpper == 'DOCTOR SUGGESTED' ||
+        statusUpper == 'DOCTOR ASSIGNED' ||
+        statusUpper == 'IN_PROGRESS' ||
+        statusUpper == 'IN PROGRESS';
     final isRescheduled = statusUpper == 'RESCHEDULED';
 
-    String dateStr = '';
+    String formattedDateOnly = 'Date pending';
+    String datePrefix = '';
     if (assignedReq.confirmedDate != null && assignedReq.confirmedDate!.isNotEmpty) {
       final dt = DateTime.tryParse(assignedReq.confirmedDate!);
       if (dt != null) {
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-        dateStr = '${weekdays[dt.weekday - 1]}, ${dt.day} ${months[dt.month - 1]} • ';
+        formattedDateOnly = '${weekdays[dt.weekday - 1]}, ${dt.day} ${months[dt.month - 1]} ${dt.year}';
+        datePrefix = '${weekdays[dt.weekday - 1]}, ${dt.day} ${months[dt.month - 1]} • ';
+      } else {
+        formattedDateOnly = assignedReq.confirmedDate!;
       }
     }
 
-    final slotDisplay = (assignedReq.confirmedTimeSlot != null && assignedReq.confirmedTimeSlot!.isNotEmpty)
-        ? '$dateStr${assignedReq.confirmedTimeSlot!}'
+    final hasTimeSlot = assignedReq.confirmedTimeSlot != null &&
+        assignedReq.confirmedTimeSlot!.trim().isNotEmpty;
+    final slotDisplay = hasTimeSlot
+        ? '$datePrefix${assignedReq.confirmedTimeSlot!.trim()}'
         : 'Slot Pending Confirmation';
 
+    final cleanInitial = docName
+        .replaceAll(RegExp(r'^Dr\.?\s*', caseSensitive: false), '')
+        .trim();
+    final docInitial = cleanInitial.isNotEmpty ? cleanInitial[0].toUpperCase() : 'D';
+
     return Container(
+      key: Key('upcoming_consultation_card_${assignedReq.id}'),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
@@ -2042,9 +2152,42 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  isFirst ? 'Your Next Scheduled Visit' : 'Scheduled Visit',
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        isFirst ? 'Upcoming Consultation' : 'Scheduled Visit',
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppTheme.gsNavy.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            isOnlineMode ? Icons.videocam_outlined : Icons.local_hospital_outlined,
+                            size: 13,
+                            color: AppTheme.gsNavy,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            isOnlineMode ? 'Online' : 'In-Person',
+                            style: const TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.gsNavy,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 10),
                 Row(
@@ -2059,6 +2202,14 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                             slotDisplay,
                             style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.textDark),
                           ),
+                          if (hasTimeSlot && formattedDateOnly != 'Date pending') ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              '$formattedDateOnly • ${assignedReq.confirmedTimeSlot!.trim()}',
+                              style: const TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
                           const SizedBox(height: 4),
                           Wrap(
                             crossAxisAlignment: WrapCrossAlignment.center,
@@ -2067,11 +2218,17 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                 assignedReq.problemCategory,
                                 style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
                               ),
-                              const SizedBox(width: 4),
-                              const Text(
-                                '• 💰 Fee: ₹500',
-                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
-                              ),
+                              if (realFee.isNotEmpty) ...[
+                                const SizedBox(width: 4),
+                                Text(
+                                  '• Fee: $realFee',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppTheme.primaryBlue,
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ],
@@ -2116,13 +2273,31 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
             child: Row(
               children: [
                 Container(
-                  width: 40,
-                  height: 40,
+                  width: 42,
+                  height: 42,
                   decoration: BoxDecoration(
                     color: AppTheme.primaryBlue.withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.person_rounded, color: AppTheme.primaryBlue, size: 22),
+                  child: matchedDoc?.photoBytes != null && matchedDoc!.photoBytes!.isNotEmpty
+                      ? ClipOval(
+                          child: Image.memory(
+                            matchedDoc.photoBytes!,
+                            width: 42,
+                            height: 42,
+                            fit: BoxFit.cover,
+                          ),
+                        )
+                      : Center(
+                          child: Text(
+                            docInitial,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              color: AppTheme.primaryBlue,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -2132,14 +2307,14 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                       Text(
                         docName,
                         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: AppTheme.textDark),
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      if (clinicName.isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          clinicName,
-                          style: const TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
-                        ),
-                      ],
+                      const SizedBox(height: 2),
+                      Text(
+                        clinicName.isNotEmpty ? '$docSpecialty • $clinicName' : docSpecialty,
+                        style: const TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ],
                   ),
                 ),
@@ -2155,16 +2330,44 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  TextButton.icon(
-                    onPressed: () => _guardServiceAccess(
-                      context,
-                      serviceTitle: 'Doctor Chat',
-                      onAllowed: () => _showChatModal(context, request: assignedReq),
+                  if (isConfirmed || isOnlineMode) ...[
+                    ElevatedButton.icon(
+                      key: Key('join_consultation_button_${assignedReq.id}'),
+                      onPressed: () => _guardServiceAccess(
+                        context,
+                        serviceTitle: 'Join Consultation',
+                        onAllowed: () => _showChatModal(context, request: assignedReq),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.gsNavy,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        minimumSize: const Size(0, 32),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      icon: Icon(
+                        isOnlineMode ? Icons.videocam_rounded : Icons.chat_bubble_outline_rounded,
+                        size: 14,
+                      ),
+                      label: Text(
+                        isOnlineMode ? 'Join Consultation' : 'Consult Chat',
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                      ),
                     ),
-                    icon: const Icon(Icons.chat_bubble_outline_rounded, size: 15, color: Color(0xFF012A58)),
-                    label: const Text('Chat', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF012A58))),
-                  ),
-                  const SizedBox(width: 4),
+                    const SizedBox(width: 6),
+                  ] else ...[
+                    TextButton.icon(
+                      onPressed: () => _guardServiceAccess(
+                        context,
+                        serviceTitle: 'Doctor Chat',
+                        onAllowed: () => _showChatModal(context, request: assignedReq),
+                      ),
+                      icon: const Icon(Icons.chat_bubble_outline_rounded, size: 15, color: Color(0xFF012A58)),
+                      label: const Text('Chat', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF012A58))),
+                    ),
+                    const SizedBox(width: 4),
+                  ],
                   TextButton.icon(
                     onPressed: () => _guardServiceAccess(
                       context,
@@ -2224,22 +2427,302 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     );
   }
 
+  Widget _buildPatientHealthOverviewSection(
+    List<PatientConsultationRequest> myRequests,
+  ) {
+    final activePatientId = _patientService.currentPatient.id.trim();
+    final currentPatientName =
+        _patientService.currentPatient.name.trim().toLowerCase();
+    final scopedRecords = _patientService.medicalRecords.where((itemMap) {
+      final recPatientId =
+          (itemMap['patientId'] ?? itemMap['patient_id'] ?? '').toString();
+      if (activePatientId.isNotEmpty &&
+          recPatientId.isNotEmpty &&
+          recPatientId != activePatientId &&
+          (currentPatientName.isEmpty ||
+              recPatientId.trim().toLowerCase() != currentPatientName)) {
+        return false;
+      }
+      return true;
+    }).toList();
+
+    final prescriptionsCount = scopedRecords.where(_isPrescriptionRecord).length;
+    final diagnosticsCount = scopedRecords.where((r) {
+      final isPatientUpload = r['isPatientUpload'] == true ||
+          (r['storageKey'] ?? '').toString().isNotEmpty ||
+          r['fileBytes'] != null;
+      if (isPatientUpload) return true;
+      return !_isPrescriptionRecord(r);
+    }).length;
+
+    final previousVisits = myRequests
+        .where((r) => r.status.trim().toUpperCase() == 'COMPLETED')
+        .toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Records & visit history',
+          style: TextStyle(
+            fontSize: 17,
+            fontWeight: FontWeight.bold,
+            color: AppTheme.textDark,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: InkWell(
+                key: const Key('dashboard_prescriptions_quick_card'),
+                onTap: () => _guardServiceAccess(
+                  context,
+                  serviceTitle: 'Prescriptions',
+                  onAllowed: () {
+                    _patientService.syncMedicalRecordsFromApi();
+                    setState(() {
+                      _lockerSubTabIndex = 0;
+                      _currentIndex = 3;
+                    });
+                  },
+                ),
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: AppTheme.gsNavy.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(11),
+                        ),
+                        child: const Icon(
+                          Icons.description_outlined,
+                          size: 20,
+                          color: AppTheme.gsNavy,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Prescriptions',
+                              style: TextStyle(
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textDark,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              prescriptionsCount == 0
+                                  ? 'None yet'
+                                  : '$prescriptionsCount saved',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                color: Color(0xFF64748B),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: InkWell(
+                key: const Key('dashboard_diagnostics_quick_card'),
+                onTap: () => _guardServiceAccess(
+                  context,
+                  serviceTitle: 'Diagnostics',
+                  onAllowed: () {
+                    _patientService.syncMedicalRecordsFromApi();
+                    setState(() {
+                      _lockerSubTabIndex = 3;
+                      _currentIndex = 3;
+                    });
+                  },
+                ),
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: AppTheme.gsRed.withValues(alpha: 0.09),
+                          borderRadius: BorderRadius.circular(11),
+                        ),
+                        child: const Icon(
+                          Icons.biotech_outlined,
+                          size: 20,
+                          color: AppTheme.gsRed,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Diagnostics',
+                              style: TextStyle(
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textDark,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              diagnosticsCount == 0
+                                  ? 'No reports yet'
+                                  : '$diagnosticsCount ${diagnosticsCount == 1 ? "report" : "reports"}',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                color: Color(0xFF64748B),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        InkWell(
+          key: const Key('dashboard_previous_visits_card'),
+          onTap: () => _guardServiceAccess(
+            context,
+            serviceTitle: 'Previous Visits',
+            onAllowed: () {
+              _patientService.syncAppointmentsFromApi();
+              setState(() {
+                _visitsSubTabIndex = 1;
+                _currentIndex = 2;
+              });
+            },
+          ),
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: AppTheme.gsNavy.withValues(alpha: 0.08),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.history_rounded,
+                    size: 20,
+                    color: AppTheme.gsNavy,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Recent & previous visits',
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.textDark,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        previousVisits.isEmpty
+                            ? 'No previous visits yet'
+                            : '${previousVisits.length} completed ${previousVisits.length == 1 ? "visit" : "visits"} • Latest: ${previousVisits.first.displayDoctorName.isNotEmpty ? previousVisits.first.displayDoctorName : previousVisits.first.problemCategory}',
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          color: Color(0xFF64748B),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  size: 14,
+                  color: Color(0xFF94A3B8),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   // ==========================================
   // TAB 2: MY VISITS TAB (GS HEALTH REDESIGN)
   // ==========================================
-  int _visitsSubTabIndex = 0; // 0 = Upcoming, 1 = Past & cancelled
+  int _visitsSubTabIndex = 0; // 0 = Upcoming Visits, 1 = Previous Visits, 2 = Cancelled Visits
   final Set<String> _cancellingVisitIds = {};
 
   List<PatientConsultationRequest> _getPatientRequests() {
     final requests = _patientService.requests;
     final patient = _patientService.currentPatient;
     final authUser = _safeAuthUser;
-    final authId = authUser?.id ?? '';
+    final authId = authUser?.id.trim() ?? '';
     final authEmail = authUser?.email?.trim().toLowerCase() ?? '';
+    final sessUserId = SessionService().currentSession?.userId.trim() ?? '';
+    final myPatientIds = <String>{
+      if (authId.isNotEmpty) authId,
+      if (patient.id.trim().isNotEmpty) patient.id.trim(),
+      if (sessUserId.isNotEmpty) sessUserId,
+    };
 
     return requests.where((r) {
-      if (r.patientId != null && r.patientId!.isNotEmpty) {
-        if (r.patientId == authId || r.patientId == patient.id) return true;
+      final reqPatientId = (r.patientId ?? '').trim();
+      if (reqPatientId.isNotEmpty) {
+        if (myPatientIds.contains(reqPatientId)) return true;
+        if (myPatientIds.isNotEmpty) return false;
       }
       if (patient.name.isNotEmpty &&
           patient.name != 'Patient' &&
@@ -2257,7 +2740,8 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
           r.patientName.toLowerCase().contains(authEmail.split('@').first)) {
         return true;
       }
-      if (patient.name.isEmpty || patient.name == 'Patient' || requests.length <= 1) {
+      if (myPatientIds.isEmpty &&
+          (patient.name.isEmpty || patient.name == 'Patient' || requests.length <= 1)) {
         return true;
       }
       return false;
@@ -2272,13 +2756,19 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
       return s != 'COMPLETED' && s != 'CANCELLED' && s != 'REJECTED';
     }).toList();
 
-    final pastAndCancelledVisits = myRequests.where((r) {
+    final previousVisits = myRequests.where((r) {
       final s = r.status.toUpperCase();
-      return s == 'COMPLETED' || s == 'CANCELLED' || s == 'REJECTED';
+      return s == 'COMPLETED';
     }).toList();
 
-    final displayedVisits =
-        _visitsSubTabIndex == 0 ? upcomingVisits : pastAndCancelledVisits;
+    final cancelledVisits = myRequests.where((r) {
+      final s = r.status.toUpperCase();
+      return s == 'CANCELLED' || s == 'REJECTED';
+    }).toList();
+
+    final displayedVisits = _visitsSubTabIndex == 0
+        ? upcomingVisits
+        : (_visitsSubTabIndex == 1 ? previousVisits : cancelledVisits);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2319,16 +2809,26 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                   children: [
                     _buildGsPillTab(
                       key: const Key('visits_tab_upcoming'),
-                      label: 'Upcoming',
+                      label: 'Upcoming Visits',
+                      badgeText: upcomingVisits.isNotEmpty ? '(${upcomingVisits.length})' : null,
                       isSelected: _visitsSubTabIndex == 0,
                       onTap: () => setState(() => _visitsSubTabIndex = 0),
                     ),
                     const SizedBox(width: 10),
                     _buildGsPillTab(
-                      key: const Key('visits_tab_past_cancelled'),
-                      label: 'Past & cancelled',
+                      key: const Key('visits_tab_previous'),
+                      label: 'Previous Visits',
+                      badgeText: previousVisits.isNotEmpty ? '(${previousVisits.length})' : null,
                       isSelected: _visitsSubTabIndex == 1,
                       onTap: () => setState(() => _visitsSubTabIndex = 1),
+                    ),
+                    const SizedBox(width: 10),
+                    _buildGsPillTab(
+                      key: const Key('visits_tab_cancelled'),
+                      label: 'Cancelled Visits',
+                      badgeText: cancelledVisits.isNotEmpty ? '(${cancelledVisits.length})' : null,
+                      isSelected: _visitsSubTabIndex == 2,
+                      onTap: () => setState(() => _visitsSubTabIndex = 2),
                     ),
                   ],
                 ),
@@ -2351,7 +2851,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (displayedVisits.isEmpty)
-                  _buildVisitsEmptyState(isUpcoming: _visitsSubTabIndex == 0)
+                  _buildVisitsEmptyState(tabIndex: _visitsSubTabIndex)
                 else
                   ...displayedVisits.map(
                     (req) => Padding(
@@ -2417,7 +2917,9 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     );
   }
 
-  Widget _buildVisitsEmptyState({required bool isUpcoming}) {
+  Widget _buildVisitsEmptyState({required int tabIndex}) {
+    final isUpcoming = tabIndex == 0;
+    final isCancelled = tabIndex == 2;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
@@ -2438,14 +2940,16 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
             child: Icon(
               isUpcoming
                   ? Icons.calendar_today_rounded
-                  : Icons.history_rounded,
+                  : (isCancelled ? Icons.cancel_outlined : Icons.history_rounded),
               color: AppTheme.gsNavy,
               size: 26,
             ),
           ),
           const SizedBox(height: 14),
           Text(
-            isUpcoming ? 'No upcoming visits' : 'No past or cancelled visits',
+            isUpcoming
+                ? 'No upcoming visits yet.'
+                : (isCancelled ? 'No cancelled visits.' : 'No previous visits yet.'),
             style: const TextStyle(
               fontSize: 17,
               fontWeight: FontWeight.w700,
@@ -2457,7 +2961,9 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
           Text(
             isUpcoming
                 ? 'Book a verified doctor near you in under a minute.'
-                : 'Your completed and cancelled medical visits will appear here.',
+                : (isCancelled
+                    ? 'Any cancelled or declined consultations will appear here.'
+                    : 'Your completed medical consultations will appear here.'),
             style: const TextStyle(
               fontSize: 13.5,
               color: Color(0xFF64748B),
@@ -2594,7 +3100,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                 ? matchedDoctor!.specialty.trim()
                 : (req.problemCategory.trim().isNotEmpty
                     ? req.problemCategory.trim()
-                    : 'General Dentistry')));
+                    : 'Medical Consultation')));
 
     final clinicLocation = req.displayDoctorClinic.isNotEmpty
         ? req.displayDoctorClinic
@@ -2604,9 +3110,12 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                 ? req.preferredDoctorClinic!.trim()
                 : (matchedDoctor?.clinicName.trim().isNotEmpty == true
                     ? matchedDoctor!.clinicName.trim()
-                    : (req.preferredLocation.trim().isNotEmpty
-                        ? req.preferredLocation.trim()
-                        : 'GS HEALTH Partner Clinic'))));
+                    : req.preferredLocation.trim())));
+
+    final realFeeDisplay = BookingRulesConfig.formatRealFee(
+      req.assignedDoctorFee ?? matchedDoctor?.consultationFee,
+      emptyFallback: '',
+    );
 
     final combinedTypeCheck =
         '${req.preferredLocation} ${req.problemDescription} ${req.problemCategory}'
@@ -2839,33 +3348,35 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                     const SizedBox(height: 6),
 
                     // Clinic Location with Location Icon
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Padding(
-                          padding: EdgeInsets.only(top: 1.5),
-                          child: Icon(
-                            Icons.location_on_outlined,
-                            size: 16,
-                            color: Color(0xFF64748B),
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            clinicLocation,
-                            style: const TextStyle(
-                              fontSize: 13.5,
+                    if (clinicLocation.isNotEmpty) ...[
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.only(top: 1.5),
+                            child: Icon(
+                              Icons.location_on_outlined,
+                              size: 16,
                               color: Color(0xFF64748B),
-                              fontWeight: FontWeight.w500,
                             ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              clinicLocation,
+                              style: const TextStyle(
+                                fontSize: 13.5,
+                                color: Color(0xFF64748B),
+                                fontWeight: FontWeight.w500,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                    ],
 
                     // Booking Date & Time + Appointment ID
                     Wrap(
@@ -2892,41 +3403,65 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                     ),
                     const SizedBox(height: 8),
 
-                    // Appointment Type Badge (IN-CLINIC / ONLINE)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF1F5F9),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            isOnline
-                                ? Icons.videocam_outlined
-                                : Icons.apartment_rounded,
-                            size: 14,
-                            color: const Color(0xFF475569),
+                    // Appointment Type Badge (IN-CLINIC / ONLINE) + Real Consultation Fee
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
                           ),
-                          const SizedBox(width: 5),
-                          Flexible(
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                isOnline
+                                    ? Icons.videocam_outlined
+                                    : Icons.apartment_rounded,
+                                size: 14,
+                                color: const Color(0xFF475569),
+                              ),
+                              const SizedBox(width: 5),
+                              Flexible(
+                                child: Text(
+                                  visitTypeLabel,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    color: Color(0xFF475569),
+                                    letterSpacing: 0.4,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (realFeeDisplay.isNotEmpty)
+                          Container(
+                            key: Key('visit_fee_badge_${req.id}'),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: AppTheme.gsNavy.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
                             child: Text(
-                              visitTypeLabel,
+                              'Fee: $realFeeDisplay',
                               style: const TextStyle(
                                 fontSize: 11,
-                                fontWeight: FontWeight.w800,
-                                color: Color(0xFF475569),
-                                letterSpacing: 0.4,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.gsNavy,
                               ),
-                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                        ],
-                      ),
+                      ],
                     ),
 
                     // Appointment Notes (if available)
@@ -2949,61 +3484,91 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
             ],
           ),
 
-          // Cancel Visit Button (Only for cancellable appointments)
+          // Reschedule & Cancel Visit Actions (Only for upcoming/cancellable appointments)
           if (canCancel) ...[
             const SizedBox(height: 14),
-            InkWell(
-              key: Key('cancel_visit_button_${req.id}'),
-              onTap: isCancelling
-                  ? null
-                  : () => _guardServiceAccess(
-                        context,
-                        serviceTitle: 'Cancel Visit',
-                        onAllowed: () => _confirmAndCancelVisit(context, req, doctorName),
-                      ),
-              borderRadius: BorderRadius.circular(14),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 11,
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  key: Key('reschedule_visit_button_${req.id}'),
+                  onPressed: () => _guardServiceAccess(
+                    context,
+                    serviceTitle: 'Reschedule Visit',
+                    onAllowed: () => AppointmentManagementDialog.show(
+                      context,
+                      appointment: req,
+                    ),
+                  ),
+                  icon: const Icon(Icons.edit_calendar_outlined, size: 16),
+                  label: const Text(
+                    'Reschedule',
+                    style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.gsNavy,
+                    side: const BorderSide(color: AppTheme.gsNavy),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
                 ),
-                decoration: BoxDecoration(
-                  color: AppTheme.gsRed.withValues(alpha: 0.12),
+                InkWell(
+                  key: Key('cancel_visit_button_${req.id}'),
+                  onTap: isCancelling
+                      ? null
+                      : () => _guardServiceAccess(
+                            context,
+                            serviceTitle: 'Cancel Visit',
+                            onAllowed: () => _confirmAndCancelVisit(context, req, doctorName),
+                          ),
                   borderRadius: BorderRadius.circular(14),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 11,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.gsRed.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (isCancelling) ...[
+                          const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Color(0xFFFE3434),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Cancelling...',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFFFE3434),
+                            ),
+                          ),
+                        ] else
+                          const Text(
+                            'Cancel visit',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFFFE3434),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (isCancelling) ...[
-                      const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Color(0xFFFE3434),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'Cancelling...',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFFFE3434),
-                        ),
-                      ),
-                    ] else
-                      const Text(
-                        'Cancel visit',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFFFE3434),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
+              ],
             ),
           ],
         ],
@@ -3148,6 +3713,22 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     return type == 'prescription' || cat.contains('prescription') || hasMedItems;
   }
 
+  bool _isDiagnosticRecord(Map<String, dynamic> rec) {
+    if (_isPrescriptionRecord(rec)) return false;
+    final type = (rec['type'] ?? '').toString().toLowerCase();
+    final cat = (rec['category'] ?? '').toString().toLowerCase();
+    return type == 'diagnostic' ||
+        type == 'lab_report' ||
+        type == 'xray' ||
+        cat.contains('diagnostic') ||
+        cat.contains('lab') ||
+        cat.contains('scan') ||
+        cat.contains('x-ray') ||
+        cat.contains('xray') ||
+        cat.contains('pathology') ||
+        cat.contains('radiology');
+  }
+
   bool _isToothChartRecord(Map<String, dynamic> rec) {
     final type = (rec['type'] ?? '').toString().toLowerCase();
     final cat = (rec['category'] ?? '').toString().toLowerCase();
@@ -3231,6 +3812,8 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
           return !_isPrescriptionRecord(r);
         }).toList();
 
+        final diagnosticRecords = allRecords.where(_isDiagnosticRecord).toList();
+
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -3300,6 +3883,13 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                           isSelected: _lockerSubTabIndex == 2,
                           onTap: () => setState(() => _lockerSubTabIndex = 2),
                         ),
+                        const SizedBox(width: 10),
+                        _buildGsPillTab(
+                          key: const Key('locker_tab_diagnostics'),
+                          label: 'Diagnostics',
+                          isSelected: _lockerSubTabIndex == 3,
+                          onTap: () => setState(() => _lockerSubTabIndex = 3),
+                        ),
                       ],
                     ),
                   ),
@@ -3331,9 +3921,16 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                         consultations: myConsultations,
                         allRecords: allRecords,
                       )
-                    else
+                    else if (_lockerSubTabIndex == 2)
                       _buildXraysAndReportsCategoryContent(
                         xrayRecords: xrayAndReportRecords,
+                        allRecords: allRecords,
+                        isLoading: snapshot.connectionState ==
+                            ConnectionState.waiting,
+                      )
+                    else
+                      _buildDiagnosticsCategoryContent(
+                        diagnosticRecords: diagnosticRecords,
                         allRecords: allRecords,
                         isLoading: snapshot.connectionState ==
                             ConnectionState.waiting,
@@ -3587,7 +4184,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                           letterSpacing: 0.8,
                         ),
                       ),
-                      Flexible(
+                      Expanded(
                         child: Text(
                           ' · ${medItems.isNotEmpty ? medItems.length : 1} MEDICINE(S)',
                           style: const TextStyle(
@@ -3599,6 +4196,22 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      if ((record['specialty'] ?? '').toString().trim().isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppTheme.gsNavy.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            record['specialty'].toString().trim(),
+                            style: const TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.gsNavy,
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                   const SizedBox(height: 10),
@@ -3707,6 +4320,30 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                       ],
                     ),
                   ],
+                  if (record['clinicalSections'] is Map && (record['clinicalSections'] as Map).isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    ...SpecialtyClinicalConfig.forSpecialty((record['specialty'] ?? '').toString())
+                        .prescriptionSchema
+                        .sections
+                        .where((sec) => ((record['clinicalSections'] as Map)[sec.key] ?? '').toString().trim().isNotEmpty)
+                        .map((sec) {
+                      final val = (record['clinicalSections'] as Map)[sec.key].toString().trim();
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Text(
+                          '${sec.label}: $val',
+                          style: const TextStyle(fontSize: 12.5, color: Color(0xFF334155), height: 1.35),
+                        ),
+                      );
+                    }),
+                  ],
+                  if ((record['followUpDate'] ?? '').toString().trim().isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'Follow-up Date: ${record['followUpDate']}',
+                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppTheme.gsRed),
+                    ),
+                  ],
                   if (clinicName.isNotEmpty) ...[
                     const SizedBox(height: 8),
                     Row(
@@ -3731,6 +4368,15 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                           ),
                         ),
                       ],
+                    ),
+                  ],
+                  if (!hasUploadedFile) ...[
+                    const SizedBox(height: 10),
+                    _buildRecordActionButton(
+                      icon: Icons.picture_as_pdf_outlined,
+                      label: 'Prescription PDF',
+                      color: AppTheme.gsNavy,
+                      onTap: () => PrescriptionPdfGenerator.showPreviewDialog(context, record: record),
                     ),
                   ],
                   if (hasUploadedFile) ...[
@@ -4077,6 +4723,210 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               ),
             );
           }),
+      ],
+    );
+  }
+
+  Widget _buildDiagnosticsCategoryContent({
+    required List<Map<String, dynamic>> diagnosticRecords,
+    required List<Map<String, dynamic>> allRecords,
+    required bool isLoading,
+  }) {
+    if (diagnosticRecords.isEmpty) {
+      return Container(
+        key: const Key('diagnostics_empty_state'),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+        ),
+        child: Column(
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: AppTheme.gsNavy.withValues(alpha: 0.08),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.biotech_rounded,
+                color: AppTheme.gsNavy,
+                size: 26,
+              ),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'No diagnostic reports yet.',
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.textDark,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Your lab tests, blood work, and radiology scans will appear here with referring doctor and lab status details.',
+              style: TextStyle(
+                fontSize: 13.5,
+                color: Color(0xFF64748B),
+                height: 1.4,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 18),
+            ElevatedButton.icon(
+              key: const Key('diagnostics_empty_upload_button'),
+              onPressed: () => _guardServiceAccess(
+                context,
+                serviceTitle: 'Diagnostics',
+                onAllowed: () => _showUploadOrEditRecordSheet(context),
+              ),
+              icon: const Icon(Icons.cloud_upload_rounded, size: 18),
+              label: const Text('+ Upload Diagnostic Report', style: TextStyle(fontWeight: FontWeight.w700)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.gsNavy,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (isLoading)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 10),
+            child: LinearProgressIndicator(color: AppTheme.gsNavy),
+          ),
+        ...diagnosticRecords.map((rec) {
+          final recId = (rec['id'] ?? '').toString();
+          final testName = (rec['testName'] ?? rec['title'] ?? 'Diagnostic Test').toString().trim();
+          final rawDate = (rec['date'] ?? rec['uploadedAt'] ?? '').toString().trim();
+          final dateLabel = _formatLockerRecordDate(rawDate);
+          final referringDoctor = (rec['referringDoctor'] ??
+                  rec['doctorName'] ??
+                  rec['doctor_name'] ??
+                  '')
+              .toString()
+              .trim();
+          final labDetails = (rec['labName'] ??
+                  rec['labDetails'] ??
+                  rec['clinicName'] ??
+                  rec['clinic_name'] ??
+                  '')
+              .toString()
+              .trim();
+          final reportStatus = (rec['reportStatus'] ?? rec['status'] ?? 'Available').toString().trim();
+
+          return Container(
+            key: Key('diagnostic_card_$recId'),
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: AppTheme.gsNavy.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.biotech_rounded, color: AppTheme.gsNavy, size: 22),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            testName,
+                            style: const TextStyle(
+                              fontSize: 15.5,
+                              fontWeight: FontWeight.w800,
+                              color: AppTheme.textDark,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Date: $dateLabel',
+                            style: const TextStyle(fontSize: 12.5, color: Color(0xFF64748B)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppTheme.gsNavy.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        reportStatus,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.gsNavy,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (referringDoctor.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Referring Doctor: $referringDoctor',
+                    style: const TextStyle(fontSize: 13, color: Color(0xFF334155)),
+                  ),
+                ],
+                if (labDetails.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Lab: $labDetails',
+                    style: const TextStyle(fontSize: 13, color: Color(0xFF475569)),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    _buildRecordActionButton(
+                      icon: Icons.visibility_rounded,
+                      label: 'View',
+                      color: AppTheme.gsNavy,
+                      onTap: () => _showRecordDetailModal(context, rec),
+                    ),
+                    _buildRecordActionButton(
+                      icon: Icons.download_rounded,
+                      label: 'Download',
+                      color: AppTheme.gsNavy,
+                      onTap: () => _handleDownloadRecord(context, rec),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        }),
       ],
     );
   }
@@ -6035,19 +6885,29 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
 
   String _resolveProfileDisplayName(PatientProfile patient) {
     final raw = patient.name.trim();
-    if (raw.isNotEmpty && raw.toLowerCase() != 'patient') {
+    if (raw.isNotEmpty &&
+        raw.toLowerCase() != 'patient' &&
+        !raw.toLowerCase().startsWith('user_')) {
       return _formatPatientName(raw);
     }
     final sessName = SessionService().currentSession?.name?.trim();
-    if (sessName != null && sessName.isNotEmpty && sessName.toLowerCase() != 'patient') {
+    if (sessName != null &&
+        sessName.isNotEmpty &&
+        sessName.toLowerCase() != 'patient' &&
+        !sessName.toLowerCase().startsWith('user_')) {
       return _formatPatientName(sessName);
     }
     final authMetaName = _safeAuthUser?.userMetadata?['name']?.toString().trim() ??
         _safeAuthUser?.userMetadata?['full_name']?.toString().trim();
-    if (authMetaName != null && authMetaName.isNotEmpty && authMetaName.toLowerCase() != 'patient') {
+    if (authMetaName != null &&
+        authMetaName.isNotEmpty &&
+        authMetaName.toLowerCase() != 'patient' &&
+        !authMetaName.toLowerCase().startsWith('user_')) {
       return _formatPatientName(authMetaName);
     }
-    return raw.isNotEmpty ? _formatPatientName(raw) : 'Patient';
+    return (raw.isNotEmpty && !raw.toLowerCase().startsWith('user_'))
+        ? _formatPatientName(raw)
+        : 'Patient';
   }
 
   String _resolveProfilePhone(PatientProfile patient) {

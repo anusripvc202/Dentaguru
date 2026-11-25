@@ -1,8 +1,6 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -13,11 +11,12 @@ import '../../../../core/services/session_service.dart';
 import '../../../../core/utils/record_file_helper.dart';
 import '../../../../core/widgets/whatsapp_chat_modal.dart';
 import '../../../patient/presentation/widgets/referred_patients_sheet.dart';
-import '../../../../core/widgets/map_location_picker_dialog.dart';
-import '../../../../core/models/medical_specialty_model.dart';
-import '../../../../core/models/prescription_template_model.dart';
+import '../../../../core/models/specialty_clinical_config.dart';
 import '../../../../core/models/doctor_availability.dart';
 import '../../../../core/models/referral_model.dart';
+import '../../../../core/utils/prescription_pdf_generator.dart';
+import '../widgets/doctor_visits_calendar.dart';
+import '../widgets/specialty_prescription_modal.dart';
 import '../../../admin/presentation/widgets/doctor_slot_management_dialog.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'doctor_patient_record_screen.dart';
@@ -49,6 +48,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   final DateTime _baseCalendarDate = DateTime.now();
   bool _isDentistAvailableNow = true;
   bool _isUpdatingAvailability = false;
+  String _visitPeriodFilter = 'All'; // 'All' | 'Today' | 'Upcoming' | 'Previous'
   DoctorScheduleModel _doctorSchedule = const DoctorScheduleModel();
   List<DoctorAvailabilityModel> _doctorBlockedDates = const [];
   bool _hasSyncedDoctorSchedule = false;
@@ -144,6 +144,18 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
           .onPostgresChanges(
             event: PostgresChangeEvent.all,
             schema: 'public',
+            table: 'appointments',
+            callback: (payload) {
+              debugPrint('⚡ Realtime update on appointments for Dentist: ${payload.eventType}');
+              if (mounted) {
+                _patientService.syncAppointmentsFromApi();
+                _patientService.syncNotificationsFromApi(role: 'Dentist');
+              }
+            },
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
             table: 'referrals',
             callback: (payload) {
               debugPrint('⚡ Realtime update on referrals for Dentist: ${payload.eventType}');
@@ -191,6 +203,61 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     )..repeat(reverse: true);
 
     _entryController.forward();
+  }
+
+  Future<void> _setDoctorPresenceState(String presenceState) async {
+    if (_isUpdatingAvailability) return;
+    final cleanState = presenceState.trim();
+    final bool nextAvailable =
+        cleanState != 'Offline' && cleanState != 'Unavailable';
+    setState(() {
+      _isDentistAvailableNow = nextAvailable;
+      _isUpdatingAvailability = true;
+    });
+    _idleAvailabilityTimer?.cancel();
+
+    DoctorModel? doc = _resolveCurrentDoctor();
+    if (doc == null || doc.id.isEmpty || doc.id.toUpperCase().startsWith('DOC-')) {
+      await _patientService.syncDoctorsFromApi(includeUnavailable: true);
+      doc = _resolveCurrentDoctor();
+    }
+    final sess = SessionService().currentSession;
+    final String targetDoctorId = (doc != null && doc.id.isNotEmpty && !doc.id.toUpperCase().startsWith('DOC-'))
+        ? doc.id
+        : ((sess?.metadata['dentistId']?.toString().trim().isNotEmpty == true)
+            ? sess!.metadata['dentistId'].toString().trim()
+            : ((sess?.userId.trim().isNotEmpty == true)
+                ? sess!.userId.trim()
+                : (doc?.id ?? '')));
+
+    Map<String, dynamic> result = {'success': true};
+    if (targetDoctorId.isNotEmpty) {
+      result = await _patientService.setDoctorAvailability(
+        doctorId: targetDoctorId,
+        isAvailable: nextAvailable,
+        statusOverride: cleanState,
+      );
+    }
+
+    if (!mounted) return;
+    setState(() => _isUpdatingAvailability = false);
+    if (result['success'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Presence status updated to $cleanState.'),
+          backgroundColor: const Color(0xFF012A58),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result['message']?.toString() ?? 'Failed to update presence status.'),
+          backgroundColor: const Color(0xFFFE3434),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   Future<void> _toggleDentistAvailability(bool value, {bool isAutoIdle = false}) async {
@@ -305,625 +372,48 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     }
   }
 
-  void _showUpdateMyFeeAndSlotsDialog(BuildContext context) {
-    final authUser = _safeAuthUser;
-    final currentDoc = _patientService.currentDoctor ?? (
-      authUser != null ? DoctorModel(
-        id: authUser.id,
-        name: authUser.userMetadata?['name'] ?? 'Doctor',
-        email: authUser.email ?? '',
-        phone: '',
-        specialty: 'General Medicine',
-        qualification: 'MBBS, MD',
-        experienceYears: 5,
-        rating: 5.0,
-        reviewCount: 0,
-        clinicName: 'GS HEALTH Care Center',
-        status: 'Available',
-        nextAvailableSlots: ['Today, 2:00 PM'],
-        consultationFee: '\$75',
-      ) : null
-    );
-    final specialtyOptions = <String>{
-      ..._patientService.activeSpecialtyNames,
-      'General Dentistry',
-      'Orthodontics',
-      'Endodontics',
-      'Periodontics',
-      'Pediatric Dentistry',
-      'Oral & Maxillofacial Surgery',
-      'Prosthodontics',
-      if (currentDoc != null && currentDoc.specialty.trim().isNotEmpty) currentDoc.specialty.trim(),
-    }.toList();
-    String selectedSpec = (currentDoc != null && currentDoc.specialty.trim().isNotEmpty)
-        ? currentDoc.specialty.trim()
-        : specialtyOptions.first;
-    final qualCtrl = TextEditingController(
-      text: (currentDoc != null && currentDoc.qualification.trim().isNotEmpty)
-          ? currentDoc.qualification.trim()
-          : MedicalSpecialtyModel.getDefaultQualificationForSpecialty(selectedSpec),
-    );
-    final expCtrl = TextEditingController(text: '${currentDoc?.experienceYears ?? 5}');
-    final clinicCtrl = TextEditingController(text: currentDoc?.clinicName ?? '');
-    final feeCtrl = TextEditingController(text: currentDoc?.consultationFee ?? '\$75');
-    final slotCtrl = TextEditingController(
-      text: (currentDoc?.nextAvailableSlots.isNotEmpty == true) ? currentDoc!.nextAvailableSlots.first : 'Today, 2:00 PM',
-    );
-
-    showDialog(
-      context: context,
-      builder: (dialogCtx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              title: const Row(
-                children: [
-                  Icon(Icons.edit_calendar_rounded, color: AppTheme.primaryBlue, size: 22),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Professional Profile, Specialty & Slots',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15.5),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    DropdownButtonFormField<String>(
-                      initialValue: specialtyOptions.contains(selectedSpec) ? selectedSpec : specialtyOptions.first,
-                      isExpanded: true,
-                      dropdownColor: Colors.white,
-                      decoration: InputDecoration(
-                        labelText: 'Medical Specialty',
-                        prefixIcon: const Icon(Icons.medical_services_outlined),
-                        filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      items: specialtyOptions
-                          .map((s) => DropdownMenuItem(
-                                value: s,
-                                child: Text(s, style: const TextStyle(fontSize: 13), overflow: TextOverflow.ellipsis),
-                              ))
-                          .toList(),
-                      onChanged: (val) {
-                        if (val != null) {
-                          setModalState(() {
-                            selectedSpec = val;
-                            qualCtrl.text = MedicalSpecialtyModel.getDefaultQualificationForSpecialty(val);
-                          });
-                        }
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          flex: 3,
-                          child: TextField(
-                            controller: qualCtrl,
-                            style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                            decoration: InputDecoration(
-                              labelText: 'Qualifications',
-                              hintText: 'MBBS, MD / BDS, MDS',
-                              filled: true,
-                              fillColor: const Color(0xFFF8FAFC),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          flex: 2,
-                          child: TextField(
-                            controller: expCtrl,
-                            keyboardType: TextInputType.number,
-                            style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                            decoration: InputDecoration(
-                              labelText: 'Exp (Yrs)',
-                              hintText: '5',
-                              filled: true,
-                              fillColor: const Color(0xFFF8FAFC),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: clinicCtrl,
-                      style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                      decoration: InputDecoration(
-                        labelText: 'Associated Clinic / Hospital',
-                        prefixIcon: const Icon(Icons.domain_rounded),
-                        filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: feeCtrl,
-                      style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                      cursorColor: AppTheme.primaryBlue,
-                      decoration: InputDecoration(
-                        labelText: 'My Consultation Fee',
-                        hintText: 'e.g. \$85',
-                        prefixIcon: const Icon(Icons.payments_outlined),
-                        filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: slotCtrl,
-                      style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                      cursorColor: AppTheme.primaryBlue,
-                      decoration: InputDecoration(
-                        labelText: 'Next Available Time Slot',
-                        hintText: 'e.g. Today, 4:00 PM',
-                        prefixIcon: const Icon(Icons.access_time_rounded),
-                        filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(onPressed: () => Navigator.of(dialogCtx).pop(), child: const Text('Cancel')),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.check_circle_rounded, size: 16),
-                  label: const Text('Save & Publish', style: TextStyle(fontWeight: FontWeight.bold)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primaryBlue,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: () async {
-                    final docId = currentDoc?.id ?? (authUser?.id ?? '');
-                    _patientService.updateDoctorFeeAndSlots(
-                      doctorId: docId,
-                      consultationFee: feeCtrl.text.trim(),
-                      availableSlot: slotCtrl.text.trim(),
-                    );
-                    await _patientService.updateDoctorProfessionalProfile(
-                      doctorId: docId,
-                      specialty: selectedSpec,
-                      qualification: qualCtrl.text.trim(),
-                      experienceYears: int.tryParse(expCtrl.text.trim()) ?? 5,
-                      clinicName: clinicCtrl.text.trim(),
-                      consultationFee: feeCtrl.text.trim(),
-                    );
-                    if (dialogCtx.mounted) Navigator.of(dialogCtx).pop();
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('🎉 Profile updated ($selectedSpec • ${qualCtrl.text.trim()}) & fee set to ${feeCtrl.text.trim()}!'),
-                          backgroundColor: const Color(0xFF012A58),
-                        ),
-                      );
-                    }
-                  },
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
   void _showPrescriptionModal(BuildContext context, dynamic reqOrName) {
     final String pName = reqOrName is PatientConsultationRequest ? reqOrName.patientName : reqOrName.toString();
-    final String initialDiag = reqOrName is PatientConsultationRequest ? reqOrName.problemCategory : 'Dental Evaluation';
-    final diagnosisController = TextEditingController(text: initialDiag);
-    final medController = TextEditingController(text: 'Amoxicillin 500mg');
-    final dosageController = TextEditingController(text: '1 Capsule');
-    final frequencyController = TextEditingController(text: 'Every 8 Hours (1-1-1)');
-    final durationController = TextEditingController(text: '5 Days');
-    final notesController = TextEditingController(text: 'Take after meals with plenty of water. Complete the full antibiotic course.');
+    final String rawPatientId = reqOrName is PatientConsultationRequest ? (reqOrName.patientId ?? '').trim() : '';
+    final String pId = rawPatientId.isNotEmpty ? rawPatientId : pName;
+    final String? apptId = reqOrName is PatientConsultationRequest ? reqOrName.id : null;
+    final String? initialDiag = reqOrName is PatientConsultationRequest ? reqOrName.problemCategory : null;
+    final String? initialSym = reqOrName is PatientConsultationRequest ? reqOrName.symptoms : null;
 
-    String selectedMedicationName = 'Amoxicillin 500mg';
-    String selectedDiagnosisPreset = dentalDiagnosisPresets.contains(initialDiag) ? initialDiag : 'Dental Evaluation';
+    final currentDoc = _patientService.currentDoctor;
+    final effectiveSpecialty = (currentDoc?.specialty.trim().isNotEmpty == true)
+        ? currentDoc!.specialty.trim()
+        : 'General Medicine';
 
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            Color getCategoryColor(String cat) {
-              if (cat.contains('Antibiotic')) return const Color(0xFF012A58);
-              if (cat.contains('Pain')) return const Color(0xFFFE3434);
-              if (cat.contains('Antiseptic')) return const Color(0xFF012A58);
-              if (cat.contains('Antacid') || cat.contains('PPI')) return const Color(0xFFFE3434);
-              if (cat.contains('Ulcer') || cat.contains('Topical')) return const Color(0xFFFE3434);
-              return const Color(0xFF012A58);
-            }
-
-            return Dialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-              child: Container(
-                constraints: const BoxConstraints(maxWidth: 520),
-                child: SingleChildScrollView(
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        // Header
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF012A58).withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Icon(Icons.receipt_long_rounded, color: Color(0xFF012A58), size: 24),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text('Issue E-Prescription', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppTheme.textDark)),
-                                  Text('Patient: $pName', style: const TextStyle(fontSize: 11, color: AppTheme.textMuted)),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-
-                        // Clinical Diagnosis Dropdown
-                        DropdownButtonFormField<String>(
-                          initialValue: dentalDiagnosisPresets.contains(selectedDiagnosisPreset) ? selectedDiagnosisPreset : 'Dental Evaluation',
-                          isExpanded: true,
-                          dropdownColor: Colors.white,
-                          decoration: InputDecoration(
-                            labelText: 'Clinical Diagnosis',
-                            prefixIcon: const Icon(Icons.medical_information_outlined, size: 18, color: AppTheme.primaryBlue),
-                            filled: true,
-                            fillColor: const Color(0xFFF8FAFC),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                          items: dentalDiagnosisPresets.map((d) {
-                            return DropdownMenuItem<String>(
-                              value: d,
-                              child: Text(d, style: const TextStyle(fontSize: 12.5, color: AppTheme.textDark), overflow: TextOverflow.ellipsis),
-                            );
-                          }).toList(),
-                          onChanged: (val) {
-                            if (val != null) {
-                              setModalState(() {
-                                selectedDiagnosisPreset = val;
-                                if (val != 'Custom Diagnosis...') {
-                                  diagnosisController.text = val;
-                                }
-                              });
-                            }
-                          },
-                        ),
-                        if (selectedDiagnosisPreset == 'Custom Diagnosis...') ...[
-                          const SizedBox(height: 8),
-                          TextField(
-                            controller: diagnosisController,
-                            style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                            cursorColor: AppTheme.primaryBlue,
-                            decoration: InputDecoration(
-                              labelText: 'Enter Custom Diagnosis',
-                              filled: true,
-                              fillColor: const Color(0xFFF8FAFC),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: 14),
-
-                        // Section Label: Related Dental Medication Dropdown
-                        const Row(
-                          children: [
-                            Icon(Icons.medication_rounded, size: 16, color: Color(0xFF012A58)),
-                            SizedBox(width: 6),
-                            Text(
-                              'Select Related Dental Medication',
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-
-                        // Medication Dropdown
-                        DropdownButtonFormField<String>(
-                          initialValue: dentalPrescriptionTemplates.any((t) => t.name == selectedMedicationName) ? selectedMedicationName : 'Amoxicillin 500mg',
-                          isExpanded: true,
-                          dropdownColor: Colors.white,
-                          decoration: InputDecoration(
-                            labelText: 'Choose Medicine & Strength',
-                            hintText: 'Select standard dental prescription...',
-                            prefixIcon: const Icon(Icons.vaccines_rounded, size: 18, color: Color(0xFF012A58)),
-                            filled: true,
-                            fillColor: const Color(0xFFF8FAFC),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                          items: dentalPrescriptionTemplates.map((template) {
-                            return DropdownMenuItem<String>(
-                              value: template.name,
-                              child: Row(
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                                    decoration: BoxDecoration(
-                                      color: getCategoryColor(template.category).withValues(alpha: 0.15),
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(
-                                      template.category,
-                                      style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: getCategoryColor(template.category)),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      template.name,
-                                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }).toList(),
-                          onChanged: (val) {
-                            if (val != null) {
-                              final matched = dentalPrescriptionTemplates.firstWhere((t) => t.name == val, orElse: () => dentalPrescriptionTemplates.first);
-                              setModalState(() {
-                                selectedMedicationName = val;
-                                medController.text = matched.name;
-                                dosageController.text = matched.defaultDosage;
-                                frequencyController.text = matched.defaultFrequency;
-                                durationController.text = matched.defaultDuration;
-                                notesController.text = matched.defaultInstructions;
-                              });
-                            }
-                          },
-                        ),
-                        const SizedBox(height: 8),
-
-                        // Quick Recommendation Chips
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: [
-                              'Amoxicillin 500mg',
-                              'Augmentin 625mg (Amox + Clav)',
-                              'Zerodol-SP (Aceclo + Para + Serratio)',
-                              'Combiflam (Ibuprofen + Paracetamol)',
-                              'Hexidine 0.2% (Chlorhexidine Mouthwash)',
-                              'Pan-40 (Pantoprazole 40mg)',
-                              'Ketorol-DT 10mg (Dispersible)',
-                            ].map((quickMed) {
-                              final isSelected = medController.text == quickMed;
-                              return Padding(
-                                padding: const EdgeInsets.only(right: 6),
-                                child: InkWell(
-                                  onTap: () {
-                                    final matched = dentalPrescriptionTemplates.firstWhere((t) => t.name == quickMed, orElse: () => dentalPrescriptionTemplates.first);
-                                    setModalState(() {
-                                      selectedMedicationName = quickMed;
-                                      medController.text = matched.name;
-                                      dosageController.text = matched.defaultDosage;
-                                      frequencyController.text = matched.defaultFrequency;
-                                      durationController.text = matched.defaultDuration;
-                                      notesController.text = matched.defaultInstructions;
-                                    });
-                                  },
-                                  borderRadius: BorderRadius.circular(16),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: isSelected ? const Color(0xFF012A58) : const Color(0xFFF1F5F9),
-                                      borderRadius: BorderRadius.circular(16),
-                                      border: Border.all(color: isSelected ? const Color(0xFF012A58) : const Color(0xFFE2E8F0)),
-                                    ),
-                                    child: Text(
-                                      quickMed.split(' (').first,
-                                      style: TextStyle(
-                                        fontSize: 10.5,
-                                        fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                                        color: isSelected ? Colors.white : AppTheme.textDark,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              );
-                            }).toList(),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-
-                        // Medication Name & Strength (Editable)
-                        TextField(
-                          controller: medController,
-                          style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
-                          cursorColor: AppTheme.primaryBlue,
-                          decoration: InputDecoration(
-                            labelText: 'Medication Name & Strength',
-                            hintText: 'e.g. Amoxicillin 500mg',
-                            filled: true,
-                            fillColor: const Color(0xFFF8FAFC),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-
-                        // Dosage & Frequency
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: dosageController,
-                                style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                                cursorColor: AppTheme.primaryBlue,
-                                decoration: InputDecoration(
-                                  labelText: 'Dosage',
-                                  hintText: '1 Capsule',
-                                  filled: true,
-                                  fillColor: const Color(0xFFF8FAFC),
-                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: TextField(
-                                controller: frequencyController,
-                                style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                                cursorColor: AppTheme.primaryBlue,
-                                decoration: InputDecoration(
-                                  labelText: 'Frequency',
-                                  hintText: 'Twice Daily (1-0-1)',
-                                  filled: true,
-                                  fillColor: const Color(0xFFF8FAFC),
-                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-
-                        // Duration
-                        TextField(
-                          controller: durationController,
-                          style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                          cursorColor: AppTheme.primaryBlue,
-                          decoration: InputDecoration(
-                            labelText: 'Duration',
-                            hintText: '5 Days',
-                            filled: true,
-                            fillColor: const Color(0xFFF8FAFC),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-
-                        // Instructions / Additional Notes
-                        TextField(
-                          controller: notesController,
-                          maxLines: 2,
-                          style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                          cursorColor: AppTheme.primaryBlue,
-                          decoration: InputDecoration(
-                            labelText: 'Instructions / Additional Notes',
-                            hintText: 'Take after meals with plenty of water.',
-                            filled: true,
-                            fillColor: const Color(0xFFF8FAFC),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-
-                        // Action Button
-                        ElevatedButton.icon(
-                          icon: const Icon(Icons.check_circle_rounded, size: 18),
-                          label: const Text('Send Digital E-Prescription to Patient', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF012A58),
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                          onPressed: () async {
-                            final diagnosis = diagnosisController.text.trim();
-                            final medName = medController.text.trim();
-                            final dosage = dosageController.text.trim();
-                            final freq = frequencyController.text.trim();
-                            final duration = durationController.text.trim();
-                            final notes = notesController.text.trim();
-
-                            final newRecord = {
-                              'id': 'REC-${DateTime.now().millisecondsSinceEpoch}',
-                              'patient_id': pName,
-                              'patientName': pName,
-                              'type': 'prescription',
-                              'title': diagnosis.isNotEmpty ? diagnosis : 'Digital Prescription Slips',
-                              'diagnosis': diagnosis.isNotEmpty ? diagnosis : 'Medical Care',
-                              'subtitle': 'Diagnosis: ${diagnosis.isNotEmpty ? diagnosis : "Medical Care"} (${medName.isNotEmpty ? medName : "Medication"})',
-                              'doctorId': _patientService.currentDoctor?.id ?? '',
-                              'doctorName': _patientService.currentDoctor?.name ?? 'Attending Doctor',
-                              'clinicName': _patientService.currentDoctor?.clinicName ?? 'GS HEALTH Clinic',
-                              'date': DateTime.now().toString().split(' ').first,
-                              'instructions': notes,
-                              'items': [
-                                {
-                                  'name': medName.isNotEmpty ? medName : 'Amoxicillin 500mg',
-                                  'dosage': dosage.isNotEmpty ? dosage : '1 Capsule',
-                                  'frequency': freq.isNotEmpty ? freq : 'Twice Daily',
-                                  'duration': duration.isNotEmpty ? duration : '7 Days',
-                                  'instructions': notes,
-                                  'status': 'Active',
-                                }
-                              ],
-                            };
-
-                            _patientService.addMedicalRecord(newRecord);
-
-                            await ApiService().createMedicalRecord(
-                              patientId: pName,
-                              type: 'prescription',
-                              title: 'Digital Prescription Slips',
-                              subtitle: 'Diagnosis: ${diagnosis.isNotEmpty ? diagnosis : "Medical Care"} (${medName.isNotEmpty ? medName : "Medication"})',
-                              doctorName: _patientService.currentDoctor?.name ?? 'Attending Doctor',
-                              clinicName: _patientService.currentDoctor?.clinicName ?? 'GS HEALTH Clinic',
-                              items: [
-                                {
-                                  'name': medName.isNotEmpty ? medName : 'Amoxicillin 500mg',
-                                  'dosage': dosage.isNotEmpty ? dosage : '1 Capsule',
-                                  'frequency': freq.isNotEmpty ? freq : 'Twice Daily',
-                                  'duration': duration.isNotEmpty ? duration : '7 Days',
-                                  'instructions': notes,
-                                  'status': 'Active',
-                                }
-                              ],
-                            );
-
-                            // Dispatch notification to Patient
-                            _patientService.addNotification(
-                              recipientRole: 'Patient',
-                              recipientId: pName,
-                              title: '💊 New E-Prescription Issued!',
-                              message: 'Dr. ${_patientService.currentDoctor?.name ?? "Attending Doctor"} has issued an E-Prescription for $diagnosis.',
-                            );
-
-                            if (context.mounted) {
-                              Navigator.of(dialogContext).pop();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('💊 Digital E-Prescription issued to $pName! Live in Patient Health Locker.'),
-                                  backgroundColor: const Color(0xFF012A58),
-                                  duration: const Duration(seconds: 3),
-                                ),
-                              );
-                            }
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
+    SpecialtyPrescriptionModal.show(
+      context,
+      patientId: pId,
+      patientName: pName,
+      doctorId: currentDoc?.id ?? '',
+      doctorName: currentDoc?.name ?? 'Attending Doctor',
+      doctorSpecialty: effectiveSpecialty,
+      doctorQualification: currentDoc?.qualification ?? '',
+      clinicName: currentDoc?.clinicName ?? 'GS HEALTH Clinic',
+      appointmentId: apptId,
+      initialDiagnosis: initialDiag,
+      initialSymptoms: initialSym,
+      onIssued: (savedRecord) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('E-Prescription issued to $pName ($effectiveSpecialty)! Live in Patient Locker.'),
+            backgroundColor: AppTheme.gsNavy,
+            duration: const Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'View PDF',
+              textColor: Colors.white,
+              onPressed: () {
+                if (mounted) {
+                  PrescriptionPdfGenerator.showPreviewDialog(context, record: savedRecord);
+                }
+              },
+            ),
+          ),
         );
       },
     );
@@ -1040,6 +530,14 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                 if (isUnread) {
                                   await _patientService.markNotificationRead(n.id);
                                   setModalState(() {});
+                                }
+                                final textLower = '${n.title} ${n.message}'.toLowerCase();
+                                if (ctx.mounted) Navigator.pop(ctx);
+                                if (!mounted) return;
+                                if (textLower.contains('referral') || textLower.contains('assigned')) {
+                                  setState(() => _currentIndex = 2);
+                                } else if (textLower.contains('appointment') || textLower.contains('booking')) {
+                                  setState(() => _currentIndex = 0);
                                 }
                               },
                               borderRadius: BorderRadius.circular(12),
@@ -1336,12 +834,15 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
           candidatePhones.any((cp) => cp.length >= 10 && dPhone.endsWith(cp.substring(cp.length - 10)))) {
         return true;
       }
-      final dName = d.name.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
-      if (candidateName.isNotEmpty &&
+      final dName = d.name.replaceAll(RegExp(r'^dr\.?\s*', caseSensitive: false), '').trim().toLowerCase();
+      if (candidateIds.isEmpty &&
+          candidateEmails.isEmpty &&
+          candidatePhones.isEmpty &&
+          candidateName.isNotEmpty &&
           candidateName != 'doctor' &&
           candidateName != 'dentist' &&
           dName.isNotEmpty &&
-          (dName == candidateName || dName.contains(candidateName) || candidateName.contains(dName))) {
+          dName == candidateName) {
         return true;
       }
       return false;
@@ -1389,17 +890,11 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
 
     bool isAssignedToMe(PatientConsultationRequest r) {
       final aId = r.assignedDoctorId?.trim();
-      if (aId != null && aId.isNotEmpty && myDoctorIds.contains(aId)) {
-        return true;
+      if (aId != null && aId.isNotEmpty) {
+        return myDoctorIds.contains(aId);
       }
-      final aName = r.assignedDoctorName?.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
-      if (currentDocName.isNotEmpty &&
-          aName != null &&
-          aName.isNotEmpty &&
-          (aName == currentDocName || currentDocName.contains(aName) || aName.contains(currentDocName))) {
-        return true;
-      }
-      return false;
+      final aName = r.assignedDoctorName?.replaceAll(RegExp(r'^dr\.?\s*', caseSensitive: false), '').trim().toLowerCase();
+      return currentDocName.isNotEmpty && aName != null && aName.isNotEmpty && aName == currentDocName;
     }
 
     final Map<String, PatientConsultationRequest> uniqueMap = {};
@@ -1780,6 +1275,43 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                     ],
                   ),
                 ),
+                const SizedBox(height: 10),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      'Available',
+                      'Busy – Online Consultation',
+                      'Busy – In-Person Consultation',
+                      'Delayed',
+                      'Offline',
+                      'Online',
+                      'Busy',
+                      'Unavailable',
+                    ].map((state) {
+                      final currentPresence = _resolveCurrentDoctor()?.onlineStatus ??
+                          (_isDentistAvailableNow ? 'Available' : 'Unavailable');
+                      final isSelected = currentPresence.toLowerCase() == state.toLowerCase() ||
+                          (state == 'Available' && currentPresence.isEmpty && _isDentistAvailableNow);
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: ChoiceChip(
+                          key: Key('doctor_presence_chip_$state'),
+                          label: Text(state),
+                          selected: isSelected,
+                          selectedColor: AppTheme.gsNavy,
+                          backgroundColor: Colors.white,
+                          labelStyle: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: isSelected ? Colors.white : const Color(0xFF334155),
+                          ),
+                          onSelected: _isUpdatingAvailability ? null : (_) => _setDoctorPresenceState(state),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
                 const SizedBox(height: 18),
 
                 // 4. Sponsored Banner
@@ -1787,7 +1319,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 const SizedBox(height: 28),
 
                 // 5. Appointments for Selected Date OR All Upcoming Booked Appointments OR Empty State
-                if (appointmentsForSelectedDate.isEmpty && allBookedAppointments.isEmpty)
+                if (appointmentsForSelectedDate.isEmpty &&
+                    (_selectedDateIndex > 0 || allBookedAppointments.isEmpty))
                   Container(
                     key: const Key('dentist_no_appointments_empty_state'),
                     width: double.infinity,
@@ -1832,32 +1365,97 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                       ],
                     ),
                   )
-                else
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        appointmentsForSelectedDate.isNotEmpty
-                            ? 'Appointments (${appointmentsForSelectedDate.length})'
-                            : 'Scheduled Appointments (${allBookedAppointments.length})',
-                        style: const TextStyle(
-                          fontSize: 16.5,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFF0F172A),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      ...(appointmentsForSelectedDate.isNotEmpty
-                              ? appointmentsForSelectedDate
-                              : allBookedAppointments)
-                          .map((req) {
-                        final slot = (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.trim().isNotEmpty)
-                            ? req.confirmedTimeSlot!
-                            : '11:00 AM';
-                        return _buildTimelineNode(req: req, time: slot);
-                      }),
-                    ],
+                else ...[
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: ['All', 'Today', 'Upcoming', 'Previous'].map((period) {
+                        final selected = _visitPeriodFilter == period;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8, bottom: 12),
+                          child: ChoiceChip(
+                            key: Key('doctor_visit_filter_$period'),
+                            label: Text(period),
+                            selected: selected,
+                            selectedColor: AppTheme.gsNavy,
+                            backgroundColor: Colors.white,
+                            labelStyle: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: selected ? Colors.white : const Color(0xFF334155),
+                            ),
+                            onSelected: (_) => setState(() => _visitPeriodFilter = period),
+                          ),
+                        );
+                      }).toList(),
+                    ),
                   ),
+                  Builder(
+                    builder: (_) {
+                      final nowYmd = _formatDateYmdLocal(DateTime.now());
+                      final baseList = (_selectedDateIndex == 0 && appointmentsForSelectedDate.isEmpty)
+                          ? allBookedAppointments
+                          : appointmentsForSelectedDate;
+                      final filtered = baseList.where((req) {
+                        final st = req.status.trim().toUpperCase();
+                        final d = (req.confirmedDate ?? '').split('T').first.trim();
+                        if (_visitPeriodFilter == 'Today') {
+                          return st != 'COMPLETED' && (d.isEmpty || d == nowYmd);
+                        }
+                        if (_visitPeriodFilter == 'Upcoming') {
+                          return st != 'COMPLETED';
+                        }
+                        if (_visitPeriodFilter == 'Previous') {
+                          return st == 'COMPLETED';
+                        }
+                        return true;
+                      }).toList();
+
+                      if (filtered.isEmpty) {
+                        return Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                          ),
+                          child: Text(
+                            'No $_visitPeriodFilter appointments found.',
+                            style: const TextStyle(fontSize: 13.5, color: Color(0xFF64748B)),
+                            textAlign: TextAlign.center,
+                          ),
+                        );
+                      }
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            appointmentsForSelectedDate.isNotEmpty
+                                ? 'Appointments (${filtered.length})'
+                                : 'Scheduled Appointments (${filtered.length})',
+                            style: const TextStyle(
+                              fontSize: 16.5,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF0F172A),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          ...filtered.asMap().entries.map((entry) {
+                            final idx = entry.key;
+                            final req = entry.value;
+                            final nextUpcoming = idx + 1 < filtered.length ? filtered[idx + 1] : null;
+                            final slot = (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.trim().isNotEmpty)
+                                ? req.confirmedTimeSlot!
+                                : '11:00 AM';
+                            return _buildTimelineNode(req: req, time: slot, nextAppointment: nextUpcoming);
+                          }),
+                        ],
+                      );
+                    },
+                  ),
+                ],
 
                 if (_patientService.doctorReceivedPatientReferrals.isNotEmpty) ...[
                   const SizedBox(height: 24),
@@ -1867,7 +1465,47 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                   ),
                 ],
 
-                const SizedBox(height: 36),
+                const SizedBox(height: 28),
+
+                // 5b. Monthly Doctor Visits & Referrals Calendar
+                DoctorVisitsCalendarSection(
+                  doctorId: currentDoc?.id ?? (authUser?.id ?? ''),
+                  doctorName: docName,
+                  doctorSpecialty: (currentDoc?.specialty.trim().isNotEmpty == true)
+                      ? currentDoc!.specialty
+                      : 'General Medicine',
+                  assignedAppointments: allMyRequests,
+                  receivedReferrals: _patientService.doctorReceivedPatientReferrals,
+                  initialSelectedDate: selectedDate,
+                  onOpenConsultationDetails: (req) {
+                    final targetProfile = PatientProfile(
+                      id: (req.patientId != null && req.patientId!.trim().isNotEmpty)
+                          ? req.patientId!
+                          : req.id,
+                      name: req.patientName,
+                      phone: req.patientPhone,
+                      email: '',
+                      city: req.city,
+                      pincode: req.pincode,
+                      state: req.state,
+                      age: '',
+                      gender: '',
+                      bloodGroup: '',
+                      languages: const ['English'],
+                    );
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => DoctorPatientRecordScreen(
+                          patient: targetProfile,
+                          onWriteRx: () => _showPrescriptionModal(context, req),
+                        ),
+                      ),
+                    );
+                  },
+                  onOpenPrescription: (req) => _showPrescriptionModal(context, req),
+                ),
+
+                const SizedBox(height: 28),
 
                 // 6. Manage Availability & Consultation Slots Section (Preserved for Slot Configuration)
                 _buildManageAvailabilitySection(),
@@ -1880,19 +1518,22 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   }
 
   bool _isBookedOrConfirmedAppointment(PatientConsultationRequest req) {
-    final statusLower = req.status.trim().toLowerCase();
-    if (statusLower == 'cancelled' || statusLower == 'rejected') return false;
-    return statusLower == 'pending' ||
-        statusLower == 'confirmed' ||
-        statusLower == 'accepted' ||
-        statusLower == 'scheduled' ||
-        statusLower == 'rescheduled' ||
-        statusLower == 'completed' ||
-        statusLower.contains('confirm') ||
-        statusLower.contains('accept') ||
-        req.problemDescription == 'Scheduled dental consultation' ||
-        req.problemDescription == 'Scheduled medical consultation' ||
-        (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.trim().isNotEmpty);
+    final statusUpper = req.status.trim().toUpperCase();
+    if (statusUpper == 'CANCELLED' || statusUpper == 'REJECTED') {
+      return false;
+    }
+    final isBookedStatus = statusUpper == 'CONFIRMED' ||
+        statusUpper == 'PENDING' ||
+        statusUpper == 'APPROVED' ||
+        statusUpper == 'BOOKED' ||
+        statusUpper == 'RESCHEDULED';
+    final isInProgress = statusUpper == 'IN_PROGRESS' || statusUpper == 'STARTED';
+    final isDelayed = statusUpper == 'DELAYED' || req.delayMinutes > 0;
+    final isNoShow = statusUpper == 'NO_SHOW' || statusUpper == 'NOSHOW';
+    final isCompleted = statusUpper == 'COMPLETED';
+    final hasSlot = (req.confirmedTimeSlot ?? '').trim().isNotEmpty ||
+        (req.confirmedDate ?? '').trim().isNotEmpty;
+    return isBookedStatus || isInProgress || isDelayed || isNoShow || isCompleted || hasSlot;
   }
 
   List<PatientConsultationRequest> _getAppointmentsForDate(
@@ -2133,12 +1774,6 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
           ),
         ),
       ),
-    );
-  }
-
-  void _showDentistProfileSheet(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const DoctorProfileScreen()),
     );
   }
 
@@ -2438,9 +2073,35 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     }
   }
 
+  Future<void> _handleLifecycleAction(
+    Future<Map<String, dynamic>> Function() actionFn,
+    String fallbackMessage,
+  ) async {
+    try {
+      final res = await actionFn();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(res['message']?.toString() ?? fallbackMessage),
+          backgroundColor: res['success'] == true ? const Color(0xFF012A58) : const Color(0xFFFE3434),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$fallbackMessage: $e'),
+          backgroundColor: const Color(0xFFFE3434),
+        ),
+      );
+    }
+  }
+
   Widget _buildTimelineNode({
     required PatientConsultationRequest req,
     required String time,
+    PatientConsultationRequest? nextAppointment,
   }) {
     final patientName = (req.patientName.contains('-') && req.patientName.length > 20)
         ? (_patientService.currentPatient.name.isNotEmpty ? _patientService.currentPatient.name : 'Patient')
@@ -2499,20 +2160,31 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     final bool isConfirmedOrAccepted = statusUpper == 'CONFIRMED' ||
         statusUpper == 'ACCEPTED' ||
         statusUpper == 'DENTIST_ACCEPTED';
+    final bool isInProgress = statusUpper == 'IN_PROGRESS' || statusUpper == 'STARTED';
+    final bool isDelayed = statusUpper == 'DELAYED' || req.delayMinutes > 0;
+    final bool isNoShow = statusUpper == 'NO_SHOW' || statusUpper == 'NOSHOW';
     final bool isCompleted = statusUpper == 'COMPLETED';
     final bool isCancelledOrRejected = statusUpper == 'CANCELLED' || statusUpper == 'REJECTED';
-    final bool isPendingAcceptance = !isConfirmedOrAccepted && !isCompleted && !isCancelledOrRejected;
+    final bool isPendingAcceptance = !isConfirmedOrAccepted && !isInProgress && !isDelayed && !isNoShow && !isCompleted && !isCancelledOrRejected;
     final bool isAccepting = _acceptingRequestIds.contains(req.id);
+    final String consultModeLabel = req.displayConsultationMode;
+    final bool isOnlineMode = consultModeLabel == 'Online';
 
-    final String statusLabel = isConfirmedOrAccepted
-        ? 'Confirmed'
-        : (isCompleted
-            ? 'Completed'
-            : (statusUpper == 'RESCHEDULED'
-                ? 'Rescheduled'
-                : (statusUpper == 'CANCELLED'
-                    ? 'Cancelled'
-                    : (statusUpper == 'REJECTED' ? 'Declined' : 'Pending'))));
+    final String statusLabel = isInProgress
+        ? 'In Progress'
+        : (isDelayed
+            ? 'Delayed (${req.delayMinutes > 0 ? "${req.delayMinutes}m" : "Late"})'
+            : (isNoShow
+                ? 'No-Show'
+                : (isConfirmedOrAccepted
+                    ? 'Confirmed'
+                    : (isCompleted
+                        ? 'Completed'
+                        : (statusUpper == 'RESCHEDULED'
+                            ? 'Rescheduled'
+                            : (statusUpper == 'CANCELLED'
+                                ? 'Cancelled'
+                                : (statusUpper == 'REJECTED' ? 'Declined' : 'Pending')))))));
 
     return Container(
       key: Key('doctor_appointment_card_${req.id}'),
@@ -2748,9 +2420,39 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '$formattedApptDate • $time',
+                    req.scheduledEndTime != null && req.scheduledEndTime!.isNotEmpty
+                        ? '$formattedApptDate • $time - ${req.scheduledEndTime}'
+                        : '$formattedApptDate • $time',
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.gsNavy),
                     overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Container(
+                  key: Key('doctor_appt_mode_badge_${req.id}'),
+                  margin: const EdgeInsets.only(right: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: isOnlineMode ? const Color(0xFFDBEAFE) : const Color(0xFFECFDF5),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isOnlineMode ? Icons.videocam_outlined : Icons.local_hospital_outlined,
+                        size: 11,
+                        color: isOnlineMode ? const Color(0xFF1D4ED8) : const Color(0xFF047857),
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        consultModeLabel,
+                        style: TextStyle(
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w800,
+                          color: isOnlineMode ? const Color(0xFF1D4ED8) : const Color(0xFF047857),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 Container(
@@ -2897,35 +2599,140 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               ],
             ),
             const SizedBox(height: 10),
-          ] else if (isConfirmedOrAccepted) ...[
-            Container(
-              key: Key('doctor_accepted_badge_${req.id}'),
-              width: double.infinity,
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: const Color(0x14012A58),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0x40012A58)),
+          ] else if (isConfirmedOrAccepted || isInProgress || isDelayed) ...[
+            if (isDelayed)
+              Container(
+                key: Key('doctor_delay_banner_${req.id}'),
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF3C7),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFF59E0B)),
+                ),
+                child: Text(
+                  'Delayed by ${req.delayMinutes > 0 ? req.delayMinutes : 15} mins${nextAppointment != null ? " • Next: ${nextAppointment.patientName} (${nextAppointment.confirmedTimeSlot ?? "Scheduled"})" : ""}',
+                  style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF92400E)),
+                ),
+              )
+            else if (nextAppointment != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  'Next Appointment: ${nextAppointment.patientName} • ${nextAppointment.confirmedTimeSlot ?? ""} (${nextAppointment.displayConsultationMode})',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              child: const Row(
-                children: [
-                  Icon(Icons.check_circle_rounded, size: 16, color: Color(0xFF012A58)),
-                  SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'Appointment Accepted & Confirmed',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w800,
-                        color: Color(0xFF012A58),
+            if (isConfirmedOrAccepted)
+              Container(
+                key: Key('doctor_accepted_badge_${req.id}'),
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0x14012A58),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0x40012A58)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.check_circle_rounded, size: 16, color: Color(0xFF012A58)),
+                    SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Appointment Accepted & Confirmed',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF012A58),
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            // Lifecycle Controls: Start, Complete, Mark Delayed, No-Show, Cancel
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                if (!isInProgress)
+                  ElevatedButton.icon(
+                    key: Key('doctor_start_consultation_btn_${req.id}'),
+                    icon: const Icon(Icons.play_arrow_rounded, size: 15),
+                    label: const Text('Start Consultation', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF047857),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    ),
+                    onPressed: () => _handleLifecycleAction(
+                      () => _patientService.startConsultation(req.id),
+                      'Consultation started',
                     ),
                   ),
-                ],
-              ),
+                ElevatedButton.icon(
+                  key: Key('doctor_complete_consultation_btn_${req.id}'),
+                  icon: const Icon(Icons.task_alt_rounded, size: 14),
+                  label: const Text('Complete Consultation', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF012A58),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  ),
+                  onPressed: () => _handleLifecycleAction(
+                    () => _patientService.completeConsultationLifecycle(req.id),
+                    'Consultation completed',
+                  ),
+                ),
+                OutlinedButton.icon(
+                  key: Key('doctor_mark_delayed_btn_${req.id}'),
+                  icon: const Icon(Icons.more_time_rounded, size: 14),
+                  label: const Text('Mark Delayed (+15m)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFB45309),
+                    side: const BorderSide(color: Color(0xFFF59E0B)),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  ),
+                  onPressed: () => _handleLifecycleAction(
+                    () => _patientService.markConsultationDelayed(req.id, delayMinutes: 15),
+                    'Consultation marked delayed',
+                  ),
+                ),
+                OutlinedButton.icon(
+                  key: Key('doctor_mark_noshow_btn_${req.id}'),
+                  icon: const Icon(Icons.person_off_outlined, size: 14),
+                  label: const Text('No-Show', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF475569),
+                    side: const BorderSide(color: Color(0xFFCBD5E1)),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  ),
+                  onPressed: () => _handleLifecycleAction(
+                    () => _patientService.markPatientNoShow(req.id),
+                    'Marked patient no-show',
+                  ),
+                ),
+                OutlinedButton.icon(
+                  key: Key('doctor_cancel_consultation_btn_${req.id}'),
+                  icon: const Icon(Icons.cancel_outlined, size: 14),
+                  label: const Text('Cancel', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFFE3434),
+                    side: const BorderSide(color: Color(0x40FE3434)),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  ),
+                  onPressed: () => _handleLifecycleAction(
+                    () => _patientService.cancelAppointment(req.id),
+                    'Consultation cancelled',
+                  ),
+                ),
+              ],
             ),
+            const SizedBox(height: 10),
           ],
 
           // Row 4: Action Buttons (Issue E-Prescription & Chat)
@@ -3004,8 +2811,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
       uniquePatientMap[req.patientName.trim().toLowerCase()] = {
         'name': req.patientName,
         'phone': req.patientPhone,
-        'age': '${patient.age.isNotEmpty ? patient.age : "28"} Yrs',
-        'blood': patient.bloodGroup.isNotEmpty ? patient.bloodGroup : 'O+',
+        'age': patient.age.isNotEmpty ? '${patient.age} Yrs' : '',
+        'blood': patient.bloodGroup,
         'issue': req.problemCategory,
       };
     }
@@ -3015,8 +2822,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         uniquePatientMap[key] = {
           'name': ref.referredPatientName,
           'phone': ref.referredPatientMobile,
-          'age': '${ref.referredPatientAge.isNotEmpty ? ref.referredPatientAge : "28"} Yrs (${ref.referredPatientGender})',
-          'blood': 'O+',
+          'age': ref.referredPatientAge.isNotEmpty
+              ? '${ref.referredPatientAge} Yrs${ref.referredPatientGender.isNotEmpty ? " (${ref.referredPatientGender})" : ""}'
+              : ref.referredPatientGender,
+          'blood': '',
           'issue': ref.requiredSpecialist.isNotEmpty ? ref.requiredSpecialist : 'Referral Consultation',
         };
       }
@@ -3029,8 +2838,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
       uniquePatientMap.putIfAbsent(k, () => {
         'name': p.name,
         'phone': p.phone,
-        'age': '${p.age.isNotEmpty ? p.age : "28"} Yrs',
-        'blood': p.bloodGroup.isNotEmpty ? p.bloodGroup : 'O+',
+        'age': p.age.isNotEmpty ? '${p.age} Yrs' : '',
+        'blood': p.bloodGroup,
         'issue': 'Consultation',
         'patientId': p.id,
       });
@@ -3041,8 +2850,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
       uniquePatientMap.putIfAbsent(k, () => {
         'name': p.name,
         'phone': p.phone,
-        'age': '${p.age.isNotEmpty ? p.age : "28"} Yrs',
-        'blood': p.bloodGroup.isNotEmpty ? p.bloodGroup : 'O+',
+        'age': p.age.isNotEmpty ? '${p.age} Yrs' : '',
+        'blood': p.bloodGroup,
         'issue': 'General Healthcare',
         'patientId': p.id,
         'city': p.city,
@@ -3100,8 +2909,8 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
             uniquePatientMap[pKey] = {
               'name': pName,
               'phone': matchP?.phone ?? '',
-              'age': '${(matchP?.age.isNotEmpty == true) ? matchP!.age : '28'} Yrs',
-              'blood': (matchP?.bloodGroup.isNotEmpty == true) ? matchP!.bloodGroup : 'O+',
+              'age': (matchP?.age.isNotEmpty == true) ? '${matchP!.age} Yrs' : '',
+              'blood': (matchP?.bloodGroup.isNotEmpty == true) ? matchP!.bloodGroup : '',
               'issue': 'Shared Health Record (${recCopy['category'] ?? 'Record'})',
               'patientId': recPid,
             };
@@ -3246,7 +3055,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                         final pPhone = (p['phone'] ?? profile?.phone ?? '').toString().trim();
                         final pCity = (profile?.city.isNotEmpty == true)
                             ? profile!.city
-                            : (p['city']?.isNotEmpty == true ? p['city']! : 'Mumbai');
+                            : (p['city']?.isNotEmpty == true ? p['city']! : '');
 
                         // Compute visits count & last visit date
                         final cleanDigits = pPhone.replaceAll(RegExp(r'\D'), '');
@@ -3285,7 +3094,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                         } else if (pPhone.isNotEmpty) {
                           formattedPhone = pPhone.startsWith('+') ? pPhone : '+$pPhone';
                         } else {
-                          formattedPhone = '+91 9000000200';
+                          formattedPhone = 'Not provided';
                         }
 
                         // Format last visit date
@@ -3308,10 +3117,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                               name: pName,
                               phone: pPhone,
                               city: pCity,
-                              age: (p['age'] ?? '28').toString().replaceAll(RegExp(r'\D'), ''),
-                              gender: 'Female',
-                              bloodGroup: p['blood'] ?? 'O+',
-                              languages: const ['English', 'Hindi'],
+                              age: (p['age'] ?? '').toString().replaceAll(RegExp(r'\D'), ''),
+                              gender: '',
+                              bloodGroup: p['blood'] ?? '',
+                              languages: const ['English'],
                             );
 
                         return Padding(
@@ -3428,410 +3237,6 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
           ),
         );
       },
-    );
-  }
-
-  Widget _buildDoctorSharedRecordTile(
-    BuildContext context, {
-    required Map<String, dynamic> record,
-    required String doctorId,
-    required String doctorUserId,
-    required String doctorEmail,
-  }) {
-    final title = (record['title'] ?? 'Health Record').toString();
-    final patientName = (record['patientName'] ?? 'Patient').toString();
-    final category = (record['category'] ?? 'Medical Report').toString();
-    final date = (record['date'] ?? '').toString();
-    final fileType = (record['fileType'] ?? 'PDF').toString().toUpperCase();
-    final description = (record['description'] ?? '').toString().trim();
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: AppTheme.gsNavy.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(
-                  fileType == 'PDF'
-                      ? Icons.picture_as_pdf_rounded
-                      : Icons.image_rounded,
-                  color: fileType == 'PDF'
-                      ? AppTheme.gsRed
-                      : AppTheme.gsNavy,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13.5,
-                        color: AppTheme.textDark,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Patient: $patientName • $category • $date',
-                      style: const TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (description.isNotEmpty)
-                      Text(
-                        description,
-                        style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                decoration: BoxDecoration(
-                  color: AppTheme.gsNavy.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  fileType,
-                  style: const TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: AppTheme.gsNavy,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              OutlinedButton.icon(
-                onPressed: () => _showDoctorRecordPreviewModal(
-                  context,
-                  record: record,
-                  doctorId: doctorId,
-                  doctorUserId: doctorUserId,
-                  doctorEmail: doctorEmail,
-                ),
-                icon: const Icon(Icons.visibility_rounded, size: 14),
-                label: const Text('View Record', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppTheme.gsNavy,
-                  side: const BorderSide(color: AppTheme.gsNavy),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-              ),
-              const SizedBox(width: 8),
-              ElevatedButton.icon(
-                onPressed: () => _handleDoctorDownloadSharedRecord(
-                  context,
-                  record: record,
-                  doctorId: doctorId,
-                  doctorUserId: doctorUserId,
-                  doctorEmail: doctorEmail,
-                ),
-                icon: const Icon(Icons.download_rounded, size: 14),
-                label: const Text('Download', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.gsNavy,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _handleDoctorDownloadSharedRecord(
-    BuildContext context, {
-    required Map<String, dynamic> record,
-    required String doctorId,
-    required String doctorUserId,
-    required String doctorEmail,
-  }) async {
-    final recId = (record['id'] ?? '').toString();
-    final title = (record['title'] ?? 'dental_record').toString();
-    final fileName = (record['fileName'] ?? '$title.pdf').toString();
-    final mimeType = (record['mimeType'] ?? 'application/pdf').toString();
-
-    final accessRes = await ApiService().getAuthorizedRecordAccess(
-      recordId: recId,
-      requesterId: doctorId,
-      requesterRole: 'Dentist',
-      doctorUserId: doctorUserId,
-      doctorEmail: doctorEmail,
-    );
-
-    if (!context.mounted) return;
-    if (accessRes['success'] != true) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text((accessRes['message'] ?? 'Access denied: Record is not shared with you.').toString()),
-          backgroundColor: const Color(0xFFFE3434),
-        ),
-      );
-      return;
-    }
-
-    if (accessRes['fileBytes'] is Uint8List) {
-      final bytes = accessRes['fileBytes'] as Uint8List;
-      await RecordFileHelper.downloadOrOpenFile(
-        bytes: bytes,
-        fileName: fileName,
-        mimeType: mimeType,
-      );
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Downloaded "$fileName" (${RecordFileHelper.formatFileSize(bytes.length)}).'),
-          backgroundColor: AppTheme.gsNavy,
-        ),
-      );
-      return;
-    }
-
-    final signedUrl = (accessRes['signedUrl'] ?? '').toString();
-    if (signedUrl.isNotEmpty) {
-      final uri = Uri.tryParse(signedUrl);
-      if (uri != null) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-        return;
-      }
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Authorized download completed for "$title".'),
-        backgroundColor: AppTheme.gsNavy,
-      ),
-    );
-  }
-
-  void _showDoctorRecordPreviewModal(
-    BuildContext context, {
-    required Map<String, dynamic> record,
-    required String doctorId,
-    required String doctorUserId,
-    required String doctorEmail,
-  }) {
-    final recId = (record['id'] ?? '').toString();
-    final title = (record['title'] ?? 'Shared Health Record').toString();
-    final patientName = (record['patientName'] ?? 'Patient').toString();
-    final category = (record['category'] ?? 'Medical Report').toString();
-    final date = (record['date'] ?? '').toString();
-    final description = (record['description'] ?? '').toString();
-    final fileName = (record['fileName'] ?? '').toString();
-    final fileType = (record['fileType'] ?? 'PDF').toString().toUpperCase();
-    final isImage = fileType == 'JPG' || fileType == 'JPEG' || fileType == 'PNG';
-
-    showDialog(
-      context: context,
-      builder: (dialogCtx) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 540, maxHeight: 620),
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: AppTheme.textDark,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        Text(
-                          'Patient: $patientName • $category • $date',
-                          style: const TextStyle(fontSize: 11, color: AppTheme.gsNavy),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.of(dialogCtx).pop(),
-                    icon: const Icon(Icons.close_rounded),
-                  ),
-                ],
-              ),
-              const Divider(height: 20, color: Color(0xFFE2E8F0)),
-              if (description.isNotEmpty) ...[
-                Text(
-                  'Patient Notes: $description',
-                  style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
-                ),
-                const SizedBox(height: 12),
-              ],
-              Expanded(
-                child: FutureBuilder<Map<String, dynamic>>(
-                  future: ApiService().getAuthorizedRecordAccess(
-                    recordId: recId,
-                    requesterId: doctorId,
-                    requesterRole: 'Dentist',
-                    doctorUserId: doctorUserId,
-                    doctorEmail: doctorEmail,
-                  ),
-                  builder: (ctx, snap) {
-                    if (snap.connectionState == ConnectionState.waiting) {
-                      return const Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            CircularProgressIndicator(strokeWidth: 2),
-                            SizedBox(height: 8),
-                            Text(
-                              'Verifying sharing permission & loading record...',
-                              style: TextStyle(fontSize: 12, color: AppTheme.textMuted),
-                            ),
-                          ],
-                        ),
-                      );
-                    }
-
-                    final res = snap.data ?? {};
-                    if (res['success'] != true) {
-                      return Center(
-                        child: Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: const Color(0x14FE3434),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.lock_person_rounded, size: 36, color: Color(0xFFFE3434)),
-                              const SizedBox(height: 8),
-                              Text(
-                                (res['message'] ?? 'Access Denied: Patient has not shared this record with you.').toString(),
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFFFE3434),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }
-
-                    final bytes = res['fileBytes'] is Uint8List ? res['fileBytes'] as Uint8List : null;
-                    if (isImage && bytes != null && bytes.isNotEmpty) {
-                      return ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
-                        child: Container(
-                          color: const Color(0xFF0F172A),
-                          width: double.infinity,
-                          child: InteractiveViewer(
-                            child: Image.memory(
-                              bytes,
-                              fit: BoxFit.contain,
-                            ),
-                          ),
-                        ),
-                      );
-                    }
-
-                    return Center(
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: const Color(0x14FE3434),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: const Color(0x40FE3434)),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.picture_as_pdf_rounded, size: 48, color: Color(0xFFFE3434)),
-                            const SizedBox(height: 10),
-                            Text(
-                              fileName.isNotEmpty ? fileName : '$title.pdf',
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                              textAlign: TextAlign.center,
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              bytes != null
-                                  ? 'Authorized PDF Record • ${RecordFileHelper.formatFileSize(bytes.length)}'
-                                  : 'Authorized PDF Record',
-                              style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.of(dialogCtx).pop();
-                    _handleDoctorDownloadSharedRecord(
-                      context,
-                      record: record,
-                      doctorId: doctorId,
-                      doctorUserId: doctorUserId,
-                      doctorEmail: doctorEmail,
-                    );
-                  },
-                  icon: const Icon(Icons.download_rounded, size: 16),
-                  label: const Text('Download Authorized Copy'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.gsNavy,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size.fromHeight(44),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 
@@ -4242,6 +3647,66 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontWeight: FontWeight.w700),
                     ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          if (normalizedStatus == 'accepted' || normalizedStatus == 'contacted') ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                if (normalizedStatus == 'accepted')
+                  Expanded(
+                    child: OutlinedButton(
+                      key: Key('${keyPrefix}_mark_contacted_referral_btn_${ref.id}'),
+                      onPressed: () async {
+                        final ok = await _patientService.updatePatientReferralStatus(
+                          ref.id,
+                          status: 'Contacted',
+                        );
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              ok
+                                  ? 'Referral marked Contacted.'
+                                  : 'Could not update referral status.',
+                            ),
+                            backgroundColor: ok ? const Color(0xFF012A58) : AppTheme.gsRed,
+                          ),
+                        );
+                      },
+                      child: const Text('Mark Contacted', overflow: TextOverflow.ellipsis),
+                    ),
+                  ),
+                if (normalizedStatus == 'accepted') const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton(
+                    key: Key('${keyPrefix}_mark_completed_referral_btn_${ref.id}'),
+                    onPressed: () async {
+                      final ok = await _patientService.updatePatientReferralStatus(
+                        ref.id,
+                        status: 'Completed',
+                      );
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            ok
+                                ? 'Referral marked Completed.'
+                                : 'Could not update referral status.',
+                          ),
+                          backgroundColor: ok ? const Color(0xFF012A58) : AppTheme.gsRed,
+                        ),
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF012A58),
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                    ),
+                    child: const Text('Mark Completed', overflow: TextOverflow.ellipsis),
                   ),
                 ),
               ],
@@ -5795,11 +5260,9 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               : null);
       final pName = _referPatientNameCtrl.text.trim();
       final pPhone = _referPatientMobileCtrl.text.replaceAll(RegExp(r'\D'), '').trim();
-      final pAge = _referPatientAgeCtrl.text.trim().isNotEmpty
-          ? _referPatientAgeCtrl.text.trim()
-          : '34';
+      final pAge = _referPatientAgeCtrl.text.trim();
       final notes = _referNotesCtrl.text.trim();
-      final gender = _referPatientGender.isNotEmpty ? _referPatientGender : 'Female';
+      final gender = _referPatientGender.isNotEmpty ? _referPatientGender : '';
 
       final res = await _patientService.submitPatientReferral(
         referrerPatientId: referrerUserId,
@@ -5809,24 +5272,24 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         referredPatientGender: gender,
         referredPatientCity: targetDoc?.city.isNotEmpty == true
             ? targetDoc!.city
-            : (_selectedReferPatient?.city.isNotEmpty == true ? _selectedReferPatient!.city : 'Mumbai'),
-        referredPatientPincode: targetDoc?.pincode.isNotEmpty == true ? targetDoc!.pincode : '400050',
+            : (_selectedReferPatient?.city ?? ''),
+        referredPatientPincode: targetDoc?.pincode ?? '',
         referredPatientLocation: targetDoc?.clinicAddress.isNotEmpty == true
             ? targetDoc!.clinicAddress
-            : (targetClinic?.location ?? 'Bandra West'),
+            : (targetClinic?.location ?? ''),
         requiredSpecialist: targetDoc?.specialty ??
             (targetClinic != null && targetClinic.services.isNotEmpty
                 ? targetClinic.services.first
                 : 'Specialist Evaluation'),
         clinicalComplaint: notes.isNotEmpty
             ? notes
-            : 'Impacted 38, pain for 2 weeks. Please evaluate for extraction',
+            : 'Specialist referral consultation requested',
         doctorId: targetDoc?.id ?? (targetClinic?.id ?? ''),
         doctorName: targetDoc?.name ?? (targetClinic?.clinicName ?? 'Specialist Doctor'),
-        doctorClinicName: targetClinic?.clinicName ?? (targetDoc?.clinicName ?? 'GS HEALTH Clinic'),
+        doctorClinicName: targetClinic?.clinicName ?? (targetDoc?.clinicName ?? ''),
         doctorLocation: targetClinic?.location ?? (targetDoc?.clinicAddress ?? ''),
-        doctorCity: targetDoc?.city ?? 'Mumbai',
-        doctorPincode: targetDoc?.pincode ?? '400050',
+        doctorCity: targetDoc?.city ?? '',
+        doctorPincode: targetDoc?.pincode ?? '',
         doctorPhone: targetDoc?.phone ?? '',
       );
 
@@ -5861,7 +5324,6 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
 
         await _patientService.syncDoctorReferralsFromApi();
         await _patientService.syncReferralsFromApi();
-        await _patientService.syncAdminReferralsFromApi();
         await _patientService.syncProblemRequestsFromApi();
 
         setState(() {
@@ -6227,19 +5689,42 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
             const SizedBox(height: 14),
             const Divider(height: 1, thickness: 1, color: Color(0xFFF1F5F9)),
             const SizedBox(height: 14),
-            Text(
-              'E-PRESCRIPTION · ${rawItems.isEmpty ? 1 : rawItems.length} MEDICINE(S)',
-              style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-                color: Color(0xFF64748B),
-                letterSpacing: 0.7,
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'E-PRESCRIPTION · ${rawItems.isEmpty ? 1 : rawItems.length} MEDICINE(S)',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF64748B),
+                      letterSpacing: 0.7,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if ((rec['specialty'] ?? '').toString().trim().isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                    decoration: BoxDecoration(
+                      color: AppTheme.gsNavy.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      rec['specialty'].toString().trim(),
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.gsNavy,
+                      ),
+                    ),
+                  ),
+              ],
             ),
             const SizedBox(height: 10),
             if (rawItems.isEmpty)
               _buildRxMedicineBox(
-                medNameAndDose: 'Prescribed Dental Medication',
+                medNameAndDose: 'Prescribed Medication',
                 freqAndDuration: 'As directed',
               )
             else
@@ -6265,6 +5750,30 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                   ),
                 );
               }),
+            if (rec['clinicalSections'] is Map && (rec['clinicalSections'] as Map).isNotEmpty) ...[
+              const SizedBox(height: 4),
+              ...SpecialtyClinicalConfig.forSpecialty((rec['specialty'] ?? '').toString())
+                  .prescriptionSchema
+                  .sections
+                  .where((sec) => ((rec['clinicalSections'] as Map)[sec.key] ?? '').toString().trim().isNotEmpty)
+                  .map((sec) {
+                final val = (rec['clinicalSections'] as Map)[sec.key].toString().trim();
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    '${sec.label}: $val',
+                    style: const TextStyle(fontSize: 12.5, color: Color(0xFF334155), height: 1.35),
+                  ),
+                );
+              }),
+            ],
+            if ((rec['followUpDate'] ?? '').toString().trim().isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Follow-up Date: ${rec['followUpDate']}',
+                style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppTheme.gsRed),
+              ),
+            ],
             if (instructions.isNotEmpty) ...[
               const SizedBox(height: 4),
               Row(
@@ -6289,6 +5798,22 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 ],
               ),
             ],
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                key: Key('doctor_rx_pdf_btn_$recId'),
+                onPressed: () => PrescriptionPdfGenerator.showPreviewDialog(context, record: rec),
+                icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
+                label: const Text('View / Download PDF', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.gsNavy,
+                  side: const BorderSide(color: AppTheme.gsNavy),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                ),
+              ),
+            ),
           ],
         ],
       ),
@@ -6341,560 +5866,6 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
       return _formatShortDayMonth(parsed);
     }
     return rawDate;
-  }
-
-  // ==========================================
-  // ADD DENTIST DIALOG
-  // ==========================================
-  void _showAddDentistDialog(BuildContext context) {
-    final nameCtrl = TextEditingController();
-    final phoneCtrl = TextEditingController();
-    final emailCtrl = TextEditingController();
-    final qualCtrl = TextEditingController(text: 'BDS, MDS');
-    final licenseCtrl = TextEditingController();
-    final clinicCtrl = TextEditingController();
-    final addressCtrl = TextEditingController();
-    final cityCtrl = TextEditingController();
-    final pincodeCtrl = TextEditingController();
-    final expCtrl = TextEditingController(text: '5');
-    final feeCtrl = TextEditingController(text: '₹500');
-    String selectedSpecialty = 'General Dentistry';
-    String selectedLanguage = 'English';
-    double? selectedLat;
-    double? selectedLng;
-    bool isSubmitting = false;
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            final screenHeight = MediaQuery.of(context).size.height;
-            final screenWidth = MediaQuery.of(context).size.width;
-
-            return Dialog(
-              insetPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
-              backgroundColor: Colors.white,
-              elevation: 20,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-              child: Container(
-                constraints: BoxConstraints(
-                  maxWidth: 540,
-                  maxHeight: screenHeight * 0.88,
-                ),
-                padding: EdgeInsets.all(screenWidth < 400 ? 14 : 20),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Header Bar
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primaryBlue.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Icon(Icons.person_add_rounded, color: AppTheme.primaryBlue, size: 22),
-                        ),
-                        const SizedBox(width: 10),
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Add New Doctor',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textDark),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              Text(
-                                'Register colleague practitioner into GS HEALTH network',
-                                style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close_rounded, color: AppTheme.textMuted, size: 20),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          onPressed: () => Navigator.of(dialogContext).pop(),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    const Divider(height: 1, color: Color(0xFFE2E8F0)),
-                    const SizedBox(height: 12),
-
-                    // Scrollable Form Fields
-                    Expanded(
-                      child: SingleChildScrollView(
-                        physics: const BouncingScrollPhysics(),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            // 1. Doctor Full Name *
-                            TextField(
-                              controller: nameCtrl,
-                              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                              cursorColor: AppTheme.primaryBlue,
-                              decoration: InputDecoration(
-                                labelText: 'Doctor Full Name *',
-                                hintText: 'e.g. Dr. Rajesh Sharma',
-                                labelStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
-                                prefixIcon: const Icon(Icons.person_outline_rounded, size: 18, color: AppTheme.primaryBlue),
-                                filled: true,
-                                fillColor: const Color(0xFFF8FAFC),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
-                                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
-                                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppTheme.primaryBlue, width: 1.8)),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-
-                            // 2. Mobile Phone Number *
-                            TextField(
-                              controller: phoneCtrl,
-                              keyboardType: TextInputType.phone,
-                              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                              cursorColor: AppTheme.primaryBlue,
-                              decoration: InputDecoration(
-                                labelText: 'Mobile Phone Number (10 Digits) *',
-                                hintText: '9876543210',
-                                prefixText: '+91 ',
-                                prefixStyle: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.textDark, fontSize: 13),
-                                labelStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
-                                prefixIcon: const Icon(Icons.phone_outlined, size: 18, color: AppTheme.primaryBlue),
-                                filled: true,
-                                fillColor: const Color(0xFFF8FAFC),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
-                                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
-                                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppTheme.primaryBlue, width: 1.8)),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-
-                            // 3. Specialty & Qualification
-                            Row(
-                              children: [
-                                Expanded(
-                                  flex: 3,
-                                  child: DropdownButtonFormField<String>(
-                                    initialValue: selectedSpecialty,
-                                    isExpanded: true,
-                                    dropdownColor: Colors.white,
-                                    decoration: InputDecoration(
-                                      labelText: 'Medical Specialty',
-                                      labelStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
-                                      prefixIcon: const Icon(Icons.medical_services_outlined, size: 18, color: AppTheme.primaryBlue),
-                                      filled: true,
-                                      fillColor: const Color(0xFFF8FAFC),
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
-                                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
-                                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppTheme.primaryBlue, width: 1.8)),
-                                    ),
-                                    items: <String>{
-                                      ..._patientService.activeSpecialtyNames,
-                                      'General Dentistry',
-                                      'Orthodontics',
-                                      'Endodontics',
-                                      'Periodontics',
-                                      'Prosthodontics',
-                                      'Pediatric Dentistry',
-                                      'Oral & Maxillofacial Surgery',
-                                      'Cosmetic Dentistry',
-                                      'Implantology',
-                                    }.map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 12, color: AppTheme.textDark), overflow: TextOverflow.ellipsis))).toList(),
-                                    onChanged: (val) {
-                                      if (val != null) {
-                                        setModalState(() {
-                                          selectedSpecialty = val;
-                                          qualCtrl.text = MedicalSpecialtyModel.getDefaultQualificationForSpecialty(val);
-                                        });
-                                      }
-                                    },
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  flex: 2,
-                                  child: TextField(
-                                    controller: qualCtrl,
-                                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                                    cursorColor: AppTheme.primaryBlue,
-                                    decoration: InputDecoration(
-                                      labelText: 'Qualification',
-                                      hintText: 'BDS, MDS',
-                                      labelStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
-                                      filled: true,
-                                      fillColor: const Color(0xFFF8FAFC),
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
-                                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
-                                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppTheme.primaryBlue, width: 1.8)),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-
-                            // 4. Clinic Name & License
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: TextField(
-                                    controller: clinicCtrl,
-                                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                                    cursorColor: AppTheme.primaryBlue,
-                                    decoration: InputDecoration(
-                                      labelText: 'Clinic / Hospital Name',
-                                      hintText: 'e.g. Apex Dental Hospital',
-                                      labelStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
-                                      prefixIcon: const Icon(Icons.local_hospital_outlined, size: 18, color: AppTheme.primaryBlue),
-                                      filled: true,
-                                      fillColor: const Color(0xFFF8FAFC),
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
-                                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
-                                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppTheme.primaryBlue, width: 1.8)),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: TextField(
-                                    controller: licenseCtrl,
-                                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                                    cursorColor: AppTheme.primaryBlue,
-                                    decoration: InputDecoration(
-                                      labelText: 'Medical License #',
-                                      hintText: 'MCI-10294',
-                                      labelStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
-                                      filled: true,
-                                      fillColor: const Color(0xFFF8FAFC),
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
-                                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
-                                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppTheme.primaryBlue, width: 1.8)),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-
-                            // 5. Interactive Map Location Picker Field
-                            Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF8FAFC),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: const Color(0xFFE2E8F0)),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      const Row(
-                                        children: [
-                                          Icon(Icons.location_on_rounded, size: 16, color: AppTheme.primaryBlue),
-                                          SizedBox(width: 6),
-                                          Text('Clinic Location & Address', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
-                                        ],
-                                      ),
-                                      InkWell(
-                                        onTap: () {
-                                          MapLocationPickerDialog.show(
-                                            context: context,
-                                            initialAddress: addressCtrl.text,
-                                            initialCity: cityCtrl.text,
-                                            initialPincode: pincodeCtrl.text,
-                                            initialLat: selectedLat,
-                                            initialLng: selectedLng,
-                                            isDentist: true,
-                                            onLocationSelected: (address, city, pincode, lat, lng, locationName) {
-                                              setModalState(() {
-                                                addressCtrl.text = address;
-                                                if (city.isNotEmpty) cityCtrl.text = city;
-                                                if (pincode.isNotEmpty) pincodeCtrl.text = pincode;
-                                                selectedLat = lat;
-                                                selectedLng = lng;
-                                              });
-                                              ScaffoldMessenger.of(context).showSnackBar(
-                                                SnackBar(
-                                                  content: Text('📍 Map Location Attached: $address, $city ($pincode)'),
-                                                  backgroundColor: const Color(0xFF012A58),
-                                                  duration: const Duration(seconds: 2),
-                                                ),
-                                              );
-                                            },
-                                          );
-                                        },
-                                        borderRadius: BorderRadius.circular(8),
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                          decoration: BoxDecoration(
-                                            color: const Color(0xFF012A58).withValues(alpha: 0.1),
-                                            borderRadius: BorderRadius.circular(8),
-                                            border: Border.all(color: const Color(0xFF012A58).withValues(alpha: 0.3)),
-                                          ),
-                                          child: const Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(Icons.map_rounded, size: 13, color: Color(0xFF012A58)),
-                                              SizedBox(width: 4),
-                                              Text('Pick on Map', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF012A58))),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 8),
-                                  TextField(
-                                    controller: addressCtrl,
-                                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 12.5, fontWeight: FontWeight.w500),
-                                    cursorColor: AppTheme.primaryBlue,
-                                    decoration: const InputDecoration(
-                                      hintText: 'Address / Street / Area (or Pick on Map)',
-                                      isDense: true,
-                                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                                      border: OutlineInputBorder(),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: TextField(
-                                          controller: cityCtrl,
-                                          style: const TextStyle(color: Color(0xFF0F172A), fontSize: 12.5, fontWeight: FontWeight.w500),
-                                          cursorColor: AppTheme.primaryBlue,
-                                          decoration: const InputDecoration(
-                                            hintText: 'City',
-                                            isDense: true,
-                                            contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                                            border: OutlineInputBorder(),
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: TextField(
-                                          controller: pincodeCtrl,
-                                          keyboardType: TextInputType.number,
-                                          style: const TextStyle(color: Color(0xFF0F172A), fontSize: 12.5, fontWeight: FontWeight.w500),
-                                          cursorColor: AppTheme.primaryBlue,
-                                          decoration: const InputDecoration(
-                                            hintText: 'Pincode',
-                                            isDense: true,
-                                            contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                                            border: OutlineInputBorder(),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-
-                            // 6. Experience, Fee & Language
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: TextField(
-                                    controller: expCtrl,
-                                    keyboardType: TextInputType.number,
-                                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                                    cursorColor: AppTheme.primaryBlue,
-                                    decoration: InputDecoration(
-                                      labelText: 'Exp. (Years)',
-                                      hintText: '5',
-                                      labelStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
-                                      filled: true,
-                                      fillColor: const Color(0xFFF8FAFC),
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: TextField(
-                                    controller: feeCtrl,
-                                    style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                                    cursorColor: AppTheme.primaryBlue,
-                                    decoration: InputDecoration(
-                                      labelText: 'Consult Fee',
-                                      hintText: '₹500',
-                                      labelStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
-                                      filled: true,
-                                      fillColor: const Color(0xFFF8FAFC),
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: DropdownButtonFormField<String>(
-                                    initialValue: selectedLanguage,
-                                    isExpanded: true,
-                                    dropdownColor: Colors.white,
-                                    decoration: InputDecoration(
-                                      labelText: 'Language',
-                                      labelStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
-                                      filled: true,
-                                      fillColor: const Color(0xFFF8FAFC),
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                                    ),
-                                    items: ['English', 'Telugu', 'Hindi', 'Tamil', 'Kannada', 'Marathi']
-                                        .map((l) => DropdownMenuItem(value: l, child: Text(l, style: const TextStyle(fontSize: 12, color: AppTheme.textDark), overflow: TextOverflow.ellipsis)))
-                                        .toList(),
-                                    onChanged: (val) {
-                                      if (val != null) setModalState(() => selectedLanguage = val);
-                                    },
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Actions
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: isSubmitting ? null : () => Navigator.of(dialogContext).pop(),
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                            child: const Text('Cancel', style: TextStyle(fontWeight: FontWeight.bold)),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          flex: 2,
-                          child: ElevatedButton.icon(
-                            onPressed: isSubmitting
-                                ? null
-                                : () async {
-                                    final name = nameCtrl.text.trim();
-                                    final phone = phoneCtrl.text.replaceAll(RegExp(r'[^0-9]'), '').trim();
-                                    if (name.isEmpty) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('⚠️ Please enter doctor name'), backgroundColor: Color(0xFFFE3434)),
-                                      );
-                                      return;
-                                    }
-                                    if (phone.length < 10) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('⚠️ Please enter a valid 10-digit mobile number'), backgroundColor: Color(0xFFFE3434)),
-                                      );
-                                      return;
-                                    }
-
-                                    setModalState(() => isSubmitting = true);
-
-                                    final cleanEmail = emailCtrl.text.trim().isNotEmpty
-                                        ? emailCtrl.text.trim().toLowerCase()
-                                        : 'dentist_$phone@dentaguru.com';
-                                    final cleanExp = int.tryParse(expCtrl.text.trim()) ?? 5;
-                                    final cleanFee = feeCtrl.text.trim().isNotEmpty ? feeCtrl.text.trim() : '₹500';
-                                    final formattedDocName = name.startsWith('Dr.') ? name : 'Dr. $name';
-
-                                    try {
-                                      _patientService.registerDoctor(
-                                        name: formattedDocName,
-                                        email: cleanEmail,
-                                        phone: phone,
-                                        licenseNumber: licenseCtrl.text.trim(),
-                                        specialty: selectedSpecialty,
-                                        clinicName: clinicCtrl.text.trim().isNotEmpty ? clinicCtrl.text.trim() : 'GS HEALTH Partner Clinic',
-                                        experienceYears: cleanExp,
-                                        qualification: qualCtrl.text.trim().isNotEmpty ? qualCtrl.text.trim() : 'BDS, MDS',
-                                        consultationFee: cleanFee,
-                                        clinicAddress: addressCtrl.text.trim(),
-                                        city: cityCtrl.text.trim(),
-                                        pincode: pincodeCtrl.text.trim(),
-                                        latitude: selectedLat,
-                                        longitude: selectedLng,
-                                        languages: [selectedLanguage],
-                                      );
-
-                                      // Register via API / Supabase
-                                      await ApiService().registerUser(
-                                        name: formattedDocName,
-                                        email: cleanEmail,
-                                        phone: phone,
-                                        password: 'Password123!',
-                                        role: 'Dentist',
-                                        specialty: selectedSpecialty,
-                                        qualification: qualCtrl.text.trim(),
-                                        licenseNumber: licenseCtrl.text.trim(),
-                                        clinicName: clinicCtrl.text.trim(),
-                                        clinicAddress: addressCtrl.text.trim(),
-                                        city: cityCtrl.text.trim(),
-                                        pincode: pincodeCtrl.text.trim(),
-                                        languages: [selectedLanguage],
-                                        experienceYears: cleanExp,
-                                        latitude: selectedLat,
-                                        longitude: selectedLng,
-                                      );
-
-                                      await _patientService.syncDoctorsFromApi();
-
-                                      if (mounted && dialogContext.mounted && context.mounted) {
-                                        Navigator.of(dialogContext).pop();
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(
-                                            content: Text('✅ $formattedDocName added to GS HEALTH network!'),
-                                            backgroundColor: const Color(0xFF012A58),
-                                            behavior: SnackBarBehavior.floating,
-                                            duration: const Duration(seconds: 3),
-                                          ),
-                                        );
-                                      }
-                                    } catch (e) {
-                                      setModalState(() => isSubmitting = false);
-                                      if (!context.mounted) return;
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('Error registering doctor: $e'), backgroundColor: const Color(0xFFFE3434)),
-                                      );
-                                    }
-                                  },
-                            icon: isSubmitting
-                                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                                : const Icon(Icons.person_add_rounded, size: 18),
-                            label: Text(
-                              isSubmitting ? 'Registering...' : 'Add Doctor',
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppTheme.primaryBlue,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
   }
 
 }

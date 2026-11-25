@@ -9,6 +9,7 @@ import '../../../../core/services/api_service.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/session_service.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../widgets/admin_global_visits_calendar.dart';
 import '../widgets/gs_health_admin_overview.dart';
 
 class SubAdminDashboardScreen extends StatefulWidget {
@@ -89,16 +90,18 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
       List<AdminAppointmentItem> items = const [];
       if (_service.hasPermission(AppPermissions.appointmentView)) {
         final rows = await ApiService().fetchAllAppointmentsForAdmin();
-        items = rows
-            .whereType<Map>()
-            .map(
-              (r) => AdminAppointmentItem.fromRow(
-                r,
-                patients: _service.allPatients,
-                doctors: _service.allDoctors,
-              ),
-            )
-            .toList();
+        items = deduplicateAdminAppointments(
+          rows
+              .whereType<Map>()
+              .map(
+                (r) => AdminAppointmentItem.fromRow(
+                  r,
+                  patients: _service.allPatients,
+                  doctors: _service.allDoctors,
+                ),
+              )
+              .toList(),
+        );
       }
       if (!mounted) return;
       setState(() {
@@ -253,6 +256,8 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
 
   Widget _buildAssignedDistrictsHeaderBar() {
     final districts = _service.subAdminDistricts;
+    final unresolvedCount =
+        waitingConsultationRequests(_service.getRequestsForCurrentRole()).length;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -293,6 +298,19 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                       }).toList(),
                     ),
                   ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            key: const Key('sub_admin_district_unresolved_badge'),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: unresolvedCount > 0 ? const Color(0xFFFE3434) : Colors.white24,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              '$unresolvedCount unresolved',
+              style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w700),
+            ),
           ),
         ],
       ),
@@ -912,23 +930,34 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                           ],
                           if (canAssign) ...[
                             const SizedBox(height: 12),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton.icon(
-                                icon: Icon(isAssigned ? Icons.swap_horiz_rounded : Icons.person_pin_rounded, size: 16),
-                                label: Text(
-                                  isAssigned ? 'Change Assigned Doctor' : 'Assign Nearby Specialist Doctor',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    icon: Icon(isAssigned ? Icons.swap_horiz_rounded : Icons.person_pin_rounded, size: 16),
+                                    label: Text(
+                                      isAssigned ? 'Change Doctor' : 'Assign Doctor',
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFFFE3434),
+                                      foregroundColor: Colors.white,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                      padding: const EdgeInsets.symmetric(vertical: 10),
+                                      elevation: 1,
+                                    ),
+                                    onPressed: () => _showAssignDoctorModal(ctx, req),
+                                  ),
                                 ),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFFFE3434),
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                  padding: const EdgeInsets.symmetric(vertical: 10),
-                                  elevation: 1,
+                                const SizedBox(width: 8),
+                                OutlinedButton.icon(
+                                  key: Key('sub_admin_coord_status_${req.id}'),
+                                  icon: const Icon(Icons.track_changes_rounded, size: 15),
+                                  label: const Text('Stage', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                  onPressed: () => _showCoordinatorStageDialog(ctx, req),
                                 ),
-                                onPressed: () => _showAssignDoctorModal(ctx, req),
-                              ),
+                              ],
                             ),
                           ],
                         ],
@@ -939,6 +968,64 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
               },
             ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _showCoordinatorStageDialog(BuildContext ctx, PatientConsultationRequest req) async {
+    String selectedStage = PatientProblemService.coordinatorLifecycleStages.first;
+    final noteCtrl = TextEditingController();
+    await showDialog<void>(
+      context: ctx,
+      builder: (dCtx) => StatefulBuilder(
+        builder: (dCtx, setDialogState) => AlertDialog(
+          title: Text('Update Status • ${req.patientName}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<String>(
+                initialValue: selectedStage,
+                decoration: const InputDecoration(labelText: 'Coordinator Stage'),
+                items: PatientProblemService.coordinatorLifecycleStages
+                    .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                    .toList(),
+                onChanged: (v) => setDialogState(() => selectedStage = v ?? selectedStage),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: noteCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Follow-up Note (Optional)',
+                  hintText: 'Phone call outcome / specialist matched',
+                ),
+                maxLines: 2,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(dCtx).pop(), child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: () async {
+                final res = await _service.updateCoordinatorRequestStatus(
+                  requestId: req.id,
+                  status: selectedStage,
+                  followUpNote: noteCtrl.text.trim(),
+                );
+                final ok = res['success'] == true;
+                if (dCtx.mounted) Navigator.of(dCtx).pop();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(ok ? 'Status updated to $selectedStage' : 'Failed to update status'),
+                      backgroundColor: ok ? const Color(0xFF012A58) : const Color(0xFFFE3434),
+                    ),
+                  );
+                }
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1259,9 +1346,23 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.all(16),
-      child: _overviewAppointments.isEmpty
-          ? _buildEmptyCard('No appointments yet.', Icons.calendar_month_outlined)
-          : Column(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AdminGlobalVisitsCalendarSection(
+            appointments: _overviewAppointments,
+            clinics: _service.allClinics,
+            doctors: _service.getDentistsForCurrentRole(),
+            patients: _service.getPatientsForCurrentRole(),
+            referrals: _service.adminPatientReferrals,
+            isSubAdmin: true,
+            assignedDistricts: _service.subAdminDistricts,
+            canViewPatientContact: canViewPhone,
+          ),
+          if (_overviewAppointments.isEmpty)
+            _buildEmptyCard('No appointments yet.', Icons.calendar_month_outlined)
+          else
+            Column(
               children: _overviewAppointments
                   .map(
                     (a) => Card(
@@ -1288,6 +1389,8 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                   )
                   .toList(),
             ),
+        ],
+      ),
     );
   }
 

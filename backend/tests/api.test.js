@@ -233,12 +233,14 @@ try {
         assert.strictEqual(doubleBookStatus, 409, 'Double booking rejected with 409 Conflict.');
         console.log('✓ SUCCESS: Duplicate/overlapping slot booking prevented with 409 Conflict.');
 
-        // Verify that booked slot is immediately excluded from available slots
+        // Verify that booked slot (10:00 AM, 30m duration + 10m In-Person buffer -> 10:00 AM-10:40 AM)
+        // and overlapping 10:30 AM slot are immediately excluded from available slots (leaving 11:00 AM & 11:30 AM)
         await availabilityController.getDoctorAvailability(mockReqFetch, mockResFetch);
-        assert.strictEqual(fetchResult.availability.availableSlots.length, 3, 'Available slots decreased from 4 to 3.');
+        assert.strictEqual(fetchResult.availability.availableSlots.length, 2, 'Available slots decreased from 4 to 2 (10:00 AM booked + 10:30 AM blocked by 10m In-Person buffer).');
         assert.ok(!fetchResult.availability.availableSlots.includes('10:00 AM'), '10:00 AM is no longer in available slots.');
+        assert.ok(!fetchResult.availability.availableSlots.includes('10:30 AM'), '10:30 AM is blocked by the 10-minute post-consultation buffer.');
         assert.ok(fetchResult.availability.bookedSlots.includes('10:00 AM'), '10:00 AM is in booked slots.');
-        console.log('✓ SUCCESS: Booked slot removed from doctor availability immediately.');
+        console.log('✓ SUCCESS: Booked slot and 10-minute buffer window removed from doctor availability immediately.');
 
         // Test Cancellation and Immediate Slot Release
         const mockCancelReq = {

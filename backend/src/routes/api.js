@@ -117,6 +117,23 @@ router.put('/appointments/:id', optionalAuth, appointments.rescheduleAppointment
 router.patch('/appointments/:id/cancel', optionalAuth, appointments.cancelAppointment);
 router.delete('/appointments/:id', optionalAuth, appointments.cancelAppointment);
 router.patch('/appointments/:id/complete', optionalAuth, appointments.completeConsultation);
+router.patch('/appointments/:id/start', optionalAuth, appointments.startConsultation);
+router.post('/appointments/:id/start', optionalAuth, appointments.startConsultation);
+router.patch('/appointments/:id/delay', optionalAuth, appointments.markConsultationDelayed);
+router.post('/appointments/:id/delay', optionalAuth, appointments.markConsultationDelayed);
+router.patch('/appointments/:id/no-show', optionalAuth, appointments.markPatientNoShow);
+router.post('/appointments/:id/no-show', optionalAuth, appointments.markPatientNoShow);
+router.post('/appointments/:id/delay-response', optionalAuth, appointments.submitPatientDelayResponse);
+router.patch('/appointments/:id/reschedule-request', optionalAuth, appointments.submitPatientDelayResponse);
+
+router.get('/scheduling/rules', optionalAuth, availability.getSchedulingRules);
+router.put('/scheduling/rules', optionalAuth, availability.updateSchedulingRules);
+router.patch('/scheduling/rules', optionalAuth, availability.updateSchedulingRules);
+router.get('/scheduling/live-status', optionalAuth, appointments.getLiveSchedulingStatus);
+router.get('/visits-calendar/doctor', optionalAuth, appointments.getDoctorVisitsCalendar);
+router.get('/doctor/visits-calendar', optionalAuth, appointments.getDoctorVisitsCalendar);
+router.get('/visits-calendar/admin', optionalAuth, appointments.getAdminGlobalVisitsCalendar);
+router.get('/admin/visits-calendar', optionalAuth, appointments.getAdminGlobalVisitsCalendar);
 
 router.get('/notifications', optionalAuth, appointments.getNotifications);
 router.put('/notifications/read-all', optionalAuth, appointments.markAllNotificationsRead);
@@ -232,6 +249,8 @@ router.post('/doctor-availability/block-date', optionalAuth, availability.blockD
 router.patch('/doctor-availability/block-date', optionalAuth, availability.updateBlockedDateStatus);
 router.put('/doctor-availability/block-date', optionalAuth, availability.updateBlockedDateStatus);
 router.delete('/doctor-availability/block-date', optionalAuth, availability.unblockDoctorDate);
+router.post('/doctor-availability/block-slot', optionalAuth, availability.blockTimeSlot);
+router.delete('/doctor-availability/block-slot', optionalAuth, availability.unblockTimeSlot);
 router.delete('/doctor-availability', optionalAuth, availability.deleteDoctorAvailability);
 
 // ─────────────────────────────────────────────
