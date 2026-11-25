@@ -49,7 +49,7 @@ void main() {
   });
 
   group('Doctor Availability ON/OFF Flutter UI & Visibility', () {
-    testWidgets('1. Doctor ON is visible in FindDoctorsScreen; Doctor OFF is immediately hidden for patients', (tester) async {
+    testWidgets('1. Both Available and Unavailable registered doctors are visible in FindDoctorsScreen for patients and admin with clear status badges', (tester) async {
       final docOn = makeTestDoctor(id: 'doc-1', name: 'Dr. Aarav Reddy', status: 'Available');
       final docOff = makeTestDoctor(id: 'doc-2', name: 'Dr. Meera Nair', status: 'Unavailable');
       service.addTestDoctor(docOn);
@@ -65,7 +65,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Dr. Aarav Reddy'), findsOneWidget);
-      expect(find.text('Dr. Meera Nair'), findsNothing);
+      expect(find.text('Dr. Meera Nair'), findsOneWidget);
+      expect(find.text('Online • Available'), findsOneWidget);
+      expect(find.text('Unavailable'), findsOneWidget);
 
       // Admin view still sees both ON and OFF doctors for management
       await tester.pumpWidget(

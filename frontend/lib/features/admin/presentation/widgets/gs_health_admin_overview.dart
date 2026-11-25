@@ -62,6 +62,7 @@ class AdminQuickActionData {
 /// using the actual saved `dentist_id` and `clinic_id` (never substituting a later assignment).
 class AdminAppointmentItem {
   final String id;
+  final String patientId;
   final String patientName;
   final String phone;
   final String status;
@@ -78,9 +79,19 @@ class AdminAppointmentItem {
   final String mode; // 'IN-CLINIC' | 'ONLINE' | ''
   final String notes;
   final String treatment;
+  final String scheduledEndTime;
+  final String actualStartAt;
+  final String actualEndAt;
+  final int delayMinutes;
+  final String estimatedStartTime;
+  final String rescheduleRequestStatus;
+  final String rescheduleRequestedDate;
+  final String rescheduleRequestedSlot;
+  final String rescheduleRequestReason;
 
   const AdminAppointmentItem({
     required this.id,
+    this.patientId = '',
     required this.patientName,
     required this.phone,
     required this.status,
@@ -97,6 +108,15 @@ class AdminAppointmentItem {
     this.doctorPhotoUrl = '',
     this.clinicId = '',
     this.createdAtRaw = '',
+    this.scheduledEndTime = '',
+    this.actualStartAt = '',
+    this.actualEndAt = '',
+    this.delayMinutes = 0,
+    this.estimatedStartTime = '',
+    this.rescheduleRequestStatus = '',
+    this.rescheduleRequestedDate = '',
+    this.rescheduleRequestedSlot = '',
+    this.rescheduleRequestReason = '',
   });
 
   static String _firstNonEmpty(Map row, List<String> keys) {
@@ -227,8 +247,15 @@ class AdminAppointmentItem {
 
     final createdRaw = _firstNonEmpty(row, ['booking_created_at', 'created_at', 'createdAt']);
 
+    final reschedMap = row['reschedule_request'] is Map
+        ? row['reschedule_request'] as Map
+        : (row['rescheduleRequest'] is Map ? row['rescheduleRequest'] as Map : const {});
+
     return AdminAppointmentItem(
       id: _firstNonEmpty(row, ['id', '_id']),
+      patientId: patientId.isNotEmpty
+          ? patientId
+          : _firstNonEmpty(patientObj, ['id']),
       patientName: name.isEmpty ? 'Patient Unavailable' : name,
       phone: phone,
       status: _firstNonEmpty(row, ['status']).isEmpty
@@ -245,6 +272,7 @@ class AdminAppointmentItem {
       clinicName: clinic,
       createdAtRaw: createdRaw,
       mode: _normalizeMode(_firstNonEmpty(row, [
+        'consultation_type',
         'consultation_mode',
         'consultationMode',
         'mode',
@@ -254,6 +282,23 @@ class AdminAppointmentItem {
       ])),
       notes: notes,
       treatment: _firstNonEmpty(row, ['treatment']),
+      scheduledEndTime: _firstNonEmpty(row, ['scheduled_end_time', 'scheduledEndTime']),
+      actualStartAt: _firstNonEmpty(row, ['actual_start_at', 'actualStartAt']),
+      actualEndAt: _firstNonEmpty(row, ['actual_end_at', 'actualEndAt']),
+      delayMinutes: int.tryParse((row['delay_minutes'] ?? row['delayMinutes'] ?? '0').toString()) ?? 0,
+      estimatedStartTime: _firstNonEmpty(row, ['estimated_start_time', 'estimatedStartTime']),
+      rescheduleRequestStatus: _firstNonEmpty(reschedMap, ['status']).isNotEmpty
+          ? _firstNonEmpty(reschedMap, ['status'])
+          : _firstNonEmpty(row, ['reschedule_request_status', 'rescheduleRequestStatus']),
+      rescheduleRequestedDate: _firstNonEmpty(reschedMap, ['requestedDate', 'requested_date']).isNotEmpty
+          ? _firstNonEmpty(reschedMap, ['requestedDate', 'requested_date'])
+          : _firstNonEmpty(row, ['reschedule_requested_date', 'rescheduleRequestedDate']),
+      rescheduleRequestedSlot: _firstNonEmpty(reschedMap, ['requestedTimeSlot', 'requested_time_slot']).isNotEmpty
+          ? _firstNonEmpty(reschedMap, ['requestedTimeSlot', 'requested_time_slot'])
+          : _firstNonEmpty(row, ['reschedule_requested_slot', 'rescheduleRequestedSlot']),
+      rescheduleRequestReason: _firstNonEmpty(reschedMap, ['reason']).isNotEmpty
+          ? _firstNonEmpty(reschedMap, ['reason'])
+          : _firstNonEmpty(row, ['reschedule_request_reason', 'rescheduleRequestReason']),
     );
   }
 
@@ -261,6 +306,7 @@ class AdminAppointmentItem {
   factory AdminAppointmentItem.fromRequest(PatientConsultationRequest r) {
     return AdminAppointmentItem(
       id: r.id,
+      patientId: r.patientId ?? '',
       patientName: r.patientName.trim().isEmpty ? 'Patient Unavailable' : r.patientName.trim(),
       phone: r.patientPhone,
       status: r.status,
@@ -271,9 +317,18 @@ class AdminAppointmentItem {
       doctorSpecialty: r.problemCategory,
       clinicName: r.assignedDoctorClinic ?? '',
       createdAtRaw: r.submittedAt.toIso8601String(),
-      mode: '',
+      mode: r.displayConsultationMode == 'Online' ? 'ONLINE' : 'IN-CLINIC',
       notes: '',
       treatment: r.problemCategory,
+      scheduledEndTime: r.scheduledEndTime ?? '',
+      actualStartAt: r.actualStartAt ?? '',
+      actualEndAt: r.actualEndAt ?? '',
+      delayMinutes: r.delayMinutes,
+      estimatedStartTime: r.estimatedStartTime ?? '',
+      rescheduleRequestStatus: r.rescheduleRequestStatus ?? '',
+      rescheduleRequestedDate: r.rescheduleRequestedDate ?? '',
+      rescheduleRequestedSlot: r.rescheduleRequestedSlot ?? '',
+      rescheduleRequestReason: r.rescheduleRequestReason ?? '',
     );
   }
 }
@@ -317,8 +372,41 @@ bool isPendingVerificationDoctor(DoctorModel d) {
   return v == 'PENDING_VERIFICATION' || v == 'PENDING';
 }
 
-/// Sponsored ads shown to patients today (the app's existing ad list).
-List<DentalAd> sponsoredAdsForOverview() => sponsoredAdsForAdmin();
+/// Returns sponsored ads from real backend records (empty when none are configured;
+/// never falls back to hardcoded dummy partner ads).
+List<DentalAd> sponsoredAdsForOverview() => const [];
+
+/// Removes duplicate appointment items by exact ID and by identical booking fingerprint
+/// (patient + doctor + date day + time slot + treatment + status) so retried/duplicate
+/// rows never render multiple times in Admin/Sub-Admin dashboards.
+List<AdminAppointmentItem> deduplicateAdminAppointments(
+  List<AdminAppointmentItem> items,
+) {
+  final seenIds = <String>{};
+  final seenFingerprints = <String>{};
+  final result = <AdminAppointmentItem>[];
+  for (final item in items) {
+    final idKey = item.id.trim();
+    if (idKey.isNotEmpty && !seenIds.add(idKey)) continue;
+    final dateDay = item.dateRaw.split('T').first.trim().toLowerCase();
+    final doctorKey = item.dentistId.trim().isNotEmpty
+        ? item.dentistId.trim().toLowerCase()
+        : item.dentistName.trim().toLowerCase();
+    final fp = [
+      item.patientName.trim().toLowerCase(),
+      doctorKey,
+      dateDay,
+      item.timeSlot.trim().toLowerCase(),
+      item.treatment.trim().toLowerCase(),
+      item.status.trim().toLowerCase(),
+    ].join('|');
+    if (dateDay.isNotEmpty && item.timeSlot.trim().isNotEmpty && !seenFingerprints.add(fp)) {
+      continue;
+    }
+    result.add(item);
+  }
+  return result;
+}
 
 const List<String> _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const List<String> _months = [

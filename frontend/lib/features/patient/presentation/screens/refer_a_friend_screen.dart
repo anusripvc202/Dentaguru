@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/models/medical_specialty_model.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/utils/record_file_helper.dart';
@@ -36,8 +37,9 @@ class _ReferAFriendScreenState extends State<ReferAFriendScreen> {
   final _searchFocus = FocusNode();
   final _noteFocus = FocusNode();
 
-  // Doctor Selection State
+  // Doctor & Specialty Selection State
   DoctorModel? _selectedDoctor;
+  String _selectedSpecialty = 'All';
   String _searchQuery = '';
 
   // Attachments State (max 5)
@@ -51,15 +53,14 @@ class _ReferAFriendScreenState extends State<ReferAFriendScreen> {
   @override
   void initState() {
     super.initState();
+    _patientService.addListener(_onServiceChanged);
     _patientService.syncDoctorsFromApi();
     _patientService.syncMyDoctorsFromApi();
 
     if (widget.preselectedDoctor != null && widget.preselectedDoctor!.isAvailable) {
       _selectedDoctor = widget.preselectedDoctor;
-    } else if (_patientService.myDoctors.any((d) => d.isAvailable)) {
-      _selectedDoctor = _patientService.myDoctors.firstWhere((d) => d.isAvailable);
-    } else if (_patientService.availableDoctors.isNotEmpty) {
-      _selectedDoctor = _patientService.availableDoctors.first;
+    } else {
+      _selectedDoctor = null;
     }
 
     _searchController.addListener(() {
@@ -69,8 +70,20 @@ class _ReferAFriendScreenState extends State<ReferAFriendScreen> {
     });
   }
 
+  void _onServiceChanged() {
+    if (!mounted) return;
+    setState(() {
+      if (_selectedDoctor == null &&
+          widget.preselectedDoctor != null &&
+          widget.preselectedDoctor!.isAvailable) {
+        _selectedDoctor = widget.preselectedDoctor;
+      }
+    });
+  }
+
   @override
   void dispose() {
+    _patientService.removeListener(_onServiceChanged);
     _nameController.dispose();
     _mobileController.dispose();
     _searchController.dispose();
@@ -102,11 +115,21 @@ class _ReferAFriendScreenState extends State<ReferAFriendScreen> {
       }
     }
 
+    final specialtyFiltered = _selectedSpecialty == 'All'
+        ? orderedDocs
+        : orderedDocs.where((doc) {
+            return MedicalSpecialtyModel.matchesSpecialtyFilter(
+              doc.specialty,
+              _selectedSpecialty,
+              specialties: _patientService.specialties,
+            );
+          }).toList();
+
     if (_searchQuery.isEmpty) {
-      return orderedDocs;
+      return specialtyFiltered;
     }
 
-    return orderedDocs.where((doc) {
+    return specialtyFiltered.where((doc) {
       final name = doc.name.toLowerCase();
       final specialty = doc.specialty.toLowerCase();
       final clinic = doc.clinicName.toLowerCase();
@@ -116,6 +139,21 @@ class _ReferAFriendScreenState extends State<ReferAFriendScreen> {
           clinic.contains(_searchQuery) ||
           city.contains(_searchQuery);
     }).toList();
+  }
+
+  List<String> _availableSpecialtyFilters() {
+    final seen = <String>{'All'};
+    final list = <String>['All'];
+    for (final core in MedicalSpecialtyModel.coreInitialSpecialties) {
+      if (seen.add(core)) list.add(core);
+    }
+    for (final s in _patientService.specialties) {
+      final name = s.name.trim();
+      if (name.isNotEmpty && seen.add(name)) {
+        list.add(name);
+      }
+    }
+    return list;
   }
 
   bool _isDoctorFavourite(DoctorModel doc) {
@@ -251,41 +289,79 @@ class _ReferAFriendScreenState extends State<ReferAFriendScreen> {
       return;
     }
 
-    if (_selectedDoctor == null) {
+    final friendName = _nameController.text.trim();
+    final friendMobile = _mobileController.text.trim();
+    final note = _noteController.text.trim();
+    final selectedDoc = _selectedDoctor;
+    final resolvedSpecialty = _selectedSpecialty != 'All'
+        ? _selectedSpecialty
+        : (selectedDoc != null && selectedDoc.specialty.trim().isNotEmpty
+            ? selectedDoc.specialty.trim()
+            : 'General Physician / MBBS');
+
+    if (selectedDoc == null && _selectedSpecialty == 'All') {
       setState(() {
-        _errorMessage = 'Please select a doctor to refer your friend to.';
+        _errorMessage = 'Please select a specialty or choose a doctor to refer your friend.';
       });
       return;
     }
+
+    final confirmedResult = await _showReferralConfirmationDialog(
+      friendName: friendName,
+      friendMobile: friendMobile,
+      specialty: resolvedSpecialty,
+      doctorName: selectedDoc?.name ?? 'No specific doctor (Match by specialty)',
+      note: note,
+    );
+    if (confirmedResult == null || !mounted) return;
+    final bool sendWhatsApp = confirmedResult['sendWhatsApp'] == true;
 
     setState(() {
       _isSubmitting = true;
       _errorMessage = null;
     });
 
-    final friendName = _nameController.text.trim();
-    final friendMobile = _mobileController.text.trim();
-    final note = _noteController.text.trim();
-    final selectedDoc = _selectedDoctor!;
-
     try {
+      final resolvedCity = (selectedDoc?.city ?? '').trim().isNotEmpty
+          ? selectedDoc!.city.trim()
+          : (_patientService.currentPatient.city.trim().isNotEmpty
+              ? _patientService.currentPatient.city.trim()
+              : 'Not specified');
+      final resolvedPincode = (selectedDoc?.pincode ?? '').trim().isNotEmpty
+          ? selectedDoc!.pincode.trim()
+          : (_patientService.currentPatient.pincode.trim().isNotEmpty
+              ? _patientService.currentPatient.pincode.trim()
+              : '000000');
+      final resolvedLocation = (selectedDoc?.clinicAddress ?? '').trim().isNotEmpty
+          ? selectedDoc!.clinicAddress.trim()
+          : ((selectedDoc?.clinicName ?? '').trim().isNotEmpty
+              ? selectedDoc!.clinicName.trim()
+              : resolvedCity);
+
       // 1. Submit referral to backend API and Supabase
       final res = await _patientService.submitPatientReferral(
         referredPatientName: friendName,
         referredPatientMobile: friendMobile,
-        referredPatientAge: '28',
-        referredPatientGender: 'Female',
-        referredPatientCity: selectedDoc.city.isNotEmpty ? selectedDoc.city : 'Hyderabad',
-        referredPatientPincode: selectedDoc.pincode.isNotEmpty ? selectedDoc.pincode : '500001',
-        referredPatientLocation: selectedDoc.clinicAddress.isNotEmpty ? selectedDoc.clinicAddress : selectedDoc.clinicName,
-        requiredSpecialist: selectedDoc.specialty.isNotEmpty ? selectedDoc.specialty : 'General Dentistry',
-        clinicalComplaint: note.isNotEmpty ? note : 'Referral consultation with ${selectedDoc.name}',
-        doctorId: selectedDoc.id.isNotEmpty ? selectedDoc.id : selectedDoc.userId,
-        doctorName: selectedDoc.name,
-        doctorClinicName: selectedDoc.clinicName,
-        doctorCity: selectedDoc.city,
-        doctorPincode: selectedDoc.pincode,
-        doctorPhone: selectedDoc.phone,
+        referredPatientAge: 'Not specified',
+        referredPatientGender: 'Not specified',
+        referredPatientCity: resolvedCity,
+        referredPatientPincode: resolvedPincode,
+        referredPatientLocation: resolvedLocation,
+        requiredSpecialist: resolvedSpecialty,
+        clinicalComplaint: note.isNotEmpty
+            ? note
+            : (selectedDoc != null
+                ? 'Referral consultation with ${selectedDoc.name}'
+                : '$resolvedSpecialty referral request'),
+        doctorId: selectedDoc == null
+            ? ''
+            : (selectedDoc.id.isNotEmpty ? selectedDoc.id : selectedDoc.userId),
+        doctorName: selectedDoc?.name,
+        doctorClinicName: selectedDoc?.clinicName,
+        doctorCity: selectedDoc?.city,
+        doctorPincode: selectedDoc?.pincode,
+        doctorPhone: selectedDoc?.phone,
+        sendWhatsApp: sendWhatsApp,
       );
 
       // 2. If attachments are present, upload them as referral records
@@ -298,7 +374,7 @@ class _ReferAFriendScreenState extends State<ReferAFriendScreen> {
               patientName: friendName,
               title: 'Referral Document: ${att.name}',
               category: att.isPdf ? 'Medical Report' : 'Medical X-ray',
-              description: 'Attachment for referral to ${selectedDoc.name}. Note: $note',
+              description: 'Attachment for referral (${selectedDoc?.name ?? resolvedSpecialty}). Note: $note',
               fileName: att.name,
               fileType: att.extension,
               fileSize: att.sizeBytes,
@@ -315,7 +391,10 @@ class _ReferAFriendScreenState extends State<ReferAFriendScreen> {
       setState(() => _isSubmitting = false);
 
       if (res['success'] == true) {
-        _showSuccessDialog(friendName, selectedDoc.name);
+        _showSuccessDialog(
+          friendName,
+          selectedDoc?.name ?? '$resolvedSpecialty specialist',
+        );
       } else {
         final message = res['message']?.toString() ?? 'Failed to send referral. Please try again.';
         setState(() {
@@ -331,6 +410,74 @@ class _ReferAFriendScreenState extends State<ReferAFriendScreen> {
       });
       _showErrorSnackBar('Error submitting referral: $e');
     }
+  }
+
+  Future<Map<String, bool>?> _showReferralConfirmationDialog({
+    required String friendName,
+    required String friendMobile,
+    required String specialty,
+    required String doctorName,
+    required String note,
+  }) async {
+    bool sendWhatsApp = false;
+    return showDialog<Map<String, bool>>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          key: const Key('referral_confirmation_dialog'),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: const Text(
+            'Confirm Referral Details',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Friend: $friendName (+91 $friendMobile)', style: const TextStyle(fontSize: 13.5)),
+                const SizedBox(height: 6),
+                Text('Specialty: $specialty', style: const TextStyle(fontSize: 13.5)),
+                const SizedBox(height: 6),
+                Text('Doctor: $doctorName', style: const TextStyle(fontSize: 13.5)),
+                if (note.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text('Note: $note', style: const TextStyle(fontSize: 13, color: Color(0xFF475569))),
+                ],
+                const SizedBox(height: 12),
+                CheckboxListTile(
+                  key: const Key('referral_confirm_whatsapp_checkbox'),
+                  value: sendWhatsApp,
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  title: const Text(
+                    'Also notify friend via WhatsApp (optional)',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                  onChanged: (val) => setDialogState(() => sendWhatsApp = val ?? false),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              key: const Key('referral_confirm_cancel_button'),
+              onPressed: () => Navigator.of(ctx).pop(null),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              key: const Key('referral_confirm_submit_button'),
+              onPressed: () => Navigator.of(ctx).pop({'sendWhatsApp': sendWhatsApp}),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.gsNavy,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Confirm & Send'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showSuccessDialog(String friendName, String doctorName) {
@@ -513,9 +660,88 @@ class _ReferAFriendScreenState extends State<ReferAFriendScreen> {
                       ),
                       const SizedBox(height: 20),
 
-                      // 3. Refer To – Dentist Selection
-                      _buildSectionLabel('REFER TO'),
+                      // 3. Specialty & Doctor Selection
+                      _buildSectionLabel('SPECIALTY FOR REFERRAL'),
                       const SizedBox(height: 8),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: _availableSpecialtyFilters().map((spec) {
+                            final selected = _selectedSpecialty == spec;
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: ChoiceChip(
+                                key: Key('referral_specialty_chip_$spec'),
+                                label: Text(spec == 'All' ? 'All Specialties' : spec),
+                                selected: selected,
+                                selectedColor: AppTheme.gsNavy,
+                                backgroundColor: const Color(0xFFF8FAFC),
+                                labelStyle: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+                                  color: selected ? Colors.white : const Color(0xFF0F172A),
+                                ),
+                                onSelected: (_) {
+                                  setState(() {
+                                    _selectedSpecialty = spec;
+                                    _errorMessage = null;
+                                  });
+                                },
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      _buildSectionLabel('REFER TO (OPTIONAL DOCTOR)'),
+                      const SizedBox(height: 8),
+                      InkWell(
+                        key: const Key('referral_no_specific_doctor_option'),
+                        onTap: () {
+                          setState(() {
+                            _selectedDoctor = null;
+                            if (_selectedSpecialty == 'All') {
+                              _selectedSpecialty = 'General Physician / MBBS';
+                            }
+                            _errorMessage = null;
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(14),
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: _selectedDoctor == null
+                                ? AppTheme.gsNavy.withValues(alpha: 0.05)
+                                : const Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: _selectedDoctor == null ? AppTheme.gsNavy : const Color(0xFFE2E8F0),
+                              width: _selectedDoctor == null ? 1.6 : 1,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.auto_awesome_rounded, size: 18, color: AppTheme.gsNavy),
+                              const SizedBox(width: 10),
+                              const Expanded(
+                                child: Text(
+                                  'No specific doctor — match by specialty',
+                                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              Icon(
+                                _selectedDoctor == null ? Icons.radio_button_checked : Icons.radio_button_off,
+                                color: _selectedDoctor == null ? AppTheme.gsNavy : const Color(0xFF94A3B8),
+                                size: 20,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
                       TextFormField(
                         key: const ValueKey('referral_doctor_search_input'),
                         controller: _searchController,

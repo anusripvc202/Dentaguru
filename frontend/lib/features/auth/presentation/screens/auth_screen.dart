@@ -85,7 +85,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   final _experienceController = TextEditingController();
   final _qualificationController = TextEditingController();
   final _clinicAddressController = TextEditingController();
-  String? _selectedSpecialty = 'General Dentistry';
+  String? _selectedSpecialty = 'General Medicine';
 
   // Role-Specific Fields - Sub-Admin / Admin
   final _adminEmployeeIdController = TextEditingController();
@@ -713,14 +713,17 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                   effectiveName)
               .toString()
               .trim();
-          final String clinicAddress = (userData['clinicAddress'] ??
+          final String canonicalClinicId = (userData['clinicId'] ?? userData['clinic_id'] ?? '').toString().trim();
+          final String effectiveClinicSessionId = canonicalClinicId.isNotEmpty ? canonicalClinicId : effectiveUserId;
+          final String clinicAddress = (userData['clinicLocation'] ??
+                  userData['clinicAddress'] ??
                   userData['location'] ??
                   userData['city'] ??
                   '')
               .toString()
               .trim();
           PatientProblemService().setAuthenticatedClinicSession(
-            id: effectiveUserId,
+            id: effectiveClinicSessionId,
             clinicName: clinicName.isNotEmpty ? clinicName : effectiveName,
             location: clinicAddress,
             phone: userPhone,
@@ -735,6 +738,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             name: effectiveName,
             metadata: {
               ...userData,
+              'clinicId': effectiveClinicSessionId,
               'clinicName': clinicName.isNotEmpty ? clinicName : effectiveName,
               if (clinicAddress.isNotEmpty) 'location': clinicAddress,
             },
@@ -755,9 +759,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           final docUserId = (userData['userId'] ?? userData['id'] ?? SupabaseService.safeCurrentUser?.id ?? '').toString();
           final docDentistId = (userData['dentistId'] ?? userData['id'] ?? docUserId).toString();
           final returnedSpec = (userData['specialty'] ?? userData['speciality'] ?? '').toString().trim();
-          final effectiveSpec = returnedSpec.isNotEmpty ? returnedSpec : 'General Dentistry';
+          final effectiveSpec = returnedSpec.isNotEmpty ? returnedSpec : 'General Medicine';
           final returnedQual = (userData['qualification'] ?? userData['qualifications'] ?? '').toString().trim();
-          final effectiveQual = returnedQual.isNotEmpty ? returnedQual : 'BDS, MDS';
+          final effectiveQual = returnedQual.isNotEmpty
+              ? returnedQual
+              : MedicalSpecialtyModel.getDefaultQualificationForSpecialty(effectiveSpec);
           final returnedExp = int.tryParse((userData['experienceYears'] ?? userData['experience_years'] ?? '').toString()) ?? 5;
           final returnedStatus = (userData['availability_status'] ?? userData['status'] ?? 'Available').toString();
 
@@ -767,9 +773,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             name: docName,
             email: userData['email'] ?? (identifier.contains('@') ? identifier : ''),
             phone: userPhone,
-            licenseNumber: (userData['licenseNumber'] ?? userData['license_number'] ?? 'MED-LIC-REGISTERED').toString(),
+            licenseNumber: (userData['licenseNumber'] ?? userData['license_number'] ?? '').toString(),
             specialty: effectiveSpec,
             qualification: effectiveQual,
+            clinicId: (userData['clinicId'] ?? userData['clinic_id'] ?? '').toString(),
             clinicName: userData['clinicName'] ?? '',
             experienceYears: returnedExp,
             status: returnedStatus,
@@ -809,12 +816,16 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             if (userData['permissions'] is List) {
               perms = List<String>.from((userData['permissions'] as List).map((e) => e.toString()));
             }
+            final List<dynamic>? subAdminDistricts = userData['assignedDistricts'] is List
+                ? List<dynamic>.from(userData['assignedDistricts'] as List)
+                : (userData['districts'] is List ? List<dynamic>.from(userData['districts'] as List) : null);
             PatientProblemService().setSubAdminSession(
               id: userData['id']?.toString() ?? '',
               name: userData['name']?.toString() ?? 'Sub-Admin',
               email: userData['email']?.toString() ?? (identifier.contains('@') ? identifier : ''),
               phone: userData['phone']?.toString() ?? userPhone,
               permissions: perms,
+              assignedDistricts: subAdminDistricts,
               status: userData['status']?.toString() ?? 'ACTIVE',
             );
           } else {
@@ -1079,7 +1090,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
     setState(() => _isRegistering = true);
 
-    final List<String> selectedLangs = kGsHealthLanguages.where(_selectedLanguages.contains).toList();
+    final List<String> selectedLangs = <String>[
+      ...kGsHealthLanguages.where(_selectedLanguages.contains),
+      ..._selectedLanguages.where((l) => l.trim().isNotEmpty && !kGsHealthLanguages.contains(l)),
+    ];
     if (selectedLangs.isEmpty) {
       selectedLangs.add('English');
     }
@@ -1157,7 +1171,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             phone: phone,
             age: registeredAge,
             gender: _selectedGender ?? '',
-            bloodGroup: _selectedBloodGroup ?? 'O Positive (O+)',
+            bloodGroup: _selectedBloodGroup ?? '',
             emergencyContact: _emergencyContactController.text.trim().isEmpty ? phone : _emergencyContactController.text.trim(),
             address: location,
             city: city,
@@ -1177,7 +1191,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             metadata: {
               'age': registeredAge,
               'gender': _selectedGender ?? '',
-              'bloodGroup': _selectedBloodGroup ?? 'O Positive (O+)',
+              'bloodGroup': _selectedBloodGroup ?? '',
               'emergencyContact': _emergencyContactController.text.trim().isEmpty ? phone : _emergencyContactController.text.trim(),
               'city': city,
               'pincode': pincode,
@@ -1198,12 +1212,13 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           PatientProblemService().registerDoctor(
             id: docDentistId,
             userId: docUserId,
+            clinicId: (regUser['clinicId'] ?? regUser['clinic_id'] ?? '').toString(),
             name: name,
             email: email,
             phone: phone,
             licenseNumber: _licenseNoController.text.trim(),
             specialty: effectiveSpec,
-            clinicName: _clinicNameController.text.trim(),
+            clinicName: (regUser['clinicName'] ?? _clinicNameController.text).toString().trim(),
             clinicAddress: clinicAddress.isNotEmpty ? clinicAddress : location,
             city: city,
             pincode: pincode,
@@ -1430,7 +1445,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       );
     } else {
       setState(() {
-        _otpErrorMessage = 'Unable to send OTP. Please check your mobile number and try again.';
+        _otpErrorMessage ??= 'Unable to send OTP. Please check your mobile number and try again.';
       });
     }
   }
@@ -2515,7 +2530,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       onSpecialtyChanged: (specialty) {
         setState(() {
           final previousDefault = MedicalSpecialtyModel.getDefaultQualificationForSpecialty(
-            _selectedSpecialty ?? 'General Dentistry',
+            _selectedSpecialty ?? 'General Medicine',
           );
           final currentQual = _qualificationController.text.trim();
           _selectedSpecialty = specialty;

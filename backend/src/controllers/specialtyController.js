@@ -132,7 +132,7 @@ exports.analyzeAiTriage = async (req, res) => {
                     city: d.city || u.city || '',
                     availability_status: d.availability_status || 'Available',
                     isAvailable: isDoctorRecordAvailable(d),
-                    rating: d.rating || 5.0
+                    rating: Number(d.rating) > 0 && Number(d.reviews_count || 0) > 0 ? Number(d.rating) : 0
                 };
             });
 

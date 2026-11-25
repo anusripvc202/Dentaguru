@@ -134,17 +134,18 @@ test('GS HEALTH Language-Based Doctor Filtering E2E Suite', async (t) => {
     }
   });
 
-  await t.test('2. /doctors/languages returns distinct languages only from available registered doctors', async () => {
+  await t.test('2. /doctors/languages returns all supported application languages plus distinct registered doctor languages without duplicates', async () => {
     const res = await api('/doctors/languages');
     assert.equal(res.status, 200);
     assert.equal(res.json.success, true);
     const langs = res.json.languages.map((l) => l.toLowerCase());
-    assert.ok(langs.includes('english'));
-    assert.ok(langs.includes('telugu'));
-    assert.ok(langs.includes('hindi'));
-    assert.ok(langs.includes('marathi'));
-    assert.ok(langs.includes('tamil'));
-    // DocLangFourOff speaks Kannada and is OFF (assuming no other ON doctor speaks Kannada only from this test batch)
+    assert.equal(new Set(langs).size, langs.length, 'No duplicate language names allowed');
+    for (const expected of [
+      'english', 'hindi', 'telugu', 'tamil', 'kannada',
+      'malayalam', 'marathi', 'bengali', 'gujarati', 'punjabi', 'urdu', 'odia',
+    ]) {
+      assert.ok(langs.includes(expected), `Supported language ${expected} must be included`);
+    }
   });
 
   await t.test('3. Single language filter & multi-language OR filter return non-duplicate matching doctors', async () => {
@@ -314,6 +315,46 @@ test('GS HEALTH Language-Based Doctor Filtering E2E Suite', async (t) => {
     assert.ok(
       langsAfter.json.languages.map((l) => l.toLowerCase()).includes('malayalam'),
       'Newly registered doctor language Malayalam must automatically appear',
+    );
+  });
+
+  await t.test('7. Case-insensitive, whitespace, alias (Oriya/Odia) & parenthetical normalization + empty result behavior', async () => {
+    const regOdia = await api('/auth/register', {
+      method: 'POST',
+      body: {
+        name: `DocOdia ${suffix}`,
+        phone: `78000${suffix.slice(-5)}`,
+        role: 'Dentist',
+        city: 'Bhubaneswar',
+        pincode: '751001',
+        specialty: 'General Medicine',
+        qualification: 'MBBS, MD',
+        experienceYears: 6,
+        languages: ['Odia'],
+      },
+    });
+    assert.equal(regOdia.status, 201);
+    cleanupUserIds.push(regOdia.json.user.id);
+    cleanupDentistIds.push(regOdia.json.user.dentistId);
+    const docOdiaId = regOdia.json.user.dentistId;
+
+    // Lowercase + whitespace + parenthetical qualifier in query
+    const messyTelugu = await api(`/dentists?languages=${encodeURIComponent('  telugu (fluent)  ')}&search=${suffix}`);
+    assert.equal(messyTelugu.status, 200);
+    assert.ok(messyTelugu.json.dentists.some((d) => d.name.includes(`DocLangOne ${suffix}`)));
+
+    // Alias "Oriya" matches "Odia"
+    const oriyaRes = await api(`/dentists?languages=${encodeURIComponent('oriya')}&search=${suffix}`);
+    assert.equal(oriyaRes.status, 200);
+    assert.ok(oriyaRes.json.dentists.some((d) => d.id === docOdiaId));
+
+    // Selecting supported language with zero matching doctors (scoped with search=${suffix}) returns empty array (no unrelated doctors)
+    const gujaratiRes = await api(`/dentists?languages=Gujarati&search=${suffix}`);
+    assert.equal(gujaratiRes.status, 200);
+    assert.equal(gujaratiRes.json.dentists.length, 0);
+    assert.ok(
+      gujaratiRes.json.availableLanguages.map((l) => l.toLowerCase()).includes('gujarati'),
+      'availableLanguages still exposes all supported languages even when current filter yields 0 doctors',
     );
   });
 });

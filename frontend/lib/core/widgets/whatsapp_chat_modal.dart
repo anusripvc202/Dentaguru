@@ -3,15 +3,19 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/api_service.dart';
 import '../services/patient_problem_service.dart';
+import '../services/session_service.dart';
+import '../services/supabase_service.dart';
 
-/// Authentic WhatsApp-Themed Real-Time 1-on-1 Chat Modal
-/// Supports instant optimistic messaging, 2-second auto-polling, and real-time sync.
+/// Real-Time 1-on-1 Chat Modal
+/// Supports instant optimistic messaging, Supabase Realtime subscription + 2-second polling,
+/// read receipts, and RBAC-enforced backend persistence.
 class WhatsAppChatModal extends StatefulWidget {
   final String patientName;
   final String doctorName;
-  final String currentUserRole; // 'Patient' | 'Dentist' | 'Admin'
+  final String currentUserRole; // 'Patient' | 'Dentist' | 'Clinic' | 'Admin'
   final String? patientId;
   final String? doctorId;
+  final String? roomIdOverride;
 
   const WhatsAppChatModal({
     super.key,
@@ -20,6 +24,7 @@ class WhatsAppChatModal extends StatefulWidget {
     required this.currentUserRole,
     this.patientId,
     this.doctorId,
+    this.roomIdOverride,
   });
 
   static void show(
@@ -29,6 +34,7 @@ class WhatsAppChatModal extends StatefulWidget {
     required String currentUserRole,
     String? patientId,
     String? doctorId,
+    String? roomIdOverride,
   }) {
     showModalBottomSheet(
       context: context,
@@ -40,6 +46,7 @@ class WhatsAppChatModal extends StatefulWidget {
         currentUserRole: currentUserRole,
         patientId: patientId,
         doctorId: doctorId,
+        roomIdOverride: roomIdOverride,
       ),
     );
   }
@@ -57,33 +64,71 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
   late String _roomId;
   List<dynamic> _messages = [];
   bool _isLoading = true;
+  bool _isSending = false;
+  String? _errorBanner;
   Timer? _pollTimer;
+  RealtimeChannel? _realtimeChannel;
 
   bool get _isDentist => widget.currentUserRole.toLowerCase().contains('dentist') || widget.currentUserRole.toLowerCase().contains('doctor');
+  bool get _isAdmin => widget.currentUserRole.toLowerCase().contains('admin');
 
-  String get _counterpartName => _isDentist 
+  String get _currentUserId {
+    final sessId = SessionService().currentSession?.userId ?? '';
+    if (sessId.isNotEmpty) return sessId;
+    return SupabaseService.safeCurrentUser?.id ?? '';
+  }
+
+  String get _counterpartName => _isDentist
       ? (widget.patientName.isNotEmpty ? widget.patientName : 'Patient')
       : (widget.doctorName.isNotEmpty ? widget.doctorName : 'Doctor');
 
   @override
   void initState() {
     super.initState();
-    _roomId = ApiService.getChatRoomId(
-      patientIdOrName: widget.patientName.isNotEmpty ? widget.patientName : (widget.patientId ?? 'PATIENT'),
-      dentistIdOrName: widget.doctorName.isNotEmpty ? widget.doctorName : (widget.doctorId ?? 'DOCTOR'),
-    );
+    _roomId = (widget.roomIdOverride != null && widget.roomIdOverride!.trim().isNotEmpty)
+        ? ApiService.normalizeRoomId(widget.roomIdOverride!)
+        : ApiService.getChatRoomId(
+            patientIdOrName: widget.patientName.isNotEmpty ? widget.patientName : (widget.patientId ?? 'PATIENT'),
+            dentistIdOrName: widget.doctorName.isNotEmpty ? widget.doctorName : (widget.doctorId ?? 'DOCTOR'),
+          );
 
     _loadMessages();
+    _subscribeRealtime();
 
-    // ⚡ Real-Time 2-second background refresh for instant WhatsApp-like synchronization
+    // Reliable 2-second background refresh alongside Supabase Realtime
     _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       _pollMessages();
     });
   }
 
+  void _subscribeRealtime() {
+    try {
+      final client = Supabase.instance.client;
+      _realtimeChannel = client
+          .channel('chat_messages_$_roomId')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.insert,
+            schema: 'public',
+            table: 'chat_messages',
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'room_id',
+              value: _roomId,
+            ),
+            callback: (_) {
+              _pollMessages();
+            },
+          )
+          .subscribe();
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
     _pollTimer?.cancel();
+    try {
+      _realtimeChannel?.unsubscribe();
+    } catch (_) {}
     _msgController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -91,14 +136,24 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
 
   Future<void> _loadMessages() async {
     try {
-      final msgs = await _apiService.fetchChatMessages(roomId: _roomId);
+      final msgs = await _apiService.fetchChatMessages(roomId: _roomId, markRead: true);
       if (mounted) {
         _reconcileMessages(msgs);
-        setState(() => _isLoading = false);
+        setState(() {
+          _isLoading = false;
+          _errorBanner = null;
+        });
       }
-    } catch (_) {
+      final uid = _currentUserId;
+      if (msgs.any((m) => m['read'] != true && m['sender_id']?.toString() != uid)) {
+        _apiService.markChatRoomRead(roomId: _roomId, currentUserId: uid);
+      }
+    } catch (e) {
       if (mounted) {
-        setState(() => _isLoading = false);
+        setState(() {
+          _isLoading = false;
+          _errorBanner = 'Unable to load conversation history.';
+        });
       }
     }
   }
@@ -108,6 +163,10 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
       final msgs = await _apiService.fetchChatMessages(roomId: _roomId);
       if (mounted) {
         _reconcileMessages(msgs);
+        final uid = _currentUserId;
+        if (msgs.any((m) => m['read'] != true && m['sender_id']?.toString() != uid)) {
+          _apiService.markChatRoomRead(roomId: _roomId, currentUserId: uid);
+        }
       }
     } catch (_) {}
   }
@@ -119,15 +178,17 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
     final unconfirmed = _messages.where((m) {
       final id = (m['id'] ?? '').toString();
       if (!id.startsWith('temp_')) return false;
-      final text = (m['message'] ?? '').toString();
+      final text = (m['message'] ?? '').toString().trim();
       final type = (m['type'] ?? '').toString();
       return !serverMsgs.any((sm) =>
-          (sm['message'] ?? '').toString() == text &&
+          (sm['message'] ?? '').toString().trim() == text &&
           (sm['type'] ?? '').toString() == type);
     }).toList();
 
     final merged = [...serverMsgs, ...unconfirmed];
-    if (merged.length != _messages.length || (serverMsgs.isNotEmpty && _messages.isEmpty)) {
+    final prevLastId = _messages.isNotEmpty ? (_messages.last['id'] ?? '').toString() : '';
+    final nextLastId = merged.isNotEmpty ? (merged.last['id'] ?? '').toString() : '';
+    if (merged.length != _messages.length || prevLastId != nextLastId || (serverMsgs.isNotEmpty && _messages.isEmpty)) {
       setState(() {
         _messages = merged;
       });
@@ -149,61 +210,97 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
 
   Future<void> _handleSend() async {
     final text = _msgController.text.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty || _isSending) return;
 
     _msgController.clear();
 
-    final authUser = Supabase.instance.client.auth.currentUser;
-    final currentUserId = authUser?.id ?? '';
+    final currentUserId = _currentUserId;
+    final currentUserName = SessionService().currentSession?.name ?? '';
 
-    final effectiveSenderId = _isDentist
-        ? (widget.doctorId?.isNotEmpty == true ? widget.doctorId! : (currentUserId.isNotEmpty ? currentUserId : widget.doctorName))
-        : (widget.patientId?.isNotEmpty == true ? widget.patientId! : (currentUserId.isNotEmpty ? currentUserId : widget.patientName));
+    final effectiveSenderId = _isAdmin
+        ? (currentUserId.isNotEmpty ? currentUserId : 'ADMIN')
+        : (_isDentist
+            ? (widget.doctorId?.isNotEmpty == true ? widget.doctorId! : (currentUserId.isNotEmpty ? currentUserId : widget.doctorName))
+            : (widget.patientId?.isNotEmpty == true ? widget.patientId! : (currentUserId.isNotEmpty ? currentUserId : widget.patientName)));
 
-    final msgType = _isDentist ? 'doctor' : 'patient';
+    final msgType = _isAdmin ? 'admin' : (_isDentist ? 'doctor' : 'patient');
+    final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
 
-    // 🟢 1. Instant Optimistic UI Update (Guaranteed to stay in list)
     final optimisticMsg = {
-      'id': 'temp_${DateTime.now().millisecondsSinceEpoch}',
+      'id': tempId,
       'room_id': _roomId,
       'sender_id': effectiveSenderId,
       'message': text,
       'type': msgType,
+      'sender': {
+        'id': effectiveSenderId,
+        'name': currentUserName.isNotEmpty ? currentUserName : (_isAdmin ? 'Admin' : (_isDentist ? widget.doctorName : widget.patientName)),
+        'role': widget.currentUserRole,
+      },
       'created_at': DateTime.now().toIso8601String(),
       'read': false,
     };
 
     setState(() {
+      _isSending = true;
+      _errorBanner = null;
       _messages.add(optimisticMsg);
     });
     _scrollToBottom();
 
-    // 🟢 2. Send to Supabase & Backend API
     try {
-      await _apiService.sendMessage(
+      final sendRes = await _apiService.sendMessage(
         senderId: effectiveSenderId,
         message: text,
         roomId: _roomId,
         type: msgType,
-        senderRole: _isDentist ? 'Dentist' : 'Patient',
+        senderRole: _isAdmin ? 'Admin' : (_isDentist ? 'Dentist' : 'Patient'),
         receiverId: _isDentist ? widget.patientId : widget.doctorId,
       );
 
-      // Notification
+      if (sendRes['success'] != true) {
+        if (mounted) {
+          setState(() {
+            _messages.removeWhere((m) => m['id'] == tempId);
+            _errorBanner = sendRes['message']?.toString() ?? 'Failed to send message.';
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(_errorBanner!),
+              backgroundColor: const Color(0xFFFE3434),
+            ),
+          );
+        }
+        return;
+      }
+
+      // Notify recipient
+      final targetRecipientId = _isDentist
+          ? ((widget.patientId != null && widget.patientId!.isNotEmpty) ? widget.patientId! : _counterpartName)
+          : ((widget.doctorId != null && widget.doctorId!.isNotEmpty) ? widget.doctorId! : _counterpartName);
       _problemService.addNotification(
         recipientRole: _isDentist ? 'Patient' : 'Dentist',
-        recipientId: _counterpartName,
+        recipientId: targetRecipientId,
         title: _isDentist ? '💬 Doctor Reply' : '💬 New Patient Message',
         message: '${_isDentist ? widget.doctorName : widget.patientName}: "$text"',
       );
 
-      // Fetch and reconcile
       final updated = await _apiService.fetchChatMessages(roomId: _roomId);
       if (mounted) {
         _reconcileMessages(updated);
       }
     } catch (e) {
       debugPrint('Error sending message: $e');
+      if (mounted) {
+        setState(() {
+          _messages.removeWhere((m) => m['id'] == tempId);
+          _errorBanner = 'Connection error while sending message. Please try again.';
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSending = false);
+      }
     }
   }
 
@@ -273,10 +370,6 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
                           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white),
                           overflow: TextOverflow.ellipsis,
                         ),
-                        const Text(
-                          'online',
-                          style: TextStyle(fontSize: 11, color: Color(0x40012A58), fontWeight: FontWeight.w400),
-                        ),
                       ],
                     ),
                   ),
@@ -331,6 +424,27 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
             ),
           ),
 
+          if (_errorBanner != null)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              color: const Color(0xFFFEE2E2),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline_rounded, size: 16, color: Color(0xFFB91C1C)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _errorBanner!,
+                      style: const TextStyle(fontSize: 12, color: Color(0xFFB91C1C), fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           // 💬 Live Chat Thread Area
           Expanded(
             child: _isLoading && _messages.isEmpty
@@ -370,15 +484,25 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
                           final senderRole = (senderObj['role'] ?? '').toString();
                           final senderName = (senderObj['name'] ?? m['sender_id'] ?? '').toString();
 
-                          final createdAt = m['created_at'] != null ? DateTime.tryParse(m['created_at'].toString()) : null;
+                          final createdAt = m['created_at'] != null ? DateTime.tryParse(m['created_at'].toString())?.toLocal() : null;
                           final String timeStr = createdAt != null
                               ? '${createdAt.hour > 12 ? createdAt.hour - 12 : (createdAt.hour == 0 ? 12 : createdAt.hour)}:${createdAt.minute.toString().padLeft(2, '0')} ${createdAt.hour >= 12 ? 'PM' : 'AM'}'
                               : 'Just now';
 
+                          final displaySenderName = (senderObj['name'] ?? '').toString().trim().isNotEmpty
+                              ? senderObj['name'].toString().trim()
+                              : (mType == 'doctor'
+                                  ? widget.doctorName
+                                  : (mType == 'admin' ? 'Admin' : widget.patientName));
+
                           // Is this message sent by the current user?
-                          final bool isSentByMe = _isDentist
-                              ? (mType == 'doctor' || senderRole == 'Dentist' || senderName.contains(widget.doctorName) || (widget.doctorId != null && senderName.contains(widget.doctorId!)))
-                              : (mType == 'patient' || senderRole == 'Patient' || senderName.contains(widget.patientName) || (widget.patientId != null && senderName.contains(widget.patientId!)));
+                          final bool isSentByMe = _isAdmin
+                              ? (mType == 'admin' || senderRole.toLowerCase().contains('admin'))
+                              : (_isDentist
+                                  ? (mType == 'doctor' || senderRole == 'Dentist' || senderRole == 'Doctor' || senderName.contains(widget.doctorName) || (widget.doctorId != null && senderName.contains(widget.doctorId!)))
+                                  : (mType == 'patient' || senderRole == 'Patient' || senderName.contains(widget.patientName) || (widget.patientId != null && senderName.contains(widget.patientId!))));
+
+                          final bool isRead = m['read'] == true;
 
                           return Align(
                             alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -423,30 +547,52 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
                                     BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 3, offset: const Offset(0, 1)),
                                   ],
                                 ),
-                                child: Wrap(
-                                  alignment: WrapAlignment.end,
-                                  crossAxisAlignment: WrapCrossAlignment.end,
+                                child: Column(
+                                  crossAxisAlignment: isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Text(
-                                      text,
-                                      style: const TextStyle(fontSize: 14, color: Color(0xFF0F172A), height: 1.3),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 4),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Text(
-                                            timeStr,
-                                            style: const TextStyle(fontSize: 10, color: Color(0xFF475569)),
-                                          ),
-                                          if (isSentByMe) ...[
-                                            const SizedBox(width: 3),
-                                            const Icon(Icons.done_all_rounded, size: 14, color: Color(0xFFFE3434)),
-                                          ],
-                                        ],
+                                    if (!isSentByMe && displaySenderName.isNotEmpty) ...[
+                                      Text(
+                                        displaySenderName,
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFF012A58),
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
                                       ),
+                                      const SizedBox(height: 2),
+                                    ],
+                                    Wrap(
+                                      alignment: WrapAlignment.end,
+                                      crossAxisAlignment: WrapCrossAlignment.end,
+                                      children: [
+                                        Text(
+                                          text,
+                                          style: const TextStyle(fontSize: 14, color: Color(0xFF0F172A), height: 1.3),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Padding(
+                                          padding: const EdgeInsets.only(top: 4),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Text(
+                                                timeStr,
+                                                style: const TextStyle(fontSize: 10, color: Color(0xFF475569)),
+                                              ),
+                                              if (isSentByMe) ...[
+                                                const SizedBox(width: 3),
+                                                Icon(
+                                                  Icons.done_all_rounded,
+                                                  size: 14,
+                                                  color: isRead ? const Color(0xFF0284C7) : const Color(0xFF64748B),
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),

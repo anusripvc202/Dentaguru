@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:dentaguru/core/services/api_service.dart';
 import 'package:dentaguru/core/services/patient_problem_service.dart';
 import 'package:dentaguru/core/utils/record_file_helper.dart';
 import 'package:dentaguru/features/dentist/presentation/screens/dentist_timeline.dart';
@@ -250,7 +251,12 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     FlutterSecureStorage.setMockInitialValues({});
     RecordFileHelper.testFilePickerOverride = null;
+    ApiService.debugCreatePatientReferralOverride = null;
     await PatientProblemService().clearAllDataAndStorage();
+  });
+
+  tearDown(() {
+    ApiService.debugCreatePatientReferralOverride = null;
   });
 
   group('GS HEALTH - Doctor Dashboard Patient Referral Navigation & Complete Workflow', () {
@@ -369,7 +375,7 @@ void main() {
 
       // A. Verify Header & Default Tab
       expect(find.text('Refer to a specialist'), findsOneWidget);
-      expect(find.text('Specialist dentist'), findsOneWidget);
+      expect(find.text('Specialist doctor'), findsOneWidget);
       expect(find.text('Clinic'), findsOneWidget);
 
       // B. Switch to Clinic Tab and verify clinic card
@@ -598,7 +604,28 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
 
-      // 5. Tap Send Referral
+      // 5. Stub referral API response for headless test and tap Send Referral
+      ApiService.debugCreatePatientReferralOverride = ({
+        required String referredPatientName,
+        required String referredPatientMobile,
+        required String doctorId,
+        String? referrerPatientId,
+      }) async => {
+        'success': true,
+        'referral': {
+          'id': 'ref-doc-flow-1',
+          'referrerPatientId': referrerPatientId ?? 'doc-ananya-rao',
+          'referredPatientName': referredPatientName,
+          'referredPatientMobile': referredPatientMobile,
+          'doctorId': doctorId,
+          'doctorName': 'Dr. Vikram Mehta',
+          'requiredSpecialist': 'Orthodontist',
+          'clinicalComplaint': 'Impacted 38, pain for 2 weeks. Please evaluate for extraction',
+          'status': 'Pending',
+          'referralDate': DateTime.now().toIso8601String(),
+        },
+      };
+
       final sendBtn = find.byKey(const Key('dentist_send_referral_button'));
       expect(sendBtn, findsOneWidget);
       await tester.ensureVisible(sendBtn);

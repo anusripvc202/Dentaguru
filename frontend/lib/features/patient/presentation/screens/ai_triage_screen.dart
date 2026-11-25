@@ -1,14 +1,26 @@
 import 'package:flutter/material.dart';
-import '../../../../core/theme/app_theme.dart';
+import '../../../../core/models/medical_specialty_model.dart';
+import '../../../../core/models/specialty_clinical_config.dart';
+import '../../../../core/services/api_service.dart';
 import '../../../../core/services/patient_problem_service.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../widgets/book_consultation_fab.dart';
+import '../widgets/book_visit_flow_dialog.dart';
+import 'doctor_profile_screen.dart';
 
-/// Screen providing interactive AI dental symptom triage and specialist matching.
+/// Multi-specialty AI Health Triage screen.
+/// Dynamically loads symptom categories, contextual triage guidance, emergency warnings,
+/// and matching specialists for EVERY existing and future medical specialty.
 class AiTriageScreen extends StatefulWidget {
   final String? initialSymptom;
+  final String? initialSpecialty;
+  final DoctorModel? initialDoctor;
 
   const AiTriageScreen({
     super.key,
     this.initialSymptom,
+    this.initialSpecialty,
+    this.initialDoctor,
   });
 
   @override
@@ -19,43 +31,121 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
   final PatientProblemService _patientService = PatientProblemService();
   late final TextEditingController _symptomController;
 
-  String _selectedCategory = 'Toothache & Sensitivity';
+  late String _selectedSpecialty;
+  DoctorModel? _selectedDoctor;
+  late String _selectedCategory;
   String _selectedSeverity = 'Moderate';
   String _selectedDuration = '2-3 days';
 
   bool _isAnalyzing = false;
   bool _isSubmitting = false;
   Map<String, dynamic>? _triageResult;
+  List<DoctorModel> _matchingDoctors = [];
 
-  final List<String> _categories = [
-    'Toothache & Sensitivity',
-    'Swollen or Bleeding Gums',
-    'Broken or Chipped Tooth',
-    'Wisdom Tooth Pain',
-    'Aligners & Orthodontics',
-    'Jaw Pain or Clicking',
-    'Routine Checkup & Cleaning',
-  ];
+  final List<String> _severities = const ['Mild', 'Moderate', 'Severe'];
+  final List<String> _durations = const ['< 24 hours', '2-3 days', '1-2 weeks', '> 2 weeks'];
 
-  final List<String> _severities = ['Mild', 'Moderate', 'Severe'];
-  final List<String> _durations = ['< 24 hours', '2-3 days', '1-2 weeks', '> 2 weeks'];
+  List<String> get _specialtyOptions => SpecialtyClinicalConfig.allSelectableSpecialties(
+        activeSpecialties: _patientService.activeSpecialties,
+        registeredDoctorSpecialties: _patientService.allDoctors.map((d) => d.specialty),
+      );
+
+  SpecialtyClinicalProfile get _activeProfile =>
+      SpecialtyClinicalConfig.forSpecialty(_selectedSpecialty);
+
+  List<String> get _categories => _activeProfile.triageCategories;
 
   @override
   void initState() {
     super.initState();
     _symptomController = TextEditingController(text: widget.initialSymptom ?? '');
+    _selectedDoctor = widget.initialDoctor;
+
+    final seedSpecialty = widget.initialDoctor?.specialty.trim().isNotEmpty == true
+        ? widget.initialDoctor!.specialty.trim()
+        : (widget.initialSpecialty?.trim().isNotEmpty == true
+            ? widget.initialSpecialty!.trim()
+            : 'General Medicine');
+
+    final resolvedProfile = SpecialtyClinicalConfig.forSpecialty(seedSpecialty);
+    _selectedSpecialty = resolvedProfile.name;
+    _selectedCategory = resolvedProfile.triageCategories.first;
+
+    _patientService.addListener(_onServiceUpdated);
+    _patientService.syncSpecialtiesFromApi();
+    _patientService.syncDoctorsFromApi(includeUnavailable: true);
+
     if ((widget.initialSymptom ?? '').trim().isNotEmpty) {
-      _runAiTriageAnalysis();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _runAiTriageAnalysis();
+      });
     }
   }
 
   @override
   void dispose() {
+    _patientService.removeListener(_onServiceUpdated);
     _symptomController.dispose();
     super.dispose();
   }
 
-  void _runAiTriageAnalysis() {
+  void _onServiceUpdated() {
+    if (mounted) setState(() {});
+  }
+
+  void _onSpecialtyChanged(String newSpecialty, {bool keepSelectedDoctor = false}) {
+    final profile = SpecialtyClinicalConfig.forSpecialty(newSpecialty);
+    setState(() {
+      _selectedSpecialty = profile.name;
+      if (!keepSelectedDoctor) {
+        if (_selectedDoctor != null &&
+            !MedicalSpecialtyModel.matchesSpecialtyFilter(
+              _selectedDoctor!.specialty,
+              profile.name,
+              specialties: _patientService.specialties,
+            )) {
+          _selectedDoctor = null;
+        }
+      }
+      _selectedCategory = profile.triageCategories.first;
+      _triageResult = null;
+      _matchingDoctors = [];
+    });
+  }
+
+  void _onDoctorSelected(DoctorModel? doc) {
+    if (doc == null) {
+      setState(() => _selectedDoctor = null);
+      return;
+    }
+    final resolved = SpecialtyClinicalConfig.forSpecialty(doc.specialty);
+    setState(() {
+      _selectedDoctor = doc;
+      _selectedSpecialty = resolved.name;
+      _selectedCategory = resolved.triageCategories.first;
+      _triageResult = null;
+      _matchingDoctors = [];
+    });
+  }
+
+  List<DoctorModel> _resolveMatchingDoctorsForSpecialty(String specialtyName) {
+    final specs = _patientService.specialties;
+    final matched = _patientService.allDoctors.where((doc) {
+      return MedicalSpecialtyModel.matchesSpecialtyFilter(
+        doc.specialty,
+        specialtyName,
+        specialties: specs,
+      );
+    }).toList();
+    // Put available doctors first
+    matched.sort((a, b) {
+      if (a.isAvailable != b.isAvailable) return a.isAvailable ? -1 : 1;
+      return b.rating.compareTo(a.rating);
+    });
+    return matched;
+  }
+
+  Future<void> _runAiTriageAnalysis() async {
     final text = _symptomController.text.trim();
     if (text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -71,60 +161,59 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
       _isAnalyzing = true;
     });
 
-    // Generate clinical triage analysis based on user inputs
-    Future.delayed(const Duration(milliseconds: 300), () {
-      if (!mounted) return;
+    // Try authoritative backend multi-specialty triage API first, with seamless local fallback
+    Map<String, dynamic>? backendData;
+    try {
+      backendData = await ApiService().analyzeAiTriage(
+        specialty: _selectedSpecialty,
+        doctorId: _selectedDoctor?.id,
+        category: _selectedCategory,
+        symptoms: text,
+        severity: _selectedSeverity,
+        duration: _selectedDuration,
+      );
+    } catch (_) {}
 
-      final lower = text.toLowerCase();
-      String urgency;
-      Color urgencyColor;
-      String condition;
-      String specialist;
-      String homeCare;
-      String warning;
+    if (!mounted) return;
 
-      if (_selectedSeverity == 'Severe' ||
-          lower.contains('swelling') ||
-          lower.contains('fever') ||
-          lower.contains('unbearable') ||
-          lower.contains('bleed')) {
-        urgency = 'Immediate Care Recommended (< 24 hrs)';
-        urgencyColor = AppTheme.gsRed;
-        condition = 'Acute Medical Emergency / Severe Inflammation';
-        specialist = 'Endodontist or Oral Surgeon';
-        homeCare = 'Apply cold compress externally. Do not place hot compresses or aspirin on gums.';
-        warning = 'If you experience difficulty swallowing, breathing, or rapid facial swelling, visit urgent care immediately.';
-      } else if (_selectedSeverity == 'Moderate' ||
-          lower.contains('sharp') ||
-          lower.contains('pain') ||
-          lower.contains('cold') ||
-          lower.contains('hot')) {
-        urgency = 'Consultation Recommended within 48-72 hrs';
-        urgencyColor = const Color(0xFFFE3434);
-        condition = 'Suspected Dental Pulpitis or Enamel Decay';
-        specialist = 'General Dentist or Endodontist';
-        homeCare = 'Rinse gently with warm salt water. Avoid extreme hot/cold foods and chewing on this side.';
-        warning = 'Untreated tooth decay can advance quickly to the dental pulp causing intense pain.';
-      } else {
-        urgency = 'Routine Evaluation Suggested';
-        urgencyColor = const Color(0xFF012A58);
-        condition = 'Mild Enamel Sensitivity or Early Gingival Irritation';
-        specialist = 'General Dentist';
-        homeCare = 'Maintain gentle brushing with a soft-bristled toothbrush and desensitizing toothpaste.';
-        warning = 'Schedule a preventative exam to keep minor sensitivity from developing into a cavity.';
-      }
+    final Map<String, dynamic> triage = (backendData?['triage'] is Map<String, dynamic>)
+        ? Map<String, dynamic>.from(backendData!['triage'] as Map)
+        : SpecialtyClinicalConfig.analyzeLocally(
+            specialty: _selectedSpecialty,
+            category: _selectedCategory,
+            symptoms: text,
+            severity: _selectedSeverity,
+            duration: _selectedDuration,
+          );
 
-      setState(() {
-        _isAnalyzing = false;
-        _triageResult = {
-          'urgency': urgency,
-          'urgencyColor': urgencyColor,
-          'condition': condition,
-          'specialist': specialist,
-          'homeCare': homeCare,
-          'warning': warning,
-        };
-      });
+    final urgencyLevel = (triage['urgencyLevel'] ?? 'Routine').toString();
+    final isEmergency = triage['isEmergency'] == true || urgencyLevel.toLowerCase() == 'emergency';
+    final Color urgencyColor = (isEmergency || urgencyLevel.toLowerCase() == 'urgent' || urgencyLevel.toLowerCase() == 'soon')
+        ? AppTheme.gsRed
+        : AppTheme.gsNavy;
+
+    final matchedLocal = _resolveMatchingDoctorsForSpecialty(
+      (triage['recommendedSpecialty'] ?? _selectedSpecialty).toString(),
+    );
+
+    setState(() {
+      _isAnalyzing = false;
+      _matchingDoctors = matchedLocal;
+      _triageResult = {
+        'urgency': (triage['urgency'] ?? 'Specialist Consultation Recommended').toString(),
+        'urgencyLevel': urgencyLevel,
+        'urgencyColor': urgencyColor,
+        'isEmergency': isEmergency,
+        'condition': (triage['clinicalSummary'] ??
+                'Preliminary symptom guidance for $_selectedSpecialty ($_selectedCategory).')
+            .toString(),
+        'specialist': (triage['recommendedSpecialty'] ?? _selectedSpecialty).toString(),
+        'homeCare': (triage['selfCareGuidance'] ?? _activeProfile.selfCareGuidance).toString(),
+        'warning': (triage['emergencyWarning'] ?? _activeProfile.emergencyWarning).toString(),
+        'disclaimer': (triage['disclaimer'] ??
+                'Informational triage guidance only — this is NOT a medical diagnosis. Please consult a qualified doctor.')
+            .toString(),
+      };
     });
   }
 
@@ -148,10 +237,15 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
 
     try {
       await _patientService.submitProblem(
-        problemCategory: _selectedCategory,
+        specialty: _selectedSpecialty,
+        problemCategory: '$_selectedSpecialty — $_selectedCategory',
         problemDescription: text,
         severity: _selectedSeverity,
-        symptoms: 'Duration: $_selectedDuration • AI Triage: ${_triageResult?['condition'] ?? "Evaluated"}',
+        symptoms:
+            'Specialty: $_selectedSpecialty • Category: $_selectedCategory • Duration: $_selectedDuration • Urgency: ${_triageResult?['urgencyLevel'] ?? _selectedSeverity}',
+        preferredDoctorId: _selectedDoctor?.id,
+        preferredDoctorName: _selectedDoctor?.name,
+        preferredDoctorClinic: _selectedDoctor?.clinicName,
       );
 
       if (!mounted) return;
@@ -167,10 +261,10 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
                 width: 56,
                 height: 56,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF012A58).withValues(alpha: 0.12),
+                  color: AppTheme.gsNavy.withValues(alpha: 0.12),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.check_circle_rounded, color: Color(0xFF012A58), size: 36),
+                child: const Icon(Icons.check_circle_rounded, color: AppTheme.gsNavy, size: 36),
               ),
               const SizedBox(height: 16),
               const Text(
@@ -179,9 +273,9 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Our clinical coordination team and matching specialists have received your triage report. We will connect you shortly.',
-                style: TextStyle(fontSize: 13, color: Color(0xFF64748B), height: 1.4),
+              Text(
+                'Your $_selectedSpecialty triage report ($_selectedCategory) has been shared with our clinical team${_selectedDoctor != null ? ' and ${_selectedDoctor!.name}' : ''}.',
+                style: const TextStyle(fontSize: 13, color: Color(0xFF64748B), height: 1.4),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 20),
@@ -223,6 +317,16 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final specialtyOptions = _specialtyOptions;
+    final effectiveSpecialty = specialtyOptions.contains(_selectedSpecialty)
+        ? _selectedSpecialty
+        : (specialtyOptions.isNotEmpty ? specialtyOptions.first : 'General Medicine');
+    final categories = _categories;
+    final effectiveCategory = categories.contains(_selectedCategory)
+        ? _selectedCategory
+        : categories.first;
+    final doctorsList = _patientService.allDoctors;
+
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       body: SafeArea(
@@ -232,11 +336,11 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
             Expanded(
               child: SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 104),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Intro banner
+                    // Intro banner (preserves exact GS HEALTH Navy card design)
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(16),
@@ -272,7 +376,7 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
                                 ),
                                 SizedBox(height: 2),
                                 Text(
-                                  'Describe what you feel and get clinical insights in seconds.',
+                                  'Select a medical specialty, describe what you feel, and get multi-specialty triage guidance.',
                                   style: TextStyle(
                                     color: Colors.white70,
                                     fontSize: 12,
@@ -287,7 +391,110 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
                     ),
                     const SizedBox(height: 20),
 
-                    // Symptom input
+                    // 1. Dynamic Medical Specialty Selector
+                    const Text(
+                      'MEDICAL SPECIALTY',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF64748B),
+                        letterSpacing: 0.6,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          key: const Key('ai_triage_specialty_dropdown'),
+                          value: effectiveSpecialty,
+                          isExpanded: true,
+                          icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF64748B)),
+                          items: specialtyOptions.map((spec) {
+                            return DropdownMenuItem<String>(
+                              value: spec,
+                              child: Text(
+                                spec,
+                                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (val) {
+                            if (val != null) _onSpecialtyChanged(val);
+                          },
+                        ),
+                      ),
+                    ),
+
+                    // Optional Specific Doctor Selector (auto-identifies doctor's registered specialty)
+                    if (doctorsList.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      const Text(
+                        'OR SELECT A SPECIFIC DOCTOR (AUTO-DETECTS SPECIALTY)',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF64748B),
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            key: const Key('ai_triage_doctor_dropdown'),
+                            value: (_selectedDoctor != null && doctorsList.any((d) => d.id == _selectedDoctor!.id))
+                                ? _selectedDoctor!.id
+                                : '',
+                            isExpanded: true,
+                            icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF64748B)),
+                            items: [
+                              const DropdownMenuItem<String>(
+                                value: '',
+                                child: Text(
+                                  'Any Specialist in Selected Department',
+                                  style: TextStyle(fontSize: 13.5, color: Color(0xFF64748B)),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              ...doctorsList.map((doc) {
+                                return DropdownMenuItem<String>(
+                                  value: doc.id,
+                                  child: Text(
+                                    '${doc.name} · ${doc.specialty}',
+                                    style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                );
+                              }),
+                            ],
+                            onChanged: (docId) {
+                              if (docId == null || docId.isEmpty) {
+                                _onDoctorSelected(null);
+                              } else {
+                                final match = doctorsList.firstWhere((d) => d.id == docId);
+                                _onDoctorSelected(match);
+                              }
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 18),
+
+                    // 2. Specialty-Contextual Symptom Description
                     const Text(
                       'DESCRIBE YOUR SYMPTOMS',
                       style: TextStyle(
@@ -314,21 +521,21 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
                           fontWeight: FontWeight.w500,
                           color: Color(0xFF0F172A),
                         ),
-                        decoration: const InputDecoration(
-                          hintText: 'e.g. Throbbing pain on the lower left side when chewing or having cold drinks...',
-                          hintStyle: TextStyle(
+                        decoration: InputDecoration(
+                          hintText: _activeProfile.symptomHint,
+                          hintStyle: const TextStyle(
                             fontSize: 14,
                             color: Color(0xFF94A3B8),
                             fontWeight: FontWeight.w400,
                           ),
                           border: InputBorder.none,
-                          contentPadding: EdgeInsets.all(14),
+                          contentPadding: const EdgeInsets.all(14),
                         ),
                       ),
                     ),
                     const SizedBox(height: 18),
 
-                    // Category
+                    // 3. Dynamic Specialty-Based Issue Category
                     const Text(
                       'ISSUE CATEGORY',
                       style: TextStyle(
@@ -349,15 +556,16 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
                       child: DropdownButtonHideUnderline(
                         child: DropdownButton<String>(
                           key: const Key('ai_triage_category_dropdown'),
-                          value: _selectedCategory,
+                          value: effectiveCategory,
                           isExpanded: true,
                           icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF64748B)),
-                          items: _categories.map((cat) {
-                            return DropdownMenuItem(
+                          items: categories.map((cat) {
+                            return DropdownMenuItem<String>(
                               value: cat,
                               child: Text(
                                 cat,
                                 style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Color(0xFF0F172A)),
+                                overflow: TextOverflow.ellipsis,
                               ),
                             );
                           }).toList(),
@@ -369,9 +577,9 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
                     ),
                     const SizedBox(height: 18),
 
-                    // Pain Severity
+                    // 4. Symptom Severity Level
                     const Text(
-                      'PAIN SEVERITY LEVEL',
+                      'SYMPTOM SEVERITY LEVEL',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
@@ -385,7 +593,7 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
                         final isSelected = _selectedSeverity == sev;
                         final color = sev == 'Severe'
                             ? AppTheme.gsRed
-                            : (sev == 'Moderate' ? const Color(0xFFFE3434) : const Color(0xFF012A58));
+                            : (sev == 'Moderate' ? AppTheme.gsRed : AppTheme.gsNavy);
                         return Expanded(
                           child: InkWell(
                             key: Key('ai_triage_severity_$sev'),
@@ -419,7 +627,7 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
                     ),
                     const SizedBox(height: 18),
 
-                    // Duration
+                    // 5. Duration
                     const Text(
                       'HOW LONG HAVE YOU HAD THIS?',
                       style: TextStyle(
@@ -533,7 +741,7 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
                                     const SizedBox(width: 6),
                                     Flexible(
                                       child: Text(
-                                        _triageResult!['urgency'],
+                                        _triageResult!['urgency'].toString(),
                                         style: TextStyle(
                                           fontSize: 12,
                                           fontWeight: FontWeight.bold,
@@ -548,36 +756,37 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
                             ),
                             const SizedBox(height: 14),
                             const Text(
-                              'POTENTIAL CONDITION',
+                              'PRELIMINARY TRIAGE GUIDANCE (NOT A DIAGNOSIS)',
                               style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              _triageResult!['condition'],
-                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
+                              _triageResult!['condition'].toString(),
+                              style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: Color(0xFF0F172A), height: 1.35),
                             ),
                             const SizedBox(height: 14),
                             const Text(
-                              'RECOMMENDED SPECIALIST',
+                              'RECOMMENDED SPECIALIST DEPARTMENT',
                               style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              _triageResult!['specialist'],
-                              style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: AppTheme.gsNavy),
+                              _triageResult!['specialist'].toString(),
+                              style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: AppTheme.gsNavy),
                             ),
                             const SizedBox(height: 14),
                             const Text(
-                              'IMMEDIATE HOME CARE TIP',
+                              'SAFE PRE-CONSULTATION GUIDANCE',
                               style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              _triageResult!['homeCare'],
+                              _triageResult!['homeCare'].toString(),
                               style: const TextStyle(fontSize: 13, color: Color(0xFF334155), height: 1.4),
                             ),
                             const SizedBox(height: 14),
                             Container(
+                              key: const Key('ai_triage_emergency_warning'),
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
                                 color: const Color(0x14FE3434),
@@ -587,18 +796,82 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
                               child: Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Icon(Icons.info_outline_rounded, color: Color(0xFFFE3434), size: 18),
+                                  const Icon(Icons.warning_amber_rounded, color: AppTheme.gsRed, size: 18),
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
-                                      _triageResult!['warning'],
-                                      style: const TextStyle(fontSize: 12, color: Color(0xFFFE3434), height: 1.35),
+                                      _triageResult!['warning'].toString(),
+                                      style: const TextStyle(fontSize: 12, color: AppTheme.gsRed, height: 1.35, fontWeight: FontWeight.w600),
                                     ),
                                   ),
                                 ],
                               ),
                             ),
-                            const SizedBox(height: 18),
+                            const SizedBox(height: 10),
+                            Text(
+                              _triageResult!['disclaimer'].toString(),
+                              style: const TextStyle(fontSize: 11, color: Color(0xFF64748B), fontStyle: FontStyle.italic),
+                            ),
+
+                            // Suitable Specialists for Selected Specialty
+                            if (_matchingDoctors.isNotEmpty) ...[
+                              const SizedBox(height: 16),
+                              Text(
+                                'SUITABLE ${_selectedSpecialty.toUpperCase()} SPECIALISTS (${_matchingDoctors.length})',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
+                              ),
+                              const SizedBox(height: 8),
+                              ..._matchingDoctors.take(4).map((doc) {
+                                return Container(
+                                  key: Key('ai_triage_doctor_card_${doc.id}'),
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF8FAFC),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                                  ),
+                                  child: ListTile(
+                                    dense: true,
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                                    leading: CircleAvatar(
+                                      backgroundColor: AppTheme.gsNavy,
+                                      radius: 18,
+                                      child: Text(
+                                        doc.name.replaceFirst(RegExp(r'^Dr\.?\s*', caseSensitive: false), '').isNotEmpty
+                                            ? doc.name.replaceFirst(RegExp(r'^Dr\.?\s*', caseSensitive: false), '')[0].toUpperCase()
+                                            : 'D',
+                                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                      ),
+                                    ),
+                                    title: Text(
+                                      doc.name,
+                                      style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: AppTheme.textDark),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    subtitle: Text(
+                                      '${doc.specialty}${doc.clinicName.isNotEmpty ? " · ${doc.clinicName}" : ""}',
+                                      style: const TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    trailing: TextButton(
+                                      onPressed: () {
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => DoctorProfileScreen(doctor: doc),
+                                          ),
+                                        );
+                                      },
+                                      child: const Text(
+                                        'View',
+                                        style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.gsNavy, fontSize: 12),
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }),
+                            ],
+
+                            const SizedBox(height: 16),
                             SizedBox(
                               width: double.infinity,
                               height: 48,
@@ -634,6 +907,26 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
               ),
             ),
           ],
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Container(
+          color: const Color(0xFFF8FAFC),
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              BookConsultationFab(
+                selectedSpecialty: _selectedSpecialty,
+                onPressed: () => BookVisitFlowDialog.show(
+                  context,
+                  preselectedDoctor: _selectedDoctor,
+                  initialSpecialtyFilter: _selectedSpecialty,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -70,14 +70,14 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
     } catch (_) {}
 
     final session = SessionService().currentSession;
-    final fallbackId = supaUser?.id ?? session?.userId ?? 'doc-session';
-    final fallbackName = supaUser?.userMetadata?['name'] ?? session?.name ?? 'Dr. Ananya Rao';
-    final fallbackPhone = supaUser?.phone ?? session?.phone ?? '+919000000001';
-    final fallbackEmail = supaUser?.email ?? session?.email ?? '';
+    final fallbackId = supaUser?.id ?? session?.userId ?? '';
+    final fallbackName = (supaUser?.userMetadata?['name'] ?? session?.name ?? 'Doctor').toString().trim();
+    final fallbackPhone = (supaUser?.phone ?? session?.phone ?? '').toString().trim();
+    final fallbackEmail = (supaUser?.email ?? session?.email ?? '').toString().trim();
 
     // Check if doc exists in allDoctors
     for (final d in _patientService.allDoctors) {
-      if (d.id == fallbackId || (d.userId.isNotEmpty && d.userId == fallbackId)) {
+      if (fallbackId.isNotEmpty && (d.id == fallbackId || (d.userId.isNotEmpty && d.userId == fallbackId))) {
         return d;
       }
       if (d.phone.isNotEmpty && fallbackPhone.isNotEmpty && d.phone.replaceAll(RegExp(r'\D'), '') == fallbackPhone.replaceAll(RegExp(r'\D'), '')) {
@@ -85,23 +85,27 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
       }
     }
 
+    final meta = supaUser?.userMetadata ?? const {};
+    final fallbackSpecialty = (meta['specialty'] ?? meta['speciality'] ?? 'General Medicine').toString().trim();
+    final fallbackQual = (meta['qualification'] ?? meta['qualifications'] ?? '').toString().trim();
+
     return DoctorModel(
       id: fallbackId,
       userId: fallbackId,
-      name: fallbackName,
-      specialty: 'Endodontist',
-      qualification: 'BDS, MDS (Endodontics)',
-      experienceYears: 8,
-      rating: 4.9,
-      reviewCount: 38,
-      clinicName: 'Bandra West Dental Clinic',
+      name: fallbackName.isNotEmpty ? fallbackName : 'Doctor',
+      specialty: fallbackSpecialty.isNotEmpty ? fallbackSpecialty : 'General Medicine',
+      qualification: fallbackQual,
+      experienceYears: int.tryParse((meta['experienceYears'] ?? meta['experience_years'] ?? '0').toString()) ?? 0,
+      rating: 0.0,
+      reviewCount: 0,
+      clinicName: (meta['clinicName'] ?? meta['clinic_name'] ?? '').toString(),
       phone: fallbackPhone,
       email: fallbackEmail,
       status: 'Available',
       verificationStatus: 'VERIFIED',
-      nextAvailableSlots: const ['Today, 2:00 PM', 'Tomorrow, 10:30 AM'],
-      consultationFee: '₹800',
-      languages: const ['English', 'Hindi', 'Telugu'],
+      nextAvailableSlots: const [],
+      consultationFee: (meta['consultationFee'] ?? '').toString(),
+      languages: const ['English'],
     );
   }
 
@@ -462,25 +466,34 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                     ],
                   ),
                   const SizedBox(height: 20),
-                  _buildReviewCard(
-                    patientName: 'Riya Sharma',
-                    date: 'Yesterday',
-                    rating: 5,
-                    comment: 'Dr. ${doc.name.replaceAll("Dr.", "").trim()} was exceptionally thorough and gentle during the root canal procedure. Highly recommended!',
-                  ),
-                  const SizedBox(height: 10),
-                  _buildReviewCard(
-                    patientName: 'Kunal Patel',
-                    date: '3 days ago',
-                    rating: 5,
-                    comment: 'Prompt triage response and very clear explanation of post-procedure care.',
-                  ),
-                  const SizedBox(height: 10),
-                  _buildReviewCard(
-                    patientName: 'Sneha Rao',
-                    date: 'Last week',
-                    rating: 5,
-                    comment: 'Clinic is hygienic and the consultation started right on schedule. Very satisfied with the treatment.',
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 18),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Column(
+                      children: const [
+                        Icon(Icons.rate_review_outlined, color: Color(0xFF94A3B8), size: 32),
+                        SizedBox(height: 10),
+                        Text(
+                          'No patient reviews yet.',
+                          style: TextStyle(
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF0F172A),
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'Verified feedback submitted by patients after completed visits will appear here.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 12.5, color: Color(0xFF64748B)),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -488,70 +501,6 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
           },
         );
       },
-    );
-  }
-
-  Widget _buildReviewCard({
-    required String patientName,
-    required String date,
-    required int rating,
-    required String comment,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 16,
-                backgroundColor: AppTheme.gsNavy.withValues(alpha: 0.1),
-                child: Text(
-                  patientName[0].toUpperCase(),
-                  style: const TextStyle(fontWeight: FontWeight.w800, color: AppTheme.gsNavy, fontSize: 13),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      patientName,
-                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Color(0xFF0F172A)),
-                    ),
-                    Text(
-                      date,
-                      style: const TextStyle(fontSize: 11.5, color: Color(0xFF94A3B8)),
-                    ),
-                  ],
-                ),
-              ),
-              Row(
-                children: List.generate(
-                  5,
-                  (index) => Icon(
-                    index < rating ? Icons.star_rounded : Icons.star_outline_rounded,
-                    color: const Color(0xFFFE3434),
-                    size: 16,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            comment,
-            style: const TextStyle(fontSize: 13, color: Color(0xFF334155), height: 1.4),
-          ),
-        ],
-      ),
     );
   }
 
@@ -900,7 +849,7 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                         const SizedBox(width: 6),
                         Flexible(
                           child: Text(
-                            doc.phone.isNotEmpty ? doc.phone : '+91 90000 00001',
+                            doc.phone.isNotEmpty ? doc.phone : 'Not provided',
                             style: const TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,

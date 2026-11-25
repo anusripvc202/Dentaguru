@@ -407,14 +407,10 @@ class _ClinicProfileScreenState extends State<ClinicProfileScreen> {
     final cId = clinic?.id ?? _problemService.authenticatedClinicId;
     final cName = (clinic?.clinicName.trim().isNotEmpty == true)
         ? clinic!.clinicName.trim()
-        : _problemService.authenticatedClinicName.trim().isNotEmpty
-            ? _problemService.authenticatedClinicName.trim()
-            : 'Bandra West Dental Clinic';
+        : _problemService.authenticatedClinicName.trim();
     final cLoc = (clinic?.location.trim().isNotEmpty == true)
         ? clinic!.location.trim()
-        : _problemService.authenticatedClinicLocation.trim().isNotEmpty
-            ? _problemService.authenticatedClinicLocation.trim()
-            : 'Hill Road, Bandra West';
+        : _problemService.authenticatedClinicLocation.trim();
     final cCover = clinic?.coverImageUrl ?? _problemService.authenticatedClinicCoverUrl;
 
     await showEditClinicDetailsSheet(
@@ -691,14 +687,14 @@ class _ClinicProfileScreenState extends State<ClinicProfileScreen> {
     final clinicId = clinic?.id ?? _problemService.authenticatedClinicId;
     final clinicName = (clinic?.clinicName.trim().isNotEmpty == true)
         ? clinic!.clinicName.trim()
-        : _problemService.authenticatedClinicName.trim().isNotEmpty
+        : (_problemService.authenticatedClinicName.trim().isNotEmpty
             ? _problemService.authenticatedClinicName.trim()
-            : 'Bandra West Dental Clinic';
+            : 'Clinic Profile');
     final clinicAddress = (clinic?.location.trim().isNotEmpty == true)
         ? clinic!.location.trim()
-        : _problemService.authenticatedClinicLocation.trim().isNotEmpty
+        : (_problemService.authenticatedClinicLocation.trim().isNotEmpty
             ? _problemService.authenticatedClinicLocation.trim()
-            : 'Hill Road, Bandra West';
+            : 'Location not specified');
     final isFeatured = _problemService.isClinicFeaturedFor(
       clinicId,
       clinicName,

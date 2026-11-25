@@ -25,19 +25,51 @@ const generateTokens = (user) => {
 // Normalize 10-digit mobile phone
 const normalizeAdminPhone = (phone) => canonicalPhone10(phone);
 
-const isPatientProfileComplete = (user = {}, tokenMeta = {}) => {
+// Flexible Patient Profile Completion Mandatory Field Configuration
+// (Pending final client confirmation on optional vs mandatory subset)
+const PATIENT_PROFILE_REQUIREMENTS = {
+    requireProfileImage: process.env.PATIENT_REQ_PROFILE_IMAGE !== 'false',
+    requirePincode: process.env.PATIENT_REQ_PINCODE !== 'false',
+    requireAge: process.env.PATIENT_REQ_AGE !== 'false',
+    requireGender: process.env.PATIENT_REQ_GENDER !== 'false',
+    requireFullName: process.env.PATIENT_REQ_FULL_NAME === 'true',
+    requireAddress: process.env.PATIENT_REQ_ADDRESS === 'true',
+    requirePreferredLanguage: process.env.PATIENT_REQ_PREFERRED_LANGUAGE === 'true',
+    requireBloodGroup: process.env.PATIENT_REQ_BLOOD_GROUP === 'true',
+};
+
+const isPatientProfileComplete = (user = {}, tokenMeta = {}, reqs = PATIENT_PROFILE_REQUIREMENTS) => {
     const rawPhoto = String(user.biometric_token || tokenMeta.profilePhoto || '').trim();
     const rawPincode = String(user.pincode || tokenMeta.pincode || '').trim();
     const rawAge = String(user.age || user.patient_age || tokenMeta.age || '').trim();
     const rawGender = String(user.gender || tokenMeta.gender || '').trim();
+    const rawName = String(user.name || tokenMeta.name || '').trim();
+    const rawAddress = String(user.address || tokenMeta.address || '').trim();
+    const rawBlood = String(user.blood_group || tokenMeta.bloodGroup || '').trim();
+    const langs = Array.isArray(user.languages) && user.languages.length > 0
+        ? user.languages
+        : (Array.isArray(tokenMeta.languages) ? tokenMeta.languages : []);
 
     const parsedAge = parseInt(rawAge, 10);
     const hasValidAge = Boolean(/^\d+$/.test(rawAge) && !Number.isNaN(parsedAge) && parsedAge >= 1 && parsedAge <= 120);
     const hasValidPincode = /^\d{6}$/.test(rawPincode);
     const hasValidGender = rawGender.length > 0 && rawGender.toLowerCase() !== 'null';
     const hasProfilePhoto = rawPhoto.length > 0 && rawPhoto.toLowerCase() !== 'null';
+    const hasFullName = rawName.length > 0 && rawName.toLowerCase() !== 'patient' && rawName.toLowerCase() !== 'null';
+    const hasAddress = rawAddress.length > 0 && rawAddress.toLowerCase() !== 'null';
+    const hasBloodGroup = rawBlood.length > 0 && rawBlood.toLowerCase() !== 'null';
+    const hasLanguage = langs.some(l => String(l || '').trim().length > 0);
 
-    return hasProfilePhoto && hasValidPincode && hasValidAge && hasValidGender;
+    if (reqs.requireProfileImage && !hasProfilePhoto) return false;
+    if (reqs.requirePincode && !hasValidPincode) return false;
+    if (reqs.requireAge && !hasValidAge) return false;
+    if (reqs.requireGender && !hasValidGender) return false;
+    if (reqs.requireFullName && !hasFullName) return false;
+    if (reqs.requireAddress && !hasAddress) return false;
+    if (reqs.requirePreferredLanguage && !hasLanguage) return false;
+    if (reqs.requireBloodGroup && !hasBloodGroup) return false;
+
+    return true;
 };
 
 const parseUserTokenMeta = (user) => {
@@ -333,17 +365,13 @@ exports.register = async (req, res) => {
                     const cPin = pincode && pincode.trim() ? pincode.trim() : '';
                     const fullLoc = cPin ? `${cAddr} - ${cPin}` : cAddr;
                     if (!clinic && cName.length > 0) {
-                        const defaultPricing = req.body.pricing || [
-                            { service: 'General Consultation', fee: '$75' },
-                            { service: `${resolvedDocSpecialty} Evaluation`, fee: '$90' },
-                            { service: 'Follow-up Consultation', fee: '$60' }
-                        ];
+                        const defaultPricing = Array.isArray(req.body.pricing) ? req.body.pricing : [];
                         clinic = await Clinic.create({
                             user_id: user.id,
                             clinic_name: cName,
                             location: fullLoc,
                             verified: true,
-                            rating: 5.0,
+                            rating: 0,
                             reviews_count: 0,
                             services: [resolvedDocSpecialty, 'General Consultation'],
                             pricing: defaultPricing
@@ -1825,7 +1853,8 @@ exports.getPatientProfile = async (req, res) => {
         }
         return res.json({
             success: true,
-            user: buildPatientUserPayload(user)
+            user: buildPatientUserPayload(user),
+            profileRequirements: PATIENT_PROFILE_REQUIREMENTS,
         });
     } catch (err) {
         console.error('Get Patient Profile Error:', err.message);
@@ -1882,20 +1911,46 @@ exports.updatePatientProfile = async (req, res) => {
         const nextPhoto = profilePhoto !== undefined
             ? (profilePhoto === null ? '' : String(profilePhoto).trim())
             : String(existingUser.biometric_token || existingMeta.profilePhoto || '').trim();
+        const nextName = name !== undefined
+            ? String(name || '').trim()
+            : String(existingUser.name || existingMeta.name || '').trim();
+        const nextAddress = address !== undefined
+            ? String(address || '').trim()
+            : String(existingUser.address || existingMeta.address || '').trim();
+        const nextBloodGroup = bloodGroup !== undefined
+            ? String(bloodGroup || '').trim()
+            : String(existingUser.blood_group || existingMeta.bloodGroup || '').trim();
+        const nextLanguages = Array.isArray(languages)
+            ? languages.map(l => String(l || '').trim()).filter(Boolean)
+            : (Array.isArray(existingUser.languages) && existingUser.languages.length > 0
+                ? existingUser.languages
+                : (Array.isArray(existingMeta.languages) ? existingMeta.languages : []));
 
         if (requireComplete) {
-            if (!nextPhoto || nextPhoto.toLowerCase() === 'null') {
+            if (PATIENT_PROFILE_REQUIREMENTS.requireProfileImage && (!nextPhoto || nextPhoto.toLowerCase() === 'null')) {
                 return res.status(400).json({ success: false, message: 'Profile image is required.' });
             }
-            if (!/^\d{6}$/.test(nextPincode)) {
+            if (PATIENT_PROFILE_REQUIREMENTS.requireFullName && (!nextName || nextName.toLowerCase() === 'patient' || nextName.toLowerCase() === 'null')) {
+                return res.status(400).json({ success: false, message: 'Full name is required.' });
+            }
+            if (PATIENT_PROFILE_REQUIREMENTS.requireAddress && (!nextAddress || nextAddress.toLowerCase() === 'null')) {
+                return res.status(400).json({ success: false, message: 'Address is required.' });
+            }
+            if (PATIENT_PROFILE_REQUIREMENTS.requirePincode && !/^\d{6}$/.test(nextPincode)) {
                 return res.status(400).json({ success: false, message: 'Please enter a valid 6-digit pincode.' });
             }
             const ageInt = parseInt(nextAge, 10);
-            if (!/^\d+$/.test(nextAge) || Number.isNaN(ageInt) || ageInt < 1 || ageInt > 120) {
+            if (PATIENT_PROFILE_REQUIREMENTS.requireAge && (!/^\d+$/.test(nextAge) || Number.isNaN(ageInt) || ageInt < 1 || ageInt > 120)) {
                 return res.status(400).json({ success: false, message: 'Please enter a valid age between 1 and 120.' });
             }
-            if (!nextGender || nextGender.toLowerCase() === 'null') {
+            if (PATIENT_PROFILE_REQUIREMENTS.requireGender && (!nextGender || nextGender.toLowerCase() === 'null')) {
                 return res.status(400).json({ success: false, message: 'Gender selection is required.' });
+            }
+            if (PATIENT_PROFILE_REQUIREMENTS.requirePreferredLanguage && nextLanguages.length === 0) {
+                return res.status(400).json({ success: false, message: 'Please select at least one preferred language.' });
+            }
+            if (PATIENT_PROFILE_REQUIREMENTS.requireBloodGroup && (!nextBloodGroup || nextBloodGroup.toLowerCase() === 'null')) {
+                return res.status(400).json({ success: false, message: 'Blood group selection is required.' });
             }
         } else {
             if (nextPincode.length > 0 && !/^\d{6}$/.test(nextPincode)) {

@@ -3,13 +3,28 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../../../core/constants/patient_profile_requirements.dart';
 import '../../../../core/services/patient_problem_service.dart';
+import '../../../../core/services/session_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 
 /// Deferred Patient Profile Completion screen.
-/// Shown when a Patient clicks any service or service-related action while
-/// one or more mandatory fields (Profile image, Pincode, Age, Gender) are missing.
+///
+/// Renders all 9 client-specified patient profile fields:
+/// 1. Profile Image (upload & preview)
+/// 2. Full Name
+/// 3. Mobile Number (verified & read-only)
+/// 4. Address
+/// 5. Pincode (6-digit Indian PIN validation)
+/// 6. Preferred Language (multi-language selection)
+/// 7. Age (valid range 1-120)
+/// 8. Gender
+/// 9. Blood Group
+///
+/// Mandatory vs. optional enforcement is controlled flexibly via
+/// [PatientProfileRequirementsConfig]. After completion, automatically
+/// continues the patient to the service they originally selected.
 class PatientProfileCompletionScreen extends StatefulWidget {
   final String? serviceTitle;
   final VoidCallback? onCompleted;
@@ -35,19 +50,22 @@ class _PatientProfileCompletionScreenState
   final _formKey = GlobalKey<FormState>();
 
   late final TextEditingController _nameController;
+  late final TextEditingController _addressController;
   late final TextEditingController _pincodeController;
   late final TextEditingController _ageController;
 
   Uint8List? _photoBytes;
   String? _profileImageUrl;
   String? _selectedGender;
+  String? _selectedBloodGroup;
+  late List<String> _selectedLanguages;
 
   bool _isSubmitting = false;
   String? _photoError;
   String? _genderError;
+  String? _languageError;
+  String? _bloodGroupError;
   String? _submitError;
-
-  static const List<String> _genderOptions = ['Female', 'Male', 'Other'];
 
   @override
   void initState() {
@@ -59,19 +77,42 @@ class _PatientProfileCompletionScreenState
           ? cleanName
           : '',
     );
+    _addressController = TextEditingController(text: patient.address.trim());
     _pincodeController = TextEditingController(text: patient.pincode.trim());
     _ageController = TextEditingController(text: patient.age.trim());
     _photoBytes = patient.photoBytes;
     _profileImageUrl = patient.profileImageUrl;
     _selectedGender = patient.hasValidGender ? patient.gender.trim() : null;
+    final cleanBg = patient.bloodGroup.trim();
+    _selectedBloodGroup = cleanBg.isNotEmpty ? cleanBg : null;
+    final initLangs = patient.languages
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toList();
+    _selectedLanguages = initLangs.isNotEmpty ? initLangs : <String>['English'];
   }
 
   @override
   void dispose() {
     _nameController.dispose();
+    _addressController.dispose();
     _pincodeController.dispose();
     _ageController.dispose();
     super.dispose();
+  }
+
+  String _resolveVerifiedMobile() {
+    String raw = _patientService.currentPatient.phone.trim();
+    if (raw.isEmpty) {
+      raw = SessionService().currentSession?.phone?.trim() ?? '';
+    }
+    if (raw.isEmpty) return 'Verified mobile account';
+    final digits = raw.replaceAll(RegExp(r'\D'), '');
+    if (digits.length == 10) return '+91 $digits';
+    if (digits.length == 12 && digits.startsWith('91')) {
+      return '+91 ${digits.substring(2)}';
+    }
+    return raw.startsWith('+') ? raw : '+$raw';
   }
 
   bool get _hasSelectedImage =>
@@ -81,7 +122,8 @@ class _PatientProfileCompletionScreenState
   Future<void> _pickImage(ImageSource source) async {
     try {
       if (PatientProfileCompletionScreen.debugPickImageOverride != null) {
-        final bytes = await PatientProfileCompletionScreen.debugPickImageOverride!();
+        final bytes =
+            await PatientProfileCompletionScreen.debugPickImageOverride!();
         if (bytes != null && bytes.isNotEmpty && mounted) {
           setState(() {
             _photoBytes = bytes;
@@ -121,33 +163,86 @@ class _PatientProfileCompletionScreenState
     }
   }
 
+  void _toggleLanguage(String lang) {
+    if (_isSubmitting) return;
+    setState(() {
+      final idx = _selectedLanguages.indexWhere(
+        (l) => l.toLowerCase() == lang.toLowerCase(),
+      );
+      if (idx != -1) {
+        if (_selectedLanguages.length > 1 ||
+            !PatientProfileRequirementsConfig.requirePreferredLanguage) {
+          _selectedLanguages.removeAt(idx);
+        }
+      } else {
+        _selectedLanguages.add(lang);
+      }
+      _languageError = null;
+      _submitError = null;
+    });
+  }
+
   Future<void> _handleSaveAndContinue() async {
     FocusManager.instance.primaryFocus?.unfocus();
     final bool formValid = _formKey.currentState?.validate() ?? false;
     final bool hasImage = _hasSelectedImage;
-    final bool hasGender = _selectedGender != null && _selectedGender!.trim().isNotEmpty;
+    final bool hasGender =
+        _selectedGender != null && _selectedGender!.trim().isNotEmpty;
+    final bool hasLangs = _selectedLanguages.isNotEmpty;
+    final bool hasBlood =
+        _selectedBloodGroup != null && _selectedBloodGroup!.trim().isNotEmpty;
+
+    final String? photoErr =
+        (PatientProfileRequirementsConfig.requireProfileImage && !hasImage)
+            ? 'Profile image is required.'
+            : null;
+    final String? genderErr =
+        (PatientProfileRequirementsConfig.requireGender && !hasGender)
+            ? 'Please select your gender.'
+            : null;
+    final String? langErr =
+        (PatientProfileRequirementsConfig.requirePreferredLanguage && !hasLangs)
+            ? 'Please select at least one preferred language.'
+            : null;
+    final String? bloodErr =
+        (PatientProfileRequirementsConfig.requireBloodGroup && !hasBlood)
+            ? 'Please select your blood group.'
+            : null;
 
     setState(() {
-      _photoError = hasImage ? null : 'Profile image is required.';
-      _genderError = hasGender ? null : 'Please select your gender.';
+      _photoError = photoErr;
+      _genderError = genderErr;
+      _languageError = langErr;
+      _bloodGroupError = bloodErr;
       _submitError = null;
     });
 
-    if (!formValid || !hasImage || !hasGender) {
+    if (!formValid ||
+        photoErr != null ||
+        genderErr != null ||
+        langErr != null ||
+        bloodErr != null) {
       return;
     }
 
     setState(() => _isSubmitting = true);
+
+    final effectiveLangs = _selectedLanguages.isNotEmpty
+        ? List<String>.from(_selectedLanguages)
+        : <String>['English'];
 
     final res = await _patientService.completePatientProfile(
       photoBytes: _photoBytes,
       profileImageUrl: _profileImageUrl,
       pincode: _pincodeController.text.trim(),
       age: _ageController.text.trim(),
-      gender: _selectedGender!,
+      gender: _selectedGender ?? '',
       name: _nameController.text.trim().isNotEmpty
           ? _nameController.text.trim()
           : null,
+      address: _addressController.text.trim(),
+      bloodGroup: _selectedBloodGroup ?? '',
+      languages: effectiveLangs,
     );
 
     if (!mounted) return;
@@ -178,11 +273,15 @@ class _PatientProfileCompletionScreenState
     }
   }
 
+  String _labelWithRequirement(String title, bool required) =>
+      required ? '$title *' : '$title (OPTIONAL)';
+
   @override
   Widget build(BuildContext context) {
     final targetLabel = (widget.serviceTitle ?? '').trim().isNotEmpty
         ? widget.serviceTitle!.trim()
         : 'GS HEALTH services';
+    final verifiedMobile = _resolveVerifiedMobile();
 
     return Scaffold(
       key: const Key('patient_profile_completion_screen'),
@@ -193,7 +292,11 @@ class _PatientProfileCompletionScreenState
         elevation: 0,
         leading: IconButton(
           key: const Key('profile_completion_back_button'),
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: AppTheme.textDark, size: 20),
+          icon: const Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: AppTheme.textDark,
+            size: 20,
+          ),
           onPressed: _isSubmitting
               ? null
               : () {
@@ -264,8 +367,13 @@ class _PatientProfileCompletionScreenState
                       ),
                     ],
 
-                    // 1. Profile Image (Required)
-                    _buildSectionLabel('PROFILE IMAGE *'),
+                    // 1. Profile Image
+                    _buildSectionLabel(
+                      _labelWithRequirement(
+                        'PROFILE IMAGE',
+                        PatientProfileRequirementsConfig.requireProfileImage,
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     Container(
                       key: const Key('profile_completion_image_section'),
@@ -294,7 +402,8 @@ class _PatientProfileCompletionScreenState
                               ),
                             ),
                             child: ClipOval(
-                              child: (_photoBytes != null && _photoBytes!.isNotEmpty)
+                              child: (_photoBytes != null &&
+                                      _photoBytes!.isNotEmpty)
                                   ? Image.memory(
                                       _photoBytes!,
                                       width: 72,
@@ -308,7 +417,8 @@ class _PatientProfileCompletionScreenState
                                           width: 72,
                                           height: 72,
                                           fit: BoxFit.cover,
-                                          errorBuilder: (_, __, ___) => const Icon(
+                                          errorBuilder: (_, __, ___) =>
+                                              const Icon(
                                             Icons.person_outline_rounded,
                                             size: 32,
                                             color: AppTheme.gsNavy,
@@ -352,13 +462,21 @@ class _PatientProfileCompletionScreenState
                                   runSpacing: 6,
                                   children: [
                                     ElevatedButton.icon(
-                                      key: const Key('profile_completion_upload_photo_button'),
+                                      key: const Key(
+                                        'profile_completion_upload_photo_button',
+                                      ),
                                       onPressed: _isSubmitting
                                           ? null
-                                          : () => _pickImage(ImageSource.gallery),
-                                      icon: const Icon(Icons.photo_library_outlined, size: 16),
+                                          : () =>
+                                              _pickImage(ImageSource.gallery),
+                                      icon: const Icon(
+                                        Icons.photo_library_outlined,
+                                        size: 16,
+                                      ),
                                       label: Text(
-                                        _hasSelectedImage ? 'Change Photo' : 'Gallery',
+                                        _hasSelectedImage
+                                            ? 'Change Photo'
+                                            : 'Gallery',
                                         style: const TextStyle(
                                           fontSize: 12.5,
                                           fontWeight: FontWeight.w700,
@@ -373,17 +491,24 @@ class _PatientProfileCompletionScreenState
                                           vertical: 8,
                                         ),
                                         shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(10),
+                                          borderRadius:
+                                              BorderRadius.circular(10),
                                         ),
                                       ),
                                     ),
                                     if (!kIsWeb)
                                       OutlinedButton.icon(
-                                        key: const Key('profile_completion_camera_photo_button'),
+                                        key: const Key(
+                                          'profile_completion_camera_photo_button',
+                                        ),
                                         onPressed: _isSubmitting
                                             ? null
-                                            : () => _pickImage(ImageSource.camera),
-                                        icon: const Icon(Icons.camera_alt_outlined, size: 16),
+                                            : () =>
+                                                _pickImage(ImageSource.camera),
+                                        icon: const Icon(
+                                          Icons.camera_alt_outlined,
+                                          size: 16,
+                                        ),
                                         label: const Text(
                                           'Camera',
                                           style: TextStyle(
@@ -393,13 +518,16 @@ class _PatientProfileCompletionScreenState
                                         ),
                                         style: OutlinedButton.styleFrom(
                                           foregroundColor: AppTheme.gsNavy,
-                                          side: const BorderSide(color: AppTheme.gsNavy),
+                                          side: const BorderSide(
+                                            color: AppTheme.gsNavy,
+                                          ),
                                           padding: const EdgeInsets.symmetric(
                                             horizontal: 12,
                                             vertical: 8,
                                           ),
                                           shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(10),
+                                            borderRadius:
+                                                BorderRadius.circular(10),
                                           ),
                                         ),
                                       ),
@@ -425,20 +553,105 @@ class _PatientProfileCompletionScreenState
                     ],
                     const SizedBox(height: 18),
 
-                    // Optional Name field so mobile OTP patients can add/keep their name smoothly
-                    _buildSectionLabel('FULL NAME (OPTIONAL)'),
+                    // 2. Full Name
+                    _buildSectionLabel(
+                      _labelWithRequirement(
+                        'FULL NAME',
+                        PatientProfileRequirementsConfig.requireFullName,
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     TextFormField(
                       key: const Key('profile_completion_name_field'),
                       controller: _nameController,
                       textCapitalization: TextCapitalization.words,
                       textInputAction: TextInputAction.next,
-                      decoration: _inputDecoration('e.g. Riya Sharma'),
+                      validator: (val) {
+                        final v = (val ?? '').trim();
+                        if (PatientProfileRequirementsConfig.requireFullName &&
+                            v.isEmpty) {
+                          return 'Full name is required';
+                        }
+                        return null;
+                      },
+                      decoration: _inputDecoration('Enter your full name'),
                     ),
                     const SizedBox(height: 18),
 
-                    // 2. Pincode (Required)
-                    _buildSectionLabel('PINCODE *'),
+                    // 3. Verified Mobile Number (Read-only)
+                    _buildSectionLabel('MOBILE NUMBER (VERIFIED)'),
+                    const SizedBox(height: 8),
+                    Container(
+                      key: const Key('profile_completion_mobile_readonly'),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.phone_android_rounded,
+                            size: 18,
+                            color: Color(0xFF475569),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              verifiedMobile,
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF334155),
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppTheme.gsNavy.withValues(alpha: 0.10),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.verified_rounded,
+                                  size: 13,
+                                  color: AppTheme.gsNavy,
+                                ),
+                                SizedBox(width: 4),
+                                Text(
+                                  'Verified',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppTheme.gsNavy,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+
+                    // 4. Pincode (Required by default)
+                    _buildSectionLabel(
+                      _labelWithRequirement(
+                        'PINCODE',
+                        PatientProfileRequirementsConfig.requirePincode,
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     TextFormField(
                       key: const Key('profile_completion_pincode_field'),
@@ -451,50 +664,71 @@ class _PatientProfileCompletionScreenState
                       ],
                       validator: (val) {
                         final v = (val ?? '').trim();
-                        if (v.isEmpty) return 'Pincode is required';
-                        if (!RegExp(r'^\d{6}$').hasMatch(v)) {
+                        if (v.isEmpty) {
+                          return PatientProfileRequirementsConfig.requirePincode
+                              ? 'Pincode is required'
+                              : null;
+                        }
+                        if (!PatientProfileRequirementsConfig.isValidPincode(
+                          v,
+                        )) {
                           return 'Please enter a valid 6-digit pincode';
                         }
                         return null;
                       },
-                      decoration: _inputDecoration('e.g. 500081'),
+                      decoration: _inputDecoration('6-digit Indian PIN code'),
                     ),
                     const SizedBox(height: 18),
 
-                    // 3. Age (Required)
-                    _buildSectionLabel('AGE *'),
+                    // 5. Age (Required by default)
+                    _buildSectionLabel(
+                      _labelWithRequirement(
+                        'AGE',
+                        PatientProfileRequirementsConfig.requireAge,
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     TextFormField(
                       key: const Key('profile_completion_age_field'),
                       controller: _ageController,
                       keyboardType: TextInputType.number,
-                      textInputAction: TextInputAction.done,
+                      textInputAction: TextInputAction.next,
                       inputFormatters: [
                         FilteringTextInputFormatter.digitsOnly,
                         LengthLimitingTextInputFormatter(3),
                       ],
                       validator: (val) {
                         final v = (val ?? '').trim();
-                        if (v.isEmpty) return 'Age is required';
-                        final parsed = int.tryParse(v);
-                        if (parsed == null || parsed < 1 || parsed > 120) {
+                        if (v.isEmpty) {
+                          return PatientProfileRequirementsConfig.requireAge
+                              ? 'Age is required'
+                              : null;
+                        }
+                        if (!PatientProfileRequirementsConfig.isValidAge(v)) {
                           return 'Please enter a valid age (1-120)';
                         }
                         return null;
                       },
-                      decoration: _inputDecoration('e.g. 28'),
+                      decoration: _inputDecoration('Age in years (1-120)'),
                     ),
                     const SizedBox(height: 18),
 
-                    // 4. Gender (Required)
-                    _buildSectionLabel('GENDER *'),
+                    // 6. Gender (Required by default)
+                    _buildSectionLabel(
+                      _labelWithRequirement(
+                        'GENDER',
+                        PatientProfileRequirementsConfig.requireGender,
+                      ),
+                    ),
                     const SizedBox(height: 10),
                     Wrap(
                       key: const Key('profile_completion_gender_section'),
                       spacing: 10,
                       runSpacing: 10,
-                      children: _genderOptions.map((g) {
-                        final selected = _selectedGender?.toLowerCase() == g.toLowerCase();
+                      children: PatientProfileRequirementsConfig.genderOptions
+                          .map((g) {
+                        final selected =
+                            _selectedGender?.toLowerCase() == g.toLowerCase();
                         return InkWell(
                           key: Key('profile_completion_gender_$g'),
                           onTap: _isSubmitting
@@ -529,8 +763,11 @@ class _PatientProfileCompletionScreenState
                               g,
                               style: TextStyle(
                                 fontSize: 14,
-                                fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-                                color: selected ? Colors.white : AppTheme.textDark,
+                                fontWeight: selected
+                                    ? FontWeight.w700
+                                    : FontWeight.w600,
+                                color:
+                                    selected ? Colors.white : AppTheme.textDark,
                               ),
                             ),
                           ),
@@ -549,13 +786,188 @@ class _PatientProfileCompletionScreenState
                         ),
                       ),
                     ],
+                    const SizedBox(height: 18),
+
+                    // 7. Address
+                    _buildSectionLabel(
+                      _labelWithRequirement(
+                        'ADDRESS',
+                        PatientProfileRequirementsConfig.requireAddress,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      key: const Key('profile_completion_address_field'),
+                      controller: _addressController,
+                      textCapitalization: TextCapitalization.sentences,
+                      maxLines: 2,
+                      minLines: 1,
+                      textInputAction: TextInputAction.done,
+                      validator: (val) {
+                        final v = (val ?? '').trim();
+                        if (PatientProfileRequirementsConfig.requireAddress &&
+                            v.isEmpty) {
+                          return 'Address is required';
+                        }
+                        return null;
+                      },
+                      decoration: _inputDecoration(
+                        'House / street / locality',
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+
+                    // 8. Preferred Languages (Multi-select)
+                    _buildSectionLabel(
+                      _labelWithRequirement(
+                        'PREFERRED LANGUAGES',
+                        PatientProfileRequirementsConfig
+                            .requirePreferredLanguage,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      key: const Key('profile_completion_languages_section'),
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: PatientProfileRequirementsConfig
+                          .supportedLanguages
+                          .map((lang) {
+                        final selected = _selectedLanguages.any(
+                          (l) => l.toLowerCase() == lang.toLowerCase(),
+                        );
+                        return InkWell(
+                          key: Key('profile_completion_lang_$lang'),
+                          onTap: () => _toggleLanguage(lang),
+                          borderRadius: BorderRadius.circular(20),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 160),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: selected ? AppTheme.gsNavy : Colors.white,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: selected
+                                    ? AppTheme.gsNavy
+                                    : const Color(0xFFCBD5E1),
+                                width: 1.2,
+                              ),
+                            ),
+                            child: Text(
+                              lang,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: selected
+                                    ? FontWeight.w700
+                                    : FontWeight.w600,
+                                color:
+                                    selected ? Colors.white : AppTheme.textDark,
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    if (_languageError != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        _languageError!,
+                        key: const Key('profile_completion_language_error'),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.gsRed,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 18),
+
+                    // 9. Blood Group
+                    _buildSectionLabel(
+                      _labelWithRequirement(
+                        'BLOOD GROUP',
+                        PatientProfileRequirementsConfig.requireBloodGroup,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      key: const Key('profile_completion_blood_group_section'),
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: PatientProfileRequirementsConfig
+                          .bloodGroupOptions
+                          .map((bg) {
+                        final selected =
+                            _selectedBloodGroup?.toUpperCase() ==
+                                bg.toUpperCase();
+                        return InkWell(
+                          key: Key('profile_completion_blood_$bg'),
+                          onTap: _isSubmitting
+                              ? null
+                              : () {
+                                  setState(() {
+                                    _selectedBloodGroup = selected ? null : bg;
+                                    _bloodGroupError = null;
+                                    _submitError = null;
+                                  });
+                                },
+                          borderRadius: BorderRadius.circular(20),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 160),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 15,
+                              vertical: 9,
+                            ),
+                            decoration: BoxDecoration(
+                              color: selected ? AppTheme.gsNavy : Colors.white,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: selected
+                                    ? AppTheme.gsNavy
+                                    : (_bloodGroupError != null
+                                        ? AppTheme.gsRed
+                                        : const Color(0xFFCBD5E1)),
+                                width: 1.3,
+                              ),
+                            ),
+                            child: Text(
+                              bg,
+                              style: TextStyle(
+                                fontSize: 13.5,
+                                fontWeight: selected
+                                    ? FontWeight.w700
+                                    : FontWeight.w600,
+                                color:
+                                    selected ? Colors.white : AppTheme.textDark,
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    if (_bloodGroupError != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        _bloodGroupError!,
+                        key: const Key('profile_completion_blood_error'),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.gsRed,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 28),
 
                     SizedBox(
                       height: 54,
                       child: ElevatedButton(
                         key: const Key('profile_completion_submit_button'),
-                        onPressed: _isSubmitting ? null : _handleSaveAndContinue,
+                        onPressed:
+                            _isSubmitting ? null : _handleSaveAndContinue,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppTheme.gsNavy,
                           foregroundColor: Colors.white,

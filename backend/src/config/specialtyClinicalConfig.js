@@ -198,7 +198,7 @@ const SPECIALTY_CONFIGS = [
     {
         code: 'GEN_MED',
         name: 'General Medicine',
-        aliases: ['general medicine', 'internal medicine', 'family medicine', 'general physician', 'primary care'],
+        aliases: ['general medicine', 'general physician / mbbs', 'general physician', 'mbbs', 'internal medicine', 'family medicine', 'primary care'],
         triageCategories: [
             'Fever & Viral Illness',
             'Body Ache & Fatigue',

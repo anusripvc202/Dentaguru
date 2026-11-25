@@ -154,16 +154,34 @@ class MedicalSpecialtyModel {
     );
   }
 
+  /// Core initial specializations required across DentaGuru multi-specialty search.
+  /// Additional specializations added via Admin Masterdata are dynamically merged after these.
+  static const List<String> coreInitialSpecialties = [
+    'Neurology',
+    'Cardiology',
+    'General Physician / MBBS',
+    'Dentistry',
+  ];
+
   static const List<String> _dentalKeywords = [
     'dentistry',
     'general dentistry',
+    'general dentist',
+    'dentist',
     'orthodontics',
+    'orthodontist',
     'endodontics',
+    'endodontist',
     'periodontics',
+    'periodontist',
     'prosthodontics',
+    'prosthodontist',
     'pediatric dentistry',
+    'pedodontist',
+    'pedodontics',
     'cosmetic dentistry',
     'oral surgery',
+    'oral surgeon',
     'oral & maxillofacial surgery',
     'maxillofacial',
     'dental',
@@ -172,37 +190,209 @@ class MedicalSpecialtyModel {
     'implantology',
   ];
 
+  static const Map<String, List<String>> _canonicalSpecialtyGroups = {
+    'NEURO': [
+      'neurology',
+      'neurologist',
+      'neurosciences',
+      'stroke medicine',
+      'epileptology',
+    ],
+    'CARDIO': [
+      'cardiology',
+      'cardiologist',
+      'interventional cardiology',
+      'electrophysiology',
+      'cardiovascular',
+    ],
+    'GEN_MED': [
+      'general physician / mbbs',
+      'general physician',
+      'general medicine',
+      'internal medicine',
+      'family medicine',
+      'mbbs physician',
+      'primary care physician',
+      'mbbs',
+    ],
+    'ORTHO': [
+      'orthopedics',
+      'orthopaedics',
+      'orthopedist',
+      'orthopaedic surgeon',
+      'orthopedic surgeon',
+      'joint replacement',
+      'spine surgery',
+      'sports medicine',
+    ],
+    'DERM': [
+      'dermatology',
+      'dermatologist',
+      'clinical dermatology',
+      'cosmetology',
+      'trichology',
+      'venereology',
+    ],
+    'PEDIA': [
+      'pediatrics',
+      'paediatrics',
+      'pediatrician',
+      'neonatology',
+      'pediatric critical care',
+    ],
+    'GYNEC': [
+      'gynecology',
+      'gynaecology',
+      'gynecologist',
+      'obstetrics',
+      'obstetrics & gynecology',
+      'obgyn',
+      'fetal medicine',
+      'reproductive medicine',
+    ],
+    'ENT': [
+      'ent',
+      'otorhinolaryngology',
+      'otolaryngology',
+      'ear, nose & throat',
+      'ear nose throat',
+      'otology',
+      'rhinology',
+      'laryngology',
+    ],
+    'OPHTHAL': [
+      'ophthalmology',
+      'ophthalmologist',
+      'retina',
+      'cornea',
+      'glaucoma',
+    ],
+    'ONCO': [
+      'oncology',
+      'oncologist',
+      'medical oncology',
+      'surgical oncology',
+      'radiation oncology',
+    ],
+    'URO': [
+      'urology',
+      'urologist',
+      'endourology',
+      'andrology',
+      'uro-oncology',
+    ],
+    'PSYCH': [
+      'psychiatry',
+      'psychiatrist',
+      'adult psychiatry',
+      'child & adolescent psychiatry',
+    ],
+    'GASTRO': [
+      'gastroenterology',
+      'gastroenterologist',
+      'hepatology',
+      'therapeutic endoscopy',
+    ],
+    'PULMO': [
+      'pulmonology',
+      'pulmonologist',
+      'pulmonary medicine',
+      'respiratory medicine',
+      'interventional pulmonology',
+      'sleep medicine',
+    ],
+    'ENDO': [
+      'endocrinology',
+      'endocrinologist',
+      'diabetology',
+      'thyroid & metabolic medicine',
+    ],
+  };
+
   static bool isDentalSpecialty(String specialty) {
     final s = specialty.trim().toLowerCase();
-    if (s.isEmpty) return true;
-    return _dentalKeywords.any((k) => s.contains(k));
+    if (s.isEmpty) return false;
+    return _dentalKeywords.any((k) => s == k || s.contains(k));
   }
 
+  static String? _resolveCanonicalGroup(String text) {
+    final s = text.trim().toLowerCase();
+    if (s.isEmpty) return null;
+    // Guard dental sub-specialties BEFORE checking Pediatrics / Orthopedics so Pediatric Dentistry & Orthodontics never leak
+    if (isDentalSpecialty(s)) return 'DENTAL';
+    for (final entry in _canonicalSpecialtyGroups.entries) {
+      for (final alias in entry.value) {
+        if (s == alias || s.contains(alias)) {
+          return entry.key;
+        }
+      }
+    }
+    return null;
+  }
+
+  /// Strictly matches [doctorSpecialty] against [selectedFilter] without leaking unrelated specialties.
   static bool matchesSpecialtyFilter(
     String doctorSpecialty,
     String selectedFilter, {
     List<MedicalSpecialtyModel>? specialties,
   }) {
     final filterClean = selectedFilter.trim();
-    if (filterClean.isEmpty || filterClean.toLowerCase() == 'all') return true;
-
-    final fLower = filterClean.toLowerCase();
-    final dLower = (doctorSpecialty.trim().isEmpty ? 'General Dentistry' : doctorSpecialty.trim()).toLowerCase();
-
-    if (dLower == fLower || dLower.contains(fLower) || fLower.contains(dLower)) {
+    if (filterClean.isEmpty ||
+        filterClean.toLowerCase() == 'all' ||
+        filterClean.toLowerCase() == 'all specialties') {
       return true;
     }
 
+    final dRaw = doctorSpecialty.trim();
+    if (dRaw.isEmpty) return false;
+
+    final fLower = filterClean.toLowerCase();
+    final dLower = dRaw.toLowerCase();
+
+    if (dLower == fLower) return true;
+
+    // Dental family vs specific dental sub-specialty handling
     if (fLower == 'dentistry' || fLower == 'dental') {
       return isDentalSpecialty(dLower);
     }
+    if (isDentalSpecialty(fLower)) {
+      if (!isDentalSpecialty(dLower)) return false;
+      if (fLower.contains('general dentist')) {
+        return dLower.contains('general dentist') || dLower == 'dentistry' || dLower == 'dental' || dLower == 'dentist';
+      }
+      if (fLower.contains('orthodont')) return dLower.contains('orthodont');
+      if (fLower.contains('endodont')) return dLower.contains('endodont');
+      if (fLower.contains('periodont')) return dLower.contains('periodont');
+      if (fLower.contains('prosthodont')) return dLower.contains('prosthodont');
+      if (fLower.contains('pedodont') || fLower.contains('pediatric dentist')) {
+        return dLower.contains('pedodont') || dLower.contains('pediatric dentist');
+      }
+      if (fLower.contains('oral')) return dLower.contains('oral') || dLower.contains('maxillofacial');
+      if (fLower.contains('cosmetic')) return dLower.contains('cosmetic');
+      if (fLower.contains('implant')) return dLower.contains('implant');
+      return dLower == fLower;
+    }
 
+    // Never let a dental doctor match a non-dental filter
+    if (isDentalSpecialty(dLower)) return false;
+
+    // Canonical medical department matching (e.g. 'General Physician / MBBS' <-> 'General Medicine',
+    // 'Neurology' <-> 'Neurologist', 'Cardiology' <-> 'Interventional Cardiology')
+    final filterGroup = _resolveCanonicalGroup(fLower);
+    final docGroup = _resolveCanonicalGroup(dLower);
+    if (filterGroup != null || docGroup != null) {
+      return filterGroup != null && filterGroup == docGroup;
+    }
+
+    // Admin Masterdata dynamic custom specialty + sub-specialty matching
     if (specialties != null) {
       for (final spec in specialties) {
-        if (spec.name.toLowerCase() == fLower) {
+        final specLower = spec.name.trim().toLowerCase();
+        if (specLower == fLower) {
+          if (dLower == specLower) return true;
           for (final sub in spec.subSpecialties) {
-            final subLower = sub.toLowerCase();
-            if (dLower == subLower || dLower.contains(subLower)) {
+            final subLower = sub.trim().toLowerCase();
+            if (subLower.isNotEmpty && (dLower == subLower || dLower.contains(subLower))) {
               return true;
             }
           }
@@ -230,7 +420,10 @@ class MedicalSpecialtyModel {
     if (lower.contains('gastro')) return 'MBBS, MD, DM (Gastroenterology)';
     if (lower.contains('pulmo') || lower.contains('respir')) return 'MBBS, MD (Pulmonology)';
     if (lower.contains('endocrin') || lower.contains('diabet')) return 'MBBS, MD, DM (Endocrinology)';
-    if (lower.contains('general medicine') || lower.contains('internal medicine')) {
+    if (lower.contains('general medicine') ||
+        lower.contains('internal medicine') ||
+        lower.contains('general physician') ||
+        lower == 'mbbs') {
       return 'MBBS, MD (General Medicine)';
     }
     return 'MBBS, MD';
@@ -287,7 +480,7 @@ class MedicalSpecialtyModel {
         'Preventive Health Checkup',
         'Chronic Illness Follow-up',
       ],
-      subSpecialties: ['Internal Medicine', 'Family Medicine'],
+      subSpecialties: ['General Physician / MBBS', 'General Physician', 'Internal Medicine', 'Family Medicine'],
       isActive: true,
       displayOrder: 1,
     ),

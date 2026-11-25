@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/models/referral_model.dart';
 import '../../../../core/services/patient_problem_service.dart';
+import '../../../../core/services/session_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import 'refer_patient_flow_dialog.dart';
 
@@ -24,13 +25,22 @@ class ReferredPatientsSheet extends StatefulWidget {
 class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
   final PatientProblemService _patientService = PatientProblemService();
   final TextEditingController _searchController = TextEditingController();
+  final Set<String> _updatingReferralIds = {};
   String _searchQuery = '';
-  String _statusFilter = 'All'; // 'All', 'Pending', 'Accepted', 'Rejected'
+  String _statusFilter = 'All'; // 'All', 'Pending', 'Accepted', 'Contacted', 'Completed', 'Rejected'
+
+  bool get _isDoctorSession {
+    final role = (SessionService().currentSession?.role ?? '').trim().toLowerCase();
+    return _patientService.currentDoctor != null || role == 'dentist' || role == 'doctor';
+  }
 
   @override
   void initState() {
     super.initState();
     _patientService.syncReferralsFromApi();
+    if (_isDoctorSession) {
+      _patientService.syncDoctorReferralsFromApi();
+    }
   }
 
   @override
@@ -181,6 +191,78 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
     }
   }
 
+  Future<void> _handleAcceptReferral(PatientReferral ref) async {
+    if (ref.id.isEmpty || _updatingReferralIds.contains(ref.id)) return;
+    setState(() => _updatingReferralIds.add(ref.id));
+    final ok = await _patientService.acceptPatientReferralByDoctor(ref.id);
+    if (!mounted) return;
+    setState(() => _updatingReferralIds.remove(ref.id));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? 'Referral accepted for ${ref.referredPatientName}.'
+              : 'Could not accept referral. Please try again.',
+        ),
+        backgroundColor: ok ? const Color(0xFF012A58) : const Color(0xFFFE3434),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _confirmDeclineReferral(PatientReferral ref) async {
+    if (ref.id.isEmpty || _updatingReferralIds.contains(ref.id)) return;
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (_) => _DeclineReferralDialog(
+        patientName: ref.referredPatientName,
+        doctorName: ref.doctorName,
+      ),
+    );
+
+    if (reason == null || !mounted) return;
+    setState(() => _updatingReferralIds.add(ref.id));
+    final ok = await _patientService.rejectPatientReferralByDoctor(
+      ref.id,
+      rejectionReason: reason,
+    );
+    if (!mounted) return;
+    setState(() => _updatingReferralIds.remove(ref.id));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? 'Referral declined for ${ref.referredPatientName}.'
+              : 'Could not decline referral. Please try again.',
+        ),
+        backgroundColor: ok ? const Color(0xFF012A58) : const Color(0xFFFE3434),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _handleUpdateStatus(PatientReferral ref, String status) async {
+    if (ref.id.isEmpty || _updatingReferralIds.contains(ref.id)) return;
+    setState(() => _updatingReferralIds.add(ref.id));
+    final ok = await _patientService.updatePatientReferralStatus(ref.id, status: status);
+    if (!mounted) return;
+    setState(() => _updatingReferralIds.remove(ref.id));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? 'Referral marked $status for ${ref.referredPatientName}.'
+              : 'Could not update referral status. Please try again.',
+        ),
+        backgroundColor: ok ? const Color(0xFF012A58) : const Color(0xFFFE3434),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -192,9 +274,12 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
       builder: (context, _) {
         final allCreated = _patientService.myCreatedPatientReferrals;
         final allReceived = _patientService.receivedForMePatientReferrals;
+        final allDoctorReceived = _isDoctorSession
+            ? _patientService.doctorReceivedPatientReferrals
+            : const <PatientReferral>[];
         final seenKeys = <String>{};
         final combinedList = <PatientReferral>[];
-        for (final r in [...allReceived, ...allCreated]) {
+        for (final r in [...allDoctorReceived, ...allReceived, ...allCreated]) {
           final key = r.id.isNotEmpty ? r.id : '${r.referredPatientMobile}_${r.doctorId}';
           if (seenKeys.add(key)) {
             combinedList.add(r);
@@ -205,6 +290,8 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
         final filteredList = combinedList.where((ref) {
           if (_statusFilter == 'Pending' && ref.status != 'Pending') return false;
           if (_statusFilter == 'Accepted' && ref.status != 'Accepted') return false;
+          if (_statusFilter == 'Contacted' && ref.status != 'Contacted') return false;
+          if (_statusFilter == 'Completed' && ref.status != 'Completed') return false;
           if (_statusFilter == 'Rejected' && ref.status != 'Rejected') return false;
 
           if (_searchQuery.isEmpty) return true;
@@ -417,6 +504,20 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
                       ),
                       const SizedBox(width: 6),
                       _buildFilterChip(
+                        'Contacted',
+                        combinedList.where((r) => r.status == 'Contacted').length,
+                        isDark,
+                        label: 'Contacted',
+                      ),
+                      const SizedBox(width: 6),
+                      _buildFilterChip(
+                        'Completed',
+                        combinedList.where((r) => r.status == 'Completed').length,
+                        isDark,
+                        label: 'Completed',
+                      ),
+                      const SizedBox(width: 6),
+                      _buildFilterChip(
                         'Rejected',
                         combinedList.where((r) => r.status == 'Rejected').length,
                         isDark,
@@ -567,16 +668,26 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
   Widget _buildReferralCard(PatientReferral ref, bool isDark) {
     final isAccepted = ref.status == 'Accepted';
     final isRejected = ref.status == 'Rejected';
+    final isContacted = ref.status == 'Contacted';
+    final isCompleted = ref.status == 'Completed';
 
-    final statusColor = isAccepted
+    final statusColor = isAccepted || isCompleted
         ? const Color(0xFF012A58)
-        : (isRejected ? const Color(0xFFFE3434) : const Color(0xFFFE3434));
-    final statusBg = isAccepted
+        : (isContacted
+            ? const Color(0xFF0369A1)
+            : const Color(0xFFFE3434));
+    final statusBg = isAccepted || isCompleted
         ? const Color(0x14012A58)
-        : (isRejected ? const Color(0x14FE3434) : const Color(0x14FE3434));
+        : (isContacted
+            ? const Color(0x140369A1)
+            : const Color(0x14FE3434));
     final statusText = isAccepted
         ? '🟢 Accepted by Doctor'
-        : (isRejected ? '🔴 Referral Declined' : '🟡 Doctor Reviewing');
+        : (isContacted
+            ? '🔵 Contacted'
+            : (isCompleted
+                ? '✅ Completed'
+                : (isRejected ? '🔴 Referral Declined' : '🟡 Doctor Reviewing')));
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -585,7 +696,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
         color: isDark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isAccepted
+          color: (isAccepted || isCompleted)
               ? const Color(0x40012A58)
               : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
         ),
@@ -681,30 +792,37 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
                   ],
                 ),
               ),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: statusBg,
-                      borderRadius: BorderRadius.circular(8),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: statusBg,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          statusText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: statusColor),
+                        ),
+                      ),
                     ),
-                    child: Text(
-                      statusText,
-                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: statusColor),
+                    const SizedBox(width: 4),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Color(0xFFFE3434)),
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+                      tooltip: 'Delete Referral',
+                      onPressed: () => _confirmDeleteReferral(context, ref),
                     ),
-                  ),
-                  const SizedBox(width: 4),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Color(0xFFFE3434)),
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
-                    tooltip: 'Delete Referral',
-                    onPressed: () => _confirmDeleteReferral(context, ref),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
           ),
@@ -780,6 +898,104 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
                 'Reason: ${ref.rejectionReason}',
                 style: const TextStyle(fontSize: 11, color: Color(0xFFFE3434), fontWeight: FontWeight.w500),
               ),
+            ),
+          ],
+
+          if (!isAccepted && !isRejected && !isContacted && !isCompleted) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    key: Key('referred_sheet_decline_btn_${ref.id}'),
+                    icon: const Icon(Icons.cancel_outlined, size: 15),
+                    label: const Text(
+                      'Decline',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFFE3434),
+                      side: const BorderSide(color: Color(0x66FE3434)),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: _updatingReferralIds.contains(ref.id)
+                        ? null
+                        : () => _confirmDeclineReferral(ref),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    key: Key('referred_sheet_accept_btn_${ref.id}'),
+                    icon: _updatingReferralIds.contains(ref.id)
+                        ? const SizedBox(
+                            width: 13,
+                            height: 13,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Icon(Icons.check_circle_outline_rounded, size: 15, color: Colors.white),
+                    label: const Text(
+                      'Accept',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF012A58),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      elevation: 0,
+                    ),
+                    onPressed: _updatingReferralIds.contains(ref.id)
+                        ? null
+                        : () => _handleAcceptReferral(ref),
+                  ),
+                ),
+              ],
+            ),
+          ],
+
+          if (isAccepted || isContacted) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                if (isAccepted)
+                  Expanded(
+                    child: OutlinedButton(
+                      key: Key('referred_sheet_contacted_btn_${ref.id}'),
+                      onPressed: _updatingReferralIds.contains(ref.id)
+                          ? null
+                          : () => _handleUpdateStatus(ref, 'Contacted'),
+                      child: const Text(
+                        'Mark Contacted',
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                if (isAccepted) const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton(
+                    key: Key('referred_sheet_completed_btn_${ref.id}'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF012A58),
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: _updatingReferralIds.contains(ref.id)
+                        ? null
+                        : () => _handleUpdateStatus(ref, 'Completed'),
+                    child: const Text(
+                      'Mark Completed',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
 
@@ -864,6 +1080,90 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _DeclineReferralDialog extends StatefulWidget {
+  final String patientName;
+  final String doctorName;
+
+  const _DeclineReferralDialog({
+    required this.patientName,
+    required this.doctorName,
+  });
+
+  @override
+  State<_DeclineReferralDialog> createState() => _DeclineReferralDialogState();
+}
+
+class _DeclineReferralDialogState extends State<_DeclineReferralDialog> {
+  final TextEditingController _reasonController = TextEditingController();
+
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      scrollable: true,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: const Row(
+        children: [
+          Icon(Icons.cancel_outlined, color: Color(0xFFFE3434), size: 22),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Decline Referral',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Decline the referral for ${widget.patientName} (${widget.doctorName})?',
+            style: const TextStyle(fontSize: 13, color: AppTheme.textMedium),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _reasonController,
+            maxLines: 2,
+            decoration: InputDecoration(
+              hintText: 'Reason (optional)',
+              hintStyle: const TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel', style: TextStyle(color: AppTheme.textMuted)),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFFFE3434),
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+          onPressed: () {
+            final text = _reasonController.text.trim();
+            Navigator.pop(context, text.isNotEmpty ? text : 'Declined');
+          },
+          child: const Text('Decline', style: TextStyle(fontWeight: FontWeight.bold)),
+        ),
+      ],
     );
   }
 }

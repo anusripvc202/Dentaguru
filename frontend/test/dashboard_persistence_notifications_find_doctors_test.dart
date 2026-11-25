@@ -407,22 +407,24 @@ void main() {
 
     // Verify ON doctors are shown with specialization, qualifications, clinic, and Available badge
     expect(find.text('Dr. Active Specialist 1'), findsOneWidget);
-    expect(find.text('General Dentistry • BDS, MDS'), findsWidgets);
+    expect(find.textContaining('General Dentistry • BDS, MDS'), findsWidgets);
     expect(find.text('GS Care Clinic 1 • Hyderabad'), findsOneWidget);
     expect(find.byKey(const Key('doctor_availability_badge_doc-on-1')), findsOneWidget);
 
-    // Verify OFF doctor is excluded from patient Find Doctors
-    expect(find.text('Dr. Hidden Offline Doctor'), findsNothing);
-
-    // Verify pagination Load More button is shown for 22 available doctors (20 shown initially, 2 remaining)
+    // Verify pagination Load More button is shown for 23 doctors (20 shown initially, 3 remaining)
     final loadMoreFinder = find.byKey(const Key('find_doctors_load_more_button'));
     expect(loadMoreFinder, findsOneWidget);
     expect(find.text('Dr. Active Specialist 22'), findsNothing);
+    expect(find.text('Dr. Hidden Offline Doctor'), findsNothing);
 
     await tester.ensureVisible(loadMoreFinder);
     await tester.pump(const Duration(milliseconds: 200));
     await tester.tap(loadMoreFinder);
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('Dr. Active Specialist 22'), findsOneWidget);
+
+    // Verify OFF registered doctor is also visible in patient Find Doctors with Unavailable badge
+    expect(find.text('Dr. Hidden Offline Doctor'), findsOneWidget);
+    expect(find.byKey(const Key('doctor_availability_badge_doc-off-99')), findsOneWidget);
   });
 }

@@ -182,6 +182,8 @@ void main() {
   });
 
   tearDown(() async {
+    ApiService.debugRequestOtpOverride = null;
+    ApiService.debugVerifyOtpOverride = null;
     ApiService.debugLoginOverride = null;
     await SessionService().clearSession();
     await PatientProblemService().clearAllData();
@@ -195,6 +197,16 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
 
+      ApiService.debugRequestOtpOverride = ({required String phone, String email = ''}) async => {
+        'success': true,
+        'message': 'One-time code sent',
+        'otp': '123456',
+        'deliveryMode': 'on_screen',
+      };
+      ApiService.debugVerifyOtpOverride = ({required String phone, String email = '', required String code}) async => {
+        'success': code == '123456',
+        'message': code == '123456' ? 'OTP Verified' : 'Invalid code',
+      };
       ApiService.debugLoginOverride = ({
         String? email,
         String? otp,

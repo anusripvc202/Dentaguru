@@ -128,11 +128,11 @@ void main() {
         expect(find.byKey(Key('view_profile_button_${testDoctor.id}')), findsOneWidget);
         expect(find.text('Dr. Sheshu Kumar'), findsOneWidget);
 
-        // Verify qualifications, fees, experience, clinic details are NOT displayed in the listing
-        expect(find.text('BDS, MDS'), findsNothing);
-        expect(find.text('5+ yrs exp'), findsNothing);
-        expect(find.textContaining('Kakaji Dental Clinic'), findsNothing);
-        expect(find.text('₹500'), findsNothing);
+        // Verify enriched doctor card details render in FindDoctorsScreen without errors
+        expect(find.textContaining('Periodontics'), findsWidgets);
+        expect(find.textContaining('BDS, MDS'), findsWidgets);
+        expect(find.textContaining('Kakaji Dental Clinic'), findsWidgets);
+        expect(find.textContaining('₹500'), findsWidgets);
       },
     );
 
@@ -144,12 +144,32 @@ void main() {
         addTearDown(() => tester.view.resetPhysicalSize());
 
         final service = PatientProblemService();
+        service.currentPatient = PatientProfile(
+          id: 'pat-fav-1',
+          name: 'Test Patient',
+          phone: '9000000001',
+          age: '29',
+          gender: 'Female',
+          pincode: '500033',
+          photoBytes: Uint8List.fromList(const [
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+            0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+            0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+            0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41,
+            0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+            0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+            0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+            0x42, 0x60, 0x82,
+          ]),
+        );
         service.addTestDoctor(testDoctor);
 
-        // Pre-book 10:00 AM today to verify booked vs available slot distinction
+        // Pre-book 10:00 AM tomorrow to verify booked vs available slot distinction on tomorrow's date chip
         final now = DateTime.now();
-        final todayStr =
-            '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+        final tomorrowSeed = now.add(const Duration(days: 1));
+        final tomorrowSeedStr =
+            '${tomorrowSeed.year.toString().padLeft(4, '0')}-${tomorrowSeed.month.toString().padLeft(2, '0')}-${tomorrowSeed.day.toString().padLeft(2, '0')}';
         service.addTestRequest(
           PatientConsultationRequest(
             id: 'existing-appt-1',
@@ -162,7 +182,7 @@ void main() {
             status: 'Confirmed',
             assignedDoctorId: testDoctor.id,
             assignedDoctorName: testDoctor.name,
-            confirmedDate: todayStr,
+            confirmedDate: tomorrowSeedStr,
             confirmedTimeSlot: '10:00 AM',
           ),
         );
@@ -223,6 +243,16 @@ void main() {
         expect(find.text('8977906566'), findsOneWidget);
         expect(find.text('sheshu@dentaguru.com'), findsOneWidget);
 
+        // Select tomorrow's date chip so 11:30 AM slot stays bookable regardless of wall-clock test time
+        final tomorrow = DateTime.now().add(const Duration(days: 1));
+        final tomorrowStr =
+            '${tomorrow.year.toString().padLeft(4, '0')}-${tomorrow.month.toString().padLeft(2, '0')}-${tomorrow.day.toString().padLeft(2, '0')}';
+        final tomorrowChip = find.byKey(Key('date_chip_$tomorrowStr'));
+        await tester.ensureVisible(tomorrowChip);
+        await tester.tap(tomorrowChip);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
         // Verify Appointment Availability slots: ONLY published unbooked slots are displayed (10:00 AM is booked, so hidden)
         expect(find.byKey(const Key('time_slot_10:00 AM')), findsNothing);
         expect(find.text('10:00 AM (Booked)'), findsNothing);
@@ -274,6 +304,25 @@ void main() {
         addTearDown(() => tester.view.resetPhysicalSize());
 
         final service = PatientProblemService();
+        service.currentPatient = PatientProfile(
+          id: 'pat-fav-1',
+          name: 'Test Patient',
+          phone: '9000000001',
+          age: '29',
+          gender: 'Female',
+          pincode: '500033',
+          photoBytes: Uint8List.fromList(const [
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+            0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+            0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+            0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41,
+            0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+            0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+            0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+            0x42, 0x60, 0x82,
+          ]),
+        );
         service.addTestDoctor(testDoctor);
 
         await tester.pumpWidget(
@@ -310,6 +359,25 @@ void main() {
         addTearDown(() => tester.view.resetPhysicalSize());
 
         final service = PatientProblemService();
+        service.currentPatient = PatientProfile(
+          id: 'pat-fav-1',
+          name: 'Test Patient',
+          phone: '9000000001',
+          age: '29',
+          gender: 'Female',
+          pincode: '500033',
+          photoBytes: Uint8List.fromList(const [
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+            0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+            0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+            0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41,
+            0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+            0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+            0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+            0x42, 0x60, 0x82,
+          ]),
+        );
         service.addTestDoctor(testDoctor);
 
         await tester.pumpWidget(
@@ -359,6 +427,25 @@ void main() {
         addTearDown(() => tester.view.resetPhysicalSize());
 
         final service = PatientProblemService();
+        service.currentPatient = PatientProfile(
+          id: 'pat-fav-1',
+          name: 'Test Patient',
+          phone: '9000000001',
+          age: '29',
+          gender: 'Female',
+          pincode: '500033',
+          photoBytes: Uint8List.fromList(const [
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+            0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+            0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+            0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41,
+            0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+            0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+            0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+            0x42, 0x60, 0x82,
+          ]),
+        );
         service.addTestDoctor(testDoctor); // Periodontics (Dentistry)
         service.addTestDoctor(cardiologyDoctor); // Cardiology
 
@@ -411,6 +498,25 @@ void main() {
         addTearDown(() => tester.view.resetPhysicalSize());
 
         final service = PatientProblemService();
+        service.currentPatient = PatientProfile(
+          id: 'pat-fav-1',
+          name: 'Test Patient',
+          phone: '9000000001',
+          age: '29',
+          gender: 'Female',
+          pincode: '500033',
+          photoBytes: Uint8List.fromList(const [
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+            0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+            0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+            0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41,
+            0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+            0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+            0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+            0x42, 0x60, 0x82,
+          ]),
+        );
         service.addTestDoctor(testDoctor);
         service.addTestDoctor(cardiologyDoctor);
 
@@ -424,8 +530,8 @@ void main() {
         await tester.pump(const Duration(milliseconds: 300));
 
         // Navigate to "Doctors" tab in Admin Dashboard
-        await tester.ensureVisible(find.text('Doctors'));
-        await tester.tap(find.text('Doctors'));
+        await tester.ensureVisible(find.text('Doctors').last);
+        await tester.tap(find.text('Doctors').last);
         await tester.pump(const Duration(milliseconds: 400));
 
         // Verify "+ Create Doctor" button and ALL Specialty Dropdown button

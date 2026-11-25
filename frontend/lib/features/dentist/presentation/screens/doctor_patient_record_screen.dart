@@ -57,7 +57,7 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
     } else if (raw.isNotEmpty) {
       return raw.startsWith('+') ? raw : '+$raw';
     }
-    return '+91 9000000200';
+    return 'Not provided';
   }
 
   String _getInitials(String name) {
@@ -118,17 +118,15 @@ class _DoctorPatientRecordScreenState extends State<DoctorPatientRecordScreen> {
 
   void _showInternalPrescriptionModal(BuildContext context) {
     final pName = widget.patient.name.isNotEmpty ? widget.patient.name : 'Patient';
-    final diagnosisController = TextEditingController(text: 'Dental Evaluation');
-    final medController = TextEditingController(text: 'Amoxicillin 500mg');
-    final dosageController = TextEditingController(text: '1 Capsule');
-    final frequencyController = TextEditingController(text: 'Every 8 Hours (1-1-1)');
-    final durationController = TextEditingController(text: '5 Days');
-    final notesController = TextEditingController(
-      text: 'Take after meals with plenty of water. Complete the full antibiotic course.',
-    );
+    final diagnosisController = TextEditingController();
+    final medController = TextEditingController();
+    final dosageController = TextEditingController();
+    final frequencyController = TextEditingController();
+    final durationController = TextEditingController();
+    final notesController = TextEditingController();
 
-    String selectedMedicationName = 'Amoxicillin 500mg';
-    String selectedDiagnosisPreset = 'Dental Evaluation';
+    String selectedMedicationName = '';
+    String selectedDiagnosisPreset = '';
 
     showDialog(
       context: context,

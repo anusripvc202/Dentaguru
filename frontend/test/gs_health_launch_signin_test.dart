@@ -295,12 +295,20 @@ void main() {
     );
 
     testWidgets(
-      'Send Code transitions to OTP verification stage with 4-digit input and on-screen code',
+      'Send Code transitions to OTP verification stage with 6-digit input and on-screen code',
       (WidgetTester tester) async {
         _installGoogleFontsAssetHandler(tester);
         tester.view.physicalSize = const Size(390 * 2.0, 844 * 2.0);
         tester.view.devicePixelRatio = 2.0;
         addTearDown(tester.view.resetPhysicalSize);
+
+        ApiService.debugRequestOtpOverride = ({required String phone, String email = ''}) async => {
+          'success': true,
+          'message': 'One-time code sent',
+          'otp': '123456',
+          'deliveryMode': 'on_screen',
+        };
+        addTearDown(() => ApiService.debugRequestOtpOverride = null);
 
         await tester.pumpWidget(
           const ProviderScope(
@@ -325,7 +333,7 @@ void main() {
         // Heading changes to Enter your code
         expect(find.text('Enter your code'), findsOneWidget);
         expect(find.text('Sent to +91 98765 *****'), findsOneWidget);
-        expect(find.byType(TextFormField), findsNWidgets(4));
+        expect(find.byType(TextFormField), findsNWidgets(6));
         expect(find.widgetWithText(ElevatedButton, 'Verify & continue'), findsOneWidget);
       },
     );
@@ -363,8 +371,8 @@ void main() {
         await tester.pump(const Duration(milliseconds: 400));
         await tester.pump(const Duration(milliseconds: 400));
 
-        // Should route directly to Dentist dashboard (/dentist)
-        expect(find.text('Dentist workspace'), findsOneWidget);
+        // Should route directly to Doctor dashboard (/dentist)
+        expect(find.text('Doctor workspace'), findsOneWidget);
       },
     );
 
@@ -383,15 +391,15 @@ void main() {
           return {
             'success': true,
             'message': 'One-time code sent',
-            'otp': '7890',
+            'otp': '789012',
             'isAdmin': isAuthorized,
           };
         };
 
         ApiService.debugVerifyOtpOverride = ({required String phone, String email = '', required String code}) async {
           return {
-            'success': code == '7890',
-            'message': code == '7890' ? 'OTP Verified' : 'Invalid code',
+            'success': code == '789012',
+            'message': code == '789012' ? 'OTP Verified' : 'Invalid code',
           };
         };
 
@@ -447,9 +455,9 @@ void main() {
         expect(find.text('Enter your code'), findsOneWidget);
         expect(find.text('Sent to +91 99999 *****'), findsOneWidget);
 
-        // 3. Fill 4-digit OTP '7890'
+        // 3. Fill 6-digit OTP '789012'
         final digitInputs = find.byType(TextFormField);
-        expect(digitInputs, findsNWidgets(4));
+        expect(digitInputs, findsNWidgets(6));
         await tester.enterText(digitInputs.at(0), '7');
         await tester.pump();
         await tester.enterText(digitInputs.at(1), '8');
@@ -457,6 +465,10 @@ void main() {
         await tester.enterText(digitInputs.at(2), '9');
         await tester.pump();
         await tester.enterText(digitInputs.at(3), '0');
+        await tester.pump();
+        await tester.enterText(digitInputs.at(4), '1');
+        await tester.pump();
+        await tester.enterText(digitInputs.at(5), '2');
         await tester.pump(const Duration(milliseconds: 300));
 
         // 4. Tap Verify & continue

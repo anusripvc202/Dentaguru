@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../core/models/medical_specialty_model.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import 'ai_triage_screen.dart';
@@ -16,7 +17,21 @@ class _TalkToDentistNowScreenState extends State<TalkToDentistNowScreen> {
   final TextEditingController _concernController = TextEditingController();
   final FocusNode _concernFocusNode = FocusNode();
 
+  String _selectedSpecialty = 'All';
   bool _isSubmitting = false;
+
+  List<String> get _specialtyOptions {
+    final list = <String>[
+      'All',
+      ...MedicalSpecialtyModel.coreInitialSpecialties,
+    ];
+    for (final s in _patientService.activeSpecialties) {
+      if (!list.any((item) => item.toLowerCase() == s.name.toLowerCase())) {
+        list.add(s.name);
+      }
+    }
+    return list;
+  }
 
   @override
   void initState() {
@@ -34,11 +49,18 @@ class _TalkToDentistNowScreenState extends State<TalkToDentistNowScreen> {
 
   List<DoctorModel> _getOnlineDentists() {
     return _patientService.allDoctors.where((d) {
-      final status = d.status.trim().toLowerCase();
-      final isOnline = status == 'available' || status == 'online';
+      if (!d.isOnline) return false;
       final isVerified = d.verificationStatus.toUpperCase() != 'REJECTED' &&
           d.verificationStatus.toUpperCase() != 'SUSPENDED';
-      return isOnline && isVerified;
+      if (!isVerified) return false;
+      if (_selectedSpecialty != 'All') {
+        return MedicalSpecialtyModel.matchesSpecialtyFilter(
+          d.specialty,
+          _selectedSpecialty,
+          specialties: _patientService.specialties,
+        );
+      }
+      return true;
     }).toList();
   }
 
@@ -112,15 +134,16 @@ class _TalkToDentistNowScreenState extends State<TalkToDentistNowScreen> {
 
     try {
       await _patientService.submitProblem(
-        problemCategory: 'Immediate Consultation',
+        specialty: _selectedSpecialty != 'All' ? _selectedSpecialty : null,
+        problemCategory: _selectedSpecialty != 'All'
+            ? 'Immediate $_selectedSpecialty Consultation'
+            : 'Immediate Consultation',
         problemDescription: concern,
         severity: 'Moderate',
         symptoms: 'Online Match: ${matchedDoctor.languages.join(", ")}',
         preferredDoctorId: matchedDoctor.id,
         preferredDoctorName: matchedDoctor.name,
-        preferredDoctorClinic: matchedDoctor.clinicName.isNotEmpty
-            ? matchedDoctor.clinicName
-            : 'GS HEALTH Clinic',
+        preferredDoctorClinic: matchedDoctor.clinicName,
       );
 
       if (!mounted) return;
@@ -233,6 +256,7 @@ class _TalkToDentistNowScreenState extends State<TalkToDentistNowScreen> {
   }
 
   void _showNoDentistsDialog(String concern) {
+    final specLabel = _selectedSpecialty != 'All' ? '$_selectedSpecialty ' : '';
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -250,51 +274,31 @@ class _TalkToDentistNowScreenState extends State<TalkToDentistNowScreen> {
               child: const Icon(Icons.nightlight_round, color: Color(0xFF64748B), size: 28),
             ),
             const SizedBox(height: 14),
-            const Text(
-              'No Doctors Online',
-              style: TextStyle(
+            Text(
+              'No ${specLabel.trim().isEmpty ? "Doctors" : "${specLabel.trim()} Doctors"} Online',
+              style: const TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
                 color: Color(0xFF0F172A),
               ),
+              textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             const Text(
-              'All doctors are currently offline. You can run AI triage to evaluate your symptoms instantly, or queue your request for the next available doctor.',
+              'No matching doctors are online right now. Request Coordinator Assistance for a phone call back and manual specialist matching, or try AI triage.',
               style: TextStyle(fontSize: 13, color: Color(0xFF64748B), height: 1.4),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 18),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                key: const Key('talk_to_dentist_no_dentists_ai_button'),
-                icon: const Icon(Icons.auto_awesome_rounded, size: 16, color: Colors.white),
-                label: const Text('Try AI Triage Now', style: TextStyle(fontWeight: FontWeight.bold)),
+                key: const Key('talk_to_dentist_request_coordinator_button'),
+                icon: const Icon(Icons.support_agent_rounded, size: 17, color: Colors.white),
+                label: const Text('Request Coordinator Assistance', style: TextStyle(fontWeight: FontWeight.bold)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.gsNavy,
                   foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-                onPressed: () {
-                  Navigator.of(ctx).pop();
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => AiTriageScreen(initialSymptom: concern),
-                    ),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                key: const Key('talk_to_dentist_no_dentists_queue_button'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppTheme.gsNavy,
-                  side: const BorderSide(color: Color(0xFFCBD5E1)),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
@@ -303,6 +307,71 @@ class _TalkToDentistNowScreenState extends State<TalkToDentistNowScreen> {
                   setState(() => _isSubmitting = true);
                   try {
                     await _patientService.submitProblem(
+                      specialty: _selectedSpecialty != 'All' ? _selectedSpecialty : null,
+                      problemCategory: _selectedSpecialty != 'All'
+                          ? 'Coordinator Assistance ($_selectedSpecialty)'
+                          : 'Coordinator Assistance',
+                      problemDescription: concern,
+                      severity: 'Moderate',
+                      symptoms: 'Requested coordinator assistance (no online doctor)',
+                      escalationType: 'COORDINATOR_ASSISTANCE',
+                    );
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Assistance request Submitted. A district coordinator will call you shortly.'),
+                          backgroundColor: Color(0xFF012A58),
+                        ),
+                      );
+                      Navigator.of(context).pop();
+                    }
+                  } finally {
+                    if (mounted) setState(() => _isSubmitting = false);
+                  }
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                key: const Key('talk_to_dentist_no_dentists_ai_button'),
+                icon: const Icon(Icons.auto_awesome_rounded, size: 16),
+                label: const Text('Try AI Triage Now', style: TextStyle(fontWeight: FontWeight.bold)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.gsNavy,
+                  side: const BorderSide(color: Color(0xFFCBD5E1)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                onPressed: () {
+                  Navigator.of(ctx).pop();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => AiTriageScreen(
+                        initialSymptom: concern,
+                        initialSpecialty: _selectedSpecialty != 'All' ? _selectedSpecialty : null,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: TextButton(
+                key: const Key('talk_to_dentist_no_dentists_queue_button'),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.textMedium,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                ),
+                onPressed: () async {
+                  Navigator.of(ctx).pop();
+                  setState(() => _isSubmitting = true);
+                  try {
+                    await _patientService.submitProblem(
+                      specialty: _selectedSpecialty != 'All' ? _selectedSpecialty : null,
                       problemCategory: 'General Consultation',
                       problemDescription: concern,
                       severity: 'Moderate',
@@ -364,7 +433,37 @@ class _TalkToDentistNowScreenState extends State<TalkToDentistNowScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Online dentist availability card
+                        // Specialty selector chips
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: _specialtyOptions.map((spec) {
+                              final selected = _selectedSpecialty == spec;
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: ChoiceChip(
+                                  key: Key('talk_specialty_chip_$spec'),
+                                  label: Text(spec),
+                                  selected: selected,
+                                  selectedColor: AppTheme.gsNavy,
+                                  backgroundColor: Colors.white,
+                                  labelStyle: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                                    color: selected ? Colors.white : AppTheme.textDark,
+                                  ),
+                                  side: BorderSide(
+                                    color: selected ? AppTheme.gsNavy : const Color(0xFFCBD5E1),
+                                  ),
+                                  onSelected: (_) => setState(() => _selectedSpecialty = spec),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+
+                        // Online doctor availability card
                         _buildAvailabilityCard(hasOnlineDentists, onlineDentists.length),
                         const SizedBox(height: 24),
 
@@ -525,7 +624,7 @@ class _TalkToDentistNowScreenState extends State<TalkToDentistNowScreen> {
     final langs = patient.languages.where((l) => l.trim().isNotEmpty).toList();
     final matchedBy = langs.isNotEmpty
         ? 'Matched by ${langs.join(' / ')}'
-        : 'Matched by English / Hindi / Telugu';
+        : 'Matched by available languages';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),

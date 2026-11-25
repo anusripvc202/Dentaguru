@@ -51,18 +51,19 @@ void main() {
               widget.data == 'Good evening')),
       findsOneWidget,
     );
-    expect(find.text('Anu'), findsOneWidget);
+    expect(find.text('Patient'), findsOneWidget);
+    expect(find.text('Anu'), findsNothing);
     expect(find.byIcon(Icons.person_outline_rounded), findsOneWidget);
 
     // 2. Section 1: Upcoming Visits Hero Banner
     expect(find.text('YOUR SMILE, CARED FOR'), findsOneWidget);
     expect(find.text('No upcoming visits'), findsOneWidget);
     expect(
-      find.text('Book a verified dentist near you in under a minute.'),
+      find.text('Book a verified doctor near you in under a minute.'),
       findsOneWidget,
     );
 
-    // 3. Section 2: AI Dental Triage Card ("Something hurting?")
+    // 3. Section 2: AI Triage Card ("Something hurting?")
     expect(find.text('Something hurting?'), findsOneWidget);
     expect(
       find.text('Describe it and our AI tells you how urgent it is and who to see.'),
@@ -70,18 +71,19 @@ void main() {
     );
     expect(find.byIcon(Icons.auto_awesome_rounded), findsOneWidget);
 
-    // 4. Section 3: Talk to a Dentist Card
-    expect(find.text('Talk to a dentist now'), findsOneWidget);
+    // 4. Section 3: Talk to a Doctor Card
+    expect(find.text('Talk to a doctor now'), findsOneWidget);
     expect(
-      find.text('Get matched with an online dentist who speaks your language.'),
+      find.text('Get matched with an online doctor who speaks your language.'),
       findsOneWidget,
     );
     expect(find.byIcon(Icons.bolt_rounded), findsOneWidget);
 
-    // 5. Section 4: Sponsored Banner ("GS IMPLANTS")
+    // 5. Section 4: Sponsored Banner (GS HEALTH Multi-Specialty)
     expect(find.text('SPONSORED'), findsOneWidget);
-    expect(find.text('GS IMPLANTS'), findsOneWidget);
-    expect(find.text('Most economic dental implants'), findsOneWidget);
+    expect(find.byKey(const Key('patient_sponsored_banner')), findsOneWidget);
+    expect(find.text('GS IMPLANTS'), findsNothing);
+    expect(find.text('Most economic dental implants'), findsNothing);
     expect(find.byIcon(Icons.open_in_new_rounded), findsOneWidget);
 
     // Scroll down to reveal lower sections
@@ -89,12 +91,12 @@ void main() {
     await tester.drag(scrollFinder, const Offset(0, -600));
     await tester.pump(const Duration(milliseconds: 500));
 
-    // 6. Section 5: My Favourite Dentists Section
-    expect(find.text('My favourite dentists'), findsOneWidget);
+    // 6. Section 5: My Favourite Doctors Section
+    expect(find.text('My favourite doctors'), findsOneWidget);
     expect(find.text('See all'), findsOneWidget);
     expect(find.text('No favourites yet'), findsOneWidget);
     expect(
-      find.text('Tap ❤️ on a dentist\'s profile to save them here and refer friends to them.'),
+      find.text('Tap ❤️ on a doctor\'s profile to save them here and refer friends to them.'),
       findsOneWidget,
     );
     expect(find.byIcon(Icons.favorite_rounded), findsOneWidget);
@@ -102,7 +104,7 @@ void main() {
     // 7. Section 6: Refer a Friend Section
     expect(find.text('Refer a friend'), findsOneWidget);
     expect(
-      find.text('Share a dentist you trust and track the referral.'),
+      find.text('Share a doctor you trust and track the referral.'),
       findsOneWidget,
     );
     expect(find.text('My referrals'), findsOneWidget);

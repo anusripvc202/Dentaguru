@@ -62,7 +62,7 @@ class _AdminProfileScreenState extends State<AdminProfileScreen> {
       final emailPrefix = session.email!.split('@').first;
       return emailPrefix.isNotEmpty ? emailPrefix : 'Admin';
     }
-    return 'Sheshu Kumar Gouda';
+    return 'Admin';
   }
 
   String _resolveAdminPhone() {
@@ -81,7 +81,7 @@ class _AdminProfileScreenState extends State<AdminProfileScreen> {
     if (metaPhone != null && metaPhone.trim().isNotEmpty) {
       return metaPhone.trim();
     }
-    return '+919550686566';
+    return '';
   }
 
   String _resolveAdminLocation() {
@@ -100,12 +100,12 @@ class _AdminProfileScreenState extends State<AdminProfileScreen> {
     if (supaLoc != null && supaLoc.trim().isNotEmpty) {
       return supaLoc.trim();
     }
-    return 'Warangal';
+    return 'Not specified';
   }
 
   String _getInitials(String name) {
     final clean = name.trim();
-    if (clean.isEmpty) return 'SK';
+    if (clean.isEmpty) return 'AD';
     final parts = clean.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
     if (parts.length >= 2) {
       return '${parts[0][0]}${parts[1][0]}'.toUpperCase();

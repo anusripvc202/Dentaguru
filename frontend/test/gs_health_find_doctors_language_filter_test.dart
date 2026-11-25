@@ -11,6 +11,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'package:dentaguru/core/theme/app_theme.dart';
 import 'package:dentaguru/core/services/patient_problem_service.dart';
+import 'package:dentaguru/features/auth/presentation/widgets/gs_health_registration_view.dart' show kGsHealthLanguages;
 import 'package:dentaguru/features/patient/presentation/screens/find_doctors_screen.dart';
 import 'package:dentaguru/features/patient/presentation/screens/patient_dashboard.dart';
 
@@ -207,15 +208,11 @@ void main() {
         final langRect = tester.getRect(languageRowFinder);
         expect(langRect.top, greaterThanOrEqualTo(specRect.bottom));
 
-        // Languages shown come from registered doctors (English, Hindi, Telugu, Tamil, Kannada)
-        // Languages NOT spoken by any registered doctor (e.g. Malayalam) are not shown
+        // All supported application languages (plus any custom doctor languages) appear without duplicates
         expect(find.byKey(const Key('language_filter_chip_Any language')), findsOneWidget);
-        expect(find.byKey(const Key('language_filter_chip_English')), findsOneWidget);
-        expect(find.byKey(const Key('language_filter_chip_Hindi')), findsOneWidget);
-        expect(find.byKey(const Key('language_filter_chip_Telugu')), findsOneWidget);
-        expect(find.byKey(const Key('language_filter_chip_Tamil')), findsOneWidget);
-        expect(find.byKey(const Key('language_filter_chip_Kannada')), findsOneWidget);
-        expect(find.byKey(const Key('language_filter_chip_Malayalam')), findsNothing);
+        for (final lang in kGsHealthLanguages) {
+          expect(find.byKey(Key('language_filter_chip_$lang')), findsOneWidget);
+        }
 
         // Initially "Any language" is selected -> all 4 doctors are shown
         expect(find.text('Dr. Ananya Rao'), findsOneWidget);
@@ -267,7 +264,7 @@ void main() {
         expect(find.text('Dr. Karthik Subramanian'), findsNothing);
 
         // Select "Any language" -> restores all 4 doctors
-        await tester.drag(languageRowFinder, const Offset(300, 0));
+        await tester.ensureVisible(find.byKey(const Key('language_filter_chip_Any language')));
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(const Key('language_filter_chip_Any language')));
         await tester.pumpAndSettle();
@@ -328,10 +325,10 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        // Unavailable doctor is never shown even before filters
-        expect(find.text('Dr. Offline Doc'), findsNothing);
+        // Registered doctors (both Available and Unavailable) are visible in directory
+        expect(find.text('Dr. Offline Doc'), findsOneWidget);
 
-        // 1) Specialty = Orthodontist -> shows Vikram (Telugu, English) and Neha (Hindi)
+        // 1) Specialty = Orthodontist -> shows Vikram (Telugu, English), Neha (Hindi), and Offline Doc (Hindi, Unavailable)
         await tester.ensureVisible(find.byKey(const Key('specialty_chip_Orthodontist')));
         await tester.tap(find.byKey(const Key('specialty_chip_Orthodontist')));
         await tester.pumpAndSettle();
@@ -363,7 +360,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('Dr. Ananya Rao'), findsOneWidget);
 
-        // 4) City + Pincode + Language combination: City=Delhi, Pincode=110001, Language=Hindi -> ONLY Dr. Neha Verma (Offline Doc excluded)
+        // 4) City + Pincode + Language combination: City=Delhi, Pincode=110001, Language=Hindi -> shows Dr. Neha Verma and Dr. Offline Doc
         await tester.ensureVisible(find.byKey(const Key('filter_city_input')));
         await tester.enterText(find.byKey(const Key('filter_city_input')), 'Delhi');
         await tester.ensureVisible(find.byKey(const Key('filter_pincode_input')));
@@ -374,7 +371,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('Dr. Neha Verma'), findsOneWidget);
         expect(find.text('Dr. Ananya Rao'), findsNothing);
-        expect(find.text('Dr. Offline Doc'), findsNothing);
+        expect(find.text('Dr. Offline Doc'), findsOneWidget);
 
         // Clear City & Pincode
         await tester.ensureVisible(find.byKey(const Key('filter_city_input')));
@@ -490,6 +487,399 @@ void main() {
         await tester.binding.setSurfaceSize(null);
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
+      },
+    );
+
+    testWidgets(
+      '4. Telugu+English & Hindi+Kannada dynamic options, searchable multi-select dialog, Any language reset & newly registered language auto-appearance',
+      (tester) async {
+        tester.view.physicalSize = const Size(430, 960);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() => tester.view.resetPhysicalSize());
+
+        final docTeEn = DoctorModel(
+          id: 'doc-te-en',
+          userId: 'usr-te-en',
+          name: 'Dr. Ravi Teja',
+          specialty: 'Orthodontics',
+          qualification: 'BDS, MDS',
+          experienceYears: 7,
+          rating: 4.9,
+          reviewCount: 24,
+          clinicName: 'Apollo Dental',
+          phone: '9000011111',
+          email: 'ravi@gshealth.test',
+          status: 'Available',
+          city: 'Hyderabad',
+          pincode: '500081',
+          clinicAddress: 'Hyderabad',
+          languages: const ['Telugu', 'English'],
+          nextAvailableSlots: const ['10:00 AM'],
+          consultationFee: '₹500',
+        );
+
+        final docHiKn = DoctorModel(
+          id: 'doc-hi-kn',
+          userId: 'usr-hi-kn',
+          name: 'Dr. Kavitha Gowda',
+          specialty: 'General Dentistry',
+          qualification: 'BDS',
+          experienceYears: 6,
+          rating: 4.8,
+          reviewCount: 19,
+          clinicName: 'Bengaluru Care',
+          phone: '9000022222',
+          email: 'kavitha@gshealth.test',
+          status: 'Available',
+          city: 'Bengaluru',
+          pincode: '560001',
+          clinicAddress: 'Bengaluru',
+          languages: const ['Hindi', 'Kannada'],
+          nextAvailableSlots: const ['11:00 AM'],
+          consultationFee: '₹500',
+        );
+
+        final service = PatientProblemService();
+        service.addTestDoctor(docTeEn);
+        service.addTestDoctor(docHiKn);
+
+        await tester.pumpWidget(
+          ProviderScope(
+            child: MaterialApp(
+              theme: AppTheme.lightTheme,
+              home: const FindDoctorsScreen(),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // 1) All 4 registered languages are dynamically available in chips
+        for (final lang in ['English', 'Hindi', 'Kannada', 'Telugu']) {
+          expect(find.byKey(Key('language_filter_chip_$lang')), findsOneWidget);
+        }
+
+        // 2) Select Telugu -> ONLY Dr. Ravi Teja
+        await tester.ensureVisible(find.byKey(const Key('language_filter_chip_Telugu')));
+        await tester.tap(find.byKey(const Key('language_filter_chip_Telugu')));
+        await tester.pumpAndSettle();
+        expect(find.text('Dr. Ravi Teja'), findsOneWidget);
+        expect(find.text('Dr. Kavitha Gowda'), findsNothing);
+
+        // 3) Clear via Any language, then select Kannada via searchable multi-select dialog
+        await tester.ensureVisible(find.byKey(const Key('language_filter_chip_Any language')));
+        await tester.tap(find.byKey(const Key('language_filter_chip_Any language')));
+        await tester.pumpAndSettle();
+        expect(find.text('Dr. Ravi Teja'), findsOneWidget);
+        expect(find.text('Dr. Kavitha Gowda'), findsOneWidget);
+
+        await tester.tap(find.byKey(const Key('filter_by_language_dropdown')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('language_search_input')), findsOneWidget);
+
+        await tester.enterText(find.byKey(const Key('language_search_input')), 'Kan');
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('language_checkbox_Kannada')), findsOneWidget);
+        expect(find.byKey(const Key('language_checkbox_Telugu')), findsNothing);
+
+        await tester.tap(find.byKey(const Key('language_checkbox_Kannada')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('language_multiselect_done_btn')));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Dr. Kavitha Gowda'), findsOneWidget);
+        expect(find.text('Dr. Ravi Teja'), findsNothing);
+
+        // 4) Add Telugu as second selected language -> BOTH doctors shown
+        await tester.ensureVisible(find.byKey(const Key('language_filter_chip_Telugu')));
+        await tester.tap(find.byKey(const Key('language_filter_chip_Telugu')));
+        await tester.pumpAndSettle();
+        expect(find.text('Dr. Kavitha Gowda'), findsOneWidget);
+        expect(find.text('Dr. Ravi Teja'), findsOneWidget);
+
+        // 5) Clear language filter -> restores unfiltered doctor list
+        await tester.tap(find.byKey(const Key('clear_language_filter_button')));
+        await tester.pumpAndSettle();
+        expect(find.text('Dr. Kavitha Gowda'), findsOneWidget);
+        expect(find.text('Dr. Ravi Teja'), findsOneWidget);
+
+        // 6) Newly registered doctor with Assamese -> Assamese automatically appears
+        service.addTestDoctor(
+          DoctorModel(
+            id: 'doc-as',
+            userId: 'usr-as',
+            name: 'Dr. Arun Das',
+            specialty: 'Cardiology',
+            qualification: 'MBBS, MD',
+            experienceYears: 9,
+            rating: 4.9,
+            reviewCount: 30,
+            clinicName: 'Guwahati Heart Care',
+            phone: '9000033333',
+            email: 'arun@gshealth.test',
+            status: 'Available',
+            city: 'Guwahati',
+            pincode: '781001',
+            clinicAddress: 'Guwahati',
+            languages: const ['Assamese'],
+            nextAvailableSlots: const ['02:00 PM'],
+            consultationFee: '₹600',
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('language_filter_chip_Assamese')), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      '5. Filter by Language popup displays ALL supported languages even when DB doctors only have English, supports search + multi-select + deselect restore + Done',
+      (tester) async {
+        tester.view.physicalSize = const Size(412, 915);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() => tester.view.resetPhysicalSize());
+
+        final docOnlyEnglish = DoctorModel(
+          id: 'doc-eng-only',
+          userId: 'usr-eng-only',
+          name: 'Dr. Priya Nair',
+          specialty: 'General Medicine',
+          qualification: 'MBBS, MD',
+          experienceYears: 8,
+          rating: 4.8,
+          reviewCount: 22,
+          clinicName: 'Metro Health Clinic',
+          phone: '9888811111',
+          email: 'priya@gshealth.test',
+          status: 'Available',
+          city: 'Hyderabad',
+          pincode: '500081',
+          clinicAddress: 'Madhapur, Hyderabad',
+          languages: const ['English'],
+          nextAvailableSlots: const ['10:00 AM'],
+          consultationFee: '₹500',
+        );
+
+        final service = PatientProblemService();
+        service.addTestDoctor(docOnlyEnglish);
+        service.addTestDoctor(docTeluguOrthodontist);
+        service.addTestDoctor(docHindiOrthodontist);
+
+        await tester.pumpWidget(
+          ProviderScope(
+            child: MaterialApp(
+              theme: AppTheme.lightTheme,
+              home: const FindDoctorsScreen(),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Any language selected by default -> all 3 doctors shown
+        expect(find.text('Dr. Priya Nair'), findsOneWidget);
+        expect(find.text('Dr. Vikram Reddy'), findsOneWidget);
+        expect(find.text('Dr. Neha Verma'), findsOneWidget);
+
+        // Open Filter by Language popup
+        await tester.tap(find.byKey(const Key('filter_by_language_dropdown')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('language_multiselect_dialog')), findsOneWidget);
+
+        // "Any language" is checked by default
+        final anyCheckboxBefore = tester.widget<CheckboxListTile>(
+          find.byKey(const Key('language_checkbox_Any language')),
+        );
+        expect(anyCheckboxBefore.value, isTrue);
+
+        // Verify ALL 12 supported languages are present in the scrollable popup without duplicates
+        for (final lang in kGsHealthLanguages) {
+          final checkboxFinder = find.byKey(Key('language_checkbox_$lang'));
+          await tester.scrollUntilVisible(
+            checkboxFinder,
+            120,
+            scrollable: find.descendant(
+              of: find.byKey(const Key('language_multiselect_dialog')),
+              matching: find.byType(Scrollable),
+            ).first,
+          );
+          expect(checkboxFinder, findsOneWidget, reason: '$lang must appear once in popup');
+        }
+
+        // Search for "Telugu" inside popup and select it -> auto-deselects "Any language"
+        await tester.enterText(find.byKey(const Key('language_search_input')), 'telugu');
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('language_checkbox_Telugu')));
+        await tester.pumpAndSettle();
+
+        // Search for "Hindi" -> Telugu remains selected; tap Hindi as well
+        await tester.enterText(find.byKey(const Key('language_search_input')), 'hindi');
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('language_checkbox_Hindi')));
+        await tester.pumpAndSettle();
+
+        // Clear popup search -> confirm Telugu, Hindi are checked and "Any language" is unchecked
+        await tester.enterText(find.byKey(const Key('language_search_input')), '');
+        await tester.pumpAndSettle();
+        expect(
+          tester.widget<CheckboxListTile>(find.byKey(const Key('language_checkbox_Any language'))).value,
+          isFalse,
+        );
+        expect(
+          tester.widget<CheckboxListTile>(find.byKey(const Key('language_checkbox_Telugu'))).value,
+          isTrue,
+        );
+        expect(
+          tester.widget<CheckboxListTile>(find.byKey(const Key('language_checkbox_Hindi'))).value,
+          isTrue,
+        );
+
+        // Doctors list behind dialog should remain unchanged until Done is tapped
+        expect(find.text('Dr. Priya Nair'), findsOneWidget);
+        expect(find.text('Dr. Vikram Reddy'), findsOneWidget);
+        expect(find.text('Dr. Neha Verma'), findsOneWidget);
+
+        await tester.tap(find.byKey(const Key('language_multiselect_done_btn')));
+        await tester.pumpAndSettle();
+
+        // Telugu OR Hindi -> Vikram (Telugu, English) & Neha (Hindi), NOT Priya (English only)
+        expect(find.text('Dr. Vikram Reddy'), findsOneWidget);
+        expect(find.text('Dr. Neha Verma'), findsOneWidget);
+        expect(find.text('Dr. Priya Nair'), findsNothing);
+
+        // Re-open popup, deselect all selected specific languages -> Any language restores automatically
+        await tester.tap(find.byKey(const Key('filter_by_language_dropdown')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('language_checkbox_Hindi')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('language_checkbox_Telugu')));
+        await tester.pumpAndSettle();
+
+        expect(
+          tester.widget<CheckboxListTile>(find.byKey(const Key('language_checkbox_Any language'))).value,
+          isTrue,
+        );
+
+        await tester.tap(find.byKey(const Key('language_multiselect_done_btn')));
+        await tester.pumpAndSettle();
+
+        // All doctors restored
+        expect(find.text('Dr. Priya Nair'), findsOneWidget);
+        expect(find.text('Dr. Vikram Reddy'), findsOneWidget);
+        expect(find.text('Dr. Neha Verma'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      '6. Empty state for unmatched language + case/space/alias normalization + Telugu+English OR filter + mobile 320px popup overflow safety',
+      (tester) async {
+        tester.view.physicalSize = const Size(360, 780);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() => tester.view.resetPhysicalSize());
+
+        final docMessyLangs = DoctorModel(
+          id: 'doc-messy',
+          userId: 'usr-messy',
+          name: 'Dr. Subhashis Panda',
+          specialty: 'Cardiology',
+          qualification: 'MBBS, MD, DM',
+          experienceYears: 11,
+          rating: 4.9,
+          reviewCount: 40,
+          clinicName: 'Cuttack Care',
+          phone: '9777711111',
+          email: 'subhashis@gshealth.test',
+          status: 'Available',
+          city: 'Bhubaneswar',
+          pincode: '751001',
+          clinicAddress: 'Bhubaneswar',
+          languages: const ['  telugu (Fluent)  ', 'oriya'],
+          nextAvailableSlots: const ['11:00 AM'],
+          consultationFee: '₹800',
+        );
+
+        final service = PatientProblemService();
+        service.addTestDoctor(docEnglishHindiGeneral); // English, Hindi
+        service.addTestDoctor(docTeluguOrthodontist);  // Telugu, English
+        service.addTestDoctor(docHindiOrthodontist);   // Hindi
+        service.addTestDoctor(docMessyLangs);          // telugu (Fluent), oriya (-> Odia)
+
+        await tester.pumpWidget(
+          ProviderScope(
+            child: MaterialApp(
+              theme: AppTheme.lightTheme,
+              home: const FindDoctorsScreen(),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // 1) English selected -> Ananya & Vikram only
+        await tester.ensureVisible(find.byKey(const Key('language_filter_chip_English')));
+        await tester.tap(find.byKey(const Key('language_filter_chip_English')));
+        await tester.pumpAndSettle();
+        expect(find.text('Dr. Ananya Rao'), findsOneWidget);
+        expect(find.text('Dr. Vikram Reddy'), findsOneWidget);
+        expect(find.text('Dr. Neha Verma'), findsNothing);
+        expect(find.text('Dr. Subhashis Panda'), findsNothing);
+
+        // 2) Add Telugu -> English OR Telugu (Ananya, Vikram, Subhashis)
+        await tester.ensureVisible(find.byKey(const Key('language_filter_chip_Telugu')));
+        await tester.tap(find.byKey(const Key('language_filter_chip_Telugu')));
+        await tester.pumpAndSettle();
+        expect(find.text('Dr. Ananya Rao'), findsOneWidget);
+        expect(find.text('Dr. Vikram Reddy'), findsOneWidget);
+        expect(find.text('Dr. Subhashis Panda'), findsOneWidget);
+        expect(find.text('Dr. Neha Verma'), findsNothing);
+
+        // 3) Clear language, select Odia -> matches doctor stored with alias "oriya"
+        await tester.tap(find.byKey(const Key('clear_language_filter_button')));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.byKey(const Key('language_filter_chip_Odia')));
+        await tester.tap(find.byKey(const Key('language_filter_chip_Odia')));
+        await tester.pumpAndSettle();
+        expect(find.text('Dr. Subhashis Panda'), findsOneWidget);
+        expect(find.text('Dr. Ananya Rao'), findsNothing);
+
+        // 4) Select Specialty=Orthodontist + Language=Bengali (no matching doctors) -> empty state shown with reset button
+        await tester.ensureVisible(find.byKey(const Key('specialty_chip_Orthodontist')));
+        await tester.tap(find.byKey(const Key('specialty_chip_Orthodontist')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('clear_language_filter_button')));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.byKey(const Key('language_filter_chip_Bengali')));
+        await tester.tap(find.byKey(const Key('language_filter_chip_Bengali')));
+        await tester.pumpAndSettle();
+
+        expect(find.text('No doctors available for the selected language.'), findsOneWidget);
+        expect(find.text('Dr. Ananya Rao'), findsNothing);
+        expect(find.text('Dr. Vikram Reddy'), findsNothing);
+        expect(find.byKey(const Key('empty_state_reset_language_filter_button')), findsOneWidget);
+
+        // Tapping Reset Language Filter clears language ONLY while preserving Specialty=Orthodontist
+        await tester.ensureVisible(find.byKey(const Key('empty_state_reset_language_filter_button')));
+        await tester.tap(find.byKey(const Key('empty_state_reset_language_filter_button')));
+        await tester.pumpAndSettle();
+        expect(find.text('Dr. Vikram Reddy'), findsOneWidget);
+        expect(find.text('Dr. Neha Verma'), findsOneWidget);
+        expect(find.text('Dr. Ananya Rao'), findsNothing); // Specialty=Orthodontist still active
+
+        // 5) Open popup on narrow 320x640 mobile viewport and scroll with zero overflow exceptions
+        await tester.binding.setSurfaceSize(const Size(320, 640));
+        tester.view.physicalSize = const Size(320, 640);
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.byKey(const Key('filter_by_language_dropdown')));
+        await tester.tap(find.byKey(const Key('filter_by_language_dropdown')));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await tester.scrollUntilVisible(
+          find.byKey(const Key('language_checkbox_Odia')),
+          100,
+          scrollable: find.descendant(
+            of: find.byKey(const Key('language_multiselect_dialog')),
+            matching: find.byType(Scrollable),
+          ).first,
+        );
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.byKey(const Key('language_multiselect_done_btn')));
+        await tester.pumpAndSettle();
       },
     );
   });

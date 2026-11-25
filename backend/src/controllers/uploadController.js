@@ -74,13 +74,9 @@ exports.uploadFile = [
                     url
                 });
             } catch (s3Err) {
-                // Return mock storage reference if cloud keys are unconfigured locally
-                return res.status(201).json({
-                    success: true,
-                    provider: 'local-mock',
-                    message: 'File upload simulated (configure SUPABASE_URL or AWS S3 keys for live cloud storage).',
-                    key: filename,
-                    url: `http://localhost:${process.env.PORT || 5000}/uploads/${filename}`
+                return res.status(503).json({
+                    success: false,
+                    message: 'Cloud storage service is currently unavailable. Configure Supabase Storage or AWS S3.'
                 });
             }
         } catch (err) {
@@ -121,11 +117,9 @@ exports.getSignedFileUrl = async (req, res) => {
         });
     } catch (err) {
         console.error('Signed URL Error:', err.message);
-        res.json({
-            success: true,
-            provider: 'fallback',
-            signedUrl: `http://localhost:${process.env.PORT || 5000}/uploads/${key}`,
-            expiresIn: '15 minutes'
+        res.status(503).json({
+            success: false,
+            message: 'Unable to generate signed cloud storage URL at this time.'
         });
     }
 };

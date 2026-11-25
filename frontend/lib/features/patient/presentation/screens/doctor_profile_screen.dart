@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../core/constants/booking_rules_config.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/models/doctor_availability.dart';
 import '../../../../core/models/medical_specialty_model.dart';
@@ -42,6 +43,7 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
   String? _selectedTimeSlot;
 
   String _selectedTreatment = 'General Consultation';
+  String _selectedConsultationMode = 'In-Person';
   final TextEditingController _symptomsController = TextEditingController();
   bool _isBooking = false;
   bool _isUnavailableFromBackend = false;
@@ -197,7 +199,11 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
     });
 
     try {
-      final avail = await _patientService.getDoctorAvailability(_effectiveDoctorId, date);
+      final avail = await _patientService.getDoctorAvailability(
+        _effectiveDoctorId,
+        date,
+        consultationType: _selectedConsultationMode,
+      );
       if (!mounted) return;
       setState(() {
         _currentAvailability = avail;
@@ -256,7 +262,7 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
     }
     final parts = <String>[];
     final expText = doc.experienceYears > 0 ? '${doc.experienceYears}+ years of clinical experience' : 'extensive clinical experience';
-    final specText = doc.specialty.trim().isNotEmpty ? doc.specialty.trim() : 'General Dentistry';
+    final specText = doc.specialty.trim().isNotEmpty ? doc.specialty.trim() : 'General Medicine';
     final qualText = doc.qualification.trim().isNotEmpty ? ' (${doc.qualification.trim()})' : '';
     parts.add('${doc.name}$qualText is a verified $specText specialist with $expText.');
 
@@ -313,6 +319,7 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
         date: dateStr,
         timeSlot: selectedSlot,
         treatment: _selectedTreatment,
+        consultationMode: _selectedConsultationMode,
         symptoms: _symptomsController.text.trim(),
       );
 
@@ -1019,7 +1026,9 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
               if (doc.qualification.trim().isNotEmpty)
                 _buildInfoChip(Icons.school_outlined, 'Qualification: ${doc.qualification}'),
               _buildInfoChip(Icons.work_outline_rounded, 'Experience: ${doc.experienceYears} Years'),
-              if (doc.licenseNumber.trim().isNotEmpty)
+              if (doc.licenseNumber.trim().isNotEmpty &&
+                  doc.licenseNumber.trim().toUpperCase() != 'MED-LIC-REG' &&
+                  doc.licenseNumber.trim().toUpperCase() != 'DEN-LIC-REG')
                 _buildInfoChip(Icons.badge_outlined, 'Reg ID: ${doc.licenseNumber}'),
               if (doc.languages.isNotEmpty)
                 _buildInfoChip(Icons.translate_rounded, 'Languages: ${doc.languages.join(', ')}'),
@@ -1472,7 +1481,10 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
   Widget _buildAppointmentAvailabilitySection(DoctorModel doc) {
     final avail = _currentAvailability;
     final allSlots = avail?.allSlots ?? const <String>[];
-    final availableSlots = avail?.availableSlots ?? const <String>[];
+    final availableSlots = BookingRulesConfig.filterBookableSlotsForDate(
+      _selectedDate,
+      avail?.availableSlots ?? const <String>[],
+    );
     final isBlocked = avail?.isBlocked ?? false;
 
     return Container(
@@ -1876,6 +1888,125 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
 
           if (!widget.isAdminView && !widget.isClinicView) ...[
             const SizedBox(height: 20),
+
+            // Consultation Type Selector (Online vs In-Person)
+            const Text(
+              'Consultation Mode',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: AppTheme.textDark,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: InkWell(
+                    key: const Key('profile_booking_mode_in_person'),
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () {
+                      if (_selectedConsultationMode != 'In-Person') {
+                        setState(() {
+                          _selectedConsultationMode = 'In-Person';
+                          _selectedTimeSlot = null;
+                        });
+                        _loadAvailabilityForDate(_selectedDate);
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                      decoration: BoxDecoration(
+                        color: _selectedConsultationMode == 'In-Person'
+                            ? AppTheme.primaryBlue
+                            : const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: _selectedConsultationMode == 'In-Person'
+                              ? AppTheme.primaryBlue
+                              : Colors.grey.shade300,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.local_hospital_outlined,
+                            size: 16,
+                            color: _selectedConsultationMode == 'In-Person' ? Colors.white : AppTheme.primaryBlue,
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              'In-Person',
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w700,
+                                color: _selectedConsultationMode == 'In-Person' ? Colors.white : AppTheme.textDark,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: InkWell(
+                    key: const Key('profile_booking_mode_online'),
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () {
+                      if (_selectedConsultationMode != 'Online') {
+                        setState(() {
+                          _selectedConsultationMode = 'Online';
+                          _selectedTimeSlot = null;
+                        });
+                        _loadAvailabilityForDate(_selectedDate);
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                      decoration: BoxDecoration(
+                        color: _selectedConsultationMode == 'Online'
+                            ? AppTheme.primaryBlue
+                            : const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: _selectedConsultationMode == 'Online'
+                              ? AppTheme.primaryBlue
+                              : Colors.grey.shade300,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.videocam_outlined,
+                            size: 16,
+                            color: _selectedConsultationMode == 'Online' ? Colors.white : AppTheme.primaryBlue,
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              'Online',
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w700,
+                                color: _selectedConsultationMode == 'Online' ? Colors.white : AppTheme.textDark,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
 
             // Step 3: Consultation Reason & Notes (Patient only)
             const Text(

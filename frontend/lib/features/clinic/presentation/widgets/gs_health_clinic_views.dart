@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/models/referral_model.dart';
+import '../../../../core/constants/booking_rules_config.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
@@ -1236,8 +1237,34 @@ class _ClinicDoctorCard extends StatelessWidget {
                             color: AppTheme.textMedium,
                           ),
                         ),
+                        if (BookingRulesConfig.formatRealFee(doc.consultationFee, emptyFallback: '').isNotEmpty)
+                          Flexible(
+                            child: Text(
+                              ' · ${BookingRulesConfig.formatRealFee(doc.consultationFee, emptyFallback: '')}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.gsNavy,
+                              ),
+                            ),
+                          ),
                       ],
                     ),
+                    if (doc.nextAvailableSlots.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        'Next slots: ${doc.nextAvailableSlots.take(2).join(', ')}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF047857),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 3),
                     Row(
                       children: [
@@ -1712,18 +1739,35 @@ class _ClinicBookingCard extends StatelessWidget {
     final dateDisplay = '$dayAbbr, ${dt.day} ${_monthAbbr(dt)}';
     final timeText = _extractTimeText();
     final doctorName = booking.displayDoctorName.trim();
+    final doctorSpec = booking.displayDoctorSpecialty.trim();
+    final doctorDisplay = (doctorName.isNotEmpty && doctorSpec.isNotEmpty && !doctorName.toLowerCase().contains(doctorSpec.toLowerCase()))
+        ? '$doctorName • $doctorSpec'
+        : (doctorName.isNotEmpty ? doctorName : doctorSpec);
     final modeLabel = _extractModeLabel();
     final rawPatient = booking.patientName.trim().isNotEmpty
         ? booking.patientName.trim()
         : 'Patient';
+    final rawPatientId = (booking.patientId ?? '').trim();
+    final shortPatientId = rawPatientId.length > 8 ? rawPatientId.substring(0, 8).toUpperCase() : rawPatientId;
     final rawCategory = booking.problemCategory.trim();
     final patientHeader =
         rawCategory.isNotEmpty ? '$rawPatient • $rawCategory' : rawPatient;
     final phone = booking.patientPhone.trim();
-    final subtitleText = phone.isNotEmpty ? '$dateDisplay · $phone' : dateDisplay;
+    final subtitleParts = <String>[
+      dateDisplay,
+      if (shortPatientId.isNotEmpty) 'ID: $shortPatientId',
+      if (phone.isNotEmpty) phone,
+    ];
+    final subtitleText = subtitleParts.join(' · ');
     final note = booking.problemDescription.trim().isNotEmpty
         ? booking.problemDescription.trim()
         : booking.symptoms.trim();
+    final rawAdminNotes = (booking.adminNotes ?? '').trim();
+    final bool isReferralBooking = rawAdminNotes.toLowerCase().contains('referral') ||
+        note.toLowerCase().contains('referred by');
+    final String referralSourceLabel = rawAdminNotes.toLowerCase().startsWith('referral source:')
+        ? rawAdminNotes
+        : (note.toLowerCase().startsWith('referred by ') ? note : 'Referred Patient');
 
     late final Color statusBg;
     late final Color statusFg;
@@ -1854,7 +1898,7 @@ class _ClinicBookingCard extends StatelessWidget {
                         fontWeight: FontWeight.w500,
                       ),
                     ),
-                    if (doctorName.isNotEmpty) ...[
+                    if (doctorDisplay.isNotEmpty) ...[
                       const SizedBox(height: 5),
                       Row(
                         children: [
@@ -1866,7 +1910,7 @@ class _ClinicBookingCard extends StatelessWidget {
                           const SizedBox(width: 6),
                           Expanded(
                             child: Text(
-                              doctorName,
+                              doctorDisplay,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
@@ -1880,39 +1924,67 @@ class _ClinicBookingCard extends StatelessWidget {
                       ),
                     ],
                     const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 9,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: modeLabel == 'IN-CLINIC'
-                            ? const Color(0xFFF1F5F9)
-                            : _kSoftNavy,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            modeLabel == 'IN-CLINIC'
-                                ? Icons.apartment_rounded
-                                : Icons.call_rounded,
-                            size: 12,
-                            color: AppTheme.gsNavy,
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 9,
+                            vertical: 4,
                           ),
-                          const SizedBox(width: 5),
-                          Text(
-                            modeLabel,
-                            style: const TextStyle(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w800,
-                              color: AppTheme.gsNavy,
-                              letterSpacing: 0.4,
+                          decoration: BoxDecoration(
+                            color: modeLabel == 'IN-CLINIC'
+                                ? const Color(0xFFF1F5F9)
+                                : _kSoftNavy,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                modeLabel == 'IN-CLINIC'
+                                    ? Icons.apartment_rounded
+                                    : Icons.call_rounded,
+                                size: 12,
+                                color: AppTheme.gsNavy,
+                              ),
+                              const SizedBox(width: 5),
+                              Text(
+                                modeLabel,
+                                style: const TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppTheme.gsNavy,
+                                  letterSpacing: 0.4,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (isReferralBooking)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _kSoftRedBg,
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(color: _kSoftRedBorder),
+                            ),
+                            child: Text(
+                              referralSourceLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.gsRed,
+                              ),
                             ),
                           ),
-                        ],
-                      ),
+                      ],
                     ),
                     if (note.isNotEmpty) ...[
                       const SizedBox(height: 6),
@@ -2778,7 +2850,12 @@ Future<void> showClinicReferralsSheet({
   required String clinicName,
   required List<PatientReferral> referrals,
   required VoidCallback onOpenReferralDirectory,
+  Future<bool> Function(String referralId)? onAcceptReferral,
+  Future<bool> Function(String referralId)? onRejectReferral,
 }) {
+  final List<PatientReferral> localRefs = List<PatientReferral>.from(referrals);
+  final Set<String> updatingIds = {};
+
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
@@ -2786,161 +2863,277 @@ Future<void> showClinicReferralsSheet({
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
-    builder: (ctx) => SafeArea(
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(ctx).size.height * 0.82,
-        ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 42,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: _kBorder,
-                    borderRadius: BorderRadius.circular(999),
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setModalState) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(ctx).size.height * 0.85,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 42,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: _kBorder,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Patient referrals',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.gsNavy,
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Patient referrals',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                              color: AppTheme.gsNavy,
+                            ),
                           ),
-                        ),
-                        Text(
-                          clinicName.trim().isNotEmpty
-                              ? 'Referred to $clinicName'
-                              : 'Patients referred by doctors',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 12.5,
-                            color: AppTheme.textMedium,
+                          Text(
+                            clinicName.trim().isNotEmpty
+                                ? 'Referred to $clinicName'
+                                : 'Patients referred to your clinic doctors',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              color: AppTheme.textMedium,
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      onOpenReferralDirectory();
-                    },
-                    child: const Text(
-                      'All Tracker',
-                      style: TextStyle(
-                        color: AppTheme.gsNavy,
-                        fontWeight: FontWeight.w700,
+                        ],
                       ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (referrals.isEmpty)
-                const _ClinicEmptyCard(
-                  icon: Icons.medical_information_outlined,
-                  title: 'No referrals received yet',
-                  subtitle:
-                      'When doctors refer patients to your clinic, their notes and case details will appear here.',
-                )
-              else
-                Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: referrals.length,
-                    itemBuilder: (_, idx) {
-                      final ref = referrals[idx];
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 10),
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: _kSurfaceBg,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: _kBorder),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        onOpenReferralDirectory();
+                      },
+                      child: const Text(
+                        'All Tracker',
+                        style: TextStyle(
+                          color: AppTheme.gsNavy,
+                          fontWeight: FontWeight.w700,
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    ref.referredPatientName,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w800,
-                                      color: AppTheme.gsNavy,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                if (localRefs.isEmpty)
+                  const _ClinicEmptyCard(
+                    icon: Icons.medical_information_outlined,
+                    title: 'No referrals received yet',
+                    subtitle:
+                        'When patients refer doctors at your clinic, their referral details will appear here.',
+                  )
+                else
+                  Flexible(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: localRefs.length,
+                      itemBuilder: (_, idx) {
+                        final ref = localRefs[idx];
+                        final statusLower = ref.status.trim().toLowerCase();
+                        final isPending = statusLower == 'pending' || statusLower == 'new';
+                        final isAccepted = statusLower == 'accepted' || statusLower == 'completed';
+                        final isRejected = statusLower == 'rejected' || statusLower == 'declined';
+                        final shortRefId = ref.id.length > 8 ? ref.id.substring(0, 8).toUpperCase() : ref.id;
+                        final dt = ref.referralDate;
+                        final dateStr = '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
+                        final timeStr = '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+
+                        return Container(
+                          key: Key('clinic_referral_card_${ref.id}'),
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: _kSurfaceBg,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: _kBorder),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      ref.referredPatientName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w800,
+                                        color: AppTheme.gsNavy,
+                                      ),
                                     ),
                                   ),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 9,
-                                    vertical: 3,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: _kSoftNavy,
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                  child: Text(
-                                    ref.status,
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppTheme.gsNavy,
+                                  const SizedBox(width: 6),
+                                  Flexible(
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 9,
+                                        vertical: 3,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: isRejected ? _kSoftRedBg : _kSoftNavy,
+                                        borderRadius: BorderRadius.circular(999),
+                                      ),
+                                      child: Text(
+                                        ref.status,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color: isRejected ? AppTheme.gsRed : AppTheme.gsNavy,
+                                        ),
+                                      ),
                                     ),
                                   ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${ref.doctorName} · ${ref.requiredSpecialist}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w600,
-                                color: AppTheme.textDark,
+                                ],
                               ),
-                            ),
-                            if (ref.clinicalComplaint.trim().isNotEmpty) ...[
                               const SizedBox(height: 4),
                               Text(
-                                ref.clinicalComplaint,
-                                maxLines: 2,
+                                'Ref #$shortRefId · $dateStr $timeStr${ref.referredPatientMobile.isNotEmpty ? ' · +91 ${ref.referredPatientMobile}' : ''}',
+                                maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
-                                  fontSize: 12,
+                                  fontSize: 11.5,
                                   color: AppTheme.textMedium,
                                 ),
                               ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '${ref.doctorName} · ${ref.requiredSpecialist}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.textDark,
+                                ),
+                              ),
+                              if (ref.clinicalComplaint.trim().isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  ref.clinicalComplaint,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: AppTheme.textMedium,
+                                  ),
+                                ),
+                              ],
+                              if (isPending && !isAccepted && !isRejected && (onAcceptReferral != null || onRejectReferral != null)) ...[
+                                const SizedBox(height: 10),
+                                Row(
+                                  children: [
+                                    if (onRejectReferral != null)
+                                      Expanded(
+                                        child: OutlinedButton(
+                                          key: Key('clinic_referral_decline_${ref.id}'),
+                                          onPressed: updatingIds.contains(ref.id)
+                                              ? null
+                                              : () async {
+                                                  setModalState(() => updatingIds.add(ref.id));
+                                                  final ok = await onRejectReferral(ref.id);
+                                                  if (!ctx.mounted) return;
+                                                  setModalState(() {
+                                                    updatingIds.remove(ref.id);
+                                                    if (ok) {
+                                                      localRefs[idx] = PatientReferral(
+                                                        id: ref.id,
+                                                        referrerPatientId: ref.referrerPatientId,
+                                                        referrerPatientName: ref.referrerPatientName,
+                                                        referredPatientName: ref.referredPatientName,
+                                                        referredPatientMobile: ref.referredPatientMobile,
+                                                        requiredSpecialist: ref.requiredSpecialist,
+                                                        clinicalComplaint: ref.clinicalComplaint,
+                                                        doctorId: ref.doctorId,
+                                                        doctorName: ref.doctorName,
+                                                        doctorSpecialty: ref.doctorSpecialty,
+                                                        doctorClinicName: ref.doctorClinicName,
+                                                        status: 'Rejected',
+                                                        referralDate: ref.referralDate,
+                                                      );
+                                                    }
+                                                  });
+                                                },
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: AppTheme.gsRed,
+                                            side: const BorderSide(color: _kSoftRedBorder),
+                                            padding: const EdgeInsets.symmetric(vertical: 8),
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                          ),
+                                          child: const Text('Decline', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                                        ),
+                                      ),
+                                    if (onAcceptReferral != null && onRejectReferral != null) const SizedBox(width: 8),
+                                    if (onAcceptReferral != null)
+                                      Expanded(
+                                        child: ElevatedButton(
+                                          key: Key('clinic_referral_accept_${ref.id}'),
+                                          onPressed: updatingIds.contains(ref.id)
+                                              ? null
+                                              : () async {
+                                                  setModalState(() => updatingIds.add(ref.id));
+                                                  final ok = await onAcceptReferral(ref.id);
+                                                  if (!ctx.mounted) return;
+                                                  setModalState(() {
+                                                    updatingIds.remove(ref.id);
+                                                    if (ok) {
+                                                      localRefs[idx] = PatientReferral(
+                                                        id: ref.id,
+                                                        referrerPatientId: ref.referrerPatientId,
+                                                        referrerPatientName: ref.referrerPatientName,
+                                                        referredPatientName: ref.referredPatientName,
+                                                        referredPatientMobile: ref.referredPatientMobile,
+                                                        requiredSpecialist: ref.requiredSpecialist,
+                                                        clinicalComplaint: ref.clinicalComplaint,
+                                                        doctorId: ref.doctorId,
+                                                        doctorName: ref.doctorName,
+                                                        doctorSpecialty: ref.doctorSpecialty,
+                                                        doctorClinicName: ref.doctorClinicName,
+                                                        status: 'Accepted',
+                                                        referralDate: ref.referralDate,
+                                                      );
+                                                    }
+                                                  });
+                                                },
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: AppTheme.gsNavy,
+                                            foregroundColor: Colors.white,
+                                            elevation: 0,
+                                            padding: const EdgeInsets.symmetric(vertical: 8),
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                          ),
+                                          child: const Text('Accept', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ],
                             ],
-                          ],
-                        ),
-                      );
-                    },
+                          ),
+                        );
+                      },
+                    ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -2952,6 +3145,7 @@ Future<void> showClinicNotificationsSheet({
   required BuildContext context,
   required List<AppNotificationModel> notifications,
   required ValueChanged<String> onMarkRead,
+  ValueChanged<AppNotificationModel>? onTapNotification,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -3020,7 +3214,13 @@ Future<void> showClinicNotificationsSheet({
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontSize: 12),
                         ),
-                        onTap: () => onMarkRead(n.id),
+                        onTap: () {
+                          onMarkRead(n.id);
+                          if (onTapNotification != null) {
+                            Navigator.pop(ctx);
+                            onTapNotification(n);
+                          }
+                        },
                       );
                     },
                   ),

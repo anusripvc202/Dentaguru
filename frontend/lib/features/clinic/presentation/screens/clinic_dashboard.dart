@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/models/medical_specialty_model.dart';
 import '../../../../core/services/patient_problem_service.dart';
@@ -31,6 +32,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
   String _selectedBookingStatusFilter = 'All';
   final Set<String> _processingBookingIds = {};
   final PatientProblemService _problemService = PatientProblemService();
+  RealtimeChannel? _realtimeChannel;
 
   String get _currentClinicName {
     if (_selectedClinicOverride != null && _selectedClinicOverride!.trim().isNotEmpty) {
@@ -80,8 +82,16 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
         return sessionName;
       }
     }
-    return _problemService.resolveClinic()?.clinicName.trim() ?? '';
+    final resolvedName = _problemService.resolveClinic()?.clinicName.trim() ?? '';
+    if (resolvedName.isNotEmpty) return resolvedName;
+    if (sessionRoleContainsAdmin(session?.role) && _problemService.allClinics.isNotEmpty) {
+      return _problemService.allClinics.first.clinicName.trim();
+    }
+    return '';
   }
+
+  bool sessionRoleContainsAdmin(String? role) =>
+      (role ?? '').toLowerCase().contains('admin');
 
   ClinicModel? get _resolvedClinic =>
       _problemService.resolveClinic(explicitClinicName: _scopedClinicName);
@@ -95,13 +105,22 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
   }
 
   List<DoctorModel> get _clinicDoctors {
+    final resolved = _resolvedClinic;
+    if (resolved != null) {
+      return _problemService.getDoctorsForClinic(resolved);
+    }
     final scoped = _displayClinicName;
     if (scoped.isEmpty) {
-      return _problemService.allDoctors
-          .where((d) =>
-              d.clinicName.trim().isNotEmpty &&
-              d.clinicName.trim().toLowerCase() != 'independent practice')
-          .toList();
+      if (_problemService.allClinics.isEmpty &&
+          !_problemService.isAdminMode &&
+          _problemService.authenticatedClinicName.isEmpty) {
+        return _problemService.allDoctors
+            .where((d) =>
+                d.clinicName.trim().isNotEmpty &&
+                d.clinicName.trim().toLowerCase() != 'independent practice')
+            .toList();
+      }
+      return const [];
     }
     return _problemService.getClinicDoctors(scoped);
   }
@@ -157,9 +176,52 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
     }
     _problemService.addListener(_onServiceUpdate);
     _loadSavedProcedurePrices();
+    _problemService.syncAppointmentsFromApi();
+    _problemService.syncClinicReferralsFromApi();
+    _problemService.syncNotificationsFromApi(role: 'Clinic');
     _problemService.syncAllDataFromApi();
     _problemService.syncAdminReferralsFromApi();
-    _problemService.syncNotificationsFromApi(role: 'Clinic');
+
+    // Supabase Realtime listener for live bookings, referrals & notifications
+    try {
+      _realtimeChannel = Supabase.instance.client
+          .channel('clinic_dashboard_realtime')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'appointments',
+            callback: (_) {
+              if (mounted) {
+                _problemService.syncAppointmentsFromApi();
+                _problemService.syncNotificationsFromApi(role: 'Clinic');
+              }
+            },
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'referrals',
+            callback: (_) {
+              if (mounted) {
+                _problemService.syncClinicReferralsFromApi();
+                _problemService.syncNotificationsFromApi(role: 'Clinic');
+              }
+            },
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'notifications',
+            callback: (_) {
+              if (mounted) {
+                _problemService.syncNotificationsFromApi(role: 'Clinic');
+              }
+            },
+          )
+          .subscribe();
+    } catch (e) {
+      debugPrint('Clinic Realtime Channel Notice: $e');
+    }
   }
 
   Future<void> _loadSavedProcedurePrices() async {
@@ -189,6 +251,11 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
   @override
   void dispose() {
     _problemService.removeListener(_onServiceUpdate);
+    if (_realtimeChannel != null) {
+      try {
+        Supabase.instance.client.removeChannel(_realtimeChannel!);
+      } catch (_) {}
+    }
     super.dispose();
   }
 
@@ -253,24 +320,38 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
     }
 
     final referrals = _problemService.clinicReferralsFor(clinicName: clinicName);
-    final notifications = _problemService.appNotifications
-        .where((n) =>
-            n.recipientRole.toLowerCase() == 'clinic' ||
-            (clinicId.isNotEmpty && n.recipientId == clinicId) ||
-            (clinicName.isNotEmpty &&
-                n.recipientId.toLowerCase() == clinicName.toLowerCase()))
-        .toList();
+    final notifications = _problemService.getNotificationsForRole(
+      'Clinic',
+      clinicId: clinicId,
+      clinicName: clinicName,
+    );
     final unreadCount = notifications.where((n) => !n.isRead).length;
 
     Future<void> refreshAll() async {
       await Future.wait([
         _problemService.syncClinicsFromApi(),
         _problemService.syncDoctorsFromApi(),
+        if (clinic != null) _problemService.fetchClinicDoctors(clinic),
         _problemService.syncAppointmentsFromApi(),
         _problemService.syncProblemRequestsFromApi(),
+        _problemService.syncClinicReferralsFromApi(clinicId: clinicId, clinicName: clinicName),
         _problemService.syncAdminReferralsFromApi(),
         _problemService.syncNotificationsFromApi(role: 'Clinic'),
       ]);
+    }
+
+    void openReferralsSheet() {
+      showClinicReferralsSheet(
+        context: context,
+        clinicName: clinicName,
+        referrals: _problemService.clinicReferralsFor(clinicName: clinicName),
+        onOpenReferralDirectory: () => ReferredPatientsSheet.show(context),
+        onAcceptReferral: (refId) => _problemService.acceptPatientReferralByDoctor(refId),
+        onRejectReferral: (refId) => _problemService.rejectPatientReferralByDoctor(
+          refId,
+          rejectionReason: 'Declined by clinic',
+        ),
+      );
     }
 
     void openNotifications() {
@@ -280,6 +361,18 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
         onMarkRead: (id) {
           _problemService.markNotificationRead(id);
           setState(() {});
+        },
+        onTapNotification: (notif) {
+          _problemService.markNotificationRead(notif.id);
+          final lower = '${notif.title} ${notif.message}'.toLowerCase();
+          if (lower.contains('referral')) {
+            openReferralsSheet();
+          } else if (lower.contains('booking') || lower.contains('appointment') || lower.contains('visit')) {
+            setState(() {
+              _selectedBookingStatusFilter = 'All';
+              _currentIndex = 1;
+            });
+          }
         },
       );
     }
@@ -387,12 +480,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
               onProfile: openProfile,
               onEditDetails: openEditDetails,
               onOpenFeaturedPlan: openFeaturedPlan,
-              onOpenReferrals: () => showClinicReferralsSheet(
-                context: context,
-                clinicName: clinicName,
-                referrals: referrals,
-                onOpenReferralDirectory: () => ReferredPatientsSheet.show(context),
-              ),
+              onOpenReferrals: openReferralsSheet,
               onOpenAdvertise: () => showAdvertiseOnGsHealthSheet(
                 context: context,
                 clinicName: clinicName,
@@ -1668,8 +1756,8 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
     final emailCtrl = TextEditingController();
     final licenseCtrl = TextEditingController();
     final qualCtrl = TextEditingController();
-    final expCtrl = TextEditingController(text: '5');
-    final feeCtrl = TextEditingController(text: '₹500');
+    final expCtrl = TextEditingController();
+    final feeCtrl = TextEditingController();
     final bioCtrl = TextEditingController();
     final cityCtrl = TextEditingController();
     final pincodeCtrl = TextEditingController();
@@ -1679,6 +1767,8 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
     final List<String> selectedSlots = ['09:00 AM', '11:30 AM', '02:00 PM', '04:30 PM'];
 
     DoctorModel? detectedExistingDoctor;
+    bool isSaving = false;
+    String? saveError;
 
     final allDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     final defaultSlotOptions = ['09:00 AM', '10:00 AM', '11:30 AM', '02:00 PM', '04:00 PM', '05:30 PM'];
@@ -1714,11 +1804,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
             final activeSpecNames = <String>{
               'General Medicine',
               ..._problemService.activeSpecialtyNames,
-              'Dentistry',
-              'Cardiology',
-              'Dermatology',
-              'Pediatrics',
-              'Orthopedics',
+              ...MedicalSpecialtyModel.defaultSpecialties.map((s) => s.name),
             }.toList();
 
             return Dialog(
@@ -2106,111 +2192,150 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                       ),
                       const SizedBox(height: 12),
 
+                      if (saveError != null) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          margin: const EdgeInsets.only(bottom: 10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFE3434).withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFFE3434).withValues(alpha: 0.35)),
+                          ),
+                          child: Text(
+                            saveError!,
+                            style: const TextStyle(color: Color(0xFFFE3434), fontSize: 11.5, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+
                       // Action Buttons
                       Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           TextButton(
-                            onPressed: () => Navigator.of(dialogCtx).pop(),
+                            onPressed: isSaving ? null : () => Navigator.of(dialogCtx).pop(),
                             child: const Text('Cancel'),
                           ),
                           const SizedBox(width: 8),
                           if (detectedExistingDoctor != null) ...[
                             ElevatedButton.icon(
                               key: const Key('clinic_associate_existing_doctor_button'),
-                              icon: const Icon(Icons.link_rounded, size: 16, color: Colors.white),
+                              icon: isSaving
+                                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                  : const Icon(Icons.link_rounded, size: 16, color: Colors.white),
                               label: const Text('Associate Existing Doctor', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF012A58)),
-                              onPressed: () async {
-                                await _problemService.associateDoctorWithClinic(
-                                  doctorId: detectedExistingDoctor!.id,
-                                  clinicName: _displayClinicName.isNotEmpty
-                                      ? _displayClinicName
-                                      : 'GS HEALTH Partner Clinic',
-                                  specialty: selectedSpecialty,
-                                  consultationFee: feeCtrl.text.trim().isNotEmpty ? feeCtrl.text.trim() : detectedExistingDoctor!.consultationFee,
-                                  availableDays: selectedDays,
-                                  availableSlots: selectedSlots,
-                                );
-                                Navigator.of(dialogCtx).pop();
-                                setState(() {});
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Doctor ${detectedExistingDoctor!.name} associated with $_currentClinicName.'),
-                                    backgroundColor: AppTheme.gsNavy,
-                                  ),
-                                );
-                              },
+                              onPressed: isSaving
+                                  ? null
+                                  : () async {
+                                      setModalState(() {
+                                        isSaving = true;
+                                        saveError = null;
+                                      });
+                                      await _problemService.associateDoctorWithClinic(
+                                        doctorId: detectedExistingDoctor!.id,
+                                        clinicName: _displayClinicName.isNotEmpty
+                                            ? _displayClinicName
+                                            : (_currentClinicName.isNotEmpty ? _currentClinicName : detectedExistingDoctor!.clinicName),
+                                        specialty: selectedSpecialty,
+                                        consultationFee: feeCtrl.text.trim().isNotEmpty ? feeCtrl.text.trim() : detectedExistingDoctor!.consultationFee,
+                                        availableDays: selectedDays,
+                                        availableSlots: selectedSlots,
+                                      );
+                                      if (!dialogCtx.mounted) return;
+                                      Navigator.of(dialogCtx).pop();
+                                      if (mounted) setState(() {});
+                                      ScaffoldMessenger.of(this.context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('Doctor ${detectedExistingDoctor!.name} associated with $_currentClinicName.'),
+                                          backgroundColor: AppTheme.gsNavy,
+                                        ),
+                                      );
+                                    },
                             ),
                           ] else ...[
                             ElevatedButton(
+                              key: const Key('clinic_save_doctor_button'),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: AppTheme.gsNavy,
                                 padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                               ),
-                              onPressed: () {
-                                final name = nameCtrl.text.trim();
-                                final phone = phoneCtrl.text.trim();
-                                final license = licenseCtrl.text.trim();
-                                final city = cityCtrl.text.trim();
-                                final pincode = pincodeCtrl.text.trim();
-                                if (name.isEmpty) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Full Name is mandatory.')),
-                                  );
-                                  return;
-                                }
-                                final cleanPhone = phone.replaceAll(RegExp(r'[^0-9]'), '');
-                                if (cleanPhone.length < 10) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Enter a valid 10-digit Contact Number.')),
-                                  );
-                                  return;
-                                }
-                                final expYears = int.tryParse(expCtrl.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 5;
-                                final qual = qualCtrl.text.trim().isNotEmpty
-                                    ? qualCtrl.text.trim()
-                                    : MedicalSpecialtyModel.getDefaultQualificationForSpecialty(selectedSpecialty);
+                              onPressed: isSaving
+                                  ? null
+                                  : () async {
+                                      final name = nameCtrl.text.trim();
+                                      final phone = phoneCtrl.text.trim();
+                                      final license = licenseCtrl.text.trim();
+                                      final city = cityCtrl.text.trim();
+                                      final pincode = pincodeCtrl.text.trim();
+                                      if (name.isEmpty) {
+                                        setModalState(() => saveError = 'Full Name is mandatory.');
+                                        return;
+                                      }
+                                      final cleanPhone = phone.replaceAll(RegExp(r'[^0-9]'), '');
+                                      if (cleanPhone.length < 10) {
+                                        setModalState(() => saveError = 'Enter a valid 10-digit Contact Number.');
+                                        return;
+                                      }
+                                      final expYears = int.tryParse(expCtrl.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 5;
+                                      final qual = qualCtrl.text.trim().isNotEmpty
+                                          ? qualCtrl.text.trim()
+                                          : MedicalSpecialtyModel.getDefaultQualificationForSpecialty(selectedSpecialty);
 
-                                final targetClinic = _displayClinicName.isNotEmpty
-                                    ? _displayClinicName
-                                    : 'GS HEALTH Partner Clinic';
+                                      final resolvedClinicObj = _resolvedClinic;
+                                      final targetClinic = (resolvedClinicObj?.clinicName.trim().isNotEmpty == true)
+                                          ? resolvedClinicObj!.clinicName.trim()
+                                          : (_displayClinicName.isNotEmpty ? _displayClinicName : _currentClinicName);
 
-                                final newDoc = _problemService.registerDoctor(
-                                  name: name,
-                                  phone: phone,
-                                  email: emailCtrl.text.trim(),
-                                  licenseNumber: license.isNotEmpty ? license : 'MED-LIC-REG',
-                                  specialty: selectedSpecialty,
-                                  qualification: qual,
-                                  clinicName: targetClinic,
-                                  experienceYears: expYears,
-                                  consultationFee: feeCtrl.text.trim().isNotEmpty ? feeCtrl.text.trim() : '₹500',
-                                  city: city,
-                                  pincode: pincode,
-                                );
+                                      setModalState(() {
+                                        isSaving = true;
+                                        saveError = null;
+                                      });
 
-                                // Attach slots and bio if provided
-                                if (selectedSlots.isNotEmpty || bioCtrl.text.trim().isNotEmpty) {
-                                  _problemService.updateDoctorProfessionalProfile(
-                                    doctorId: newDoc.id,
-                                    bio: bioCtrl.text.trim(),
-                                    status: 'Available',
-                                    verificationStatus: 'VERIFIED',
-                                  );
-                                }
+                                      final res = await _problemService.addDoctorToClinicAndPersist(
+                                        clinic: resolvedClinicObj,
+                                        clinicName: targetClinic,
+                                        name: name,
+                                        phone: phone,
+                                        email: emailCtrl.text.trim(),
+                                        specialty: selectedSpecialty,
+                                        qualification: qual,
+                                        experienceYears: expYears,
+                                        licenseNumber: license,
+                                        consultationFee: feeCtrl.text.trim(),
+                                        bio: bioCtrl.text.trim(),
+                                        city: city,
+                                        pincode: pincode,
+                                      );
 
-                                Navigator.of(dialogCtx).pop();
-                                setState(() {});
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Doctor $name added and associated with $targetClinic.'),
-                                    backgroundColor: AppTheme.gsNavy,
-                                  ),
-                                );
-                              },
-                              child: const Text('Save Doctor', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                      if (res['success'] == true) {
+                                        if (!dialogCtx.mounted) return;
+                                        Navigator.of(dialogCtx).pop();
+                                        if (mounted) setState(() {});
+                                        ScaffoldMessenger.of(this.context).showSnackBar(
+                                          SnackBar(
+                                            content: Text('Doctor $name added and associated with ${targetClinic.isNotEmpty ? targetClinic : "Clinic"}.'),
+                                            backgroundColor: AppTheme.gsNavy,
+                                          ),
+                                        );
+                                      } else {
+                                        if (dialogCtx.mounted) {
+                                          setModalState(() {
+                                            isSaving = false;
+                                            saveError = (res['message'] ?? 'Failed to add doctor to clinic.').toString();
+                                          });
+                                        }
+                                      }
+                                    },
+                              child: isSaving
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                    )
+                                  : const Text('Save Doctor', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                             ),
                           ],
                         ],

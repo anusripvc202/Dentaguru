@@ -117,11 +117,16 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('🏥 ${doctor.clinicName.isNotEmpty ? doctor.clinicName : "GS HEALTH Care Clinic"}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                      Text('🏥 ${doctor.clinicName.isNotEmpty ? doctor.clinicName : "Independent Practice"}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                       const SizedBox(height: 2),
-                      Text('📍 ${doctor.city.isNotEmpty ? doctor.city : "Hyderabad"} • PIN: ${doctor.pincode.isNotEmpty ? doctor.pincode : "500001"}', style: const TextStyle(fontSize: 11.5)),
-                      const SizedBox(height: 2),
-                      Text('🗣️ Languages: ${doctor.languages.isNotEmpty ? doctor.languages.join(", ") : "English, Telugu, Hindi"}', style: const TextStyle(fontSize: 11.5)),
+                      if (doctor.city.isNotEmpty || doctor.pincode.isNotEmpty) ...[
+                        Text(
+                          '📍 ${doctor.city.isNotEmpty ? doctor.city : "City not specified"}${doctor.pincode.isNotEmpty ? " • PIN: ${doctor.pincode}" : ""}',
+                          style: const TextStyle(fontSize: 11.5),
+                        ),
+                        const SizedBox(height: 2),
+                      ],
+                      Text('🗣️ Languages: ${doctor.languages.isNotEmpty ? doctor.languages.join(", ") : "Not specified"}', style: const TextStyle(fontSize: 11.5)),
                       if (doctor.phone.isNotEmpty) ...[
                         const SizedBox(height: 2),
                         Text('📞 Mobile: ${doctor.phone}', style: const TextStyle(fontSize: 11.5, color: Color(0xFF475569))),
@@ -741,14 +746,15 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '🏥 ${doc.clinicName.isNotEmpty ? doc.clinicName : "GS HEALTH Care Clinic"}',
+                        '🏥 ${doc.clinicName.isNotEmpty ? doc.clinicName : "Independent Practice"}',
                         style: const TextStyle(fontSize: 11.5, color: Color(0xFF334155), fontWeight: FontWeight.w500),
                         overflow: TextOverflow.ellipsis,
                       ),
-                      Text(
-                        '📍 ${doc.city.isNotEmpty ? doc.city : "Hyderabad"} • PIN: ${doc.pincode.isNotEmpty ? doc.pincode : "500001"}',
-                        style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
-                      ),
+                      if (doc.city.isNotEmpty || doc.pincode.isNotEmpty)
+                        Text(
+                          '📍 ${doc.city.isNotEmpty ? doc.city : "City not specified"}${doc.pincode.isNotEmpty ? " • PIN: ${doc.pincode}" : ""}',
+                          style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                        ),
                     ],
                   ),
                 ),
@@ -812,7 +818,8 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
               _buildDetailRow(Icons.local_hospital_rounded, 'Clinic Name', doc.clinicName),
               if (doc.clinicAddress.isNotEmpty)
                 _buildDetailRow(Icons.location_on_rounded, 'Clinic Address', doc.clinicAddress),
-              _buildDetailRow(Icons.location_city_rounded, 'City / Location', '${doc.city.isNotEmpty ? doc.city : "Hyderabad"} ${doc.pincode.isNotEmpty ? "• PIN: ${doc.pincode}" : ""}'),
+              if (doc.city.isNotEmpty || doc.pincode.isNotEmpty)
+                _buildDetailRow(Icons.location_city_rounded, 'City / Location', '${doc.city.isNotEmpty ? doc.city : "City not specified"}${doc.pincode.isNotEmpty ? " • PIN: ${doc.pincode}" : ""}'),
               if (doc.phone.isNotEmpty)
                 _buildDetailRow(Icons.phone_rounded, 'Mobile Number', doc.phone),
               if (doc.email.isNotEmpty)
@@ -820,7 +827,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
               _buildDetailRow(
                 Icons.translate_rounded,
                 'Languages Known',
-                doc.languages.isNotEmpty ? doc.languages.join(', ') : 'English, Telugu, Hindi',
+                doc.languages.isNotEmpty ? doc.languages.join(', ') : 'Not specified',
               ),
               _buildDetailRow(Icons.event_available_rounded, 'Availability Status', doc.status),
               _buildDetailRow(Icons.verified_user_rounded, 'Doctor Status', doc.verificationStatus),
@@ -1071,7 +1078,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                                   overflow: TextOverflow.ellipsis,
                                 ),
                                 Text(
-                                  '⭐ ${doc.rating.toStringAsFixed(1)} • ${doc.experienceYears} Yrs Exp • Fee: ${doc.consultationFee.isNotEmpty ? doc.consultationFee : "₹500"}',
+                                  '${doc.reviewCount > 0 && doc.rating > 0 ? '⭐ ${doc.rating.toStringAsFixed(1)} • ' : ''}${doc.experienceYears} Yrs Exp${doc.consultationFee.trim().isNotEmpty ? ' • Fee: ${doc.consultationFee}' : ''}',
                                   style: const TextStyle(fontSize: 10.5, color: Color(0xFF64748B)),
                                 ),
                               ],
@@ -1144,7 +1151,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                                 const SizedBox(width: 4),
                                 Expanded(
                                   child: Text(
-                                    'City: ${doc.city.isNotEmpty ? doc.city : "Hyderabad"} • Pincode: ${doc.pincode.isNotEmpty ? doc.pincode : "500001"}',
+                                    'City: ${doc.city.isNotEmpty ? doc.city : "Not specified"}${doc.pincode.isNotEmpty ? " • Pincode: ${doc.pincode}" : ""}',
                                     style: const TextStyle(fontSize: 11, color: Color(0xFF475569)),
                                     overflow: TextOverflow.ellipsis,
                                   ),
@@ -1260,7 +1267,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
                         _buildDetailRow(Icons.timeline_rounded, 'Experience', '${doc.experienceYears} Years in Clinical Practice'),
                         if (doc.clinicAddress.isNotEmpty)
                           _buildDetailRow(Icons.location_city_rounded, 'Clinic Address', doc.clinicAddress),
-                        _buildDetailRow(Icons.payments_outlined, 'Consultation Fee', doc.consultationFee.isNotEmpty ? doc.consultationFee : '₹500'),
+                        _buildDetailRow(Icons.payments_outlined, 'Consultation Fee', doc.consultationFee.trim().isNotEmpty ? doc.consultationFee.trim() : 'As per clinic tariff'),
                         _buildDetailRow(Icons.event_available_rounded, 'Availability', doc.status),
                         _buildDetailRow(Icons.verified_user_rounded, 'Verification Status', doc.verificationStatus),
                         if (doc.nextAvailableSlots.isNotEmpty)

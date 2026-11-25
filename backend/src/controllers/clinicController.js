@@ -14,7 +14,8 @@ const {
     normalizeLanguagesList,
     parseLanguageFilters,
     extractDoctorLanguages,
-    doctorMatchesLanguages
+    doctorMatchesLanguages,
+    mergeSupportedAndDoctorLanguages
 } = require('../models/Schemas');
 
 function isPrivilegedDoctorViewer(req, targetDoctor = null) {
@@ -53,6 +54,25 @@ function formatDentistRecord(d) {
     const resolvedQual = d.qualifications || d.qualification || getDefaultQualificationForSpecialty(resolvedSpec);
     const availabilityStatus = d.availability_status || d.status || 'Available';
     const isAvailable = isDoctorRecordAvailable(d);
+    const normStatusLower = String(availabilityStatus || '').trim().toLowerCase();
+    let metaOnline = '';
+    if (uObj.device_token && typeof uObj.device_token === 'string' && uObj.device_token.trim().startsWith('{')) {
+        try {
+            const parsedMeta = JSON.parse(uObj.device_token);
+            if (parsedMeta && parsedMeta.onlineStatus) {
+                metaOnline = String(parsedMeta.onlineStatus).trim().toLowerCase();
+            }
+        } catch (_) {}
+    }
+    const explicitOnline = String(d.online_status || d.onlineStatus || metaOnline || '').trim();
+    const explicitOnlineLower = explicitOnline.toLowerCase();
+    const isOnline = isAvailable && (explicitOnlineLower
+        ? (explicitOnlineLower === 'online' || explicitOnlineLower.includes('busy') || explicitOnlineLower === 'delayed')
+        : (normStatusLower === 'online' || normStatusLower === 'available' || normStatusLower.includes('busy') || normStatusLower === 'delayed'));
+    const reviewCountVal = Number(d.reviews_count ?? d.reviewCount ?? 0) || 0;
+    const resolvedOnlineStatus = !isAvailable
+        ? (normStatusLower === 'offline' ? 'Offline' : 'Unavailable')
+        : (explicitOnline || (normStatusLower.includes('busy') || normStatusLower === 'delayed' ? availabilityStatus : (isOnline ? 'Online' : 'Offline')));
 
     return {
         id: d.id,
@@ -75,8 +95,8 @@ function formatDentistRecord(d) {
         consultation_fee: d.consultation_fee || d.consultationFee || '',
         consultationFee: d.consultation_fee || d.consultationFee || '',
         bio: d.bio || '',
-        rating: d.rating || 5.0,
-        reviews_count: d.reviews_count || d.reviewCount || 1,
+        rating: reviewCountVal > 0 ? (Number(d.rating) || 0) : 0,
+        reviews_count: reviewCountVal,
         clinicName: cObj.clinic_name || d.clinicName || '',
         clinicAddress: cObj.location || d.clinicAddress || d.location || '',
         state: d.state || uObj.state || '',
@@ -87,7 +107,10 @@ function formatDentistRecord(d) {
         longitude: d.longitude || uObj.longitude || null,
         availability_status: availabilityStatus,
         status: availabilityStatus,
+        onlineStatus: resolvedOnlineStatus,
+        liveStatus: resolvedOnlineStatus,
         isAvailable,
+        isOnline,
         verificationStatus: d.verification_status || d.verificationStatus || 'VERIFIED',
         profilePhoto: uObj.biometric_token || d.profilePhoto || null,
         users: uObj,
@@ -399,35 +422,35 @@ exports.getAllDentists = async (req, res) => {
 
         let formattedDentists = dentists.map(formatDentistRecord);
 
-        // Enforce Availability ON/OFF visibility on backend
-        if (availability && availability.trim()) {
-            const availNormalized = normalizeAvailabilityStatus(availability.trim());
-            if (availNormalized === 'Available') {
-                formattedDentists = formattedDentists.filter(d => d.isAvailable);
-            } else if (availNormalized === 'Unavailable') {
-                formattedDentists = allowUnavailable ? formattedDentists.filter(d => !d.isAvailable) : [];
+        // Enforce Availability ON/OFF & Online presence visibility on backend
+        const onlineOnlyRequested = String(req.query.onlineOnly || '').trim().toLowerCase() === 'true';
+        if (onlineOnlyRequested) {
+            formattedDentists = formattedDentists.filter(d => d.isOnline);
+        } else if (availability && availability.trim()) {
+            const rawAvailLower = availability.trim().toLowerCase();
+            if (rawAvailLower === 'online') {
+                formattedDentists = formattedDentists.filter(d => d.isOnline);
             } else {
-                const rawAvailLower = availability.trim().toLowerCase();
-                formattedDentists = formattedDentists.filter(d =>
-                    (d.availability_status || '').trim().toLowerCase() === rawAvailLower &&
-                    (allowUnavailable || d.isAvailable)
-                );
+                const availNormalized = normalizeAvailabilityStatus(availability.trim());
+                if (availNormalized === 'Available') {
+                    formattedDentists = formattedDentists.filter(d => d.isAvailable);
+                } else if (availNormalized === 'Unavailable') {
+                    formattedDentists = allowUnavailable ? formattedDentists.filter(d => !d.isAvailable) : [];
+                } else {
+                    formattedDentists = formattedDentists.filter(d =>
+                        (d.availability_status || '').trim().toLowerCase() === rawAvailLower &&
+                        (allowUnavailable || d.isAvailable)
+                    );
+                }
             }
         } else if (!allowUnavailable) {
             formattedDentists = formattedDentists.filter(d => d.isAvailable);
         }
 
-        // Collect available languages across ALL eligible registered doctors BEFORE applying location/specialty/language filters
-        const availableLanguagesSet = new Map();
-        for (const d of formattedDentists) {
-            for (const lang of (d.languages || [])) {
-                const clean = (lang || '').toString().trim();
-                if (clean && !availableLanguagesSet.has(clean.toLowerCase())) {
-                    availableLanguagesSet.set(clean.toLowerCase(), clean);
-                }
-            }
-        }
-        const availableLanguages = Array.from(availableLanguagesSet.values());
+        // Collect supported application languages + all languages spoken by eligible registered doctors
+        const availableLanguages = mergeSupportedAndDoctorLanguages(
+            formattedDentists.flatMap(d => d.languages || [])
+        );
 
         // Apply combined State, City, Pincode, Specialty, Search, and Language filters at backend level
         if (state && state.trim()) {
@@ -537,20 +560,14 @@ exports.getAvailableDoctorLanguages = async (req, res) => {
         }
 
         const eligible = allowUnavailable ? dentists : dentists.filter(d => isDoctorRecordAvailable(d));
-        const langMap = new Map();
-        for (const d of eligible) {
-            for (const lang of extractDoctorLanguages(d)) {
-                const clean = (lang || '').toString().trim();
-                if (clean && !langMap.has(clean.toLowerCase())) {
-                    langMap.set(clean.toLowerCase(), clean);
-                }
-            }
-        }
+        const languages = mergeSupportedAndDoctorLanguages(
+            eligible.flatMap(d => extractDoctorLanguages(d))
+        );
 
         res.json({
             success: true,
-            count: langMap.size,
-            languages: Array.from(langMap.values())
+            count: languages.length,
+            languages
         });
     } catch (err) {
         console.error('Get Doctor Languages Error:', err.message);
@@ -613,17 +630,28 @@ exports.updateDoctorAvailability = async (req, res) => {
             });
         }
 
+        const explicitOnlineStatus = req.body.onlineStatus !== undefined
+            ? String(req.body.onlineStatus).trim()
+            : (req.body.online_status !== undefined ? String(req.body.online_status).trim() : '');
         const rawInput = req.body.isAvailable !== undefined
             ? req.body.isAvailable
             : (req.body.available !== undefined
                 ? req.body.available
                 : (req.body.availability_status !== undefined ? req.body.availability_status : req.body.status));
 
-        const normalizedStatus = normalizeAvailabilityStatus(rawInput);
+        // Support distinguishing Online Presence ('Offline' presence while schedule remains 'Available')
+        let normalizedStatus = normalizeAvailabilityStatus(rawInput);
+        let resolvedOnlinePresence = explicitOnlineStatus;
+        if (!normalizedStatus && explicitOnlineStatus) {
+            const ol = explicitOnlineStatus.toLowerCase();
+            if (ol === 'online') normalizedStatus = 'Online';
+            else if (ol === 'busy') normalizedStatus = 'Busy';
+            else if (ol === 'offline') normalizedStatus = 'Available';
+        }
         if (!normalizedStatus) {
             return res.status(400).json({
                 success: false,
-                message: 'Valid availability status is required (isAvailable: true/false or availability_status: Available/Unavailable).'
+                message: 'Valid availability status is required (Online, Offline, Available, Busy, Unavailable, or isAvailable: true/false).'
             });
         }
 
@@ -657,9 +685,24 @@ exports.updateDoctorAvailability = async (req, res) => {
         const updatedDoctor = await Dentist.findByIdAndUpdate(existingDoctor.id, {
             availability_status: normalizedStatus
         });
+        if (resolvedOnlinePresence && existingDoctor.user_id) {
+            try {
+                const docUser = await User.findById(existingDoctor.user_id);
+                let meta = {};
+                if (docUser?.device_token && typeof docUser.device_token === 'string' && docUser.device_token.trim().startsWith('{')) {
+                    try { meta = JSON.parse(docUser.device_token); } catch (_) {}
+                }
+                meta.onlineStatus = resolvedOnlinePresence;
+                await User.findByIdAndUpdate(existingDoctor.user_id, { device_token: JSON.stringify(meta) });
+            } catch (_) {}
+        }
         const refreshed = await Dentist.findById(existingDoctor.id) || updatedDoctor || existingDoctor;
-        const formatted = formatDentistRecord({ ...refreshed, availability_status: normalizedStatus });
-        const isAvailable = normalizedStatus === 'Available';
+        const formatted = formatDentistRecord({
+            ...refreshed,
+            availability_status: normalizedStatus,
+            ...(resolvedOnlinePresence ? { onlineStatus: resolvedOnlinePresence } : {})
+        });
+        const isAvailable = normalizedStatus !== 'Unavailable';
 
         res.json({
             success: true,

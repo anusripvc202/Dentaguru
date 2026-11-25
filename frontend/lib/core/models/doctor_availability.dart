@@ -70,6 +70,13 @@ class DoctorAvailabilityModel {
   final List<String> allSlots;
   final List<String> bookedSlots;
   final List<String> availableSlots;
+  final List<Map<String, dynamic>> blockedSlots;
+  final List<Map<String, dynamic>> occupiedIntervals;
+  final String liveDoctorStatus;
+  final int activeDelayMinutes;
+  final String consultationType;
+  final int consultationDurationMinutes;
+  final int bufferMinutes;
   final bool isBlocked;
   final String? blockedReason;
 
@@ -89,6 +96,13 @@ class DoctorAvailabilityModel {
     this.allSlots = const [],
     this.bookedSlots = const [],
     this.availableSlots = const [],
+    this.blockedSlots = const [],
+    this.occupiedIntervals = const [],
+    this.liveDoctorStatus = 'Available',
+    this.activeDelayMinutes = 0,
+    this.consultationType = 'In-Person',
+    this.consultationDurationMinutes = 30,
+    this.bufferMinutes = 10,
     this.isBlocked = false,
     this.blockedReason,
   });
@@ -99,6 +113,13 @@ class DoctorAvailabilityModel {
         return val.map((e) => e.toString().trim()).where((s) => s.isNotEmpty).toList();
       }
       return [];
+    }
+
+    List<Map<String, dynamic>> parseMapList(dynamic val) {
+      if (val is List) {
+        return val.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+      }
+      return const [];
     }
 
     final bStart = json['breakStartTime']?.toString() ?? json['break_start_time']?.toString() ?? json['break_start']?.toString();
@@ -127,6 +148,13 @@ class DoctorAvailabilityModel {
       allSlots: parseStringList(json['allSlots'] ?? json['slots']),
       bookedSlots: parseStringList(json['bookedSlots']),
       availableSlots: parseStringList(json['availableSlots'] ?? json['slots']),
+      blockedSlots: parseMapList(json['blockedSlots']),
+      occupiedIntervals: parseMapList(json['occupiedIntervals']),
+      liveDoctorStatus: (json['liveDoctorStatus'] ?? 'Available').toString(),
+      activeDelayMinutes: int.tryParse(json['activeDelayMinutes']?.toString() ?? '0') ?? 0,
+      consultationType: (json['consultationType'] ?? 'In-Person').toString(),
+      consultationDurationMinutes: int.tryParse(json['consultationDurationMinutes']?.toString() ?? '30') ?? 30,
+      bufferMinutes: int.tryParse(json['bufferMinutes']?.toString() ?? '10') ?? 10,
       isBlocked: json['isBlocked'] == true || json['is_blocked'] == true,
       blockedReason: json['blockedReason']?.toString() ?? json['blocked_reason']?.toString(),
     );
@@ -150,6 +178,13 @@ class DoctorAvailabilityModel {
       'allSlots': allSlots,
       'bookedSlots': bookedSlots,
       'availableSlots': availableSlots,
+      'blockedSlots': blockedSlots,
+      'occupiedIntervals': occupiedIntervals,
+      'liveDoctorStatus': liveDoctorStatus,
+      'activeDelayMinutes': activeDelayMinutes,
+      'consultationType': consultationType,
+      'consultationDurationMinutes': consultationDurationMinutes,
+      'bufferMinutes': bufferMinutes,
       'isBlocked': isBlocked,
       if (blockedReason != null) 'blockedReason': blockedReason,
     };
@@ -171,6 +206,13 @@ class DoctorAvailabilityModel {
     List<String>? allSlots,
     List<String>? bookedSlots,
     List<String>? availableSlots,
+    List<Map<String, dynamic>>? blockedSlots,
+    List<Map<String, dynamic>>? occupiedIntervals,
+    String? liveDoctorStatus,
+    int? activeDelayMinutes,
+    String? consultationType,
+    int? consultationDurationMinutes,
+    int? bufferMinutes,
     bool? isBlocked,
     String? blockedReason,
   }) {
@@ -190,6 +232,13 @@ class DoctorAvailabilityModel {
       allSlots: allSlots ?? this.allSlots,
       bookedSlots: bookedSlots ?? this.bookedSlots,
       availableSlots: availableSlots ?? this.availableSlots,
+      blockedSlots: blockedSlots ?? this.blockedSlots,
+      occupiedIntervals: occupiedIntervals ?? this.occupiedIntervals,
+      liveDoctorStatus: liveDoctorStatus ?? this.liveDoctorStatus,
+      activeDelayMinutes: activeDelayMinutes ?? this.activeDelayMinutes,
+      consultationType: consultationType ?? this.consultationType,
+      consultationDurationMinutes: consultationDurationMinutes ?? this.consultationDurationMinutes,
+      bufferMinutes: bufferMinutes ?? this.bufferMinutes,
       isBlocked: isBlocked ?? this.isBlocked,
       blockedReason: blockedReason ?? this.blockedReason,
     );

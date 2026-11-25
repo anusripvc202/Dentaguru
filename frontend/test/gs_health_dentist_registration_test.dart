@@ -235,8 +235,11 @@ void _installDentistRegisterOverride() {
     String? emergencyContact,
     String? specialty,
     String? licenseNumber,
+    String? clinicId,
     String? clinicName,
     String? clinicAddress,
+    String? consultationFee,
+    String? bio,
     String? location,
     String? state,
     String? city,
@@ -401,7 +404,7 @@ void main() {
 
       // Review note
       expect(
-        find.text('New dentist profiles are reviewed by GS HEALTH before they appear to patients.'),
+        find.text('New doctor profiles are reviewed by GS HEALTH before they appear to patients.'),
         findsOneWidget,
       );
 
@@ -551,7 +554,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(_dentistRegisterCalls, greaterThanOrEqualTo(1));
-      expect(_firstDentistPayload?['specialty'], 'General Dentistry');
+      expect(_firstDentistPayload?['specialty'], 'General Medicine');
       expect(_firstDentistPayload?['clinicName'], isNull);
       expect(_firstDentistPayload?['clinicAddress'], isNull);
       expect(find.text('DENTIST_ROUTE'), findsOneWidget);

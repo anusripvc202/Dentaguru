@@ -35,7 +35,7 @@ void main() {
         createdAt: now,
       );
       expect(dentistSession.targetRoute, '/dentist');
-      expect(dentistSession.displayRole, 'Dentist');
+      expect(dentistSession.displayRole, 'Doctor');
 
       final doctorSession = UserSession(
         token: 'token_456_b',
@@ -44,7 +44,7 @@ void main() {
         createdAt: now,
       );
       expect(doctorSession.targetRoute, '/dentist');
-      expect(doctorSession.displayRole, 'Dentist');
+      expect(doctorSession.displayRole, 'Doctor');
 
       final adminSession = UserSession(
         token: 'token_789',

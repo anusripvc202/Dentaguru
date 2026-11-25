@@ -273,10 +273,11 @@ void main() {
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 300));
 
-        // Verify My visits header and tabs
+        // Verify My visits header and 3 separated tabs
         expect(find.text('My visits'), findsOneWidget);
-        expect(find.text('Upcoming'), findsOneWidget);
-        expect(find.text('Past & cancelled'), findsOneWidget);
+        expect(find.text('Upcoming Visits'), findsOneWidget);
+        expect(find.text('Previous Visits'), findsOneWidget);
+        expect(find.text('Cancelled Visits'), findsOneWidget);
 
         // Verify Upcoming appointment card details
         expect(find.text('Dr. Ananya Rao'), findsWidgets);
@@ -313,16 +314,25 @@ void main() {
         // Only 1 upcoming visit remains
         expect(find.text('Cancel visit'), findsOneWidget);
 
-        // Switch to "Past & cancelled" tab
-        final pastTabFinder = find.byKey(const Key('visits_tab_past_cancelled'));
-        await tester.ensureVisible(pastTabFinder);
+        // Switch to "Previous Visits" tab
+        final prevTabFinder = find.byKey(const Key('visits_tab_previous'));
+        await tester.ensureVisible(prevTabFinder);
         await tester.pump();
-        await tester.tap(pastTabFinder);
+        await tester.tap(prevTabFinder);
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 300));
 
-        // Verify Completed and Cancelled badges appear, and no Cancel visit button is shown
         expect(find.text('Completed'), findsOneWidget);
+        expect(find.text('Cancel visit'), findsNothing);
+
+        // Switch to "Cancelled Visits" tab
+        final cancelledTabFinder = find.byKey(const Key('visits_tab_cancelled'));
+        await tester.ensureVisible(cancelledTabFinder);
+        await tester.pump();
+        await tester.tap(cancelledTabFinder);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
         expect(find.text('Cancelled'), findsOneWidget);
         expect(find.text('Cancel visit'), findsNothing);
       },

@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../constants/api_constants.dart';
+import '../constants/booking_rules_config.dart';
 import '../models/medical_specialty_model.dart';
 import 'analytics_service.dart';
 import 'session_service.dart';
@@ -376,6 +377,31 @@ class ApiService {
               'rating': 5.0,
               'reviews_count': 0,
             });
+          } catch (_) {}
+        } else if (role == 'Clinic' || role.toLowerCase() == 'clinic') {
+          try {
+            final cName = (clinicName != null && clinicName.trim().isNotEmpty)
+                ? clinicName.trim()
+                : (name.trim().isNotEmpty ? name.trim() : 'GS HEALTH Clinic');
+            final existingClinic = await client
+                .from('clinics')
+                .select('id, user_id')
+                .ilike('clinic_name', cName)
+                .limit(1)
+                .maybeSingle();
+            if (existingClinic == null) {
+              await client.from('clinics').insert({
+                'user_id': newUserId,
+                'clinic_name': cName,
+                'location': effectiveLocation.isNotEmpty ? effectiveLocation : (city?.trim() ?? 'GS HEALTH Medical Center'),
+                'verified': true,
+                'rating': 5.0,
+                'reviews_count': 0,
+                'services': ['General Consultation'],
+              });
+            } else if (existingClinic['user_id'] == null || existingClinic['user_id'].toString().trim().isEmpty) {
+              await client.from('clinics').update({'user_id': newUserId}).eq('id', existingClinic['id']);
+            }
           } catch (_) {}
         } else if (role == 'Sub-Admin' || role.toLowerCase().contains('sub')) {
           try {
@@ -1368,11 +1394,7 @@ class ApiService {
         final data = jsonDecode(response.body);
         final availLangs = data['availableLanguages'];
         if (availLangs is List) {
-          _lastAvailableDoctorLanguages = availLangs
-              .map((e) => e.toString().trim())
-              .where((e) => e.isNotEmpty)
-              .toSet()
-              .toList();
+          _lastAvailableDoctorLanguages = deduplicateLanguages(availLangs);
         }
         final list = data['dentists'] ?? data['doctors'] ?? [];
         if (list is List) {
@@ -1423,30 +1445,13 @@ class ApiService {
           });
         }
         if (selectedLangs.isNotEmpty) {
-          final targets = selectedLangs.map((l) => l.toLowerCase()).toList();
           filtered = filtered.where((d) {
-            final List<String> docLangs = [];
-            final raw = d['languages'];
-            if (raw is List) {
-              docLangs.addAll(raw.map((e) => e.toString().trim().toLowerCase()));
-            } else if (raw is String && raw.trim().isNotEmpty) {
-              docLangs.addAll(raw.split(',').map((e) => e.trim().toLowerCase()));
-            }
-            final userObj = d['users'];
-            if (userObj is Map) {
-              if (userObj['languages'] is List) {
-                docLangs.addAll((userObj['languages'] as List).map((e) => e.toString().trim().toLowerCase()));
-              }
-              if (userObj['device_token'] != null && userObj['device_token'].toString().startsWith('{')) {
-                try {
-                  final meta = jsonDecode(userObj['device_token'].toString());
-                  if (meta['languages'] is List) {
-                    docLangs.addAll((meta['languages'] as List).map((e) => e.toString().trim().toLowerCase()));
-                  }
-                } catch (_) {}
-              }
-            }
-            return targets.any((t) => docLangs.any((dl) => dl == t || dl.startsWith('$t ') || dl.startsWith('$t(')));
+            final userObj = d['users'] is Map ? d['users'] as Map : const {};
+            final docLangs = extractDoctorLanguagesFromRaw(
+              d is Map ? d : const {},
+              userObj,
+            );
+            return doctorLanguagesMatch(docLangs, selectedLangs);
           });
         }
         _lastFetchDentistsSucceeded = true;
@@ -1476,11 +1481,7 @@ class ApiService {
         final data = jsonDecode(response.body);
         final list = data['languages'];
         if (list is List) {
-          return list
-              .map((e) => e.toString().trim())
-              .where((e) => e.isNotEmpty)
-              .toSet()
-              .toList();
+          return deduplicateLanguages(list);
         }
       }
     } catch (e) {
@@ -1491,34 +1492,17 @@ class ApiService {
     try {
       final client = Supabase.instance.client;
       final res = await client.from('dentists').select('languages, availability_status, users!user_id(device_token)');
-      final seen = <String>{};
-      final result = <String>[];
+      final List<String> extracted = [];
       for (final row in res) {
         final status = (row['availability_status'] ?? 'Available').toString().trim().toLowerCase();
         if (!includeUnavailable &&
             (status == 'unavailable' || status == 'offline' || status == 'inactive' || status == 'on leave' || status == 'off' || status == 'suspended')) {
           continue;
         }
-        final langs = <String>[];
-        if (row['languages'] is List) {
-          langs.addAll((row['languages'] as List).map((e) => e.toString().trim()));
-        }
-        final userObj = row['users'];
-        if (userObj is Map && userObj['device_token'] != null && userObj['device_token'].toString().startsWith('{')) {
-          try {
-            final meta = jsonDecode(userObj['device_token'].toString());
-            if (meta['languages'] is List) {
-              langs.addAll((meta['languages'] as List).map((e) => e.toString().trim()));
-            }
-          } catch (_) {}
-        }
-        for (final l in langs) {
-          if (l.isNotEmpty && seen.add(l.toLowerCase())) {
-            result.add(l);
-          }
-        }
+        final userObj = row['users'] is Map ? row['users'] as Map : const {};
+        extracted.addAll(extractDoctorLanguagesFromRaw(row, userObj));
       }
-      return result;
+      return deduplicateLanguages(extracted);
     } catch (e) {
       debugPrint('Supabase direct fetch doctor languages notice: $e');
     }
@@ -1562,13 +1546,32 @@ class ApiService {
     }
   }
 
-  /// Toggle Doctor Availability ON/OFF persistently via Backend API (and Supabase fallback)
-  Future<Map<String, dynamic>> updateDoctorAvailability(String doctorId, bool isAvailable) async {
-    final statusStr = isAvailable ? 'Available' : 'Unavailable';
+  /// Test hook for stubbing doctor availability toggles in headless widget tests.
+  static Future<Map<String, dynamic>> Function(
+    String doctorId,
+    bool isAvailable, {
+    String? statusOverride,
+  })? debugUpdateDoctorAvailabilityOverride;
+
+  /// Toggle Doctor Availability ON/OFF or 5-state presence ('Online', 'Offline', 'Available', 'Busy', 'Unavailable')
+  Future<Map<String, dynamic>> updateDoctorAvailability(
+    String doctorId,
+    bool isAvailable, {
+    String? statusOverride,
+  }) async {
+    final override = debugUpdateDoctorAvailabilityOverride;
+    if (override != null) {
+      return override(doctorId, isAvailable, statusOverride: statusOverride);
+    }
+    final statusStr = (statusOverride != null && statusOverride.trim().isNotEmpty)
+        ? statusOverride.trim()
+        : (isAvailable ? 'Available' : 'Unavailable');
     final bodyJson = jsonEncode({
       'isAvailable': isAvailable,
       'availability_status': statusStr,
       'status': statusStr,
+      if (statusOverride != null && statusOverride.trim().isNotEmpty)
+        'onlineStatus': statusOverride.trim(),
     });
 
     try {
@@ -1921,6 +1924,7 @@ class ApiService {
     required String date,
     required String timeSlot,
     required String treatment,
+    String? consultationMode,
   }) async {
     try {
       final url = Uri.parse(ApiConstants.appointments);
@@ -1934,6 +1938,8 @@ class ApiService {
           'date': date,
           'timeSlot': timeSlot,
           'treatment': treatment,
+          if (consultationMode != null && consultationMode.trim().isNotEmpty)
+            'consultationMode': consultationMode.trim(),
         }),
       ).timeout(const Duration(seconds: 35));
       final resData = jsonDecode(response.body);
@@ -3832,9 +3838,13 @@ class ApiService {
     String? preferredDoctorClinic,
     String? referringDentistId,
     String? referringDentistName,
+    String? escalationType,
   }) async {
     final bool isDirectReferral = preferredDoctorId != null && preferredDoctorId.isNotEmpty;
-    final String initialStatus = isDirectReferral ? 'DENTIST_ASSIGNED' : 'PENDING_ADMIN_REVIEW';
+    final bool isCoordEscalation = !isDirectReferral && escalationType?.toUpperCase() == 'COORDINATOR_ASSISTANCE';
+    final String initialStatus = isDirectReferral
+        ? 'DENTIST_ASSIGNED'
+        : (isCoordEscalation ? 'SUBMITTED' : 'PENDING_ADMIN_REVIEW');
 
     // 1. Try Supabase direct first
     try {
@@ -3845,6 +3855,7 @@ class ApiService {
         'problem_description': problemDescription,
         'symptoms': [
           if (specialty != null && specialty.trim().isNotEmpty) 'Specialty: ${specialty.trim()}',
+          if (isCoordEscalation) 'Coordinator Assistance Escalation',
           if (symptoms != null && symptoms.trim().isNotEmpty) symptoms.trim(),
         ].join(' • '),
         'preferred_location': preferredLocation ?? '',
@@ -3857,6 +3868,8 @@ class ApiService {
           'suggested_dentist_id': preferredDoctorId,
           'admin_notes': 'Referral directly assigned to ${preferredDoctorName ?? 'Specialist'}',
         },
+        if (isCoordEscalation)
+          'admin_notes': 'Coordinator assistance requested${specialty != null && specialty.isNotEmpty ? ' for $specialty' : ''}.\nCOORD_META:${jsonEncode({'escalationType': 'COORDINATOR_ASSISTANCE', 'specialty': specialty ?? '', 'coordinatorStatus': 'Submitted', 'followUpNotes': []})}',
       };
       final res = await Supabase.instance.client.from('patient_problem_requests').insert(payload).select().single();
       if (res.isNotEmpty) {
@@ -3868,6 +3881,7 @@ class ApiService {
             'problemCategory': problemCategory,
             'problemDescription': problemDescription,
             if (specialty != null && specialty.trim().isNotEmpty) 'specialty': specialty.trim(),
+            if (escalationType != null && escalationType.trim().isNotEmpty) 'escalationType': escalationType.trim(),
             if (symptoms != null) 'symptoms': symptoms,
             'patientName': patientName,
             'patientPhone': patientPhone,
@@ -3894,6 +3908,7 @@ class ApiService {
           'problemCategory': problemCategory,
           'problemDescription': problemDescription,
           if (specialty != null && specialty.trim().isNotEmpty) 'specialty': specialty.trim(),
+          if (escalationType != null && escalationType.trim().isNotEmpty) 'escalationType': escalationType.trim(),
           if (symptoms != null) 'symptoms': symptoms,
           if (preferredLocation != null) 'preferredLocation': preferredLocation,
           if (attachments != null) 'attachments': attachments,
@@ -3914,7 +3929,6 @@ class ApiService {
   Future<List<dynamic>> fetchPatientProblemRequests({String? patientId}) async {
     final client = Supabase.instance.client;
     final currentUserId = client.auth.currentUser?.id;
-    final currentUserEmail = client.auth.currentUser?.email;
     final targetId = (patientId != null && patientId.isNotEmpty) ? patientId : currentUserId;
 
     if (targetId == null || targetId.isEmpty) return [];
@@ -5193,6 +5207,34 @@ class ApiService {
     }
   }
 
+  /// Admin / Coordinator: Update 6-stage coordinator status and append follow-up note
+  Future<Map<String, dynamic>> updateCoordinatorStatus({
+    required String requestId,
+    required String status,
+    String? followUpNote,
+    String? coordinatorId,
+    String? coordinatorName,
+    String? doctorId,
+  }) async {
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/problem-requests/$requestId/coordinator-status');
+      final response = await http.patch(
+        url,
+        headers: _headers,
+        body: jsonEncode({
+          'status': status,
+          if (followUpNote != null && followUpNote.trim().isNotEmpty) 'followUpNote': followUpNote.trim(),
+          if (coordinatorId != null) 'coordinatorId': coordinatorId,
+          if (coordinatorName != null) 'coordinatorName': coordinatorName,
+          if (doctorId != null) 'doctorId': doctorId,
+        }),
+      ).timeout(const Duration(seconds: 35));
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to update coordinator status.'};
+    }
+  }
+
   /// Dentist: Accept Problem Request / Referral & Confirm Slot
   Future<Map<String, dynamic>> acceptProblemRequest({
     required String requestId,
@@ -5391,6 +5433,197 @@ class ApiService {
     }
   }
 
+  /// Fetch centralized hybrid scheduling rules (durations, buffers, intervals, thresholds)
+  Future<Map<String, dynamic>> fetchSchedulingRules() async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/scheduling/rules');
+      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 25));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['rules'] is Map) {
+          BookingRulesConfig.applyFromJson(Map<String, dynamic>.from(data['rules'] as Map));
+        }
+        return Map<String, dynamic>.from(data);
+      }
+    } catch (e) {
+      debugPrint('Fetch scheduling rules notice: $e');
+    }
+    return {'success': true, 'rules': BookingRulesConfig.toJson()};
+  }
+
+  /// Admin: Update hybrid scheduling duration & buffer rules
+  Future<Map<String, dynamic>> updateSchedulingRules(Map<String, dynamic> rules) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/scheduling/rules');
+      final response = await http
+          .put(uri, headers: _headers, body: jsonEncode(rules))
+          .timeout(const Duration(seconds: 25));
+      final data = jsonDecode(response.body);
+      if (response.statusCode == 200 && data['success'] == true && data['rules'] is Map) {
+        BookingRulesConfig.applyFromJson(Map<String, dynamic>.from(data['rules'] as Map));
+        return Map<String, dynamic>.from(data);
+      }
+      return {
+        'success': false,
+        'message': data['message'] ?? 'Failed to update scheduling rules.',
+      };
+    } catch (_) {
+      BookingRulesConfig.applyFromJson(rules);
+      return {'success': true, 'rules': BookingRulesConfig.toJson(), 'localOnly': true};
+    }
+  }
+
+  /// Admin: Live hybrid doctor calendar monitor & pending reschedule requests
+  Future<Map<String, dynamic>> fetchLiveSchedulingStatus({String? date}) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/scheduling/live-status').replace(
+        queryParameters: (date != null && date.trim().isNotEmpty) ? {'date': date.trim()} : null,
+      );
+      final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 25));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['rules'] is Map) {
+          BookingRulesConfig.applyFromJson(Map<String, dynamic>.from(data['rules'] as Map));
+        }
+        return Map<String, dynamic>.from(data);
+      }
+    } catch (e) {
+      debugPrint('Fetch live scheduling status notice: $e');
+    }
+    return {
+      'success': false,
+      'doctors': const [],
+      'pendingRescheduleRequests': const [],
+      'rules': BookingRulesConfig.toJson(),
+    };
+  }
+
+  /// Doctor/Admin: Start consultation (updates live doctor status to Busy – Online/In-Person Consultation)
+  Future<Map<String, dynamic>> startConsultation(String appointmentId) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/appointments/$appointmentId/start');
+      final response = await http.patch(uri, headers: _headers).timeout(const Duration(seconds: 25));
+      final data = jsonDecode(response.body);
+      if (response.statusCode == 200 && data['success'] == true) {
+        return Map<String, dynamic>.from(data);
+      }
+      return {'success': false, 'message': data['message'] ?? 'Failed to start consultation.'};
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to start consultation: $e'};
+    }
+  }
+
+  /// Doctor/Admin: Mark consultation delayed & alert next patient + Admin
+  Future<Map<String, dynamic>> markConsultationDelayed(String appointmentId, {int delayMinutes = 15}) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/appointments/$appointmentId/delay');
+      final response = await http
+          .patch(uri, headers: _headers, body: jsonEncode({'delayMinutes': delayMinutes}))
+          .timeout(const Duration(seconds: 25));
+      final data = jsonDecode(response.body);
+      if (response.statusCode == 200 && data['success'] == true) {
+        return Map<String, dynamic>.from(data);
+      }
+      return {'success': false, 'message': data['message'] ?? 'Failed to mark consultation delay.'};
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to mark consultation delay: $e'};
+    }
+  }
+
+  /// Doctor/Admin: Mark patient no-show and release slot
+  Future<Map<String, dynamic>> markPatientNoShow(String appointmentId) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/appointments/$appointmentId/no-show');
+      final response = await http.patch(uri, headers: _headers).timeout(const Duration(seconds: 25));
+      final data = jsonDecode(response.body);
+      if (response.statusCode == 200 && data['success'] == true) {
+        return Map<String, dynamic>.from(data);
+      }
+      return {'success': false, 'message': data['message'] ?? 'Failed to mark patient no-show.'};
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to mark patient no-show: $e'};
+    }
+  }
+
+  /// Patient: Respond to doctor delay (WAIT, REQUEST_RESCHEDULE, SWITCH_DOCTOR)
+  Future<Map<String, dynamic>> submitPatientDelayResponse({
+    required String appointmentId,
+    required String action,
+    String? requestedDate,
+    String? requestedTimeSlot,
+    String? reason,
+  }) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/appointments/$appointmentId/delay-response');
+      final response = await http
+          .post(
+            uri,
+            headers: _headers,
+            body: jsonEncode({
+              'action': action,
+              if (requestedDate != null) 'requestedDate': requestedDate,
+              if (requestedTimeSlot != null) 'requestedTimeSlot': requestedTimeSlot,
+              if (reason != null) 'reason': reason,
+            }),
+          )
+          .timeout(const Duration(seconds: 25));
+      final data = jsonDecode(response.body);
+      if (response.statusCode == 200 && data['success'] == true) {
+        return Map<String, dynamic>.from(data);
+      }
+      return {'success': false, 'message': data['message'] ?? 'Failed to submit delay response.'};
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to submit response: $e'};
+    }
+  }
+
+  /// Admin/Doctor: Manually block an individual time slot on a date
+  Future<Map<String, dynamic>> blockDoctorTimeSlot({
+    required String dentistId,
+    required String date,
+    required String startTime,
+    String? endTime,
+    String reason = 'Blocked by Admin',
+  }) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/doctor-availability/block-slot');
+      final response = await http
+          .post(
+            uri,
+            headers: _headers,
+            body: jsonEncode({
+              'dentistId': dentistId,
+              'date': date.contains('T') ? date.split('T').first : date,
+              'startTime': startTime,
+              if (endTime != null) 'endTime': endTime,
+              'reason': reason,
+            }),
+          )
+          .timeout(const Duration(seconds: 25));
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to block time slot: $e'};
+    }
+  }
+
+  /// Admin/Doctor: Unblock an individual time slot on a date
+  Future<Map<String, dynamic>> unblockDoctorTimeSlot({
+    required String dentistId,
+    required String date,
+    required String startTime,
+  }) async {
+    try {
+      final cleanDate = date.contains('T') ? date.split('T').first : date;
+      final uri = Uri.parse('${ApiConstants.baseUrl}/doctor-availability/block-slot').replace(
+        queryParameters: {'dentistId': dentistId, 'date': cleanDate, 'startTime': startTime},
+      );
+      final response = await http.delete(uri, headers: _headers).timeout(const Duration(seconds: 25));
+      return Map<String, dynamic>.from(jsonDecode(response.body));
+    } catch (e) {
+      return {'success': false, 'message': 'Failed to unblock time slot: $e'};
+    }
+  }
+
   /// Admin: Verify Dentist Status
   Future<Map<String, dynamic>> verifyDentist(String dentistId, String status, {String? notes}) async {
     try {
@@ -5532,16 +5765,17 @@ class ApiService {
         bool hasBooked = false;
         bool hasCompleted = false;
 
-        if (allAppts is List) {
-          for (final a in allAppts) {
-            if (a['patient_id']?.toString() == rId || a['patient_phone']?.toString() == rPhone) {
-              final st = (a['status'] ?? '').toString().toUpperCase();
-              if (st == 'COMPLETED') hasCompleted = true;
-              else hasBooked = true;
+        for (final a in allAppts) {
+          if (a['patient_id']?.toString() == rId || a['patient_phone']?.toString() == rPhone) {
+            final st = (a['status'] ?? '').toString().toUpperCase();
+            if (st == 'COMPLETED') {
+              hasCompleted = true;
+            } else {
+              hasBooked = true;
             }
           }
         }
-        if (!hasBooked && !hasCompleted && allProblems is List) {
+        if (!hasBooked && !hasCompleted) {
           for (final p in allProblems) {
             if (p['patient_id']?.toString() == rId || p['patient_phone']?.toString() == rPhone) {
               hasBooked = true;
@@ -5944,7 +6178,7 @@ class ApiService {
     required String referredPatientLocation,
     required String requiredSpecialist,
     required String clinicalComplaint,
-    required String doctorId,
+    String doctorId = '',
     String? referrerPatientId,
     String? doctorName,
     String? doctorClinicName,
@@ -5952,6 +6186,7 @@ class ApiService {
     String? doctorCity,
     String? doctorPincode,
     String? doctorPhone,
+    bool sendWhatsApp = false,
   }) async {
     final override = debugCreatePatientReferralOverride;
     if (override != null) {
@@ -5971,9 +6206,12 @@ class ApiService {
       currentUserId = (SupabaseService.safeCurrentUser?.id ?? '').trim();
     }
 
-    final cleanDocName = (doctorName != null && doctorName.trim().isNotEmpty)
-        ? (doctorName.trim().startsWith('Dr.') ? doctorName.trim() : 'Dr. ${doctorName.trim()}')
-        : 'Doctor';
+    final trimmedDoctorId = doctorId.trim();
+    final cleanDocName = trimmedDoctorId.isEmpty
+        ? 'Any available specialist'
+        : ((doctorName != null && doctorName.trim().isNotEmpty)
+            ? (doctorName.trim().startsWith('Dr.') ? doctorName.trim() : 'Dr. ${doctorName.trim()}')
+            : 'Doctor');
 
     final cleanAge = referredPatientAge.trim().isNotEmpty ? referredPatientAge.trim() : 'Not specified';
     final cleanGender = referredPatientGender.trim().isNotEmpty ? referredPatientGender.trim() : 'Not specified';
@@ -5995,8 +6233,9 @@ class ApiService {
       'referredPatientLocation': cleanLocation,
       'requiredSpecialist': requiredSpecialist.trim(),
       'clinicalComplaint': clinicalComplaint.trim(),
-      'doctorId': doctorId,
-      'doctor_id': doctorId,
+      'sendWhatsApp': sendWhatsApp,
+      if (trimmedDoctorId.isNotEmpty) 'doctorId': trimmedDoctorId,
+      if (trimmedDoctorId.isNotEmpty) 'doctor_id': trimmedDoctorId,
       'doctorName': cleanDocName,
       if (doctorClinicName != null && doctorClinicName.isNotEmpty) 'doctorClinicName': doctorClinicName,
       if (doctorLocation != null && doctorLocation.isNotEmpty) 'doctorLocation': doctorLocation,
@@ -6074,18 +6313,18 @@ class ApiService {
       'referred_patient_location': cleanLocation,
       'required_specialist': requiredSpecialist.trim(),
       'clinical_complaint': clinicalComplaint.trim(),
-      'doctor_id': doctorId,
-      'assigned_doctor_id': doctorId,
+      if (trimmedDoctorId.isNotEmpty) 'doctor_id': trimmedDoctorId,
+      if (trimmedDoctorId.isNotEmpty) 'assigned_doctor_id': trimmedDoctorId,
       'doctor_name': cleanDocName,
       'doctorName': cleanDocName,
       'doctorSpecialty': requiredSpecialist.trim(),
-      'doctorClinicName': doctorClinicName ?? 'GS HEALTH Partner Clinic',
+      'doctorClinicName': doctorClinicName ?? '',
       'doctorLocation': doctorLocation ?? cleanLocation,
       'doctorCity': doctorCity ?? cleanCity,
       'doctorPincode': doctorPincode ?? cleanPincode,
       'doctorPhone': doctorPhone ?? '',
       'status': 'Pending',
-      'whatsapp_status': 'Sent',
+      'whatsapp_status': sendWhatsApp ? 'Pending' : 'NotSent',
       'referral_date': DateTime.now().toIso8601String(),
       'created_at': DateTime.now().toIso8601String(),
     };
@@ -6178,7 +6417,7 @@ class ApiService {
         if (resolvedDoctorId != null) 'doctor_id': resolvedDoctorId,
         if (resolvedDoctorId != null) 'assigned_doctor_id': resolvedDoctorId,
         'status': 'Pending',
-        'whatsapp_status': 'Sent',
+        'whatsapp_status': sendWhatsApp ? 'Pending' : 'NotSent',
         'referral_date': DateTime.now().toIso8601String(),
       };
 
@@ -6186,24 +6425,25 @@ class ApiService {
         final res = await client.from('referrals').insert(dbReferralRow).select().single();
         final insertedId = res['id']?.toString() ?? '';
 
-        // Notifications for Receiving Doctor, Referred Patient & Admin
+        // Notifications for Receiving Doctor (if assigned), Referred Patient & Admin
         try {
           await client.from('notifications').insert([
-            {
-              'recipient_role': 'Dentist',
-              'recipient_id': resolvedDoctorUserId ?? resolvedDoctorId ?? doctorId,
-              if (insertedId.isNotEmpty) 'referral_id': insertedId,
-              'title': 'New Patient Referral',
-              'message': 'A new referral for ${referredPatientName.trim()} has been assigned to you.',
-              'type': 'NEW_REFERRAL',
-            },
+            if (resolvedDoctorId != null || trimmedDoctorId.isNotEmpty)
+              {
+                'recipient_role': 'Dentist',
+                'recipient_id': resolvedDoctorUserId ?? resolvedDoctorId ?? trimmedDoctorId,
+                if (insertedId.isNotEmpty) 'referral_id': insertedId,
+                'title': 'New Patient Referral',
+                'message': 'A new referral for ${referredPatientName.trim()} has been assigned to you.',
+                'type': 'NEW_REFERRAL',
+              },
             if (linkedPatientId != null)
               {
                 'recipient_role': 'Patient',
                 'recipient_id': linkedPatientId,
                 if (insertedId.isNotEmpty) 'referral_id': insertedId,
                 'title': 'Specialist Referral Received',
-                'message': 'You have been referred to $cleanDocName (${requiredSpecialist.trim()}).',
+                'message': 'You have been referred for ${requiredSpecialist.trim()}${trimmedDoctorId.isNotEmpty ? ' with $cleanDocName' : ''}.',
                 'type': 'NEW_REFERRAL',
               },
             {
@@ -6211,7 +6451,7 @@ class ApiService {
               'recipient_id': 'ALL_ADMINS',
               if (insertedId.isNotEmpty) 'referral_id': insertedId,
               'title': 'New Patient Referral Submitted',
-              'message': '${referredPatientName.trim()} was referred to $cleanDocName.',
+              'message': '${referredPatientName.trim()} was referred for ${requiredSpecialist.trim()}${trimmedDoctorId.isNotEmpty ? ' ($cleanDocName)' : ''}.',
               'type': 'NEW_REFERRAL',
             },
           ]);
@@ -6219,7 +6459,7 @@ class ApiService {
 
         final enrichedRes = Map<String, dynamic>.from(res);
         enrichedRes['doctorName'] = cleanDocName;
-        enrichedRes['doctorClinicName'] = doctorClinicName ?? 'GS HEALTH Partner Clinic';
+        enrichedRes['doctorClinicName'] = doctorClinicName ?? '';
         enrichedRes['doctorSpecialty'] = requiredSpecialist.trim();
         return {'success': true, 'referral': enrichedRes, 'message': 'Referral submitted successfully.'};
       } catch (referralTableErr) {
@@ -6795,6 +7035,65 @@ class ApiService {
     return {'success': false, 'message': 'Failed to reject referral'};
   }
 
+  @visibleForTesting
+  static Future<Map<String, dynamic>> Function(String referralId, {required String status, String? reason})?
+      debugUpdatePatientReferralStatusOverride;
+
+  /// Update patient referral status across all 5 states (Pending, Accepted, Rejected, Contacted, Completed)
+  Future<Map<String, dynamic>> updatePatientReferralStatus(
+    String referralId, {
+    required String status,
+    String? reason,
+  }) async {
+    final override = debugUpdatePatientReferralStatusOverride;
+    if (override != null) {
+      return override(referralId, status: status, reason: reason);
+    }
+
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/referrals/$referralId/status');
+      final response = await http.patch(
+        url,
+        headers: _headersWithUser(),
+        body: jsonEncode({
+          'status': status,
+          if (reason != null && reason.trim().isNotEmpty) 'rejectionReason': reason.trim(),
+        }),
+      ).timeout(const Duration(seconds: 35));
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+      if (response.statusCode == 400 || response.statusCode == 401 || response.statusCode == 403 || response.statusCode == 404) {
+        try {
+          final body = jsonDecode(response.body);
+          if (body is Map<String, dynamic>) return {'success': false, 'statusCode': response.statusCode, ...body};
+        } catch (_) {}
+        return {'success': false, 'statusCode': response.statusCode, 'message': 'Unable to update referral status.'};
+      }
+    } catch (e) {
+      debugPrint('⚠️ Express update referral status notice: $e');
+    }
+
+    final client = SupabaseService.safeClient;
+    if (client == null) {
+      return {'success': false, 'message': 'Unable to update referral status right now. Server unreachable.'};
+    }
+    try {
+      final res = await client.from('referrals').update({
+        'status': status,
+        'rejection_reason': status == 'Rejected' ? (reason ?? 'Unavailable') : null,
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', referralId).select().maybeSingle();
+      if (res != null) {
+        return {'success': true, 'referral': res};
+      }
+    } catch (e) {
+      debugPrint('❌ Supabase update referral status error: $e');
+    }
+    return {'success': false, 'message': 'Failed to update referral status.'};
+  }
+
   /// Delete a patient referral
   Future<Map<String, dynamic>> deletePatientReferral(String referralId) async {
     // 1. Primary Express Backend Call
@@ -7060,24 +7359,31 @@ class ApiService {
   Future<Map<String, dynamic>> fetchDoctorAvailability({
     required String dentistId,
     String? date,
+    String? consultationType,
   }) async {
     // 1. Primary Express Backend Call
     try {
       final queryParams = {
         'dentistId': dentistId,
         if (date != null && date.isNotEmpty) 'date': date.contains('T') ? date.split('T').first : date,
+        if (consultationType != null && consultationType.trim().isNotEmpty)
+          'consultationType': consultationType.trim(),
       };
       final uri = Uri.parse('${ApiConstants.baseUrl}/doctor-availability').replace(queryParameters: queryParams);
       final response = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 35));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
+        if (data['bookingRules'] is Map) {
+          BookingRulesConfig.applyFromJson(Map<String, dynamic>.from(data['bookingRules'] as Map));
+        }
         return {
           'success': true,
           'availability': data['availability'],
           'availabilities': data['availabilities'],
           'schedule': data['schedule'],
           'blockedDates': data['blockedDates'],
+          'bookingRules': data['bookingRules'],
         };
       }
     } catch (e) {
@@ -7952,6 +8258,354 @@ class ApiService {
     }
 
     return {'success': true, 'localOnly': true};
+  }
+
+  static const Map<String, String> _languageAliases = <String, String>{
+    'en': 'english',
+    'eng': 'english',
+    'english': 'english',
+    'hi': 'hindi',
+    'hin': 'hindi',
+    'hindi': 'hindi',
+    'te': 'telugu',
+    'tel': 'telugu',
+    'telugu': 'telugu',
+    'ta': 'tamil',
+    'tam': 'tamil',
+    'tamil': 'tamil',
+    'kn': 'kannada',
+    'kan': 'kannada',
+    'kannada': 'kannada',
+    'ml': 'malayalam',
+    'mal': 'malayalam',
+    'malayalam': 'malayalam',
+    'mr': 'marathi',
+    'mar': 'marathi',
+    'marathi': 'marathi',
+    'bn': 'bengali',
+    'ben': 'bengali',
+    'bangla': 'bengali',
+    'bengali': 'bengali',
+    'gu': 'gujarati',
+    'guj': 'gujarati',
+    'gujarati': 'gujarati',
+    'pa': 'punjabi',
+    'pan': 'punjabi',
+    'panjabi': 'punjabi',
+    'punjabi': 'punjabi',
+    'ur': 'urdu',
+    'urd': 'urdu',
+    'urdu': 'urdu',
+    'or': 'odia',
+    'ori': 'odia',
+    'oriya': 'odia',
+    'odia': 'odia',
+  };
+
+  static const Map<String, String> _canonicalLanguageDisplayNames = <String, String>{
+    'english': 'English',
+    'hindi': 'Hindi',
+    'telugu': 'Telugu',
+    'tamil': 'Tamil',
+    'kannada': 'Kannada',
+    'malayalam': 'Malayalam',
+    'marathi': 'Marathi',
+    'bengali': 'Bengali',
+    'gujarati': 'Gujarati',
+    'punjabi': 'Punjabi',
+    'urdu': 'Urdu',
+    'odia': 'Odia',
+  };
+
+  /// Splits raw language input (List, JSON string, Postgres `{...}` array, or delimited text) into trimmed tokens.
+  static List<String> splitRawLanguages(dynamic raw) {
+    final List<String> tokens = <String>[];
+    void addString(String s) {
+      final trimmed = s.trim();
+      if (trimmed.isEmpty) return;
+      if (trimmed.startsWith('[')) {
+        try {
+          final parsed = jsonDecode(trimmed);
+          if (parsed is List) {
+            for (final item in parsed) {
+              if (item != null) addString(item.toString());
+            }
+            return;
+          }
+        } catch (_) {}
+      } else if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+        for (final part in trimmed.substring(1, trimmed.length - 1).split(RegExp(r'[,;/|]+'))) {
+          addString(part);
+        }
+        return;
+      }
+      for (final part in trimmed.split(RegExp(r'[,;/|]+'))) {
+        var clean = part.replaceAll(RegExp(r'\s+'), ' ').trim();
+        if ((clean.startsWith('"') && clean.endsWith('"')) ||
+            (clean.startsWith("'") && clean.endsWith("'"))) {
+          clean = clean.substring(1, clean.length - 1).trim();
+        }
+        if (clean.isNotEmpty) {
+          tokens.add(clean);
+        }
+      }
+    }
+
+    if (raw is Iterable) {
+      for (final item in raw) {
+        if (item != null) addString(item.toString());
+      }
+    } else if (raw != null) {
+      addString(raw.toString());
+    }
+    return tokens;
+  }
+
+  /// Normalizes a language value for case-, space-, and format-insensitive comparisons.
+  static String canonicalLanguageKey(String raw) {
+    var cleaned = raw.replaceAll(RegExp(r'\s+'), ' ').trim().toLowerCase();
+    if (cleaned.isEmpty) return '';
+    cleaned = cleaned.replaceAll(RegExp(r'\s*\([^)]*\)'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (cleaned.isEmpty) return '';
+    return _languageAliases[cleaned] ?? cleaned;
+  }
+
+  /// Returns canonical display name for supported languages or a cleaned label for custom languages.
+  static String canonicalLanguageDisplayName(String raw) {
+    final collapsed = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (collapsed.isEmpty) return '';
+    final key = canonicalLanguageKey(collapsed);
+    if (key.isNotEmpty && _canonicalLanguageDisplayNames.containsKey(key)) {
+      return _canonicalLanguageDisplayNames[key]!;
+    }
+    final withoutParen = collapsed.replaceAll(RegExp(r'\s*\([^)]*\)'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+    final base = withoutParen.isNotEmpty ? withoutParen : collapsed;
+    if (base == base.toLowerCase() || base == base.toUpperCase()) {
+      return base
+          .split(' ')
+          .where((w) => w.isNotEmpty)
+          .map((w) => w[0].toUpperCase() + w.substring(1).toLowerCase())
+          .join(' ');
+    }
+    return base;
+  }
+
+  static bool isAnyLanguageToken(String raw) {
+    final key = canonicalLanguageKey(raw);
+    return key.isEmpty ||
+        key == 'any' ||
+        key == 'any language' ||
+        key == 'all' ||
+        key == 'all languages';
+  }
+
+  /// Deduplicates raw language inputs using [canonicalLanguageKey] while skipping empty/"Any language" entries.
+  static List<String> deduplicateLanguages(dynamic raw) {
+    final seen = <String>{};
+    final result = <String>[];
+    for (final token in splitRawLanguages(raw)) {
+      final key = canonicalLanguageKey(token);
+      if (isAnyLanguageToken(key)) continue;
+      if (seen.add(key)) {
+        result.add(canonicalLanguageDisplayName(token));
+      }
+    }
+    return result;
+  }
+
+  /// OR-matching across selected languages using canonical keys.
+  static bool doctorLanguagesMatch(Iterable<String> doctorLangs, Iterable<String> selectedLangs) {
+    final targetKeys = selectedLangs
+        .expand((l) => splitRawLanguages(l))
+        .map(canonicalLanguageKey)
+        .where((k) => !isAnyLanguageToken(k))
+        .toSet();
+    if (targetKeys.isEmpty) return true;
+
+    final docKeys = doctorLangs
+        .expand((l) => splitRawLanguages(l))
+        .map(canonicalLanguageKey)
+        .where((k) => k.isNotEmpty)
+        .toList();
+    if (docKeys.isEmpty) return false;
+
+    return targetKeys.any(
+      (target) => docKeys.any((dl) => dl == target || dl.startsWith('$target ')),
+    );
+  }
+
+  /// Extracts a doctor's languages from raw dentist + joined user JSON matching backend priority.
+  static List<String> extractDoctorLanguagesFromRaw(Map<dynamic, dynamic> dMap, Map<dynamic, dynamic> userObj) {
+    final dLangs = deduplicateLanguages(dMap['languages']);
+    final uLangs = deduplicateLanguages(userObj['languages']);
+    List<String> metaLangs = [];
+    final devToken = (userObj['device_token'] ?? dMap['device_token'])?.toString() ?? '';
+    if (devToken.trim().startsWith('{')) {
+      try {
+        final meta = jsonDecode(devToken);
+        if (meta is Map && meta['languages'] != null) {
+          metaLangs = deduplicateLanguages(meta['languages']);
+        }
+      } catch (_) {}
+    }
+
+    if (dLangs.length > 1 || (dLangs.length == 1 && canonicalLanguageKey(dLangs.first) != 'english')) {
+      return dLangs;
+    }
+    if (uLangs.length > 1 || (uLangs.length == 1 && canonicalLanguageKey(uLangs.first) != 'english')) {
+      return uLangs;
+    }
+    if (metaLangs.isNotEmpty) {
+      return metaLangs;
+    }
+    if (dLangs.isNotEmpty) return dLangs;
+    if (uLangs.isNotEmpty) return uLangs;
+    return const ['English'];
+  }
+
+  /// Optional test overrides for deterministic widget testing of Doctor & Admin Visits Calendars.
+  static Future<Map<String, dynamic>> Function({
+    required String doctorId,
+    String? date,
+    String? month,
+    String? consultationType,
+    String? status,
+    String? specialty,
+  })? debugDoctorVisitsCalendarOverride;
+
+  static Future<Map<String, dynamic>> Function({
+    String? date,
+    String? month,
+    String? clinicId,
+    String? doctorId,
+    String? specialty,
+    String? consultationType,
+    String? district,
+  })? debugAdminVisitsCalendarOverride;
+
+  /// Converts a raw date or ISO timestamp to `YYYY-MM-DD` in `Asia/Kolkata` (UTC+05:30).
+  static String toAsiaKolkataYmd(dynamic rawDateOrTimestamp) {
+    if (rawDateOrTimestamp == null) return '';
+    if (rawDateOrTimestamp is DateTime) {
+      final ist = rawDateOrTimestamp.isUtc
+          ? rawDateOrTimestamp.add(const Duration(hours: 5, minutes: 30))
+          : rawDateOrTimestamp;
+      return '${ist.year.toString().padLeft(4, '0')}-${ist.month.toString().padLeft(2, '0')}-${ist.day.toString().padLeft(2, '0')}';
+    }
+    final str = rawDateOrTimestamp.toString().trim();
+    if (str.isEmpty) return '';
+    if (RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(str)) return str;
+    if (RegExp(r'^\d{4}-\d{2}-\d{2}T00:00:00(?:\.000)?Z?$', caseSensitive: false).hasMatch(str)) {
+      return str.substring(0, 10);
+    }
+    final parsed = DateTime.tryParse(str);
+    if (parsed != null) {
+      final ist = parsed.isUtc ? parsed.add(const Duration(hours: 5, minutes: 30)) : parsed;
+      return '${ist.year.toString().padLeft(4, '0')}-${ist.month.toString().padLeft(2, '0')}-${ist.day.toString().padLeft(2, '0')}';
+    }
+    if (str.length >= 10 && RegExp(r'^\d{4}-\d{2}-\d{2}').hasMatch(str)) {
+      return str.substring(0, 10);
+    }
+    return '';
+  }
+
+  /// Fetch Doctor Visits Calendar & date-wise visit/referral aggregation (`GET /api/visits-calendar/doctor`)
+  Future<Map<String, dynamic>> fetchDoctorVisitsCalendar({
+    required String doctorId,
+    String? date,
+    String? month,
+    String? consultationType,
+    String? status,
+    String? specialty,
+  }) async {
+    if (debugDoctorVisitsCalendarOverride != null) {
+      return debugDoctorVisitsCalendarOverride!(
+        doctorId: doctorId,
+        date: date,
+        month: month,
+        consultationType: consultationType,
+        status: status,
+        specialty: specialty,
+      );
+    }
+    try {
+      final qp = <String, String>{
+        if (doctorId.trim().isNotEmpty) 'doctorId': doctorId.trim(),
+        if (date != null && date.trim().isNotEmpty) 'date': date.trim(),
+        if (month != null && month.trim().isNotEmpty) 'month': month.trim(),
+        if (consultationType != null && consultationType.trim().isNotEmpty && consultationType != 'All')
+          'consultationType': consultationType.trim(),
+        if (status != null && status.trim().isNotEmpty && status != 'All') 'status': status.trim(),
+        if (specialty != null && specialty.trim().isNotEmpty && specialty != 'All') 'specialty': specialty.trim(),
+      };
+      final uri = Uri.parse('${ApiConstants.baseUrl}/visits-calendar/doctor').replace(queryParameters: qp);
+      final response = await http.get(uri, headers: _headersWithUser()).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic>) return decoded;
+      } else if (response.statusCode == 403 || response.statusCode == 401) {
+        final decoded = jsonDecode(response.body);
+        return {
+          'success': false,
+          'statusCode': response.statusCode,
+          'message': decoded['message'] ?? 'Access Denied.',
+        };
+      }
+    } catch (e) {
+      debugPrint('fetchDoctorVisitsCalendar notice: $e');
+    }
+    return {'success': false};
+  }
+
+  /// Fetch Admin Global Visits Calendar & hospital/clinic breakdown (`GET /api/visits-calendar/admin`)
+  Future<Map<String, dynamic>> fetchAdminGlobalVisitsCalendar({
+    String? date,
+    String? month,
+    String? clinicId,
+    String? doctorId,
+    String? specialty,
+    String? consultationType,
+    String? district,
+  }) async {
+    if (debugAdminVisitsCalendarOverride != null) {
+      return debugAdminVisitsCalendarOverride!(
+        date: date,
+        month: month,
+        clinicId: clinicId,
+        doctorId: doctorId,
+        specialty: specialty,
+        consultationType: consultationType,
+        district: district,
+      );
+    }
+    try {
+      final qp = <String, String>{
+        if (date != null && date.trim().isNotEmpty) 'date': date.trim(),
+        if (month != null && month.trim().isNotEmpty) 'month': month.trim(),
+        if (clinicId != null && clinicId.trim().isNotEmpty && clinicId != 'All') 'clinicId': clinicId.trim(),
+        if (doctorId != null && doctorId.trim().isNotEmpty && doctorId != 'All') 'doctorId': doctorId.trim(),
+        if (specialty != null && specialty.trim().isNotEmpty && specialty != 'All') 'specialty': specialty.trim(),
+        if (consultationType != null && consultationType.trim().isNotEmpty && consultationType != 'All')
+          'consultationType': consultationType.trim(),
+        if (district != null && district.trim().isNotEmpty && district != 'All') 'district': district.trim(),
+      };
+      final uri = Uri.parse('${ApiConstants.baseUrl}/visits-calendar/admin').replace(queryParameters: qp);
+      final response = await http.get(uri, headers: _headersWithUser()).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic>) return decoded;
+      } else if (response.statusCode == 403 || response.statusCode == 401) {
+        final decoded = jsonDecode(response.body);
+        return {
+          'success': false,
+          'statusCode': response.statusCode,
+          'message': decoded['message'] ?? 'Access Denied.',
+        };
+      }
+    } catch (e) {
+      debugPrint('fetchAdminGlobalVisitsCalendar notice: $e');
+    }
+    return {'success': false};
   }
 }
 

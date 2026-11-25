@@ -1,3 +1,11 @@
+const List<String> referralStatuses = [
+  'Pending',
+  'Accepted',
+  'Rejected',
+  'Contacted',
+  'Completed',
+];
+
 class PatientReferral {
   final String id;
   final String referrerPatientId;
@@ -50,8 +58,8 @@ class PatientReferral {
     this.referredPatientLocation = '',
     required this.requiredSpecialist,
     required this.clinicalComplaint,
-    required this.doctorId,
-    this.doctorName = 'Specialist',
+    this.doctorId = '',
+    this.doctorName = 'Any available specialist',
     this.doctorSpecialty = '',
     this.doctorClinicName = '',
     this.doctorCity = '',
@@ -80,15 +88,22 @@ class PatientReferral {
     String docName = json['doctorName']?.toString() ??
         json['doctor_name']?.toString() ??
         (json['doctor'] is Map ? (json['doctor']['users']?['name'] ?? json['doctor']['name'])?.toString() : null) ??
-        'Specialist';
-    while (docName.toLowerCase().startsWith('dr. dr.') ||
-        docName.toLowerCase().startsWith('dr. dr ') ||
-        docName.toLowerCase().startsWith('dr dr ')) {
-      docName = docName.substring(3).trim();
-      if (docName.startsWith('.')) docName = docName.substring(1).trim();
-    }
-    if (!docName.startsWith('Dr.') && !docName.startsWith('Dr ')) {
-      docName = 'Dr. $docName';
+        '';
+    final rawDoctorId = json['doctorId']?.toString() ?? json['doctor_id']?.toString() ?? json['assigned_doctor_id']?.toString() ?? '';
+    if (docName.trim().isEmpty || (rawDoctorId.isEmpty && (docName == 'Doctor' || docName == 'Specialist'))) {
+      docName = 'Any available specialist';
+    } else {
+      while (docName.toLowerCase().startsWith('dr. dr.') ||
+          docName.toLowerCase().startsWith('dr. dr ') ||
+          docName.toLowerCase().startsWith('dr dr ')) {
+        docName = docName.substring(3).trim();
+        if (docName.startsWith('.')) docName = docName.substring(1).trim();
+      }
+      if (!docName.toLowerCase().startsWith('any ') &&
+          !docName.startsWith('Dr.') &&
+          !docName.startsWith('Dr ')) {
+        docName = 'Dr. $docName';
+      }
     }
 
     final referrerName = json['referrerPatientName']?.toString() ??

@@ -171,11 +171,13 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 300));
 
-    // Switch to Patients tab (tab index 1)
+    // Switch to Patients tab (tab index 1) and allow AnimatedSwitcher transition to complete
     final patientsTabIcon = find.byIcon(Icons.people_outline_rounded);
     expect(patientsTabIcon, findsOneWidget);
     await tester.tap(patientsTabIcon);
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump();
 
     // 1. Verify Header
     expect(find.text("Everyone you've cared for"), findsOneWidget);

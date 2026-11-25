@@ -325,9 +325,9 @@ void main() {
     expect(find.text('Admin console'), findsOneWidget);
     expect(find.text('GS HEALTH'), findsWidgets);
     expect(find.text('Requests awaiting a doctor'), findsOneWidget);
-    expect(find.text('Dentists pending verification'), findsOneWidget);
+    expect(find.text('Doctors pending verification'), findsOneWidget);
     expect(find.text('Patients'), findsWidgets);
-    expect(find.text('Dentists'), findsWidgets);
+    expect(find.text('Doctors'), findsWidgets);
     expect(find.text('Clinics'), findsWidgets);
     expect(find.text('Appointments'), findsWidgets);
     expect(find.text('Assign 2 waiting request(s)'), findsOneWidget);
@@ -348,7 +348,7 @@ void main() {
 
     expect(find.text('SMS login'), findsOneWidget);
     expect(find.text('Latest appointments'), findsOneWidget);
-    expect(find.text('SPONSORED'), findsOneWidget);
+    expect(find.text('SPONSORED'), findsNothing);
     expect(find.text('IN-CLINIC'), findsWidgets);
     expect(find.byKey(const Key('admin_appointments_load_more')), findsOneWidget);
     expect(find.text('Load more (2 remaining)'), findsOneWidget);
@@ -451,8 +451,8 @@ void main() {
 
     await _capturePngIfPossible(tester, boundaryKey, '$artifactDir/gs_health_sub_admin_bottom.png');
 
-    // Tapping restricted Dentists bottom nav tab shows access restriction snackbar
-    await tester.tap(find.text('Dentists').last);
+    // Tapping restricted Doctors bottom nav tab shows access restriction snackbar
+    await tester.tap(find.text('Doctors').last);
     await tester.pump();
     expect(find.textContaining('Access restricted'), findsOneWidget);
   });

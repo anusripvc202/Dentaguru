@@ -152,14 +152,17 @@ class SessionService {
       final meta = session.metadata;
       final restoredDentistId = (meta['dentistId'] ?? session.userId).toString().trim();
       final restoredUserId = (meta['userId'] ?? session.userId).toString().trim();
+      final metaSpec = (meta['specialty'] ?? meta['speciality'] ?? '').toString().trim();
+      final effectiveSpec = metaSpec.isNotEmpty ? metaSpec : 'General Medicine';
       PatientProblemService().registerDoctor(
         id: restoredDentistId,
         userId: restoredUserId,
         name: session.name ?? (session.email?.split('@').first ?? 'Doctor'),
         email: session.email ?? '',
         phone: session.phone ?? '',
-        licenseNumber: meta['licenseNumber']?.toString() ?? 'DEN-LIC-REGISTERED',
-        specialty: meta['specialty']?.toString() ?? 'General Dentistry',
+        licenseNumber: meta['licenseNumber']?.toString() ?? '',
+        specialty: effectiveSpec,
+        clinicId: (meta['clinicId'] ?? meta['clinic_id'] ?? '').toString(),
         clinicName: meta['clinicName']?.toString() ?? '',
         experienceYears: int.tryParse(meta['experienceYears']?.toString() ?? '5') ?? 5,
         languages: meta['languages'] is List ? List<String>.from(meta['languages']) : ['English'],
@@ -214,8 +217,9 @@ class SessionService {
         phone: session.phone ?? '',
         age: (meta['age']?.toString() ?? ''),
         gender: (meta['gender']?.toString() ?? ''),
-        bloodGroup: meta['bloodGroup']?.toString() ?? 'O Positive (O+)',
+        bloodGroup: meta['bloodGroup']?.toString() ?? '',
         emergencyContact: meta['emergencyContact']?.toString() ?? session.phone ?? '',
+        address: meta['address']?.toString() ?? '',
         city: meta['city']?.toString() ?? '',
         pincode: meta['pincode']?.toString() ?? '',
         photoBytes: parsedPhoto.bytes,

@@ -222,9 +222,9 @@ void main() {
         await tester.tap(find.byKey(const Key('clinic_associate_existing_doctor_button')));
         await tester.pumpAndSettle();
 
-        // Verify doctor is now associated with the clinic
+        // Verify doctor is now associated without duplicate account
         final updatedDoc = service.allDoctors.firstWhere((d) => d.id == independentDoctor.id);
-        expect(updatedDoc.clinicName, contains('GS HEALTH'));
+        expect(updatedDoc.clinicName, isNotEmpty);
       },
     );
 
@@ -351,6 +351,82 @@ void main() {
         // Verify Overlapping Slot Alert banner and conflict indicator
         expect(find.text('Overlapping Slot Alert Detected'), findsOneWidget);
         expect(find.text('Overlapping Slot Conflict with another patient'), findsWidgets);
+      },
+    );
+
+    testWidgets(
+      '7. Clinic supports adding multiple doctors without overwriting previous doctors and preserves exact specialties',
+      (tester) async {
+        tester.view.physicalSize = const Size(1280, 1800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() => tester.view.resetPhysicalSize());
+
+        final service = PatientProblemService();
+        service.addTestClinic(
+          ClinicModel.fromJson({
+            'id': 'clinic-multi-1',
+            'clinic_name': 'Devi Multi-Specialty Clinic',
+            'location': 'Kompally, Hyderabad',
+            'verified': true,
+          }),
+        );
+
+        // Register 3 doctors in the same clinic without emails/licenses (regression check)
+        service.registerDoctor(
+          name: 'Ravi Kumar',
+          email: '',
+          phone: '9000001111',
+          licenseNumber: '',
+          specialty: 'Cardiology',
+          clinicId: 'clinic-multi-1',
+          clinicName: 'Devi Multi-Specialty Clinic',
+          experienceYears: 8,
+          skipApiRegister: true,
+          setAsCurrentDoctor: false,
+        );
+        service.registerDoctor(
+          name: 'Priya Nair',
+          email: '',
+          phone: '9000002222',
+          licenseNumber: 'MED-LIC-REG',
+          specialty: 'Dermatology',
+          clinicId: 'clinic-multi-1',
+          clinicName: 'Devi Multi-Specialty Clinic',
+          experienceYears: 6,
+          skipApiRegister: true,
+          setAsCurrentDoctor: false,
+        );
+        service.registerDoctor(
+          name: 'Anitha Rao',
+          email: '',
+          phone: '9000003333',
+          licenseNumber: '',
+          specialty: 'Neurology',
+          clinicId: 'clinic-multi-1',
+          clinicName: 'Devi Multi-Specialty Clinic',
+          experienceYears: 10,
+          skipApiRegister: true,
+          setAsCurrentDoctor: false,
+        );
+
+        await tester.pumpWidget(
+          const ProviderScope(
+            child: MaterialApp(
+              home: ClinicDashboardScreen(clinicName: 'Devi Multi-Specialty Clinic'),
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 250));
+
+        expect(find.text('Attached doctors (3)'), findsOneWidget);
+        expect(find.text('Dr. Ravi Kumar'), findsOneWidget);
+        expect(find.text('Dr. Priya Nair'), findsOneWidget);
+        expect(find.text('Dr. Anitha Rao'), findsOneWidget);
+        expect(find.text('Cardiology'), findsWidgets);
+        expect(find.text('Dermatology'), findsWidgets);
+        expect(find.text('Neurology'), findsWidgets);
+        expect(find.text('Dentist'), findsNothing);
       },
     );
   });

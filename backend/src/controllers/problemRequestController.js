@@ -1,9 +1,67 @@
 const { PatientProblemRequest, DentistSuggestion, Dentist, User, Notification, PatientAssignmentHistory, District, SubAdminDistrict, ASSIGNMENT_SOURCES, isDoctorRecordAvailable } = require('../models/Schemas');
 const { sendPushNotification } = require('../services/notificationService');
 
-// 1. PATIENT: CREATE MULTI-SPECIALTY CONSULTATION / TRIAGE REQUEST
+const COORDINATOR_STAGES = [
+    'SUBMITTED',
+    'ASSIGNED',
+    'CONTACTING_PATIENT',
+    'DOCTOR_IDENTIFIED',
+    'RESOLVED',
+    'CLOSED',
+];
+
+const COORDINATOR_STAGE_LABELS = {
+    SUBMITTED: 'Submitted',
+    PENDING_ADMIN_REVIEW: 'Submitted',
+    ASSIGNED: 'Assigned',
+    ADMIN_REVIEWED: 'Assigned',
+    CONTACTING_PATIENT: 'Contacting Patient',
+    DOCTOR_IDENTIFIED: 'Doctor Identified',
+    DENTIST_ASSIGNED: 'Doctor Identified',
+    DENTIST_SUGGESTED: 'Doctor Identified',
+    RESOLVED: 'Resolved',
+    DENTIST_ACCEPTED: 'Resolved',
+    CLOSED: 'Closed',
+    COMPLETED: 'Closed',
+};
+
+function normalizeCoordinatorStage(raw) {
+    const clean = String(raw || '').trim();
+    if (!clean) return 'SUBMITTED';
+    const upper = clean.toUpperCase().replace(/[\s-]+/g, '_');
+    if (COORDINATOR_STAGES.includes(upper)) return upper;
+    if (upper === 'PENDING_ADMIN_REVIEW') return 'SUBMITTED';
+    if (upper === 'ADMIN_REVIEWED' || upper === 'ADMIN_REVIEW') return 'ASSIGNED';
+    if (upper === 'DENTIST_ASSIGNED' || upper === 'DENTIST_SUGGESTED') return 'DOCTOR_IDENTIFIED';
+    if (upper === 'DENTIST_ACCEPTED') return 'RESOLVED';
+    if (upper === 'COMPLETED') return 'CLOSED';
+    return 'SUBMITTED';
+}
+
+function parseCoordinatorMeta(adminNotes) {
+    const raw = String(adminNotes || '');
+    const marker = 'COORD_META:';
+    const idx = raw.indexOf(marker);
+    if (idx === -1) return { humanNote: raw.trim(), meta: {} };
+    const humanNote = raw.slice(0, idx).trim();
+    const jsonPart = raw.slice(idx + marker.length).trim();
+    try {
+        const meta = JSON.parse(jsonPart);
+        return { humanNote, meta: meta && typeof meta === 'object' ? meta : {} };
+    } catch (_) {
+        return { humanNote, meta: {} };
+    }
+}
+
+function serializeCoordinatorMeta(humanNote, meta) {
+    const cleanHuman = String(humanNote || '').trim();
+    const serialized = `COORD_META:${JSON.stringify(meta || {})}`;
+    return cleanHuman ? `${cleanHuman}\n${serialized}` : serialized;
+}
+
+// 1. PATIENT: CREATE MULTI-SPECIALTY CONSULTATION / TRIAGE / COORDINATOR ASSISTANCE REQUEST
 exports.createProblemRequest = async (req, res) => {
-    const { problemCategory, problemDescription, symptoms, preferredLocation, attachments, patientName, patientPhone, specialty, speciality, appointmentId } = req.body;
+    const { problemCategory, problemDescription, symptoms, preferredLocation, attachments, patientName, patientPhone, specialty, speciality, appointmentId, escalationType } = req.body;
     try {
         const patientId = req.user ? req.user.id : req.body.patientId;
         const patientUser = patientId ? await User.findById(patientId) : null;
@@ -34,14 +92,71 @@ exports.createProblemRequest = async (req, res) => {
             }
         }
         const isDirectReferral = !!preferredDoctorId;
-        const initialStatus = isDirectReferral ? 'DENTIST_ASSIGNED' : 'PENDING_ADMIN_REVIEW';
+        const isCoordinatorEscalation = !isDirectReferral && String(escalationType || '').toUpperCase() === 'COORDINATOR_ASSISTANCE';
+
+        // Resolve patient's district & matching Sub-Admin coordinator if available
+        const locRes = District.resolveDistrictFromLocation({
+            city: realCity,
+            district: patientUser?.district,
+            state: realState,
+            pincode: realPincode
+        });
+        const resolvedDistrictName = locRes.district || patientUser?.district || realCity || '';
+        const resolvedDistrictId = locRes.districtId || null;
+
+        let matchedCoordinator = null;
+        if (!isDirectReferral) {
+            try {
+                const subAdmins = await User.find({ role: { $in: ['Sub-Admin', 'SUB_ADMIN', 'SUB-ADMIN'] } });
+                for (const sa of (subAdmins || [])) {
+                    const saStatus = String(sa.status || 'ACTIVE').toUpperCase();
+                    if (saStatus !== 'ACTIVE') continue;
+                    const assignedDists = await SubAdminDistrict.getDistrictsForSubAdmin(sa.id).catch(() => []);
+                    const matchesDistrict = assignedDists.some(d =>
+                        (resolvedDistrictId && d.id === resolvedDistrictId) ||
+                        (resolvedDistrictName && d.name && d.name.toLowerCase() === resolvedDistrictName.toLowerCase())
+                    );
+                    if (matchesDistrict) {
+                        matchedCoordinator = sa;
+                        break;
+                    }
+                }
+            } catch (_) {}
+        }
+
+        const initialStatus = isDirectReferral
+            ? 'DENTIST_ASSIGNED'
+            : (isCoordinatorEscalation
+                ? (matchedCoordinator ? 'ASSIGNED' : 'SUBMITTED')
+                : 'PENDING_ADMIN_REVIEW');
 
         const effectiveCategory = problemCategory || (resolvedSpecialty ? `${resolvedSpecialty} Consultation` : 'General Medical Consultation');
         const effectiveSymptoms = [
             resolvedSpecialty ? `Specialty: ${resolvedSpecialty}` : '',
             appointmentId ? `Appointment: ${appointmentId}` : '',
+            isCoordinatorEscalation ? 'Coordinator Assistance Escalation' : '',
             symptoms || ''
         ].filter(Boolean).join(' • ');
+
+        const coordMeta = isDirectReferral
+            ? null
+            : {
+                escalationType: isCoordinatorEscalation ? 'COORDINATOR_ASSISTANCE' : 'TRIAGE',
+                specialty: resolvedSpecialty || '',
+                coordinatorStatus: matchedCoordinator && isCoordinatorEscalation ? 'ASSIGNED' : 'SUBMITTED',
+                assignedCoordinatorId: matchedCoordinator?.id || null,
+                assignedCoordinatorName: matchedCoordinator?.name || null,
+                districtName: resolvedDistrictName || 'Unassigned',
+                followUpNotes: []
+            };
+        const initialNotes = isDirectReferral
+            ? `Direct patient referral to ${req.body.preferredDoctorName || 'Doctor'}`
+            : serializeCoordinatorMeta(
+                isCoordinatorEscalation
+                    ? `Coordinator assistance requested${resolvedSpecialty ? ` for ${resolvedSpecialty}` : ''}.`
+                    : '',
+                coordMeta
+            );
 
         const request = await PatientProblemRequest.create({
             patient_id: patientId,
@@ -58,7 +173,7 @@ exports.createProblemRequest = async (req, res) => {
             attachments: attachments || [],
             status: initialStatus,
             suggested_dentist_id: preferredDoctorId || null,
-            admin_notes: isDirectReferral ? `Direct patient referral to ${req.body.preferredDoctorName || 'Doctor'}` : null
+            admin_notes: initialNotes
         });
 
         if (isDirectReferral) {
@@ -73,18 +188,38 @@ exports.createProblemRequest = async (req, res) => {
             } catch (_) {}
         }
 
-        // 🔔 Dispatch Notification to Admin or Doctor
+        // 🔔 Dispatch Notification to Doctor, District Coordinator / Sub-Admin, and Admin
         await Notification.create({
             recipient_role: isDirectReferral ? 'Dentist' : 'Admin',
-            recipient_id: isDirectReferral ? preferredDoctorId : 'ALL',
-            title: isDirectReferral ? '🩺 Direct Referral Consultation' : '🚨 New Consultation Request',
-            message: `Patient (${realName}) consultation request for ${problemCategory}`,
-            type: 'problem_request'
+            recipient_id: isDirectReferral ? preferredDoctorId : 'ALL_ADMINS',
+            title: isDirectReferral
+                ? '🩺 Direct Referral Consultation'
+                : (isCoordinatorEscalation ? '🚨 Coordinator Assistance Needed' : '🚨 New Consultation Request'),
+            message: isCoordinatorEscalation
+                ? `Patient ${realName}${realPhone ? ` (${realPhone})` : ''} needs ${resolvedSpecialty || 'specialist'} assistance in ${resolvedDistrictName || 'their area'}.`
+                : `Patient (${realName}) consultation request for ${effectiveCategory}`,
+            type: isCoordinatorEscalation ? 'coordinator_escalation' : 'problem_request'
         });
+
+        if (matchedCoordinator?.id) {
+            await Notification.create({
+                recipient_role: 'Sub-Admin',
+                recipient_id: matchedCoordinator.id,
+                title: '📞 District Coordinator Assistance Assigned',
+                message: `Please contact ${realName}${realPhone ? ` (${realPhone})` : ''} for ${resolvedSpecialty || effectiveCategory} in ${resolvedDistrictName}.`,
+                type: 'coordinator_escalation'
+            }).catch(() => {});
+        }
 
         res.status(201).json({
             success: true,
-            message: isDirectReferral ? 'Referral submitted directly to doctor.' : 'Consultation request submitted successfully. Awaiting admin review.',
+            message: isDirectReferral
+                ? 'Referral submitted directly to doctor.'
+                : (isCoordinatorEscalation
+                    ? 'Your request has been escalated to our district coordinator team for phone follow-up.'
+                    : 'Consultation request submitted successfully. Awaiting admin review.'),
+            coordinatorStatus: COORDINATOR_STAGE_LABELS[initialStatus] || 'Submitted',
+            assignedCoordinator: matchedCoordinator ? { id: matchedCoordinator.id, name: matchedCoordinator.name } : null,
             request
         });
     } catch (err) {
@@ -217,6 +352,7 @@ exports.getAdminProblemRequests = async (req, res) => {
             const docSpecialty = d.speciality || d.specialty || r.assigned_doctor_specialty || 'General Medicine';
             const docClinic = dClinic.clinic_name || r.assigned_doctor_clinic || 'GS HEALTH Care Center';
 
+            const parsedCoord = parseCoordinatorMeta(r.admin_notes);
             return {
                 ...reqObj,
                 patientName: realName,
@@ -224,6 +360,8 @@ exports.getAdminProblemRequests = async (req, res) => {
                 city: realCity,
                 pincode: realPincode,
                 state: realState,
+                coordinatorStatus: COORDINATOR_STAGE_LABELS[String(r.status || '').toUpperCase()] || parsedCoord.meta?.coordinatorStatus || 'Submitted',
+                coordinatorMeta: parsedCoord.meta || {},
                 assigned_doctor_name: docName || reqObj.assigned_doctor_name,
                 assigned_doctor_specialty: docSpecialty || reqObj.assigned_doctor_specialty,
                 assigned_doctor_clinic: docClinic || reqObj.assigned_doctor_clinic,
@@ -534,7 +672,7 @@ exports.getDentistAssignedRequests = async (req, res) => {
 
             let realName = r.patient_name || r.patientName;
             if ((!realName || realName.trim().toLowerCase() === 'patient') && u) {
-                realName = u.name || (u.email ? u.email.split('@')[0] : 'anusha');
+                realName = u.name || (u.email ? u.email.split('@')[0] : 'Patient');
             }
 
             let realPhone = r.patient_phone || r.patientPhone;
@@ -632,6 +770,99 @@ exports.acceptProblemRequest = async (req, res) => {
     } catch (err) {
         console.error('Accept Problem Request Error:', err.message);
         res.status(500).json({ success: false, message: 'Failed to accept problem request.' });
+    }
+};
+
+// 9. ADMIN / SUB-ADMIN COORDINATOR: UPDATE 6-STAGE ESCALATION STATUS & LOG PHONE FOLLOW-UP
+exports.updateCoordinatorStatus = async (req, res) => {
+    const { id } = req.params;
+    const { status, coordinatorId, coordinatorName, doctorId, followUpNote, notes } = req.body || {};
+    try {
+        const problemReq = await PatientProblemRequest.findById(id);
+        if (!problemReq) {
+            return res.status(404).json({ success: false, message: 'Assistance request not found.' });
+        }
+
+        const patientUserObj = await User.findById(problemReq.patient_id).catch(() => null);
+        const locRes = District.resolveDistrictFromLocation({
+            city: problemReq.city || patientUserObj?.city,
+            district: problemReq.district || patientUserObj?.district,
+            state: problemReq.state || patientUserObj?.state,
+            pincode: problemReq.pincode || patientUserObj?.pincode
+        });
+        const finalDistrictName = locRes.district || problemReq.district || problemReq.city || 'Unassigned / Review';
+        const finalDistrictId = locRes.districtId || null;
+
+        const userRoleLower = (req.user?.role || '').toLowerCase();
+        const isSubAdmin = userRoleLower === 'sub-admin' || userRoleLower === 'subadmin' || userRoleLower === 'sub_admin';
+        if (isSubAdmin && req.user?.id) {
+            const assignedDistricts = await SubAdminDistrict.getDistrictsForSubAdmin(req.user.id);
+            const isAuthorized = assignedDistricts.some(d =>
+                (finalDistrictId && d.id === finalDistrictId) ||
+                (finalDistrictName && d.name && d.name.toLowerCase() === finalDistrictName.toLowerCase())
+            );
+            if (!isAuthorized) {
+                return res.status(403).json({
+                    success: false,
+                    message: `Access Denied: You cannot manage assistance requests in '${finalDistrictName}'.`
+                });
+            }
+        }
+
+        const nextStage = normalizeCoordinatorStage(status);
+        const stageLabel = COORDINATOR_STAGE_LABELS[nextStage] || 'Submitted';
+        const parsed = parseCoordinatorMeta(problemReq.admin_notes);
+        const meta = {
+            ...parsed.meta,
+            coordinatorStatus: stageLabel,
+            assignedCoordinatorId: coordinatorId || parsed.meta.assignedCoordinatorId || req.user?.id || null,
+            assignedCoordinatorName: coordinatorName || parsed.meta.assignedCoordinatorName || req.user?.name || null,
+            districtName: finalDistrictName,
+            followUpNotes: Array.isArray(parsed.meta.followUpNotes) ? [...parsed.meta.followUpNotes] : [],
+        };
+
+        const noteText = String(followUpNote || notes || '').trim();
+        if (noteText) {
+            meta.followUpNotes.push({
+                note: noteText,
+                by: req.user?.name || coordinatorName || 'Coordinator',
+                status: stageLabel,
+                at: new Date().toISOString(),
+            });
+        }
+
+        const updatePayload = {
+            status: nextStage,
+            admin_notes: serializeCoordinatorMeta(noteText || parsed.humanNote, meta),
+        };
+        if (doctorId) {
+            updatePayload.suggested_dentist_id = doctorId;
+        }
+
+        const updatedReq = await PatientProblemRequest.findByIdAndUpdate(id, updatePayload);
+
+        if (problemReq.patient_id) {
+            await Notification.create({
+                recipient_role: 'Patient',
+                recipient_id: problemReq.patient_id,
+                title: `Assistance Update: ${stageLabel}`,
+                message: noteText
+                    ? `Your consultation assistance status is now "${stageLabel}": ${noteText}`
+                    : `Your consultation assistance request status has been updated to "${stageLabel}".`,
+                type: 'coordinator_status_update'
+            }).catch(() => {});
+        }
+
+        return res.json({
+            success: true,
+            message: `Coordinator status updated to ${stageLabel}.`,
+            coordinatorStatus: stageLabel,
+            coordinatorMeta: meta,
+            request: updatedReq || { ...problemReq, ...updatePayload }
+        });
+    } catch (err) {
+        console.error('Update Coordinator Status Error:', err.message);
+        return res.status(500).json({ success: false, message: 'Failed to update coordinator status.' });
     }
 };
 

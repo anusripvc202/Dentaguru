@@ -3,8 +3,8 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/widgets/whatsapp_chat_modal.dart';
-
-import '../../../../core/models/prescription_template_model.dart';
+import '../../../../core/utils/prescription_pdf_generator.dart';
+import '../widgets/specialty_prescription_modal.dart';
 
 class PatientConsultationDetailsScreen extends StatefulWidget {
   final String requestId;
@@ -91,445 +91,55 @@ class _PatientConsultationDetailsScreenState extends State<PatientConsultationDe
     );
   }
 
-  void _showPrescriptionModal() {
-    String selectedDiagnosisPreset = dentalDiagnosisPresets.firstWhere(
-      (d) => d.toLowerCase().contains(widget.category.toLowerCase()),
-      orElse: () => 'Dental Evaluation',
-    );
-    String selectedMedicationName = 'Amoxicillin 500mg';
-
-    final diagCtrl = TextEditingController(text: selectedDiagnosisPreset);
-    final medCtrl = TextEditingController(text: 'Amoxicillin 500mg');
-    final dosageCtrl = TextEditingController(text: '1 Capsule (500mg)');
-    final frequencyCtrl = TextEditingController(text: 'Three Times Daily (1-1-1)');
-    final durationCtrl = TextEditingController(text: '5 Days');
-    final adviceCtrl = TextEditingController(text: 'Take after food with plenty of water. Complete full course.');
-
-    Color getCategoryColor(String cat) {
-      switch (cat) {
-        case 'Antibiotic':
-          return const Color(0xFFFE3434);
-        case 'Pain & Swelling':
-          return const Color(0xFFFE3434);
-        case 'Antiseptic':
-          return const Color(0xFF012A58);
-        case 'Antacid / PPI':
-          return const Color(0xFFFE3434);
-        case 'Topical Gel':
-          return const Color(0xFFFE3434);
-        case 'Hemostatic':
-          return const Color(0xFFFE3434);
-        default:
-          return const Color(0xFFFE3434);
+  DoctorModel? _resolveConsultationDoctor() {
+    if (_problemService.currentDoctor != null) return _problemService.currentDoctor;
+    for (final d in _problemService.allDoctors) {
+      if (d.id == widget.dentistId || d.userId == widget.dentistId) {
+        return d;
       }
     }
+    return null;
+  }
 
-    showDialog(
-      context: context,
-      builder: (dialogCtx) => StatefulBuilder(
-        builder: (context, setModalState) {
-          return Dialog(
-            backgroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-            child: Container(
-              constraints: const BoxConstraints(maxWidth: 540),
-              padding: const EdgeInsets.all(20),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Header
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF012A58).withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Icon(Icons.receipt_long_rounded, color: Color(0xFF012A58), size: 24),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Issue E-Prescription',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppTheme.textDark),
-                              ),
-                              Text(
-                                'Patient: ${widget.patientName}',
-                                style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
-                              ),
-                            ],
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close, size: 20, color: AppTheme.textMuted),
-                          onPressed: () => Navigator.pop(dialogCtx),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
+  void _showPrescriptionModal() {
+    final doc = _resolveConsultationDoctor();
+    final effectiveSpecialty = (doc?.specialty.trim().isNotEmpty == true)
+        ? doc!.specialty.trim()
+        : (widget.category.trim().isNotEmpty ? widget.category.trim() : 'General Medicine');
+    final effectiveDocName = (doc?.name.trim().isNotEmpty == true) ? doc!.name.trim() : 'Attending Doctor';
+    final effectiveDocQual = (doc?.qualification.trim().isNotEmpty == true) ? doc!.qualification.trim() : '';
+    final effectiveClinic = (doc?.clinicName.trim().isNotEmpty == true) ? doc!.clinicName.trim() : 'GS HEALTH Clinic';
 
-                    // Clinical Diagnosis Dropdown
-                    DropdownButtonFormField<String>(
-                      initialValue: dentalDiagnosisPresets.contains(selectedDiagnosisPreset) ? selectedDiagnosisPreset : 'Dental Evaluation',
-                      isExpanded: true,
-                      dropdownColor: Colors.white,
-                      decoration: InputDecoration(
-                        labelText: 'Clinical Diagnosis',
-                        prefixIcon: const Icon(Icons.medical_information_outlined, size: 18, color: AppTheme.primaryBlue),
-                        filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      items: dentalDiagnosisPresets.map((d) {
-                        return DropdownMenuItem<String>(
-                          value: d,
-                          child: Text(d, style: const TextStyle(fontSize: 12.5, color: AppTheme.textDark), overflow: TextOverflow.ellipsis),
-                        );
-                      }).toList(),
-                      onChanged: (val) {
-                        if (val != null) {
-                          setModalState(() {
-                            selectedDiagnosisPreset = val;
-                            if (val != 'Custom Diagnosis...') {
-                              diagCtrl.text = val;
-                            }
-                          });
-                        }
-                      },
-                    ),
-                    if (selectedDiagnosisPreset == 'Custom Diagnosis...') ...[
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: diagCtrl,
-                        style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                        cursorColor: AppTheme.primaryBlue,
-                        decoration: InputDecoration(
-                          labelText: 'Enter Custom Diagnosis',
-                          filled: true,
-                          fillColor: const Color(0xFFF8FAFC),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 14),
-
-                    // Section Label: Related Dental Medication Dropdown
-                    const Row(
-                      children: [
-                        Icon(Icons.medication_rounded, size: 16, color: Color(0xFF012A58)),
-                        SizedBox(width: 6),
-                        Text(
-                          'Select Related Dental Medication',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-
-                    // Medication Dropdown
-                    DropdownButtonFormField<String>(
-                      initialValue: dentalPrescriptionTemplates.any((t) => t.name == selectedMedicationName) ? selectedMedicationName : 'Amoxicillin 500mg',
-                      isExpanded: true,
-                      dropdownColor: Colors.white,
-                      decoration: InputDecoration(
-                        labelText: 'Choose Medicine & Strength',
-                        hintText: 'Select standard dental prescription...',
-                        prefixIcon: const Icon(Icons.vaccines_rounded, size: 18, color: Color(0xFF012A58)),
-                        filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      items: dentalPrescriptionTemplates.map((template) {
-                        return DropdownMenuItem<String>(
-                          value: template.name,
-                          child: Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                                decoration: BoxDecoration(
-                                  color: getCategoryColor(template.category).withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  template.category,
-                                  style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: getCategoryColor(template.category)),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  template.name,
-                                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }).toList(),
-                      onChanged: (val) {
-                        if (val != null) {
-                          final matched = dentalPrescriptionTemplates.firstWhere((t) => t.name == val, orElse: () => dentalPrescriptionTemplates.first);
-                          setModalState(() {
-                            selectedMedicationName = val;
-                            medCtrl.text = matched.name;
-                            dosageCtrl.text = matched.defaultDosage;
-                            frequencyCtrl.text = matched.defaultFrequency;
-                            durationCtrl.text = matched.defaultDuration;
-                            adviceCtrl.text = matched.defaultInstructions;
-                          });
-                        }
-                      },
-                    ),
-                    const SizedBox(height: 8),
-
-                    // Quick Recommendation Chips
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          'Amoxicillin 500mg',
-                          'Augmentin 625mg (Amox + Clav)',
-                          'Zerodol-SP (Aceclo + Para + Serratio)',
-                          'Combiflam (Ibuprofen + Paracetamol)',
-                          'Hexidine 0.2% (Chlorhexidine Mouthwash)',
-                          'Pan-40 (Pantoprazole 40mg)',
-                          'Ketorol-DT 10mg (Dispersible)',
-                        ].map((quickMed) {
-                          final isSelected = medCtrl.text == quickMed;
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 6),
-                            child: InkWell(
-                              onTap: () {
-                                final matched = dentalPrescriptionTemplates.firstWhere((t) => t.name == quickMed, orElse: () => dentalPrescriptionTemplates.first);
-                                setModalState(() {
-                                  selectedMedicationName = quickMed;
-                                  medCtrl.text = matched.name;
-                                  dosageCtrl.text = matched.defaultDosage;
-                                  frequencyCtrl.text = matched.defaultFrequency;
-                                  durationCtrl.text = matched.defaultDuration;
-                                  adviceCtrl.text = matched.defaultInstructions;
-                                });
-                              },
-                              borderRadius: BorderRadius.circular(16),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: isSelected ? const Color(0xFF012A58) : const Color(0xFFF1F5F9),
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(color: isSelected ? const Color(0xFF012A58) : const Color(0xFFE2E8F0)),
-                                ),
-                                child: Text(
-                                  quickMed.split(' (').first,
-                                  style: TextStyle(
-                                    fontSize: 10.5,
-                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                                    color: isSelected ? Colors.white : AppTheme.textDark,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Medication Name & Strength (Editable)
-                    TextField(
-                      controller: medCtrl,
-                      style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w600),
-                      cursorColor: AppTheme.primaryBlue,
-                      decoration: InputDecoration(
-                        labelText: 'Medication Name & Strength',
-                        hintText: 'e.g. Amoxicillin 500mg',
-                        filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Dosage & Frequency
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: dosageCtrl,
-                            style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                            cursorColor: AppTheme.primaryBlue,
-                            decoration: InputDecoration(
-                              labelText: 'Dosage',
-                              hintText: '1 Capsule',
-                              filled: true,
-                              fillColor: const Color(0xFFF8FAFC),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            controller: frequencyCtrl,
-                            style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                            cursorColor: AppTheme.primaryBlue,
-                            decoration: InputDecoration(
-                              labelText: 'Frequency',
-                              hintText: 'Twice Daily (1-0-1)',
-                              filled: true,
-                              fillColor: const Color(0xFFF8FAFC),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Duration
-                    TextField(
-                      controller: durationCtrl,
-                      style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                      cursorColor: AppTheme.primaryBlue,
-                      decoration: InputDecoration(
-                        labelText: 'Duration',
-                        hintText: '5 Days',
-                        filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Instructions / Additional Notes
-                    TextField(
-                      controller: adviceCtrl,
-                      maxLines: 2,
-                      style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
-                      cursorColor: AppTheme.primaryBlue,
-                      decoration: InputDecoration(
-                        labelText: 'Instructions / Additional Notes',
-                        hintText: 'Take after meals with plenty of water.',
-                        filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-
-                    // Action Buttons
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => Navigator.pop(dialogCtx),
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                            child: const Text('Cancel', style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.textMuted)),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          flex: 2,
-                          child: ElevatedButton.icon(
-                            icon: const Icon(Icons.check_circle_rounded, size: 18),
-                            label: const Text('Send Digital E-Prescription', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF012A58),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                            onPressed: () async {
-                              final diagnosis = diagCtrl.text.trim();
-                              final medName = medCtrl.text.trim();
-                              final dosage = dosageCtrl.text.trim();
-                              final freq = frequencyCtrl.text.trim();
-                              final duration = durationCtrl.text.trim();
-                              final notes = adviceCtrl.text.trim();
-
-                              final newRecord = {
-                                'id': 'PRES-${DateTime.now().millisecondsSinceEpoch}',
-                                'patient_id': widget.patientName,
-                                'patientName': widget.patientName,
-                                'type': 'prescription',
-                                'title': 'Digital Prescription Slips',
-                                'subtitle': 'Diagnosis: ${diagnosis.isNotEmpty ? diagnosis : "Medical Care"} (${medName.isNotEmpty ? medName : "Medication"})',
-                                'diagnosis': diagnosis,
-                                'medication': '$medName ($dosage, $freq, $duration)',
-                                'duration': duration,
-                                'advice': notes,
-                                'issuedAt': DateTime.now().toIso8601String(),
-                                'items': [
-                                  {
-                                    'name': medName.isNotEmpty ? medName : 'Amoxicillin 500mg',
-                                    'dosage': dosage.isNotEmpty ? dosage : '1 Capsule',
-                                    'frequency': freq.isNotEmpty ? freq : 'Twice Daily',
-                                    'duration': duration.isNotEmpty ? duration : '7 Days',
-                                    'instructions': notes,
-                                    'status': 'Active',
-                                  }
-                                ],
-                              };
-
-                              _problemService.addMedicalRecord(newRecord);
-
-                              await ApiService().createMedicalRecord(
-                                patientId: widget.patientName,
-                                type: 'prescription',
-                                title: 'Digital Prescription Slips',
-                                subtitle: 'Diagnosis: ${diagnosis.isNotEmpty ? diagnosis : "Medical Care"} (${medName.isNotEmpty ? medName : "Medication"})',
-                                doctorName: 'Attending Doctor',
-                                clinicName: 'GS HEALTH Clinic',
-                                items: [
-                                  {
-                                    'name': medName.isNotEmpty ? medName : 'Amoxicillin 500mg',
-                                    'dosage': dosage.isNotEmpty ? dosage : '1 Capsule',
-                                    'frequency': freq.isNotEmpty ? freq : 'Twice Daily',
-                                    'duration': duration.isNotEmpty ? duration : '7 Days',
-                                    'instructions': notes,
-                                    'status': 'Active',
-                                  }
-                                ],
-                              );
-
-                              _problemService.addNotification(
-                                recipientRole: 'Patient',
-                                recipientId: widget.patientName,
-                                title: '📝 New E-Prescription Issued',
-                                message: 'Your doctor issued an E-Prescription for ${diagnosis.isNotEmpty ? diagnosis : "your medical treatment"}. Check Medical Records.',
-                              );
-
-                              Navigator.pop(dialogCtx);
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('📝 E-Prescription issued successfully for ${widget.patientName}!'),
-                                    backgroundColor: const Color(0xFF012A58),
-                                  ),
-                                );
-                              }
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
+    SpecialtyPrescriptionModal.show(
+      context,
+      patientId: widget.patientId.isNotEmpty ? widget.patientId : widget.patientName,
+      patientName: widget.patientName,
+      doctorId: doc?.id.isNotEmpty == true ? doc!.id : widget.dentistId,
+      doctorName: effectiveDocName,
+      doctorSpecialty: effectiveSpecialty,
+      doctorQualification: effectiveDocQual,
+      clinicName: effectiveClinic,
+      appointmentId: widget.requestId,
+      initialDiagnosis: widget.category,
+      initialSymptoms: widget.symptoms,
+      onIssued: (savedRecord) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('E-Prescription issued for ${widget.patientName} ($effectiveSpecialty)!'),
+            backgroundColor: AppTheme.gsNavy,
+            action: SnackBarAction(
+              label: 'View PDF',
+              textColor: Colors.white,
+              onPressed: () {
+                if (mounted) {
+                  PrescriptionPdfGenerator.showPreviewDialog(context, record: savedRecord);
+                }
+              },
             ),
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -622,8 +232,17 @@ class _PatientConsultationDetailsScreenState extends State<PatientConsultationDe
                 children: [
                   const Text('Medical Consultation Details', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark)),
                   const Divider(height: 20),
+                  Builder(
+                    builder: (context) {
+                      final doc = _resolveConsultationDoctor();
+                      final spec = (doc?.specialty.trim().isNotEmpty == true)
+                          ? doc!.specialty.trim()
+                          : (widget.category.trim().isNotEmpty ? widget.category.trim() : 'General Medicine');
+                      return _buildDetailRow(Icons.medical_services_rounded, 'Department / Specialty', spec);
+                    },
+                  ),
                   _buildDetailRow(Icons.category_rounded, 'Category', widget.category),
-                  _buildDetailRow(Icons.description_rounded, 'Symptoms', widget.symptoms),
+                  _buildDetailRow(Icons.description_rounded, 'Symptoms & Triage Notes', widget.symptoms),
                   Builder(
                     builder: (context) {
                       final cleanNote = PatientConsultationRequest.sanitizeAdminGuidance(widget.adminNotes);

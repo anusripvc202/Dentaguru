@@ -54,6 +54,8 @@ router.patch('/admin/problem-requests/:id/review', optionalAuth, requirePermissi
 router.patch('/problem-requests/:id/review', optionalAuth, requirePermission('PROBLEM_UPDATE', ['ASSIGNMENT_CREATE']), problemRequests.markAdminReviewed);
 router.post('/admin/problem-requests/:id/suggest-dentist', optionalAuth, requirePermission('ASSIGNMENT_CREATE'), problemRequests.suggestDentist);
 router.post('/problem-requests/:id/suggest-dentist', optionalAuth, requirePermission('ASSIGNMENT_CREATE'), problemRequests.suggestDentist);
+router.patch('/problem-requests/:id/coordinator-status', optionalAuth, requirePermission('PROBLEM_UPDATE', ['ASSIGNMENT_CREATE']), problemRequests.updateCoordinatorStatus);
+router.patch('/admin/problem-requests/:id/coordinator-status', optionalAuth, requirePermission('PROBLEM_UPDATE', ['ASSIGNMENT_CREATE']), problemRequests.updateCoordinatorStatus);
 router.delete('/admin/problem-requests/:id', optionalAuth, requirePermission('PROBLEM_UPDATE'), problemRequests.deleteProblemRequest);
 router.delete('/patient/problem-requests/:id', optionalAuth, problemRequests.deleteProblemRequest);
 router.get('/admin/patients', optionalAuth, requirePermission('PATIENT_VIEW'), auth.getPatients);
@@ -211,6 +213,8 @@ router.get('/referrals/analytics', optionalAuth, referrals.getAdminReferralAnaly
 router.get('/referrals/:referralId', optionalAuth, referrals.getReferralById);
 router.patch('/referrals/:referralId/accept', optionalAuth, referrals.acceptReferral);
 router.patch('/referrals/:referralId/reject', optionalAuth, referrals.rejectReferral);
+router.patch('/referrals/:referralId/status', optionalAuth, referrals.updateReferralStatus);
+router.put('/referrals/:referralId/status', optionalAuth, referrals.updateReferralStatus);
 router.delete('/referrals/:referralId', optionalAuth, referrals.deleteReferral);
 router.post('/referrals/:referralId/notify-whatsapp', optionalAuth, referrals.notifyWhatsApp);
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import '../services/patient_problem_service.dart';
 
 class MapLocationItem {
   final String name;
@@ -19,152 +20,21 @@ class MapLocationItem {
   });
 }
 
-const List<MapLocationItem> dentalHubLocations = [
-  MapLocationItem(
-    name: 'Jubilee Hills Dental Speciality',
-    locality: 'Road No. 36, Jubilee Hills',
-    city: 'Hyderabad',
-    pincode: '500033',
-    latitude: 17.4325,
-    longitude: 78.4071,
-  ),
-  MapLocationItem(
-    name: 'Banjara Hills Dental Care Hub',
-    locality: 'Road No. 12, Banjara Hills',
-    city: 'Hyderabad',
-    pincode: '500034',
-    latitude: 17.4156,
-    longitude: 78.4350,
-  ),
-  MapLocationItem(
-    name: 'Hitec City Implant Clinic',
-    locality: 'Cyber Towers, Hitec City',
-    city: 'Hyderabad',
-    pincode: '500081',
-    latitude: 17.4504,
-    longitude: 78.3808,
-  ),
-  MapLocationItem(
-    name: 'Kondapur Smiles Center',
-    locality: 'Botanical Garden Road, Kondapur',
-    city: 'Hyderabad',
-    pincode: '500084',
-    latitude: 17.4617,
-    longitude: 78.3673,
-  ),
-  MapLocationItem(
-    name: 'Kukatpally Dental Care',
-    locality: 'KPHB Colony Phase 3, Kukatpally',
-    city: 'Hyderabad',
-    pincode: '500072',
-    latitude: 17.4938,
-    longitude: 78.3995,
-  ),
-  MapLocationItem(
-    name: 'Manikonda Dental Aesthetics',
-    locality: 'Puppalaguda Main Road, Manikonda',
-    city: 'Hyderabad',
-    pincode: '500089',
-    latitude: 17.3991,
-    longitude: 78.3772,
-  ),
-  MapLocationItem(
-    name: 'Madhapur Dental Practice Area',
-    locality: 'Ayyappa Society, Madhapur',
-    city: 'Hyderabad',
-    pincode: '500081',
-    latitude: 17.4483,
-    longitude: 78.3915,
-  ),
-  MapLocationItem(
-    name: 'Gachibowli Healthcare Boulevard',
-    locality: 'Financial District, Gachibowli',
-    city: 'Hyderabad',
-    pincode: '500032',
-    latitude: 17.4401,
-    longitude: 78.3489,
-  ),
-  MapLocationItem(
-    name: 'Begumpet Specialty Center',
-    locality: 'Prakash Nagar, Begumpet',
-    city: 'Hyderabad',
-    pincode: '500016',
-    latitude: 17.4447,
-    longitude: 78.4664,
-  ),
-  MapLocationItem(
-    name: 'Secunderabad Clinic Square',
-    locality: 'MG Road, Secunderabad',
-    city: 'Hyderabad',
-    pincode: '500003',
-    latitude: 17.4399,
-    longitude: 78.4983,
-  ),
-  MapLocationItem(
-    name: 'Indiranagar Dental Plaza',
-    locality: '100ft Road, Indiranagar',
-    city: 'Bengaluru',
-    pincode: '560038',
-    latitude: 12.9784,
-    longitude: 77.6408,
-  ),
-  MapLocationItem(
-    name: 'Koramangala Dental Care',
-    locality: '80 Feet Road, 4th Block, Koramangala',
-    city: 'Bengaluru',
-    pincode: '560034',
-    latitude: 12.9352,
-    longitude: 77.6245,
-  ),
-  MapLocationItem(
-    name: 'Whitefield Dental Suite',
-    locality: 'ITPL Main Road, Whitefield',
-    city: 'Bengaluru',
-    pincode: '560066',
-    latitude: 12.9698,
-    longitude: 77.7499,
-  ),
-  MapLocationItem(
-    name: 'Bandra West Dental Clinic',
-    locality: 'Linking Road, Bandra West',
-    city: 'Mumbai',
-    pincode: '400050',
-    latitude: 19.0596,
-    longitude: 72.8295,
-  ),
-  MapLocationItem(
-    name: 'Andheri West Smiles Center',
-    locality: 'Lokhandwala Complex, Andheri West',
-    city: 'Mumbai',
-    pincode: '400053',
-    latitude: 19.1363,
-    longitude: 72.8277,
-  ),
-  MapLocationItem(
-    name: 'Connaught Place Healthcare',
-    locality: 'Inner Circle, Connaught Place',
-    city: 'New Delhi',
-    pincode: '110001',
-    latitude: 28.6304,
-    longitude: 77.2177,
-  ),
-  MapLocationItem(
-    name: 'Anna Nagar Dental Clinic',
-    locality: '2nd Avenue, Anna Nagar',
-    city: 'Chennai',
-    pincode: '600040',
-    latitude: 13.0850,
-    longitude: 80.2101,
-  ),
-  MapLocationItem(
-    name: 'T. Nagar Dental Care',
-    locality: 'Pondy Bazaar, T. Nagar',
-    city: 'Chennai',
-    pincode: '600017',
-    latitude: 13.0418,
-    longitude: 80.2341,
-  ),
-];
+List<MapLocationItem> _realClinicLocations() {
+  return PatientProblemService().allClinics
+      .where((c) => c.clinicName.trim().isNotEmpty)
+      .map(
+        (c) => MapLocationItem(
+          name: c.clinicName.trim(),
+          locality: c.location.trim(),
+          city: '',
+          pincode: '',
+          latitude: 17.3850,
+          longitude: 78.4867,
+        ),
+      )
+      .toList();
+}
 
 class MapLocationPickerDialog extends StatefulWidget {
   final String initialAddress;
@@ -229,11 +99,11 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
   @override
   void initState() {
     super.initState();
-    _currentLat = widget.initialLat ?? 17.4325;
-    _currentLng = widget.initialLng ?? 78.4071;
-    _customAddressController.text = widget.initialAddress.isNotEmpty ? widget.initialAddress : 'Road No. 36, Jubilee Hills';
-    _customCityController.text = widget.initialCity.isNotEmpty ? widget.initialCity : 'Hyderabad';
-    _customPincodeController.text = widget.initialPincode.isNotEmpty ? widget.initialPincode : '500033';
+    _currentLat = widget.initialLat ?? 17.3850;
+    _currentLng = widget.initialLng ?? 78.4867;
+    _customAddressController.text = widget.initialAddress;
+    _customCityController.text = widget.initialCity;
+    _customPincodeController.text = widget.initialPincode;
   }
 
   void _selectLocationItem(MapLocationItem item) {
@@ -248,31 +118,13 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
     });
   }
 
-  void _useCurrentGPSLocation() {
-    setState(() {
-      _currentLat = 17.4325 + (DateTime.now().millisecond % 50) * 0.0001;
-      _currentLng = 78.4071 + (DateTime.now().millisecond % 50) * 0.0001;
-      _selectedName = 'Current GPS Location';
-      _customAddressController.text = 'GPS Pinpoint, Jubilee Hills Main Road';
-      _customCityController.text = 'Hyderabad';
-      _customPincodeController.text = '500033';
-      _panOffset = Offset.zero;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('📍 Current GPS location accurately detected!'),
-        backgroundColor: Color(0xFF012A58),
-        duration: Duration(seconds: 1),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
+    final clinicLocations = _realClinicLocations();
     final query = _searchController.text.trim().toLowerCase();
     final filteredLocations = query.isEmpty
-        ? dentalHubLocations
-        : dentalHubLocations.where((loc) {
+        ? clinicLocations
+        : clinicLocations.where((loc) {
             return loc.name.toLowerCase().contains(query) ||
                 loc.locality.toLowerCase().contains(query) ||
                 loc.city.toLowerCase().contains(query) ||
@@ -366,29 +218,25 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                     onChanged: (_) => setState(() {}),
                   ),
                 ),
-                const SizedBox(width: 8),
-                ElevatedButton.icon(
-                  onPressed: _useCurrentGPSLocation,
-                  icon: const Icon(Icons.my_location_rounded, size: 14),
-                  label: const Text('GPS', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF0F172A),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    elevation: 0,
-                  ),
-                ),
               ],
             ),
             const SizedBox(height: 8),
 
-            // Quick Locality Chips
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              child: Row(
-                children: (filteredLocations.isNotEmpty ? filteredLocations : dentalHubLocations).take(10).map((loc) {
+            // Quick Locality Chips (strictly from real registered clinics)
+            if (filteredLocations.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 4),
+                child: Text(
+                  'No clinic locations registered yet. Enter an address or pincode manually.',
+                  style: TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
+                ),
+              )
+            else
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                child: Row(
+                  children: filteredLocations.take(10).map((loc) {
                   final isSelected = (_currentLat - loc.latitude).abs() < 0.005 && (_currentLng - loc.longitude).abs() < 0.005;
                   return Padding(
                     padding: const EdgeInsets.only(right: 6),

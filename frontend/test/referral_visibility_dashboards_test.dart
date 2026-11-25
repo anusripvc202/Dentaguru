@@ -26,6 +26,7 @@ void main() {
     ApiService.debugFetchAppointmentsOverride = ({String? patientId, String? dentistId}) async => [];
     ApiService.debugAdminAppointmentsOverride = () async => [];
     ApiService.debugFetchNotificationsOverride = ({String? role, String? userId}) async => [];
+    ApiService.debugAdminReferralsOverride = () async => {'success': false, 'referrals': const []};
 
     sampleReferral = PatientReferral(
       id: referralId,
@@ -56,6 +57,7 @@ void main() {
     ApiService.debugFetchAppointmentsOverride = null;
     ApiService.debugAdminAppointmentsOverride = null;
     ApiService.debugFetchNotificationsOverride = null;
+    ApiService.debugAdminReferralsOverride = null;
   });
 
   testWidgets(

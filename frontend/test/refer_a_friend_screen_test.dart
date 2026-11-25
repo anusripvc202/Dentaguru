@@ -63,7 +63,7 @@ void main() {
 
     // 2. Subtitle Description
     expect(
-      find.text('Share a dentist you trust. We\'ll keep track of the referral for you.'),
+      find.text('Share a doctor you trust. We\'ll keep track of the referral for you.'),
       findsOneWidget,
     );
 
@@ -76,10 +76,10 @@ void main() {
     expect(find.text('98765 43210'), findsOneWidget);
 
     // 5. Refer To Section
-    expect(find.text('REFER TO'), findsOneWidget);
-    expect(find.text('Search dentist by name, specialty...'), findsOneWidget);
+    expect(find.text('REFER TO (OPTIONAL DOCTOR)'), findsOneWidget);
+    expect(find.text('Search doctor by name, specialty...'), findsOneWidget);
     expect(
-      find.text('Showing your favourite and visited dentists. Search to find others.'),
+      find.text('Showing your favourite and visited doctors. Search to find others.'),
       findsOneWidget,
     );
 

@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:dentaguru/core/services/api_service.dart';
 import 'package:dentaguru/core/services/patient_problem_service.dart';
 import 'package:dentaguru/core/widgets/denta_guru_logo.dart';
 import 'package:dentaguru/features/dentist/presentation/screens/dentist_timeline.dart';
@@ -290,6 +291,16 @@ void main() {
 
         final service = PatientProblemService();
         seedDentistWorkspaceData(service);
+        ApiService.debugUpdateDoctorAvailabilityOverride = (
+          String doctorId,
+          bool isAvailable, {
+          String? statusOverride,
+        }) async => {
+          'success': true,
+          'isAvailable': isAvailable,
+          'availability_status': statusOverride ?? (isAvailable ? 'Available' : 'Unavailable'),
+        };
+        addTearDown(() => ApiService.debugUpdateDoctorAvailabilityOverride = null);
 
         final boundaryKey = GlobalKey();
 
@@ -312,7 +323,7 @@ void main() {
         // TAB 0: TODAY (Default Landing Screen)
         // ==========================================
         expect(find.byType(GsHealthLogo), findsOneWidget);
-        expect(find.text('Dentist workspace'), findsOneWidget);
+        expect(find.text('Doctor workspace'), findsOneWidget);
         expect(find.byKey(const Key('dentist_header_name')), findsOneWidget);
         expect(find.text('Dr. Ananya Rao'), findsOneWidget);
         expect(find.byKey(const Key('dentist_notifications_button')), findsOneWidget);
@@ -326,10 +337,12 @@ void main() {
 
         // Availability Card
         expect(find.byKey(const Key('dentist_availability_card')), findsOneWidget);
-        expect(find.text('Available now'), findsOneWidget);
+        expect(find.text('Availability'), findsOneWidget);
+        expect(find.byKey(const Key('dentist_availability_status_badge')), findsOneWidget);
+        expect(find.text('ON'), findsOneWidget);
         expect(
           find.text(
-            'Patients who speak your language can reach you instantly. Auto-off after 30 min idle.',
+            'Visible in patient search and open for new appointment bookings.',
           ),
           findsOneWidget,
         );
@@ -400,7 +413,7 @@ void main() {
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 300));
 
-        expect(find.text('Triage cases routed to you'), findsOneWidget);
+        expect(find.text('Triage cases & referrals routed to you'), findsOneWidget);
         expect(find.text('Assigned requests'), findsOneWidget);
         expect(find.byKey(const Key('requests_folder_button')), findsOneWidget);
 
@@ -446,7 +459,7 @@ void main() {
         expect(find.byKey(const Key('refer_history_button')), findsOneWidget);
         expect(find.byKey(const Key('refer_type_specialist_pill')), findsOneWidget);
         expect(find.byKey(const Key('refer_type_clinic_pill')), findsOneWidget);
-        expect(find.text('Specialist dentist'), findsOneWidget);
+        expect(find.text('Specialist doctor'), findsOneWidget);
         expect(find.text('Clinic'), findsOneWidget);
 
         expect(find.text('Patient details'), findsOneWidget);
@@ -514,6 +527,16 @@ void main() {
 
         final service = PatientProblemService();
         seedDentistWorkspaceData(service);
+        ApiService.debugUpdateDoctorAvailabilityOverride = (
+          String doctorId,
+          bool isAvailable, {
+          String? statusOverride,
+        }) async => {
+          'success': true,
+          'isAvailable': isAvailable,
+          'availability_status': statusOverride ?? (isAvailable ? 'Available' : 'Unavailable'),
+        };
+        addTearDown(() => ApiService.debugUpdateDoctorAvailabilityOverride = null);
 
         await tester.pumpWidget(
           const ProviderScope(
@@ -579,7 +602,33 @@ void main() {
         await tester.tap(vikramCard);
         await tester.pump(const Duration(milliseconds: 200));
 
-        // Scroll to and tap Send referral button
+        // Stub referral creation API for headless test & scroll Send button cleanly above bottom nav
+        ApiService.debugCreatePatientReferralOverride = ({
+          required String referredPatientName,
+          required String referredPatientMobile,
+          required String doctorId,
+          String? referrerPatientId,
+        }) async => {
+          'success': true,
+          'referral': {
+            'id': 'ref-dentist-tab-1',
+            'referrerPatientId': referrerPatientId ?? 'doc-ananya-rao',
+            'referredPatientName': referredPatientName,
+            'referredPatientMobile': referredPatientMobile,
+            'doctorId': doctorId,
+            'doctorName': 'Dr. Vikram Mehta',
+            'requiredSpecialist': 'Orthodontist',
+            'clinicalComplaint': 'Specialist referral consultation requested',
+            'status': 'Pending',
+            'referralDate': DateTime.now().toIso8601String(),
+          },
+        };
+        addTearDown(() => ApiService.debugCreatePatientReferralOverride = null);
+
+        // Wait for any earlier availability SnackBar (3s) to dismiss, then scroll to Send button
+        await tester.pump(const Duration(seconds: 4));
+        await tester.drag(find.byKey(const Key('dentist_refer_scroll_view')), const Offset(0, -600));
+        await tester.pump(const Duration(milliseconds: 200));
         final sendBtn = find.byKey(const Key('dentist_send_referral_button'));
         await tester.ensureVisible(sendBtn);
         await tester.pump(const Duration(milliseconds: 200));
@@ -620,6 +669,16 @@ void main() {
       (tester) async {
         final service = PatientProblemService();
         seedDentistWorkspaceData(service);
+        ApiService.debugUpdateDoctorAvailabilityOverride = (
+          String doctorId,
+          bool isAvailable, {
+          String? statusOverride,
+        }) async => {
+          'success': true,
+          'isAvailable': isAvailable,
+          'availability_status': statusOverride ?? (isAvailable ? 'Available' : 'Unavailable'),
+        };
+        addTearDown(() => ApiService.debugUpdateDoctorAvailabilityOverride = null);
 
         for (final width in [320.0, 360.0, 390.0, 412.0]) {
           tester.view.physicalSize = Size(width, 844);

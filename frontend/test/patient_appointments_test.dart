@@ -65,11 +65,12 @@ void main() {
 
       // Verify "My visits" heading and tabs
       expect(find.text('My visits'), findsOneWidget);
-      expect(find.text('Upcoming'), findsOneWidget);
-      expect(find.text('Past & cancelled'), findsOneWidget);
+      expect(find.text('Upcoming Visits'), findsOneWidget);
+      expect(find.text('Previous Visits'), findsOneWidget);
+      expect(find.text('Cancelled Visits'), findsOneWidget);
 
       // Verify empty state when no visits exist
-      expect(find.text('No upcoming visits'), findsOneWidget);
+      expect(find.text('No upcoming visits yet.'), findsOneWidget);
     });
 
     testWidgets('2. Clicking Book Visit opens the 4-step booking flow dialog', (tester) async {
@@ -119,7 +120,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // Step 1: Doctor selection dialog header
-      expect(find.text('Book Dental Visit (1/4)'), findsOneWidget);
+      expect(find.text('Book Consultation (1/4)'), findsOneWidget);
       expect(find.text('Dr. Ramesh Sharma'), findsOneWidget);
       expect(find.text('Periodontics'), findsWidgets);
       expect(find.text('Smile Dental Clinic'), findsOneWidget);
@@ -133,7 +134,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // Step 2: Date & Slot Selection
-      expect(find.text('Book Dental Visit (2/4)'), findsOneWidget);
+      expect(find.text('Book Consultation (2/4)'), findsOneWidget);
       expect(find.text('1. Select Appointment Date'), findsOneWidget);
       expect(find.text('2. Select Available Time Slot'), findsOneWidget);
 
@@ -148,8 +149,8 @@ void main() {
       await tester.pumpAndSettle();
 
       // Step 3: Reason & Symptoms
-      expect(find.text('Book Dental Visit (3/4)'), findsOneWidget);
-      expect(find.text('Dental Issue / Consultation Reason'), findsOneWidget);
+      expect(find.text('Book Consultation (3/4)'), findsOneWidget);
+      expect(find.text('Consultation Reason / Symptoms'), findsOneWidget);
       expect(find.text('Describe Symptoms / Notes (Optional)'), findsOneWidget);
 
       // Tap Next: Review Booking Details
@@ -157,7 +158,7 @@ void main() {
       await tester.pumpAndSettle();
 
       // Step 4: Review Details
-      expect(find.text('Book Dental Visit (4/4)'), findsOneWidget);
+      expect(find.text('Book Consultation (4/4)'), findsOneWidget);
       expect(find.text('Review Appointment Details'), findsOneWidget);
       expect(find.text('Dr. Ramesh Sharma'), findsOneWidget);
       expect(find.text('Smile Dental Clinic'), findsOneWidget);

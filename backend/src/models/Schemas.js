@@ -1095,7 +1095,7 @@ const Clinic = {
             user_id: validUserId,
             clinic_name: clinicData.clinic_name || clinicData.clinicName || '',
             location: clinicData.location || '',
-            rating: clinicData.rating || 5.0,
+            rating: clinicData.rating ?? 0,
             reviews_count: clinicData.reviews_count || clinicData.reviewsCount || 0,
             verified: clinicData.verified !== undefined ? clinicData.verified : true,
             services: clinicData.services || clinicData.departments || ['General Medicine', 'General Consultation'],
@@ -1167,32 +1167,159 @@ function getDefaultQualificationForSpecialty(spec) {
     return 'MBBS, MD';
 }
 
-function normalizeLanguagesList(rawLanguages) {
+const SUPPORTED_LANGUAGES = [
+    'English',
+    'Hindi',
+    'Telugu',
+    'Tamil',
+    'Kannada',
+    'Malayalam',
+    'Marathi',
+    'Bengali',
+    'Gujarati',
+    'Punjabi',
+    'Urdu',
+    'Odia',
+];
+
+const LANGUAGE_ALIASES = {
+    en: 'english',
+    eng: 'english',
+    english: 'english',
+    hi: 'hindi',
+    hin: 'hindi',
+    hindi: 'hindi',
+    te: 'telugu',
+    tel: 'telugu',
+    telugu: 'telugu',
+    ta: 'tamil',
+    tam: 'tamil',
+    tamil: 'tamil',
+    kn: 'kannada',
+    kan: 'kannada',
+    kannada: 'kannada',
+    ml: 'malayalam',
+    mal: 'malayalam',
+    malayalam: 'malayalam',
+    mr: 'marathi',
+    mar: 'marathi',
+    marathi: 'marathi',
+    bn: 'bengali',
+    ben: 'bengali',
+    bangla: 'bengali',
+    bengali: 'bengali',
+    gu: 'gujarati',
+    guj: 'gujarati',
+    gujarati: 'gujarati',
+    pa: 'punjabi',
+    pan: 'punjabi',
+    panjabi: 'punjabi',
+    punjabi: 'punjabi',
+    ur: 'urdu',
+    urd: 'urdu',
+    urdu: 'urdu',
+    or: 'odia',
+    ori: 'odia',
+    oriya: 'odia',
+    odia: 'odia',
+};
+
+const _CANONICAL_LANGUAGE_DISPLAY_MAP = SUPPORTED_LANGUAGES.reduce((acc, lang) => {
+    acc[lang.toLowerCase()] = lang;
+    return acc;
+}, {});
+
+function _splitRawLanguageTokens(rawInput) {
     let items = [];
-    if (Array.isArray(rawLanguages)) {
-        items = rawLanguages;
-    } else if (typeof rawLanguages === 'string') {
-        const trimmed = rawLanguages.trim();
+    if (Array.isArray(rawInput)) {
+        items = rawInput;
+    } else if (typeof rawInput === 'string') {
+        const trimmed = rawInput.trim();
+        if (!trimmed) return [];
         if (trimmed.startsWith('[')) {
             try {
                 const parsed = JSON.parse(trimmed);
-                if (Array.isArray(parsed)) items = parsed;
+                if (Array.isArray(parsed)) {
+                    items = parsed;
+                } else {
+                    items = trimmed.split(/[,;/|]+/);
+                }
             } catch (_) {
-                items = trimmed.split(',');
+                items = trimmed.split(/[,;/|]+/);
             }
-        } else if (trimmed.length > 0) {
-            items = trimmed.split(',');
+        } else if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+            items = trimmed.slice(1, -1).split(/[,;/|]+/);
+        } else {
+            items = trimmed.split(/[,;/|]+/);
+        }
+    } else {
+        return [];
+    }
+
+    const tokens = [];
+    for (const item of items) {
+        if (item == null) continue;
+        if (Array.isArray(item)) {
+            tokens.push(..._splitRawLanguageTokens(item));
+            continue;
+        }
+        let str = String(item).trim();
+        if (!str) continue;
+        if ((str.startsWith('"') && str.endsWith('"')) || (str.startsWith("'") && str.endsWith("'"))) {
+            str = str.slice(1, -1).trim();
+        }
+        if (/[,;/|]/.test(str)) {
+            for (const part of str.split(/[,;/|]+/)) {
+                const collapsed = part.replace(/\s+/g, ' ').trim();
+                if (collapsed) tokens.push(collapsed);
+            }
+        } else {
+            const collapsed = str.replace(/\s+/g, ' ').trim();
+            if (collapsed) tokens.push(collapsed);
         }
     }
+    return tokens;
+}
+
+function canonicalLanguageKey(raw) {
+    if (raw == null) return '';
+    let cleaned = String(raw).replace(/\s+/g, ' ').trim().toLowerCase();
+    if (!cleaned) return '';
+    // Strip parenthetical qualifiers such as "Telugu (Fluent)" -> "telugu"
+    cleaned = cleaned.replace(/\s*\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!cleaned) return '';
+    if (LANGUAGE_ALIASES[cleaned]) {
+        return LANGUAGE_ALIASES[cleaned];
+    }
+    return cleaned;
+}
+
+function canonicalLanguageDisplayName(raw) {
+    const collapsed = String(raw || '').replace(/\s+/g, ' ').trim();
+    if (!collapsed) return '';
+    const key = canonicalLanguageKey(collapsed);
+    if (key && _CANONICAL_LANGUAGE_DISPLAY_MAP[key]) {
+        return _CANONICAL_LANGUAGE_DISPLAY_MAP[key];
+    }
+    // Strip parenthetical qualifier if present so label remains clean unless needed
+    const withoutParen = collapsed.replace(/\s*\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+    const base = withoutParen || collapsed;
+    if (base === base.toLowerCase() || base === base.toUpperCase()) {
+        return base.split(' ').map(w => (w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : '')).join(' ');
+    }
+    return base;
+}
+
+function normalizeLanguagesList(rawLanguages) {
+    const tokens = _splitRawLanguageTokens(rawLanguages);
     const seen = new Set();
     const result = [];
-    for (const item of items) {
-        const clean = (item || '').toString().trim();
-        if (!clean) continue;
-        const lower = clean.toLowerCase();
-        if (!seen.has(lower)) {
-            seen.add(lower);
-            result.push(clean);
+    for (const token of tokens) {
+        const key = canonicalLanguageKey(token);
+        if (!key) continue;
+        if (!seen.has(key)) {
+            seen.add(key);
+            result.push(canonicalLanguageDisplayName(token));
         }
     }
     return result;
@@ -1200,10 +1327,50 @@ function normalizeLanguagesList(rawLanguages) {
 
 function parseLanguageFilters(rawInput) {
     if (!rawInput) return [];
-    const list = normalizeLanguagesList(rawInput);
-    return list
-        .map(l => l.toLowerCase())
-        .filter(l => l && l !== 'any' && l !== 'any language' && l !== 'all' && l !== 'all languages');
+    const tokens = _splitRawLanguageTokens(rawInput);
+    const seen = new Set();
+    const result = [];
+    for (const token of tokens) {
+        const key = canonicalLanguageKey(token);
+        if (!key || key === 'any' || key === 'any language' || key === 'all' || key === 'all languages') {
+            continue;
+        }
+        if (!seen.has(key)) {
+            seen.add(key);
+            result.push(key);
+        }
+    }
+    return result;
+}
+
+function mergeSupportedAndDoctorLanguages(doctorLanguagesIterable = []) {
+    const seen = new Set();
+    const canonicalList = [];
+    const extraCustomList = [];
+
+    for (const lang of SUPPORTED_LANGUAGES) {
+        const key = canonicalLanguageKey(lang);
+        if (key && !seen.has(key)) {
+            seen.add(key);
+            canonicalList.push(lang);
+        }
+    }
+
+    for (const rawLang of (doctorLanguagesIterable || [])) {
+        for (const token of _splitRawLanguageTokens(rawLang)) {
+            const key = canonicalLanguageKey(token);
+            if (!key || key === 'any' || key === 'any language' || key === 'all' || key === 'all languages') {
+                continue;
+            }
+            if (!seen.has(key)) {
+                seen.add(key);
+                extraCustomList.push(canonicalLanguageDisplayName(token));
+            }
+        }
+    }
+
+    extraCustomList.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+    return [...canonicalList, ...extraCustomList];
 }
 
 function extractDoctorLanguages(d) {
@@ -1239,31 +1406,96 @@ function extractDoctorLanguages(d) {
 }
 
 function doctorMatchesLanguages(doctor, selectedLangsInput) {
-    const selected = Array.isArray(selectedLangsInput)
-        ? parseLanguageFilters(selectedLangsInput)
-        : parseLanguageFilters(selectedLangsInput);
+    const selected = parseLanguageFilters(selectedLangsInput);
     if (selected.length === 0) return true;
-    const docLangs = extractDoctorLanguages(doctor).map(l => l.toLowerCase());
+    const docLangKeys = extractDoctorLanguages(doctor)
+        .flatMap(l => _splitRawLanguageTokens(l))
+        .map(l => canonicalLanguageKey(l))
+        .filter(Boolean);
     return selected.some(target =>
-        docLangs.some(dl => dl === target || dl.startsWith(`${target} `) || dl.startsWith(`${target}(`))
+        docLangKeys.some(dl => dl === target || dl.startsWith(`${target} `))
     );
+}
+
+const CANONICAL_SPECIALTY_GROUPS = {
+    NEURO: ['neurology', 'neurologist', 'neurosciences', 'stroke medicine', 'epileptology'],
+    CARDIO: ['cardiology', 'cardiologist', 'interventional cardiology', 'electrophysiology', 'cardiovascular'],
+    GEN_MED: ['general physician / mbbs', 'general physician', 'general medicine', 'internal medicine', 'family medicine', 'mbbs physician', 'primary care physician', 'mbbs'],
+    ORTHO: ['orthopedics', 'orthopaedics', 'orthopedist', 'orthopedic surgeon', 'orthopaedic surgeon', 'joint replacement', 'spine surgery', 'sports medicine'],
+    DERM: ['dermatology', 'dermatologist', 'clinical dermatology', 'cosmetology', 'trichology', 'venereology'],
+    PEDIA: ['pediatrics', 'paediatrics', 'pediatrician', 'neonatology', 'pediatric critical care'],
+    GYNEC: ['gynecology', 'gynaecology', 'gynecologist', 'obstetrics', 'obstetrics & gynecology', 'obgyn', 'fetal medicine', 'reproductive medicine'],
+    ENT: ['ent', 'otorhinolaryngology', 'otolaryngology', 'ear, nose & throat', 'ear nose throat', 'otology', 'rhinology', 'laryngology'],
+    OPHTHAL: ['ophthalmology', 'ophthalmologist', 'retina', 'cornea', 'glaucoma'],
+    ONCO: ['oncology', 'oncologist', 'medical oncology', 'surgical oncology', 'radiation oncology'],
+    URO: ['urology', 'urologist', 'endourology', 'andrology', 'uro-oncology'],
+    PSYCH: ['psychiatry', 'psychiatrist', 'adult psychiatry', 'child & adolescent psychiatry'],
+    GASTRO: ['gastroenterology', 'gastroenterologist', 'hepatology', 'therapeutic endoscopy'],
+    PULMO: ['pulmonology', 'pulmonologist', 'pulmonary medicine', 'respiratory medicine', 'interventional pulmonology', 'sleep medicine'],
+    ENDO: ['endocrinology', 'endocrinologist', 'diabetology', 'thyroid & metabolic medicine'],
+};
+
+function _resolveCanonicalSpecialtyGroup(rawText) {
+    const s = String(rawText || '').trim().toLowerCase();
+    if (!s) return null;
+    if (isDentalSpecialtyText(s) || s === 'dentist' || s === 'general dentist' || s.includes('orthodont') || s.includes('endodont') || s.includes('periodont') || s.includes('prosthodont') || s.includes('pedodont')) {
+        return 'DENTAL';
+    }
+    for (const [group, aliases] of Object.entries(CANONICAL_SPECIALTY_GROUPS)) {
+        if (aliases.some(alias => s === alias || s.includes(alias))) {
+            return group;
+        }
+    }
+    return null;
 }
 
 function matchesSpecialtyQuery(doctorSpec, filterSpec) {
     if (!filterSpec || filterSpec.trim().toLowerCase() === 'all' || filterSpec.trim().toLowerCase() === 'all specialties') return true;
     const f = filterSpec.trim().toLowerCase();
-    const d = (doctorSpec || 'General Medicine').toString().trim().toLowerCase();
-    if (d === f || d.includes(f) || f.includes(d)) return true;
+    const d = String(doctorSpec || '').trim().toLowerCase();
+    if (!d) return false;
+    if (d === f) return true;
+
+    const isDentalDoc = _resolveCanonicalSpecialtyGroup(d) === 'DENTAL';
+    const isDentalFilter = _resolveCanonicalSpecialtyGroup(f) === 'DENTAL';
+
     if (f === 'dentistry' || f === 'dental') {
-        return isDentalSpecialtyText(d);
+        return isDentalDoc;
     }
-    if (f.includes('orthodont') && d.includes('orthodont')) return true;
-    if (f.includes('general dentist') && (d.includes('general dentist') || d === 'dentistry' || d === 'dental')) return true;
-    if (f.includes('endodont') && d.includes('endodont')) return true;
-    if (f.includes('periodont') && d.includes('periodont')) return true;
-    if (f.includes('prosthodont') && d.includes('prosthodont')) return true;
-    if ((f.includes('pedodont') || f.includes('pediatric dentist')) && (d.includes('pedodont') || d.includes('pediatric dentist'))) return true;
-    if (f.includes('oral surg') && d.includes('oral')) return true;
+    if (isDentalFilter) {
+        if (!isDentalDoc) return false;
+        if (f.includes('general dentist')) return d.includes('general dentist') || d === 'dentistry' || d === 'dental' || d === 'dentist';
+        if (f.includes('orthodont')) return d.includes('orthodont');
+        if (f.includes('endodont')) return d.includes('endodont');
+        if (f.includes('periodont')) return d.includes('periodont');
+        if (f.includes('prosthodont')) return d.includes('prosthodont');
+        if (f.includes('pedodont') || f.includes('pediatric dentist')) return d.includes('pedodont') || d.includes('pediatric dentist');
+        if (f.includes('oral')) return d.includes('oral') || d.includes('maxillofacial');
+        if (f.includes('cosmetic')) return d.includes('cosmetic');
+        if (f.includes('implant')) return d.includes('implant');
+        return d === f;
+    }
+    if (isDentalDoc) return false;
+
+    const fGroup = _resolveCanonicalSpecialtyGroup(f);
+    const dGroup = _resolveCanonicalSpecialtyGroup(d);
+    if (fGroup || dGroup) {
+        return Boolean(fGroup && fGroup === dGroup);
+    }
+
+    for (const spec of _inMemorySpecialties) {
+        const specLower = String(spec.name || '').trim().toLowerCase();
+        if (specLower === f) {
+            if (d === specLower) return true;
+            if (Array.isArray(spec.sub_specialties) && spec.sub_specialties.some(sub => {
+                const subLower = String(sub || '').trim().toLowerCase();
+                return subLower && (d === subLower || d.includes(subLower));
+            })) {
+                return true;
+            }
+        }
+    }
+
     return false;
 }
 
@@ -1472,7 +1704,7 @@ const Dentist = {
             availability_status: dentistData.availability_status || dentistData.availabilityStatus || 'Available',
             verification_status: dentistData.verification_status || 'VERIFIED',
             languages: finalLanguages,
-            rating: dentistData.rating || 5.0,
+            rating: dentistData.rating ?? 0,
             reviews_count: dentistData.reviews_count ?? 0,
             consultation_fee: (dentistData.consultation_fee || dentistData.consultationFee || '').toString(),
             bio: (dentistData.bio || '').toString()
@@ -3090,23 +3322,25 @@ const Referral = {
     },
 
     async checkDuplicate(referrerPatientId, referredPatientMobile, doctorId) {
-        if (!referrerPatientId || !referredPatientMobile || !doctorId) return null;
+        if (!referrerPatientId || !referredPatientMobile) return null;
         try {
-            const { data } = await supabaseAdmin
+            let q = supabaseAdmin
                 .from('referrals')
                 .select('*')
                 .eq('referrer_patient_id', referrerPatientId)
                 .eq('referred_patient_mobile', referredPatientMobile)
-                .eq('doctor_id', doctorId)
-                .eq('status', 'Pending')
-                .limit(1);
+                .eq('status', 'Pending');
+            if (doctorId) {
+                q = q.eq('doctor_id', doctorId);
+            }
+            const { data } = await q.limit(1);
             if (data && data.length > 0) return data[0];
         } catch (_) { }
 
         return _inMemoryReferrals.find(r =>
             (r.referrer_patient_id === referrerPatientId || r.referrer_id === referrerPatientId) &&
             r.referred_patient_mobile === referredPatientMobile &&
-            (r.doctor_id === doctorId || r.assigned_doctor_id === doctorId) &&
+            (!doctorId || r.doctor_id === doctorId || r.assigned_doctor_id === doctorId) &&
             r.status === 'Pending'
         ) || null;
     },
@@ -3308,11 +3542,13 @@ function sanitizeSchedulePayload(raw = {}, fallback = DEFAULT_DOCTOR_SCHEDULE) {
         ? String(raw.breakEndTime || raw.break_end_time || fallback.breakEndTime || '02:00 PM').trim()
         : null;
     const dur = parseInt(raw.slotDurationMinutes || raw.slot_duration_minutes || fallback.slotDurationMinutes, 10);
+    const interval = parseInt(raw.slotIntervalMinutes || raw.slot_interval_minutes || dur || fallback.slotIntervalMinutes || fallback.slotDurationMinutes, 10);
     return {
         workingDays: workingDays.length > 0 ? workingDays : [...fallback.workingDays],
         startTime: String(raw.startTime || raw.start_time || fallback.startTime || '09:00 AM').trim(),
         endTime: String(raw.endTime || raw.end_time || fallback.endTime || '05:00 PM').trim(),
-        slotDurationMinutes: [15, 30, 45, 60].includes(dur) ? dur : (dur > 0 ? dur : 30),
+        slotDurationMinutes: dur >= 5 ? dur : 30,
+        slotIntervalMinutes: interval >= 5 ? interval : (dur >= 5 ? dur : 30),
         hasBreak: hasBreakVal,
         breakStartTime: breakStart,
         breakEndTime: breakEnd,
@@ -3320,6 +3556,8 @@ function sanitizeSchedulePayload(raw = {}, fallback = DEFAULT_DOCTOR_SCHEDULE) {
         updatedAt: raw.updatedAt || new Date().toISOString(),
     };
 }
+
+const _inMemoryBlockedSlots = new Map(); // key: `${dentistId}_${dateYmd}` -> Array<{startTime, endTime, reason, ...}>
 
 const DoctorAvailability = {
     extractDateYmd,
@@ -3599,6 +3837,104 @@ const DoctorAvailability = {
             }
         }
         return { success: true };
+    },
+
+    async getBlockedSlotsForDate(dentistId, dateYmd) {
+        const cleanDate = extractDateYmd(dateYmd);
+        if (!dentistId || !cleanDate) return [];
+        const { userTableId, idsToMatch } = await this.resolveCanonicalIds(dentistId);
+
+        let targetUserId = userTableId;
+        if (!targetUserId) {
+            const firstUuid = idsToMatch.find(id => isUUID(id));
+            if (firstUuid) {
+                try {
+                    const { data: dRow } = await supabaseAdmin
+                        .from('dentists')
+                        .select('user_id')
+                        .or(`id.eq.${firstUuid},user_id.eq.${firstUuid}`)
+                        .limit(1)
+                        .maybeSingle();
+                    if (dRow?.user_id) targetUserId = dRow.user_id;
+                } catch (_) {}
+            }
+        }
+
+        if (targetUserId) {
+            try {
+                const { data: uRow } = await supabaseAdmin
+                    .from('users')
+                    .select('id, device_token')
+                    .eq('id', targetUserId)
+                    .maybeSingle();
+                if (uRow?.device_token && typeof uRow.device_token === 'string' && uRow.device_token.trim().startsWith('{')) {
+                    const meta = JSON.parse(uRow.device_token);
+                    if (meta?.blockedSlotsByDate && Array.isArray(meta.blockedSlotsByDate[cleanDate])) {
+                        return meta.blockedSlotsByDate[cleanDate];
+                    }
+                }
+            } catch (_) {}
+        }
+
+        for (const k of idsToMatch) {
+            const mem = _inMemoryBlockedSlots.get(`${k}_${cleanDate}`);
+            if (Array.isArray(mem)) return mem;
+        }
+        return [];
+    },
+
+    async saveBlockedSlotsForDate(dentistId, dateYmd, blockedSlots = []) {
+        const cleanDate = extractDateYmd(dateYmd);
+        if (!dentistId || !cleanDate) return [];
+        const { userTableId, dentistTableId, idsToMatch } = await this.resolveCanonicalIds(dentistId);
+        const sanitized = Array.isArray(blockedSlots) ? blockedSlots : [];
+
+        for (const k of idsToMatch) {
+            _inMemoryBlockedSlots.set(`${k}_${cleanDate}`, sanitized);
+        }
+
+        let targetUserId = userTableId;
+        if (!targetUserId && isUUID(dentistTableId || dentistId)) {
+            try {
+                const { data: dRow } = await supabaseAdmin
+                    .from('dentists')
+                    .select('user_id')
+                    .or(`id.eq.${dentistTableId || dentistId},user_id.eq.${dentistId}`)
+                    .limit(1)
+                    .maybeSingle();
+                if (dRow?.user_id) targetUserId = dRow.user_id;
+            } catch (_) {}
+        }
+
+        if (targetUserId) {
+            try {
+                const { data: uRow } = await supabaseAdmin
+                    .from('users')
+                    .select('id, device_token')
+                    .eq('id', targetUserId)
+                    .maybeSingle();
+                let meta = {};
+                if (uRow?.device_token && typeof uRow.device_token === 'string' && uRow.device_token.trim().startsWith('{')) {
+                    try { meta = JSON.parse(uRow.device_token); } catch (_) {}
+                }
+                const nextMap = (meta.blockedSlotsByDate && typeof meta.blockedSlotsByDate === 'object')
+                    ? { ...meta.blockedSlotsByDate }
+                    : {};
+                if (sanitized.length === 0) {
+                    delete nextMap[cleanDate];
+                } else {
+                    nextMap[cleanDate] = sanitized;
+                }
+                meta.blockedSlotsByDate = nextMap;
+                await supabaseAdmin
+                    .from('users')
+                    .update({ device_token: JSON.stringify(meta) })
+                    .eq('id', targetUserId);
+            } catch (e) {
+                console.warn('⚠️ DoctorAvailability.saveBlockedSlotsForDate Supabase notice:', e.message);
+            }
+        }
+        return sanitized;
     }
 };
 
@@ -4050,11 +4386,18 @@ function normalizeAvailabilityStatus(input) {
     }
     const normalized = String(input ?? '').trim().toLowerCase();
     if (!normalized) return null;
-    if (normalized === 'on' || normalized === 'true' || normalized === 'available' || normalized === 'online' || normalized === 'active') {
+    if (normalized === 'online') return 'Online';
+    if (normalized.includes('busy') && normalized.includes('online')) return 'Busy – Online Consultation';
+    if (normalized.includes('busy') && (normalized.includes('in-person') || normalized.includes('in person') || normalized.includes('clinic'))) {
+        return 'Busy – In-Person Consultation';
+    }
+    if (normalized === 'busy' || normalized === 'in consultation' || normalized === 'in_consultation') return 'Busy';
+    if (normalized === 'delayed' || normalized === 'running late' || normalized === 'running_late') return 'Delayed';
+    if (normalized === 'on' || normalized === 'true' || normalized === 'available' || normalized === 'active') {
         return 'Available';
     }
     if (UNAVAILABLE_STATUS_VALUES.has(normalized)) {
-        return 'Unavailable';
+        return normalized === 'offline' ? 'Offline' : 'Unavailable';
     }
     return null;
 }
@@ -4091,6 +4434,10 @@ module.exports = {
     parseLanguageFilters,
     extractDoctorLanguages,
     doctorMatchesLanguages,
+    SUPPORTED_LANGUAGES,
+    canonicalLanguageKey,
+    canonicalLanguageDisplayName,
+    mergeSupportedAndDoctorLanguages,
     isDoctorAvailableStatus,
     isDoctorRecordAvailable,
     normalizeAvailabilityStatus,

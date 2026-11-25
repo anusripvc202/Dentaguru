@@ -75,11 +75,11 @@ void main() {
     expect(find.byKey(const Key('talk_to_dentist_matched_languages')), findsOneWidget);
     expect(find.text('Matched by English / Hindi / Telugu'), findsOneWidget);
     expect(find.byKey(const Key('talk_to_dentist_title')), findsOneWidget);
-    expect(find.text('Talk to a dentist now'), findsOneWidget);
+    expect(find.text('Talk to a doctor now'), findsOneWidget);
 
     // 2. Availability card (0 online by default)
     expect(find.byKey(const Key('talk_to_dentist_availability_card')), findsOneWidget);
-    expect(find.text('No dentists online right now'), findsOneWidget);
+    expect(find.text('No doctors online right now'), findsOneWidget);
     expect(find.byKey(const Key('dentist_availability_dot')), findsOneWidget);
 
     // 3. Patient concern section
@@ -160,7 +160,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('1 dentist online right now'), findsOneWidget);
+    expect(find.text('1 doctor online right now'), findsOneWidget);
 
     // Add second online dentist
     service.addTestDoctor(
@@ -186,7 +186,7 @@ void main() {
     service.notifyListeners();
     await tester.pump();
 
-    expect(find.text('2 dentists online right now'), findsOneWidget);
+    expect(find.text('2 doctors online right now'), findsOneWidget);
   });
 
   testWidgets('Validation on empty concern prevents connection and shows warning', (tester) async {
@@ -355,7 +355,7 @@ void main() {
 
     // AI Triage screen should be open
     expect(find.byType(AiTriageScreen), findsOneWidget);
-    expect(find.text('AI Dental Triage'), findsOneWidget);
+    expect(find.text('AI Health Triage'), findsOneWidget);
     expect(find.text('Sharp sensitivity when drinking cold water'), findsOneWidget);
 
     // Let any pending timer complete
@@ -368,7 +368,7 @@ void main() {
 
     // Back on Talk to Dentist Now screen
     expect(find.byType(TalkToDentistNowScreen), findsOneWidget);
-    expect(find.text('Talk to a dentist now'), findsOneWidget);
+    expect(find.text('Talk to a doctor now'), findsOneWidget);
   });
 
   testWidgets('No dentists online dialog opens when 0 dentists are online', (tester) async {
@@ -399,7 +399,7 @@ void main() {
     await tester.tap(find.byKey(const Key('talk_to_dentist_connect_button')));
     await tester.pump();
 
-    expect(find.text('No Dentists Online'), findsOneWidget);
+    expect(find.text('No Doctors Online'), findsOneWidget);
     expect(find.byKey(const Key('talk_to_dentist_no_dentists_ai_button')), findsOneWidget);
     expect(find.byKey(const Key('talk_to_dentist_no_dentists_queue_button')), findsOneWidget);
   });
@@ -452,7 +452,7 @@ void main() {
 
     // Verify TalkToDentistNowScreen opens
     expect(find.byType(TalkToDentistNowScreen), findsOneWidget);
-    expect(find.text('Talk to a dentist now'), findsOneWidget);
+    expect(find.text('Talk to a doctor now'), findsOneWidget);
 
     // Tap back button
     await tester.tap(find.byKey(const Key('talk_to_dentist_back_button')));
