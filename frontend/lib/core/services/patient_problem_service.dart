@@ -260,6 +260,7 @@ class PatientProfile {
   String? districtIdentificationStatus;
   List<String> languages;
   Uint8List? photoBytes;
+  String? profileImageUrl;
 
   PatientProfile({
     this.id = '',
@@ -267,7 +268,7 @@ class PatientProfile {
     this.email = '',
     this.phone = '',
     this.age = '',
-    this.gender = 'Female',
+    this.gender = '',
     this.bloodGroup = 'O Positive (O+)',
     this.emergencyContact = '',
     this.address = '',
@@ -278,7 +279,61 @@ class PatientProfile {
     this.districtIdentificationStatus,
     this.languages = const ['English'],
     this.photoBytes,
+    this.profileImageUrl,
   });
+
+  static String cleanString(dynamic value) {
+    final s = (value ?? '').toString().trim();
+    return s.toLowerCase() == 'null' ? '' : s;
+  }
+
+  static String _cleanString(dynamic value) => cleanString(value);
+
+  static ({Uint8List? bytes, String? url}) parseProfilePhoto(dynamic raw) {
+    final str = _cleanString(raw);
+    if (str.isEmpty) return (bytes: null, url: null);
+    if (str.startsWith('http://') || str.startsWith('https://')) {
+      return (bytes: null, url: str);
+    }
+    try {
+      final cleanBase64 = str.contains(',') ? str.split(',').last.trim() : str;
+      final decoded = base64Decode(cleanBase64);
+      if (decoded.isNotEmpty) {
+        return (bytes: decoded, url: null);
+      }
+    } catch (_) {}
+    return (bytes: null, url: null);
+  }
+
+  bool get hasProfileImage =>
+      (photoBytes != null && photoBytes!.isNotEmpty) ||
+      (profileImageUrl != null &&
+          profileImageUrl!.trim().isNotEmpty &&
+          profileImageUrl!.trim().toLowerCase() != 'null');
+
+  bool get hasValidPincode => RegExp(r'^\d{6}$').hasMatch(pincode.trim());
+
+  bool get hasValidAge {
+    final trimmed = age.trim();
+    if (trimmed.isEmpty || !RegExp(r'^\d+$').hasMatch(trimmed)) return false;
+    final parsed = int.tryParse(trimmed);
+    return parsed != null && parsed >= 1 && parsed <= 120;
+  }
+
+  bool get hasValidGender {
+    final trimmed = gender.trim();
+    return trimmed.isNotEmpty && trimmed.toLowerCase() != 'null';
+  }
+
+  bool get isProfileComplete =>
+      hasProfileImage && hasValidPincode && hasValidAge && hasValidGender;
+
+  List<String> get missingRequiredProfileFields => <String>[
+        if (!hasProfileImage) 'Profile image',
+        if (!hasValidPincode) 'Pincode',
+        if (!hasValidAge) 'Age',
+        if (!hasValidGender) 'Gender',
+      ];
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -297,15 +352,14 @@ class PatientProfile {
         'district_identification_status': districtIdentificationStatus,
         'languages': languages,
         'photoBase64': photoBytes != null ? base64Encode(photoBytes!) : null,
+        'profileImageUrl': profileImageUrl,
       };
 
   factory PatientProfile.fromJson(Map<String, dynamic> json) {
-    Uint8List? bytes;
-    if (json['photoBase64'] != null && json['photoBase64'].toString().isNotEmpty) {
-      try {
-        bytes = base64Decode(json['photoBase64']);
-      } catch (_) {}
-    }
+    final parsedPhoto = parseProfilePhoto(
+      json['photoBase64'] ?? json['profilePhoto'] ?? json['biometric_token'] ?? json['profileImageUrl'],
+    );
+    final explicitUrl = _cleanString(json['profileImageUrl']);
 
     List<String> parsedLangs = ['English'];
     final rawLangs = json['languages'];
@@ -321,22 +375,25 @@ class PatientProfile {
     }
 
     return PatientProfile(
-      id: json['id'] ?? '',
-      name: json['name'] ?? '',
-      email: json['email'] ?? '',
-      phone: json['phone'] ?? '',
-      age: (json['age'] ?? json['patient_age'] ?? '').toString(),
-      gender: json['gender'] ?? 'Female',
-      bloodGroup: json['bloodGroup'] ?? 'O Positive (O+)',
-      emergencyContact: json['emergencyContact'] ?? '',
-      address: json['address'] ?? json['location'] ?? '',
-      city: json['city'] ?? '',
-      state: json['state'] ?? '',
-      pincode: json['pincode'] ?? json['postal_code'] ?? '',
+      id: _cleanString(json['id']),
+      name: _cleanString(json['name']),
+      email: _cleanString(json['email']),
+      phone: _cleanString(json['phone']),
+      age: _cleanString(json['age'] ?? json['patient_age']),
+      gender: _cleanString(json['gender']),
+      bloodGroup: _cleanString(json['bloodGroup']).isNotEmpty
+          ? _cleanString(json['bloodGroup'])
+          : 'O Positive (O+)',
+      emergencyContact: _cleanString(json['emergencyContact']),
+      address: _cleanString(json['address'] ?? json['location']),
+      city: _cleanString(json['city']),
+      state: _cleanString(json['state']),
+      pincode: _cleanString(json['pincode'] ?? json['postal_code']),
       district: json['district'] ?? json['district_name'] ?? json['city'],
       districtIdentificationStatus: json['district_identification_status'] ?? 'VERIFIED',
       languages: parsedLangs,
-      photoBytes: bytes,
+      photoBytes: parsedPhoto.bytes,
+      profileImageUrl: explicitUrl.isNotEmpty ? explicitUrl : parsedPhoto.url,
     );
   }
 }
@@ -2215,6 +2272,7 @@ class PatientProblemService extends ChangeNotifier {
     _districtReports.clear();
     _assignmentStats.clear();
     currentPatient = PatientProfile();
+    _userPhotoCache.clear();
     currentDoctor = null;
     _isClinicMode = false;
     _authenticatedClinicId = '';
@@ -2295,6 +2353,9 @@ class PatientProblemService extends ChangeNotifier {
           }
           if (userLangs.isEmpty) userLangs = ['English'];
 
+          final rawPhotoToken = item['profilePhoto'] ?? item['biometric_token'] ?? tokenMeta['profilePhoto'];
+          final parsedPhoto = PatientProfile.parseProfilePhoto(rawPhotoToken);
+
           final pProfile = PatientProfile(
             id: id,
             name: name,
@@ -2309,6 +2370,8 @@ class PatientProblemService extends ChangeNotifier {
             state: state,
             address: address,
             languages: userLangs,
+            photoBytes: parsedPhoto.bytes,
+            profileImageUrl: parsedPhoto.url,
           );
           _allPatients.add(pProfile);
 
@@ -2347,6 +2410,8 @@ class PatientProblemService extends ChangeNotifier {
             if (state.isNotEmpty) currentPatient.state = state;
             if (address.isNotEmpty) currentPatient.address = address;
             if (userLangs.isNotEmpty) currentPatient.languages = userLangs;
+            if (parsedPhoto.bytes != null) currentPatient.photoBytes = parsedPhoto.bytes;
+            if (parsedPhoto.url != null) currentPatient.profileImageUrl = parsedPhoto.url;
           }
         }
       }
@@ -2354,6 +2419,41 @@ class PatientProblemService extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint('Sync patients error: $e');
+    }
+  }
+
+  /// Syncs the currently authenticated Patient's own profile from backend/Supabase.
+  Future<void> syncCurrentPatientProfileFromApi() async {
+    try {
+      final sess = SessionService().currentSession;
+      if (sess == null || sess.role.trim().toLowerCase() != 'patient') return;
+      final remoteUser = await ApiService().fetchCurrentPatientProfile(patientId: sess.userId);
+      if (remoteUser == null) return;
+
+      final parsedPhoto = PatientProfile.parseProfilePhoto(remoteUser['profilePhoto']);
+      final rAge = PatientProfile._cleanString(remoteUser['age']);
+      final rGender = PatientProfile._cleanString(remoteUser['gender']);
+      final rPincode = PatientProfile._cleanString(remoteUser['pincode']);
+      final rCity = PatientProfile._cleanString(remoteUser['city']);
+      final rName = PatientProfile._cleanString(remoteUser['name']);
+      final rPhone = PatientProfile._cleanString(remoteUser['phone']);
+      final rEmail = PatientProfile._cleanString(remoteUser['email']);
+
+      if (remoteUser['id'] != null) currentPatient.id = remoteUser['id'].toString();
+      if (rName.isNotEmpty) currentPatient.name = rName;
+      if (rPhone.isNotEmpty) currentPatient.phone = rPhone;
+      if (rEmail.isNotEmpty) currentPatient.email = rEmail;
+      if (rAge.isNotEmpty) currentPatient.age = rAge;
+      if (rGender.isNotEmpty) currentPatient.gender = rGender;
+      if (rPincode.isNotEmpty) currentPatient.pincode = rPincode;
+      if (rCity.isNotEmpty) currentPatient.city = rCity;
+      if (parsedPhoto.bytes != null) currentPatient.photoBytes = parsedPhoto.bytes;
+      if (parsedPhoto.url != null) currentPatient.profileImageUrl = parsedPhoto.url;
+
+      await _saveToStorage();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Sync current patient profile notice: $e');
     }
   }
 
@@ -3729,6 +3829,9 @@ class PatientProblemService extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('dentaguru_patient_profile', jsonEncode(currentPatient.toJson()));
+      if (currentPatient.id.trim().isNotEmpty) {
+        await prefs.setString('dentaguru_patient_profile_${currentPatient.id.trim()}', jsonEncode(currentPatient.toJson()));
+      }
       if (currentPatient.email.isNotEmpty) {
         await prefs.setString('dentaguru_patient_profile_${currentPatient.email.trim().toLowerCase()}', jsonEncode(currentPatient.toJson()));
       }
@@ -3859,73 +3962,191 @@ class PatientProblemService extends ChangeNotifier {
     String state = '',
     List<String>? languages,
     Uint8List? photoBytes,
+    String? profileImageUrl,
+    bool preserveExistingPhoto = true,
+    bool syncRemote = true,
   }) {
-    if (photoBytes != null) {
-      _userPhotoCache[email.trim().toLowerCase()] = photoBytes;
+    final cleanEmailKey = email.trim().toLowerCase();
+    if (photoBytes != null && cleanEmailKey.isNotEmpty) {
+      _userPhotoCache[cleanEmailKey] = photoBytes;
     }
-    final cachedPhoto = photoBytes ?? _userPhotoCache[email.trim().toLowerCase()] ?? currentPatient.photoBytes;
+    final cachedPhoto = photoBytes ??
+        (preserveExistingPhoto
+            ? ((cleanEmailKey.isNotEmpty ? _userPhotoCache[cleanEmailKey] : null) ??
+                currentPatient.photoBytes)
+            : null);
+    final effectiveImageUrl = (profileImageUrl != null && profileImageUrl.trim().isNotEmpty)
+        ? profileImageUrl.trim()
+        : (preserveExistingPhoto && photoBytes == null ? currentPatient.profileImageUrl : null);
+
     final effectiveLanguages = (languages != null && languages.isNotEmpty)
         ? List<String>.from(languages)
         : (currentPatient.languages.isNotEmpty ? List<String>.from(currentPatient.languages) : <String>['English']);
     final effectiveId = id.trim().isNotEmpty ? id.trim() : currentPatient.id;
     final effectiveState = state.trim().isNotEmpty ? state.trim() : currentPatient.state;
+    final cleanGender = gender.trim().toLowerCase() == 'null' ? '' : gender.trim();
+    final cleanAge = age.trim().toLowerCase() == 'null' ? '' : age.trim();
+    final cleanPincode = pincode.trim().toLowerCase() == 'null' ? '' : pincode.trim();
 
     currentPatient = PatientProfile(
       id: effectiveId,
       name: name.trim().isEmpty ? 'Patient' : name.trim(),
       email: email.trim().isEmpty ? 'patient@dentaguru.com' : email.trim(),
       phone: phone.trim(),
-      age: age.trim(),
-      gender: gender.isEmpty ? 'Female' : gender,
-      bloodGroup: bloodGroup.isEmpty ? 'O Positive (O+)' : bloodGroup,
+      age: cleanAge,
+      gender: cleanGender,
+      bloodGroup: bloodGroup.trim().isEmpty ? 'O Positive (O+)' : bloodGroup.trim(),
       emergencyContact: emergencyContact.trim().isEmpty ? phone.trim() : emergencyContact.trim(),
       address: address.trim(),
       city: city.trim(),
-      pincode: pincode.trim(),
+      pincode: cleanPincode,
       state: effectiveState,
       languages: effectiveLanguages,
       photoBytes: cachedPhoto,
+      profileImageUrl: effectiveImageUrl,
     );
     _saveToStorage();
 
-    // Persist profile metadata to Supabase DB users table in device_token column
-    if (email.trim().isNotEmpty || phone.trim().isNotEmpty || effectiveId.isNotEmpty) {
+    if (syncRemote && (email.trim().isNotEmpty || phone.trim().isNotEmpty || effectiveId.isNotEmpty)) {
       try {
-        final profileMeta = jsonEncode({
-          'age': age.trim(),
-          'bloodGroup': bloodGroup.trim(),
-          'gender': gender.trim(),
-          'emergencyContact': emergencyContact.trim(),
-          'city': city.trim(),
-          'pincode': pincode.trim(),
-          'state': effectiveState,
-          'address': address.trim(),
-          'languages': effectiveLanguages,
-        });
-        final updatePayload = <String, dynamic>{
-          'name': currentPatient.name,
-          'phone': currentPatient.phone,
-          'device_token': profileMeta,
-        };
-        if (effectiveId.isNotEmpty) {
-          Supabase.instance.client
-              .from('users')
-              .update(updatePayload)
-              .eq('id', effectiveId)
-              .then((_) {})
-              .catchError((_) {});
-        } else if (email.trim().isNotEmpty) {
-          Supabase.instance.client
-              .from('users')
-              .update(updatePayload)
-              .ilike('email', email.trim())
-              .then((_) {})
-              .catchError((_) {});
-        }
+        final photoPayload = cachedPhoto != null
+            ? 'data:image/png;base64,${base64Encode(cachedPhoto)}'
+            : effectiveImageUrl;
+        ApiService().updatePatientProfileApi(
+          patientId: effectiveId,
+          name: currentPatient.name,
+          age: cleanAge,
+          gender: cleanGender,
+          pincode: cleanPincode,
+          city: city.trim(),
+          address: address.trim(),
+          bloodGroup: currentPatient.bloodGroup,
+          emergencyContact: currentPatient.emergencyContact,
+          languages: effectiveLanguages,
+          profilePhoto: photoPayload,
+          completeProfile: false,
+        );
       } catch (_) {}
+      syncAllDataFromApi();
     }
 
-    syncAllDataFromApi();
+    notifyListeners();
+  }
+
+  /// Persists deferred Patient Profile Completion against the existing authenticated Patient ID
+  /// without creating duplicate accounts.
+  Future<Map<String, dynamic>> completePatientProfile({
+    required Uint8List? photoBytes,
+    String? profileImageUrl,
+    required String pincode,
+    required String age,
+    required String gender,
+    String? name,
+    String? city,
+  }) async {
+    final cleanPin = pincode.trim();
+    final cleanAge = age.trim();
+    final cleanGender = gender.trim();
+    final effectiveBytes = photoBytes ?? currentPatient.photoBytes;
+    final effectiveUrl = (profileImageUrl != null && profileImageUrl.trim().isNotEmpty)
+        ? profileImageUrl.trim()
+        : currentPatient.profileImageUrl;
+
+    if ((effectiveBytes == null || effectiveBytes.isEmpty) &&
+        (effectiveUrl == null || effectiveUrl.isEmpty)) {
+      return {'success': false, 'message': 'Please upload a profile image.'};
+    }
+    if (!RegExp(r'^\d{6}$').hasMatch(cleanPin)) {
+      return {'success': false, 'message': 'Please enter a valid 6-digit pincode.'};
+    }
+    final parsedAge = int.tryParse(cleanAge);
+    if (!RegExp(r'^\d+$').hasMatch(cleanAge) || parsedAge == null || parsedAge < 1 || parsedAge > 120) {
+      return {'success': false, 'message': 'Please enter a valid age between 1 and 120.'};
+    }
+    if (cleanGender.isEmpty || cleanGender.toLowerCase() == 'null') {
+      return {'success': false, 'message': 'Please select your gender.'};
+    }
+
+    final sess = SessionService().currentSession;
+    final existingPatientId = currentPatient.id.trim().isNotEmpty
+        ? currentPatient.id.trim()
+        : (sess?.userId.trim() ?? '');
+    if (existingPatientId.isEmpty) {
+      return {'success': false, 'message': 'No active patient session found. Please sign in again.'};
+    }
+
+    final String photoData = effectiveBytes != null && effectiveBytes.isNotEmpty
+        ? 'data:image/png;base64,${base64Encode(effectiveBytes)}'
+        : effectiveUrl!;
+    final effectiveName = (name != null && name.trim().isNotEmpty)
+        ? name.trim()
+        : (currentPatient.name.trim().isNotEmpty ? currentPatient.name.trim() : (sess?.name ?? 'Patient'));
+    final effectiveCity = (city != null && city.trim().isNotEmpty)
+        ? city.trim()
+        : currentPatient.city;
+
+    final apiRes = await _api.updatePatientProfileApi(
+      patientId: existingPatientId,
+      pincode: cleanPin,
+      age: cleanAge,
+      gender: cleanGender,
+      profilePhoto: photoData,
+      name: effectiveName,
+      city: effectiveCity,
+      languages: currentPatient.languages,
+      completeProfile: true,
+    );
+
+    if (apiRes['success'] != true) {
+      return {
+        'success': false,
+        'message': apiRes['message']?.toString() ?? 'Failed to save profile details.',
+      };
+    }
+
+    updatePatientProfile(
+      id: existingPatientId,
+      name: effectiveName,
+      email: currentPatient.email.isNotEmpty ? currentPatient.email : (sess?.email ?? ''),
+      phone: currentPatient.phone.isNotEmpty ? currentPatient.phone : (sess?.phone ?? ''),
+      age: cleanAge,
+      gender: cleanGender,
+      bloodGroup: currentPatient.bloodGroup,
+      emergencyContact: currentPatient.emergencyContact,
+      address: currentPatient.address,
+      city: effectiveCity,
+      pincode: cleanPin,
+      state: currentPatient.state,
+      languages: currentPatient.languages,
+      photoBytes: effectiveBytes,
+      profileImageUrl: effectiveBytes == null ? effectiveUrl : null,
+      preserveExistingPhoto: true,
+      syncRemote: false,
+    );
+
+    await SessionService().updateSessionUser(
+      name: effectiveName,
+      additionalMetadata: {
+        'age': cleanAge,
+        'gender': cleanGender,
+        'pincode': cleanPin,
+        'city': effectiveCity,
+        'profilePhoto': photoData,
+        'isProfileComplete': true,
+      },
+    );
+
+    return {'success': true, 'message': 'Profile completed successfully.'};
+  }
+
+  /// Clears only cached active patient profile fields on logout or user switch.
+  Future<void> clearPatientSessionCache() async {
+    currentPatient = PatientProfile();
+    _userPhotoCache.clear();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('dentaguru_patient_profile');
+    } catch (_) {}
     notifyListeners();
   }
 

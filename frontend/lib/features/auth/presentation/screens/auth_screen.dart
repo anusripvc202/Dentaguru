@@ -14,7 +14,6 @@ import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/supabase_service.dart';
 import '../../../../core/services/analytics_service.dart';
 import '../../../../core/services/session_service.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/widgets/map_location_picker_dialog.dart';
 import '../widgets/gs_health_registration_view.dart';
@@ -583,10 +582,13 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     final normalized = _normalizePhone(rawInput);
 
     try {
+      final bool isPatientSignIn = !_isAdminMode && _selectedRole == UserRole.patient;
       final res = await ApiService().verifyOtp(
         phone: normalized,
         email: rawInput.contains('@') ? rawInput : '',
         code: code,
+        role: isPatientSignIn ? 'Patient' : null,
+        autoCreatePatient: isPatientSignIn,
       );
       final bool verified = res['success'] == true;
 
@@ -594,7 +596,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       setState(() => _isVerifyingLoginCode = false);
 
       if (verified) {
-        await _handleLogin(verifiedOtpCode: code, otpAlreadyVerified: true);
+        await _handleLogin(
+          verifiedOtpCode: code,
+          otpAlreadyVerified: true,
+          verifiedOtpResponse: res,
+        );
       } else {
         setState(() {
           _loginOtpErrorMessage = res['message']?.toString() ?? 'Invalid or expired OTP code.';
@@ -609,7 +615,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     }
   }
 
-  Future<void> _handleLogin({String? verifiedOtpCode, bool otpAlreadyVerified = false}) async {
+  Future<void> _handleLogin({
+    String? verifiedOtpCode,
+    bool otpAlreadyVerified = false,
+    Map<String, dynamic>? verifiedOtpResponse,
+  }) async {
     if (_isLoggingIn) return;
 
     final String otpToUse = (verifiedOtpCode ?? _getEnteredOtp()).trim();
@@ -628,14 +638,35 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     ScaffoldMessenger.of(context).clearSnackBars();
 
     try {
-      final res = await ApiService().loginUser(
-        email: identifier,
-        phone: identifier,
-        otp: otpAlreadyVerified ? null : (otpToUse.isNotEmpty ? otpToUse : null),
-        role: _isAdminMode
-            ? 'Admin'
-            : (_selectedRole == UserRole.clinic ? 'Clinic' : null),
-      );
+      late final Map<String, dynamic> res;
+      if (otpAlreadyVerified &&
+          verifiedOtpResponse != null &&
+          verifiedOtpResponse['success'] == true &&
+          verifiedOtpResponse['user'] is Map) {
+        final vUser = Map<String, dynamic>.from(verifiedOtpResponse['user'] as Map);
+        final vRoleLower = (vUser['role'] ?? 'patient').toString().trim().toLowerCase();
+        final bool vIsAdminOrSubAdmin = vRoleLower.contains('admin');
+        if (_isAdminMode && !vIsAdminOrSubAdmin) {
+          res = {
+            'success': false,
+            'message': 'Role Mismatch: Your account is registered as \'${vUser['role'] ?? 'Patient'}\'. Cannot log into Admin Portal.',
+          };
+        } else {
+          res = {
+            'success': true,
+            'data': verifiedOtpResponse,
+          };
+        }
+      } else {
+        res = await ApiService().loginUser(
+          email: identifier,
+          phone: identifier,
+          otp: otpAlreadyVerified ? null : (otpToUse.isNotEmpty ? otpToUse : null),
+          role: _isAdminMode
+              ? 'Admin'
+              : (_selectedRole == UserRole.clinic ? 'Clinic' : null),
+        );
+      }
 
       if (!mounted) return;
 
@@ -648,14 +679,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         // Authoritative role directly from database
         final String registeredRole = (userData['role'] ?? 'patient').toString().toLowerCase();
 
-        final String? returnedPhoto = userData['profilePhoto'];
-        Uint8List? photoBytes;
-        if (returnedPhoto != null && returnedPhoto.trim().isNotEmpty) {
-          try {
-            final base64Str = returnedPhoto.contains(',') ? returnedPhoto.split(',').last : returnedPhoto;
-            photoBytes = base64Decode(base64Str.trim());
-          } catch (_) {}
-        }
+        final String? returnedPhoto = userData['profilePhoto']?.toString();
+        final parsedPhoto = PatientProfile.parseProfilePhoto(returnedPhoto);
+        final Uint8List? photoBytes = parsedPhoto.bytes;
+        final String? profileImageUrl = parsedPhoto.url;
 
         final userPhone = (userData['phone'] != null && userData['phone'].toString().isNotEmpty)
             ? userData['phone'].toString()
@@ -669,6 +696,14 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             : (effectiveEmail.contains('@') ? effectiveEmail.split('@').first : identifier);
 
         AnalyticsService.logLogin(method: 'OTP_Mobile_Login', role: registeredRole);
+
+        final prevUserId = SessionService().currentSession?.userId.trim();
+        if (prevUserId != null && prevUserId.isNotEmpty && prevUserId != effectiveUserId) {
+          await PatientProblemService().clearAllDataAndStorage();
+        }
+        if (effectiveToken.isNotEmpty) {
+          ApiService().setAuthToken(effectiveToken);
+        }
 
         // Direct Authoritative Role Routing
         if (registeredRole.contains('clinic') ||
@@ -808,14 +843,21 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           );
           context.go(isSubAdmin ? '/sub-admin' : '/admin');
         } else {
-          // Patient Role
+          // Patient Role (defer profile completion until service access)
+          final existingCurId = PatientProblemService().currentPatient.id.trim();
+          if (existingCurId.isNotEmpty && existingCurId != effectiveUserId) {
+            await PatientProblemService().clearPatientSessionCache();
+          }
+
           final prefs = await SharedPreferences.getInstance();
-          final userEmailKey = (userData['email'] ?? (identifier.contains('@') ? identifier : '')).toString().trim().toLowerCase();
-          final cachedProfileStr = prefs.getString('dentaguru_patient_profile_$userEmailKey') ?? prefs.getString('dentaguru_patient_profile');
+          final scopedProfileStr = prefs.getString('dentaguru_patient_profile_$effectiveUserId');
           Map<String, dynamic> cachedMap = {};
-          if (cachedProfileStr != null && cachedProfileStr.isNotEmpty) {
+          if (scopedProfileStr != null && scopedProfileStr.isNotEmpty) {
             try {
-              cachedMap = jsonDecode(cachedProfileStr);
+              final decoded = jsonDecode(scopedProfileStr);
+              if (decoded is Map<String, dynamic> && decoded['id']?.toString() == effectiveUserId) {
+                cachedMap = decoded;
+              }
             } catch (_) {}
           }
 
@@ -826,29 +868,48 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             } catch (_) {}
           }
 
-          final authMeta = SupabaseService.safeCurrentUser?.userMetadata ?? {};
-          final String loginAge = (userData['age'] ?? dbProfileMeta['age'] ?? cachedMap['age'] ?? authMeta['age'] ?? authMeta['patient_age'] ?? '').toString();
-          final String loginGender = (userData['gender'] ?? dbProfileMeta['gender'] ?? cachedMap['gender'] ?? authMeta['gender'] ?? 'Female').toString();
-          final String loginBloodGroup = (userData['bloodGroup'] ?? userData['blood_group'] ?? dbProfileMeta['bloodGroup'] ?? cachedMap['bloodGroup'] ?? authMeta['bloodGroup'] ?? 'O Positive (O+)').toString();
-          final String loginEmergency = (userData['emergencyContact'] ?? userData['emergency_contact'] ?? dbProfileMeta['emergencyContact'] ?? cachedMap['emergencyContact'] ?? authMeta['emergencyContact'] ?? userPhone).toString();
+          String cleanVal(dynamic v) => PatientProfile.cleanString(v);
+
+          final currentSbUser = SupabaseService.safeCurrentUser;
+          final bool authUserMatches = currentSbUser != null &&
+              ((effectiveUserId.isNotEmpty && currentSbUser.id.trim() == effectiveUserId) ||
+                  (effectiveEmail.isNotEmpty &&
+                      (currentSbUser.email ?? '').trim().toLowerCase() == effectiveEmail.trim().toLowerCase()));
+          final authMeta = authUserMatches ? (currentSbUser.userMetadata ?? {}) : const <String, dynamic>{};
+          final String loginAge = cleanVal(userData['age'] ?? dbProfileMeta['age'] ?? cachedMap['age'] ?? authMeta['age'] ?? authMeta['patient_age']);
+          final String loginGender = cleanVal(userData['gender'] ?? dbProfileMeta['gender'] ?? cachedMap['gender'] ?? authMeta['gender']);
+          final String loginPincode = cleanVal(userData['pincode'] ?? dbProfileMeta['pincode'] ?? cachedMap['pincode'] ?? authMeta['pincode']);
+          final String loginCity = cleanVal(userData['city'] ?? dbProfileMeta['city'] ?? cachedMap['city'] ?? authMeta['city']);
+          final String loginBloodGroup = cleanVal(userData['bloodGroup'] ?? userData['blood_group'] ?? dbProfileMeta['bloodGroup'] ?? cachedMap['bloodGroup'] ?? authMeta['bloodGroup']);
+          final String loginEmergency = cleanVal(userData['emergencyContact'] ?? userData['emergency_contact'] ?? dbProfileMeta['emergencyContact'] ?? cachedMap['emergencyContact'] ?? authMeta['emergencyContact'] ?? userPhone);
           final dynamic rawLoginLangs = userData['languages'] ?? dbProfileMeta['languages'] ?? cachedMap['languages'] ?? authMeta['languages'];
           final List<String> loginLanguages = (rawLoginLangs is List && rawLoginLangs.isNotEmpty)
               ? rawLoginLangs.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList()
               : <String>['English'];
 
+          final Uint8List? effectivePhotoBytes = photoBytes ?? PatientProfile.parseProfilePhoto(cachedMap['photoBase64']).bytes;
+          final String? effectiveImageUrl = profileImageUrl ?? (cleanVal(cachedMap['profileImageUrl']).isNotEmpty ? cleanVal(cachedMap['profileImageUrl']) : null);
+
           PatientProblemService().updatePatientProfile(
-            id: userData['id']?.toString() ?? '',
-            name: userData['name'] ?? (identifier.contains('@') ? identifier.split('@').first : 'Patient'),
-            email: userData['email'] ?? (identifier.contains('@') ? identifier : ''),
+            id: effectiveUserId,
+            name: (userData['name'] != null && cleanVal(userData['name']).isNotEmpty)
+                ? cleanVal(userData['name'])
+                : (identifier.contains('@') ? identifier.split('@').first : 'Patient'),
+            email: cleanVal(userData['email']).isNotEmpty
+                ? cleanVal(userData['email'])
+                : (identifier.contains('@') ? identifier : ''),
             phone: userPhone,
-            age: loginAge.isNotEmpty ? loginAge : '',
-            gender: loginGender.isNotEmpty ? loginGender : 'Female',
+            age: loginAge,
+            gender: loginGender,
             bloodGroup: loginBloodGroup.isNotEmpty ? loginBloodGroup : 'O Positive (O+)',
             emergencyContact: loginEmergency.isNotEmpty ? loginEmergency : userPhone,
-            city: (userData['city'] ?? dbProfileMeta['city'] ?? cachedMap['city'] ?? '').toString(),
-            pincode: (userData['pincode'] ?? dbProfileMeta['pincode'] ?? cachedMap['pincode'] ?? '').toString(),
+            city: loginCity,
+            pincode: loginPincode,
             languages: loginLanguages,
-            photoBytes: photoBytes,
+            photoBytes: effectivePhotoBytes,
+            profileImageUrl: effectiveImageUrl,
+            preserveExistingPhoto: false,
+            syncRemote: false,
           );
           await SessionService().saveSession(
             token: effectiveToken,
@@ -861,28 +922,39 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               ...userData,
               'age': loginAge,
               'gender': loginGender,
-              'bloodGroup': loginBloodGroup,
-              'emergencyContact': loginEmergency,
+              'pincode': loginPincode,
+              'city': loginCity,
+              'bloodGroup': loginBloodGroup.isNotEmpty ? loginBloodGroup : 'O Positive (O+)',
+              'emergencyContact': loginEmergency.isNotEmpty ? loginEmergency : userPhone,
               'languages': loginLanguages,
+              if (returnedPhoto != null && cleanVal(returnedPhoto).isNotEmpty) 'profilePhoto': returnedPhoto,
             },
           );
+          PatientProblemService().syncAllDataFromApi();
           if (!mounted) return;
           setState(() => _isLoggingIn = false);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('🎉 Welcome back, ${userData['name'] ?? 'Patient'}!'),
+              content: Text('🎉 Welcome${cleanVal(userData['name']).isNotEmpty && cleanVal(userData['name']).toLowerCase() != 'patient' ? ' back, ${userData['name']}' : ' to GS HEALTH'}!'),
               backgroundColor: AppTheme.gsNavy,
             ),
           );
-          context.go('/patient');
+          final router = GoRouter.maybeOf(context);
+          if (router != null) {
+            router.go('/patient');
+          }
         }
       } else {
         final String errMsg = (res['message'] ?? 'Failed to authenticate user.').toString();
         final String lowerErr = errMsg.toLowerCase();
+        final bool isNonPatientRole = _isAdminMode ||
+            _selectedRole == UserRole.dentist ||
+            _selectedRole == UserRole.clinic;
         final bool isUnregisteredMobile = verifiedOtpCode != null &&
             verifiedOtpCode.trim().isNotEmpty &&
             !identifier.contains('@') &&
             _isValidMobilePhone(identifier) &&
+            isNonPatientRole &&
             (lowerErr.contains('not registered') ||
                 lowerErr.contains('not found') ||
                 lowerErr.contains('no account') ||
@@ -1083,8 +1155,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             name: name,
             email: email,
             phone: phone,
-            age: registeredAge.isNotEmpty ? registeredAge : '',
-            gender: _selectedGender ?? 'Female',
+            age: registeredAge,
+            gender: _selectedGender ?? '',
             bloodGroup: _selectedBloodGroup ?? 'O Positive (O+)',
             emergencyContact: _emergencyContactController.text.trim().isEmpty ? phone : _emergencyContactController.text.trim(),
             address: location,
@@ -1092,6 +1164,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             pincode: pincode,
             languages: selectedLangs,
             photoBytes: _pickedImageBytes,
+            preserveExistingPhoto: false,
+            syncRemote: false,
           );
           await SessionService().saveSession(
             token: regToken,
@@ -1102,7 +1176,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             name: name,
             metadata: {
               'age': registeredAge,
-              'gender': _selectedGender ?? 'Female',
+              'gender': _selectedGender ?? '',
               'bloodGroup': _selectedBloodGroup ?? 'O Positive (O+)',
               'emergencyContact': _emergencyContactController.text.trim().isEmpty ? phone : _emergencyContactController.text.trim(),
               'city': city,
@@ -1397,12 +1471,15 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
     bool verified = false;
     String? errorReason;
+    Map<String, dynamic>? verifiedResponse;
 
     // 1. Mobile Phone SMS OTP verification via Backend API
     if (phone.isNotEmpty) {
       final res = await ApiService().verifyOtp(phone: phone, email: email, code: code);
       verified = res['success'] == true;
-      if (!verified) {
+      if (verified) {
+        verifiedResponse = res;
+      } else {
         errorReason = res['message']?.toString();
       }
     }
@@ -1421,6 +1498,17 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
     if (verified) {
       AnalyticsService.logOtpVerification(status: 'verified', method: phone.isNotEmpty ? 'SMS_Mobile_OTP' : 'Email_OTP');
+      if (verifiedResponse != null &&
+          verifiedResponse['user'] is Map &&
+          (verifiedResponse['accessToken']?.toString().trim().isNotEmpty ?? false)) {
+        _loginEmailController.text = phone;
+        await _handleLogin(
+          verifiedOtpCode: code,
+          otpAlreadyVerified: true,
+          verifiedOtpResponse: verifiedResponse,
+        );
+        return;
+      }
       setState(() {
         _isOtpVerified = true;
         _verifiedPhone = phone;

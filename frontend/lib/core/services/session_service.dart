@@ -26,6 +26,13 @@ class SessionService {
   /// Get current in-memory cached session
   UserSession? get currentSession => _cachedSession;
 
+  /// Clears only the in-memory cached session so tests can simulate cold app restarts
+  /// while preserving persistent FlutterSecureStorage credentials.
+  @visibleForTesting
+  void resetInMemoryCacheForTest() {
+    _cachedSession = null;
+  }
+
   /// Save an authenticated user session securely
   Future<UserSession> saveSession({
     required String token,
@@ -199,18 +206,24 @@ class SessionService {
     // 3. Restore Patient State
     else if (normalizedRole.contains('patient')) {
       final meta = session.metadata;
+      final parsedPhoto = PatientProfile.parseProfilePhoto(meta['profilePhoto']);
       PatientProblemService().updatePatientProfile(
         id: session.userId,
         name: session.name ?? (session.email?.split('@').first ?? 'Patient'),
         email: session.email ?? '',
         phone: session.phone ?? '',
-        age: meta['age']?.toString() ?? '',
-        gender: meta['gender']?.toString() ?? 'Female',
+        age: (meta['age']?.toString() ?? ''),
+        gender: (meta['gender']?.toString() ?? ''),
         bloodGroup: meta['bloodGroup']?.toString() ?? 'O Positive (O+)',
         emergencyContact: meta['emergencyContact']?.toString() ?? session.phone ?? '',
         city: meta['city']?.toString() ?? '',
         pincode: meta['pincode']?.toString() ?? '',
+        photoBytes: parsedPhoto.bytes,
+        profileImageUrl: parsedPhoto.url,
+        preserveExistingPhoto: false,
+        syncRemote: false,
       );
+      PatientProblemService().syncCurrentPatientProfileFromApi();
     }
 
     // Always trigger background sync from Supabase DB to ensure fresh state
@@ -275,6 +288,7 @@ class SessionService {
 
     ApiService().clearAuthToken();
     PatientProblemService().clearSubAdminSession();
+    await PatientProblemService().clearPatientSessionCache();
 
     try {
       await Supabase.instance.client.auth.signOut();

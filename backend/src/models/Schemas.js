@@ -68,6 +68,17 @@ const ASSIGNMENT_SOURCES = {
     SUB_ADMIN_ASSIGNMENT: 'SUB_ADMIN_ASSIGNMENT',
 };
 
+// Helper: canonical 10-digit Indian phone normalization across +91 / 91 / 0 / spaces / hyphens
+function canonicalPhone10(rawPhone) {
+    const clean = String(rawPhone || '').trim();
+    if (!clean) return '';
+    const digits = clean.replace(/[^0-9]/g, '');
+    if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
+    if (digits.length === 11 && digits.startsWith('0')) return digits.slice(1);
+    if (digits.length > 10) return digits.slice(-10);
+    return digits;
+}
+
 // Helper: unpack JSON metadata safely stored in users.device_token
 function _unpackUserRecord(record) {
     if (!record) return record;
@@ -95,6 +106,12 @@ function _unpackUserRecord(record) {
             }
             if (meta.city && !record.city) record.city = meta.city;
             if (meta.pincode && !record.pincode) record.pincode = meta.pincode;
+            if (meta.age && !record.age) record.age = meta.age;
+            if (meta.gender && !record.gender) record.gender = meta.gender;
+            if (meta.bloodGroup && !record.blood_group) record.blood_group = meta.bloodGroup;
+            if (meta.emergencyContact && !record.emergency_contact) record.emergency_contact = meta.emergencyContact;
+            if (meta.address && !record.address) record.address = meta.address;
+            if (meta.profilePhoto && !record.biometric_token) record.biometric_token = meta.profilePhoto;
         } catch (_) { }
     }
     return record;
@@ -124,12 +141,13 @@ const User = {
         const clean = String(rawPhone || '').trim();
         if (!clean) return null;
         const digits = clean.replace(/[^0-9]/g, '');
-        const last10 = digits.length >= 10 ? digits.slice(-10) : digits;
+        const last10 = canonicalPhone10(clean);
         const candidates = Array.from(new Set([
             clean,
             digits,
             last10,
             last10 ? `+91${last10}` : '',
+            last10 ? `+91 ${last10}` : '',
             last10 ? `91${last10}` : '',
             last10 ? `0${last10}` : ''
         ].filter(Boolean)));
@@ -146,10 +164,7 @@ const User = {
                 .ilike('phone', `%${last10}%`)
                 .limit(5);
             if (data && data.length > 0) {
-                const match = data.find(u => {
-                    const uDigits = String(u.phone || '').replace(/[^0-9]/g, '');
-                    return uDigits.length >= 10 && uDigits.slice(-10) === last10;
-                }) || data[0];
+                const match = data.find(u => canonicalPhone10(u.phone) === last10) || data[0];
                 const unpacked = _unpackUserRecord(match);
                 if (unpacked && (unpacked.role === 'Sub-Admin' || unpacked.role === 'SUB_ADMIN' || unpacked.role === 'SUB-ADMIN')) {
                     if (!unpacked.permissions || unpacked.permissions.length === 0) {
@@ -158,6 +173,27 @@ const User = {
                     if (!unpacked.status) unpacked.status = 'ACTIVE';
                 }
                 return unpacked;
+            }
+
+            // Fallback for interior spacing/hyphens (e.g. "+91 98765 43210") using trailing 4 digits
+            const last4 = last10.slice(-4);
+            const { data: spacedData } = await supabaseAdmin
+                .from('users')
+                .select('*')
+                .ilike('phone', `%${last4}%`)
+                .limit(25);
+            if (spacedData && spacedData.length > 0) {
+                const match = spacedData.find(u => canonicalPhone10(u.phone) === last10);
+                if (match) {
+                    const unpacked = _unpackUserRecord(match);
+                    if (unpacked && (unpacked.role === 'Sub-Admin' || unpacked.role === 'SUB_ADMIN' || unpacked.role === 'SUB-ADMIN')) {
+                        if (!unpacked.permissions || unpacked.permissions.length === 0) {
+                            unpacked.permissions = await SubAdminPermission.getPermissionsForUser(unpacked.id);
+                        }
+                        if (!unpacked.status) unpacked.status = 'ACTIVE';
+                    }
+                    return unpacked;
+                }
             }
         }
         return null;
@@ -313,6 +349,7 @@ const User = {
         const dbPayload = { ...updateData };
         delete dbPayload.permissions;
         delete dbPayload.languages;
+        delete dbPayload.address;
         delete dbPayload.status_updated_at;
         delete dbPayload.status_updated_by;
         if (dbPayload.status !== undefined) {
@@ -326,12 +363,13 @@ const User = {
                 updatedData = data;
             }
         } catch (err) {
-            // Strip optional schema columns that may not exist in legacy tables (e.g. updated_at, refresh_tokens)
+            // Strip optional schema columns that may not exist in legacy tables (e.g. updated_at, refresh_tokens, address)
             const safeUpdate = { ...dbPayload };
             delete safeUpdate.updated_at;
             delete safeUpdate.refresh_tokens;
             delete safeUpdate.status_updated_at;
             delete safeUpdate.status_updated_by;
+            delete safeUpdate.address;
             if (err && typeof err.message === 'string' && err.message.toLowerCase().includes('status')) {
                 delete safeUpdate.status;
             }
@@ -342,7 +380,18 @@ const User = {
             }
         }
 
-        if (updateData.status || updateData.permissions || updateData.languages || updateData.status_updated_at || updateData.status_updated_by || updateData.refresh_tokens !== undefined) {
+        const hasProfileMetaUpdates =
+            updateData.age !== undefined ||
+            updateData.gender !== undefined ||
+            updateData.pincode !== undefined ||
+            updateData.city !== undefined ||
+            updateData.state !== undefined ||
+            updateData.address !== undefined ||
+            updateData.blood_group !== undefined ||
+            updateData.emergency_contact !== undefined ||
+            updateData.biometric_token !== undefined;
+
+        if (updateData.status || updateData.permissions || updateData.languages || updateData.status_updated_at || updateData.status_updated_by || updateData.refresh_tokens !== undefined || hasProfileMetaUpdates) {
             try {
                 const existing = await supabaseAdmin.from('users').select('device_token').eq('id', id).maybeSingle();
                 const rawDt = existing.data?.device_token;
@@ -357,6 +406,17 @@ const User = {
                 if (updateData.languages) meta.languages = normalizeLanguagesList(updateData.languages);
                 if (updateData.status_updated_at) meta.statusUpdatedAt = updateData.status_updated_at;
                 if (updateData.status_updated_by) meta.statusUpdatedBy = updateData.status_updated_by;
+                if (updateData.age !== undefined) meta.age = String(updateData.age || '');
+                if (updateData.gender !== undefined) meta.gender = String(updateData.gender || '');
+                if (updateData.pincode !== undefined) meta.pincode = String(updateData.pincode || '');
+                if (updateData.city !== undefined) meta.city = String(updateData.city || '');
+                if (updateData.state !== undefined) meta.state = String(updateData.state || '');
+                if (updateData.address !== undefined) meta.address = String(updateData.address || '');
+                if (updateData.blood_group !== undefined) meta.bloodGroup = String(updateData.blood_group || '');
+                if (updateData.emergency_contact !== undefined) meta.emergencyContact = String(updateData.emergency_contact || '');
+                if (updateData.biometric_token !== undefined && updateData.biometric_token) {
+                    meta.profilePhoto = String(updateData.biometric_token);
+                }
                 if (updateData.status === 'INACTIVE' || updateData.status === 'DEACTIVATED') {
                     meta.revokedBefore = Date.now();
                 } else if (updateData.status === 'ACTIVE') {
@@ -378,6 +438,7 @@ const User = {
             if (updateData.languages) updatedData.languages = normalizeLanguagesList(updateData.languages);
             if (updateData.status_updated_at) updatedData.status_updated_at = updateData.status_updated_at;
             if (updateData.status_updated_by) updatedData.status_updated_by = updateData.status_updated_by;
+            if (updateData.address !== undefined) updatedData.address = updateData.address;
         }
 
         if (updateData.permissions && Array.isArray(updateData.permissions)) {
@@ -4037,6 +4098,7 @@ module.exports = {
     resolveDentistIds,
     resolveClinicIds,
     resolveClinicUuid,
+    canonicalPhone10,
     comparePassword
 };
 

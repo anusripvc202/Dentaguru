@@ -236,14 +236,12 @@ class ApiService {
       debugPrint('⚠️ Primary Register URL notice ($e). Executing direct 24/7 Supabase PostgreSQL registration...');
       try {
         final client = Supabase.instance.client;
-        final existingByPhone = await client
-            .from('users')
-            .select('id, phone')
-            .eq('phone', cleanPhone)
-            .maybeSingle();
+        final existingByPhone = await _findSupabaseUserByIdentifier(phone, cleanPhone);
         if (existingByPhone != null) {
           return {
             'success': false,
+            'code': 'MOBILE_ALREADY_REGISTERED',
+            'existingRole': existingByPhone['role'] ?? 'Patient',
             'message': 'Phone number already registered. Please sign in with OTP.'
           };
         }
@@ -609,6 +607,17 @@ class ApiService {
             }
           }
           u ??= candidates.first;
+        } else {
+          final last4 = last10.substring(last10.length - 4);
+          final spacedCandidates = await client.from('users').select('*').ilike('phone', '%$last4%').limit(25);
+          for (final cand in spacedCandidates) {
+            final cDigits = (cand['phone'] ?? '').toString().replaceAll(RegExp(r'[^0-9]'), '');
+            final c10 = cDigits.length >= 10 ? cDigits.substring(cDigits.length - 10) : cDigits;
+            if (c10 == last10) {
+              u = cand;
+              break;
+            }
+          }
         }
       }
     }
@@ -723,15 +732,15 @@ class ApiService {
           'status': userStatus,
           'permissions': userPerms,
           'assignedDistricts': assignedDistricts,
-          'age': u['age'] ?? tokenMeta['age'] ?? '',
-          'gender': u['gender'] ?? tokenMeta['gender'] ?? '',
-          'bloodGroup': u['blood_group'] ?? u['bloodGroup'] ?? tokenMeta['bloodGroup'] ?? '',
-          'emergencyContact': u['emergency_contact'] ?? u['emergencyContact'] ?? tokenMeta['emergencyContact'] ?? '',
-          'city': u['city'] ?? tokenMeta['city'] ?? '',
-          'pincode': u['pincode'] ?? tokenMeta['pincode'] ?? '',
-          'state': u['state'] ?? tokenMeta['location'] ?? '',
+          'age': _cleanField(u['age'] ?? tokenMeta['age']),
+          'gender': _cleanField(u['gender'] ?? tokenMeta['gender']),
+          'bloodGroup': _cleanField(u['blood_group'] ?? u['bloodGroup'] ?? tokenMeta['bloodGroup']),
+          'emergencyContact': _cleanField(u['emergency_contact'] ?? u['emergencyContact'] ?? tokenMeta['emergencyContact']),
+          'city': _cleanField(u['city'] ?? tokenMeta['city']),
+          'pincode': _cleanField(u['pincode'] ?? tokenMeta['pincode']),
+          'state': _cleanField(u['state'] ?? tokenMeta['location']),
           'languages': u['languages'] ?? tokenMeta['languages'] ?? ['English'],
-          'profilePhoto': u['biometric_token'],
+          'profilePhoto': u['biometric_token'] ?? tokenMeta['profilePhoto'],
           ...doctorExtra,
           ...clinicExtra,
         }
@@ -874,11 +883,18 @@ class ApiService {
   @visibleForTesting
   static Future<Map<String, dynamic>> Function({required String phone, String email, required String code})? debugVerifyOtpOverride;
 
+  String _cleanField(dynamic val) {
+    final s = (val ?? '').toString().trim();
+    return s.toLowerCase() == 'null' ? '' : s;
+  }
+
   /// Verify 6-Digit Mobile & Email OTP Code via Backend (with 24/7 isolated testing Supabase fallback on localhost)
   Future<Map<String, dynamic>> verifyOtp({
     required String phone,
     String email = '',
     required String code,
+    String? role,
+    bool autoCreatePatient = false,
     http.Client? client,
   }) async {
     if (debugVerifyOtpOverride != null) {
@@ -890,7 +906,13 @@ class ApiService {
     for (final url in urls) {
       try {
         final headers = {'Content-Type': 'application/json'};
-        final payload = jsonEncode({'phone': phone, 'email': email, 'code': code.trim()});
+        final payload = jsonEncode({
+          'phone': phone,
+          'email': email,
+          'code': code.trim(),
+          if (role != null && role.trim().isNotEmpty) 'role': role.trim(),
+          if (autoCreatePatient) 'autoCreatePatient': true,
+        });
         final response = await (client != null
                 ? client.post(url, headers: headers, body: payload)
                 : http.post(url, headers: headers, body: payload))
@@ -905,6 +927,7 @@ class ApiService {
             'accessToken': data['accessToken'],
             'refreshToken': data['refreshToken'],
             'isAdmin': data['isAdmin'] == true,
+            if (data['isNewPatient'] == true) 'isNewPatient': true,
           };
         } else {
           return {
@@ -945,7 +968,57 @@ class ApiService {
         _localTestingOtpChallenges.remove(normKey);
 
         try {
-          final u = await _findSupabaseUserByIdentifier(rawId, normKey);
+          var u = await _findSupabaseUserByIdentifier(rawId, normKey);
+          bool isNewPatient = false;
+          final roleLower = (role ?? '').trim().toLowerCase();
+          if (u == null &&
+              autoCreatePatient &&
+              (roleLower.isEmpty || roleLower == 'patient') &&
+              RegExp(r'^\d{10}$').hasMatch(normKey)) {
+            final sbClient = SupabaseService.safeClient;
+            if (sbClient != null) {
+              final cleanEmail = (email.trim().isNotEmpty && email.contains('@'))
+                  ? email.trim().toLowerCase()
+                  : 'user_$normKey@dentaguru.internal';
+              final refCode = 'DG-PAT${normKey.substring(normKey.length - 4)}';
+              final metaJson = jsonEncode({
+                'age': '',
+                'gender': '',
+                'pincode': '',
+                'city': '',
+                'languages': ['English'],
+                'referral_code': refCode,
+                'profileCompleted': false,
+              });
+              try {
+                u = await sbClient.from('users').insert({
+                  'name': 'Patient',
+                  'email': cleanEmail,
+                  'password': 'OTP_SECURE_${Random.secure().nextInt(999999)}',
+                  'phone': normKey,
+                  'role': 'Patient',
+                  'city': '',
+                  'pincode': '',
+                  'age': '',
+                  'gender': '',
+                  'referral_code': refCode,
+                  'device_token': metaJson,
+                }).select().single();
+              } catch (_) {
+                u = await sbClient.from('users').insert({
+                  'name': 'Patient',
+                  'email': cleanEmail,
+                  'password': 'OTP_SECURE_${Random.secure().nextInt(999999)}',
+                  'phone': normKey,
+                  'role': 'Patient',
+                  'city': '',
+                  'pincode': '',
+                  'device_token': metaJson,
+                }).select().single();
+              }
+              isNewPatient = true;
+            }
+          }
           if (u != null) {
             final authResult = await _buildDirectSupabaseAuthData(u, fallbackIdentifier: rawId);
             if (authResult['success'] != true) {
@@ -963,6 +1036,7 @@ class ApiService {
               'user': data['user'],
               'accessToken': data['accessToken'],
               'isAdmin': challenge.isAdmin,
+              if (isNewPatient) 'isNewPatient': true,
             };
           }
           return {
@@ -981,6 +1055,191 @@ class ApiService {
       'success': false,
       'message': 'Failed to verify OTP code due to connection error. Please try again.',
     };
+  }
+
+  @visibleForTesting
+  static Future<Map<String, dynamic>> Function({
+    required String patientId,
+    String? pincode,
+    String? age,
+    String? gender,
+    String? profilePhoto,
+    String? name,
+    String? city,
+    bool completeProfile,
+  })? debugUpdatePatientProfileOverride;
+
+  /// Fetch authenticated patient profile by JWT / Supabase ID
+  Future<Map<String, dynamic>?> fetchCurrentPatientProfile({
+    String? patientId,
+    http.Client? client,
+  }) async {
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/auth/patient/profile');
+      final response = await (client != null
+              ? client.get(url, headers: _headersWithUser(patientId))
+              : http.get(url, headers: _headersWithUser(patientId)))
+          .timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && data['user'] is Map) {
+          return Map<String, dynamic>.from(data['user'] as Map);
+        }
+      }
+    } catch (_) {}
+
+    final targetId = (patientId ?? SessionService().currentSession?.userId ?? '').trim();
+    if (targetId.isEmpty) return null;
+    try {
+      final sbClient = SupabaseService.safeClient;
+      if (sbClient == null) return null;
+      final row = await sbClient.from('users').select('*').eq('id', targetId).maybeSingle();
+      if (row == null) return null;
+      final built = await _buildDirectSupabaseAuthData(row, fallbackIdentifier: _cleanField(row['phone']));
+      final user = (built['data'] is Map) ? (built['data'] as Map)['user'] : null;
+      return user is Map ? Map<String, dynamic>.from(user) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Update authenticated Patient profile in-place against existing user ID (no duplicates).
+  Future<Map<String, dynamic>> updatePatientProfileApi({
+    required String patientId,
+    String? pincode,
+    String? age,
+    String? gender,
+    String? profilePhoto,
+    String? name,
+    String? city,
+    String? address,
+    String? bloodGroup,
+    String? emergencyContact,
+    List<String>? languages,
+    bool completeProfile = true,
+    http.Client? client,
+  }) async {
+    if (debugUpdatePatientProfileOverride != null) {
+      return debugUpdatePatientProfileOverride!(
+        patientId: patientId,
+        pincode: pincode,
+        age: age,
+        gender: gender,
+        profilePhoto: profilePhoto,
+        name: name,
+        city: city,
+        completeProfile: completeProfile,
+      );
+    }
+
+    final payloadMap = <String, dynamic>{
+      if (pincode != null) 'pincode': pincode.trim(),
+      if (age != null) 'age': age.trim(),
+      if (gender != null) 'gender': gender.trim(),
+      if (profilePhoto != null && profilePhoto.trim().isNotEmpty) 'profilePhoto': profilePhoto.trim(),
+      if (name != null && name.trim().isNotEmpty) 'name': name.trim(),
+      if (city != null) 'city': city.trim(),
+      if (address != null) 'address': address.trim(),
+      if (bloodGroup != null) 'bloodGroup': bloodGroup.trim(),
+      if (emergencyContact != null) 'emergencyContact': emergencyContact.trim(),
+      if (languages != null) 'languages': languages,
+      'completeProfile': completeProfile,
+    };
+
+    try {
+      final url = Uri.parse('${ApiConstants.baseUrl}/auth/patient/profile');
+      final response = await (client != null
+              ? client.put(url, headers: _headersWithUser(patientId), body: jsonEncode(payloadMap))
+              : http.put(url, headers: _headersWithUser(patientId), body: jsonEncode(payloadMap)))
+          .timeout(const Duration(seconds: 35));
+      final data = jsonDecode(response.body);
+      if (response.statusCode == 200 && data['success'] == true) {
+        return {
+          'success': true,
+          'message': data['message'] ?? 'Profile updated successfully.',
+          'user': data['user'],
+        };
+      }
+      if (response.statusCode >= 400 && response.statusCode < 500) {
+        return {
+          'success': false,
+          'status': response.statusCode,
+          'message': data['message'] ?? 'Validation failed while saving profile.',
+        };
+      }
+    } catch (e) {
+      debugPrint('⚠️ updatePatientProfileApi HTTP notice ($e). Falling back to direct Supabase user update...');
+    }
+
+    // 24/7 Direct Supabase fallback updating ONLY existing patient row by ID (never insert)
+    final cleanId = patientId.trim();
+    if (cleanId.isEmpty) {
+      return {'success': false, 'message': 'Authenticated patient ID is missing.'};
+    }
+    try {
+      final sbClient = SupabaseService.safeClient;
+      if (sbClient == null) {
+        return {'success': false, 'message': 'Unable to reach server. Please try again.'};
+      }
+
+      Map<String, dynamic> meta = {};
+      try {
+        final existing = await sbClient.from('users').select('device_token').eq('id', cleanId).maybeSingle();
+        final rawDt = existing?['device_token']?.toString() ?? '';
+        if (rawDt.trim().startsWith('{')) {
+          meta = Map<String, dynamic>.from(jsonDecode(rawDt) as Map);
+        }
+      } catch (_) {}
+
+      if (age != null) meta['age'] = age.trim();
+      if (gender != null) meta['gender'] = gender.trim();
+      if (pincode != null) meta['pincode'] = pincode.trim();
+      if (city != null) meta['city'] = city.trim();
+      if (address != null) meta['address'] = address.trim();
+      if (bloodGroup != null) meta['bloodGroup'] = bloodGroup.trim();
+      if (emergencyContact != null) meta['emergencyContact'] = emergencyContact.trim();
+      if (languages != null && languages.isNotEmpty) meta['languages'] = languages;
+      if (profilePhoto != null && profilePhoto.trim().isNotEmpty) {
+        meta['profilePhoto'] = profilePhoto.trim();
+      }
+      meta['profileCompleted'] = completeProfile;
+
+      final updateMap = <String, dynamic>{
+        if (name != null && name.trim().isNotEmpty) 'name': name.trim(),
+        if (city != null) 'city': city.trim(),
+        if (pincode != null) 'pincode': pincode.trim(),
+        if (age != null) 'age': age.trim(),
+        if (gender != null) 'gender': gender.trim(),
+        if (bloodGroup != null) 'blood_group': bloodGroup.trim(),
+        if (emergencyContact != null) 'emergency_contact': emergencyContact.trim(),
+        if (profilePhoto != null && profilePhoto.trim().isNotEmpty) 'biometric_token': profilePhoto.trim(),
+        'device_token': jsonEncode(meta),
+      };
+
+      Map<String, dynamic>? updatedRow;
+      try {
+        updatedRow = await sbClient.from('users').update(updateMap).eq('id', cleanId).select().maybeSingle();
+      } catch (_) {
+        final coreUpdate = <String, dynamic>{
+          if (name != null && name.trim().isNotEmpty) 'name': name.trim(),
+          if (city != null) 'city': city.trim(),
+          if (pincode != null) 'pincode': pincode.trim(),
+          if (profilePhoto != null && profilePhoto.trim().isNotEmpty) 'biometric_token': profilePhoto.trim(),
+          'device_token': jsonEncode(meta),
+        };
+        updatedRow = await sbClient.from('users').update(coreUpdate).eq('id', cleanId).select().maybeSingle();
+      }
+
+      if (updatedRow != null) {
+        final built = await _buildDirectSupabaseAuthData(updatedRow, fallbackIdentifier: _cleanField(updatedRow['phone']));
+        final user = (built['data'] is Map) ? (built['data'] as Map)['user'] : null;
+        return {'success': true, 'user': user};
+      }
+    } catch (sbErr) {
+      debugPrint('⚠️ Direct Supabase patient profile update error: $sbErr');
+    }
+
+    return {'success': false, 'message': 'Unable to save patient profile right now. Please try again.'};
   }
 
   /// Request Forgot Password OTP

@@ -18,6 +18,7 @@ import 'find_doctors_screen.dart';
 import 'refer_a_friend_screen.dart';
 import 'talk_to_dentist_now_screen.dart';
 import 'ai_triage_screen.dart';
+import 'patient_profile_completion_screen.dart';
 
 class PatientDashboardScreen extends StatefulWidget {
   const PatientDashboardScreen({super.key});
@@ -170,16 +171,47 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     return patient.bloodGroup.isNotEmpty ? patient.bloodGroup : 'O Positive (O+)';
   }
 
+  /// Ensures Patients complete required profile fields (image, pincode, age, gender)
+  /// before opening any service or service-related action, then continues to the selected service.
+  Future<void> _guardServiceAccess(
+    BuildContext context, {
+    required String serviceTitle,
+    required VoidCallback onAllowed,
+  }) async {
+    if (_patientService.currentPatient.isProfileComplete) {
+      onAllowed();
+      return;
+    }
+    final completed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => PatientProfileCompletionScreen(
+          serviceTitle: serviceTitle,
+        ),
+      ),
+    );
+    if (!mounted || completed != true) return;
+    if (_patientService.currentPatient.isProfileComplete) {
+      setState(() {});
+      onAllowed();
+    }
+  }
+
   void _openBookVisitFlow(BuildContext context, {DoctorModel? preselectedDoctor}) {
-    BookVisitFlowDialog.show(
+    _guardServiceAccess(
       context,
-      preselectedDoctor: preselectedDoctor,
-      onBookingSuccess: () {
-        _patientService.syncAppointmentsFromApi();
-        _patientService.syncNotificationsFromApi(role: 'Patient');
-        setState(() {
-          _currentIndex = 2; // Switch/stay on Visits (Appointments) tab
-        });
+      serviceTitle: 'Book a Visit',
+      onAllowed: () {
+        BookVisitFlowDialog.show(
+          context,
+          preselectedDoctor: preselectedDoctor,
+          onBookingSuccess: () {
+            _patientService.syncAppointmentsFromApi();
+            _patientService.syncNotificationsFromApi(role: 'Patient');
+            setState(() {
+              _currentIndex = 2; // Switch/stay on Visits (Appointments) tab
+            });
+          },
+        );
       },
     );
   }
@@ -454,7 +486,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                   setModalState(() => isSubmitting = false);
                                   if (context.mounted) {
                                     ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('Error submitting problem: $err'), backgroundColor: Color(0xFFFE3434)),
+                                      SnackBar(content: Text('Error submitting problem: $err'), backgroundColor: const Color(0xFFFE3434)),
                                     );
                                   }
                                 }
@@ -777,11 +809,26 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                     fit: BoxFit.cover,
                                   ),
                                 )
-                              : const Icon(
-                                  Icons.person_outline_rounded,
-                                  color: AppTheme.gsNavy,
-                                  size: 24,
-                                ),
+                              : (patient.profileImageUrl != null &&
+                                      patient.profileImageUrl!.trim().isNotEmpty)
+                                  ? ClipOval(
+                                      child: Image.network(
+                                        patient.profileImageUrl!,
+                                        width: 40,
+                                        height: 40,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) => const Icon(
+                                          Icons.person_outline_rounded,
+                                          color: AppTheme.gsNavy,
+                                          size: 24,
+                                        ),
+                                      ),
+                                    )
+                                  : const Icon(
+                                      Icons.person_outline_rounded,
+                                      color: AppTheme.gsNavy,
+                                      size: 24,
+                                    ),
                         ),
                       ),
                     ),
@@ -823,17 +870,34 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
           selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold),
           unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500),
           onTap: (index) {
-            setState(() => _currentIndex = index);
-            if (index == 0 || index == 2) {
+            if (index == 0) {
+              setState(() => _currentIndex = 0);
               _patientService.syncAppointmentsFromApi();
               _patientService.syncProblemRequestsFromApi();
               _patientService.syncReferralsFromApi();
               _patientService.syncNotificationsFromApi(role: 'Patient');
-            } else if (index == 1) {
-              _patientService.syncDoctorsFromApi(includeUnavailable: false);
-            } else if (index == 3) {
-              _patientService.syncMedicalRecordsFromApi();
+              return;
             }
+            final String serviceName = index == 1
+                ? 'Find Doctors'
+                : (index == 2 ? 'My Visits' : 'Health Locker');
+            _guardServiceAccess(
+              context,
+              serviceTitle: serviceName,
+              onAllowed: () {
+                setState(() => _currentIndex = index);
+                if (index == 1) {
+                  _patientService.syncDoctorsFromApi(includeUnavailable: false);
+                } else if (index == 2) {
+                  _patientService.syncAppointmentsFromApi();
+                  _patientService.syncProblemRequestsFromApi();
+                  _patientService.syncReferralsFromApi();
+                  _patientService.syncNotificationsFromApi(role: 'Patient');
+                } else if (index == 3) {
+                  _patientService.syncMedicalRecordsFromApi();
+                }
+              },
+            );
           },
           items: const [
             BottomNavigationBarItem(
@@ -955,7 +1019,11 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     return InkWell(
       onTap: () {
         if (hasUpcoming) {
-          setState(() => _currentIndex = 2);
+          _guardServiceAccess(
+            context,
+            serviceTitle: 'My Visits',
+            onAllowed: () => setState(() => _currentIndex = 2),
+          );
         } else {
           _openBookVisitFlow(context);
         }
@@ -1076,10 +1144,16 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     return InkWell(
       key: const Key('patient_ai_triage_card'),
       onTap: () {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => const AiTriageScreen(),
-          ),
+        _guardServiceAccess(
+          context,
+          serviceTitle: 'AI Health Triage',
+          onAllowed: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const AiTriageScreen(),
+              ),
+            );
+          },
         );
       },
       borderRadius: BorderRadius.circular(20),
@@ -1160,10 +1234,16 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     return InkWell(
       key: const Key('talk_to_dentist_now_card'),
       onTap: () {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => const TalkToDentistNowScreen(),
-          ),
+        _guardServiceAccess(
+          context,
+          serviceTitle: 'Talk to a Doctor',
+          onAllowed: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const TalkToDentistNowScreen(),
+              ),
+            );
+          },
         );
       },
       borderRadius: BorderRadius.circular(20),
@@ -1260,10 +1340,16 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   Widget _buildSponsoredBanner() {
     return InkWell(
       onTap: () {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => const FindDoctorsScreen(initialSpecialty: 'Implantology'),
-          ),
+        _guardServiceAccess(
+          context,
+          serviceTitle: 'Sponsored Care',
+          onAllowed: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const FindDoctorsScreen(initialSpecialty: 'Implantology'),
+              ),
+            );
+          },
         );
       },
       borderRadius: BorderRadius.circular(20),
@@ -1408,10 +1494,16 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
             const SizedBox(width: 8),
             TextButton(
               onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => const FindDoctorsScreen(initialTabFilter: 1),
-                  ),
+                _guardServiceAccess(
+                  context,
+                  serviceTitle: 'Favourite Doctors',
+                  onAllowed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const FindDoctorsScreen(initialTabFilter: 1),
+                      ),
+                    );
+                  },
                 );
               },
               style: TextButton.styleFrom(
@@ -1434,10 +1526,16 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
         if (myDocs.isEmpty)
           InkWell(
             onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const FindDoctorsScreen(),
-                ),
+              _guardServiceAccess(
+                context,
+                serviceTitle: 'Find Doctors',
+                onAllowed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const FindDoctorsScreen(),
+                    ),
+                  );
+                },
               );
             },
             borderRadius: BorderRadius.circular(18),
@@ -1592,10 +1690,16 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   Widget _buildReferAFriendSection() {
     return InkWell(
       onTap: () {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => const ReferAFriendScreen(),
-          ),
+        _guardServiceAccess(
+          context,
+          serviceTitle: 'Refer a Friend',
+          onAllowed: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const ReferAFriendScreen(),
+              ),
+            );
+          },
         );
       },
       borderRadius: BorderRadius.circular(18),
@@ -1663,7 +1767,13 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
             ),
             const SizedBox(width: 8),
             TextButton(
-              onPressed: () => ReferredPatientsSheet.show(context),
+              onPressed: () {
+                _guardServiceAccess(
+                  context,
+                  serviceTitle: 'My Referrals',
+                  onAllowed: () => ReferredPatientsSheet.show(context),
+                );
+              },
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 minimumSize: const Size(50, 30),
@@ -1740,7 +1850,13 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               ),
               TextButton(
                 key: const Key('patient_view_all_referrals_btn'),
-                onPressed: () => ReferredPatientsSheet.show(context),
+                onPressed: () {
+                  _guardServiceAccess(
+                    context,
+                    serviceTitle: 'My Referrals',
+                    onAllowed: () => ReferredPatientsSheet.show(context),
+                  );
+                },
                 child: const Text('View all', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
               ),
             ],
@@ -2040,46 +2156,62 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton.icon(
-                    onPressed: () => _showChatModal(context, request: assignedReq),
+                    onPressed: () => _guardServiceAccess(
+                      context,
+                      serviceTitle: 'Doctor Chat',
+                      onAllowed: () => _showChatModal(context, request: assignedReq),
+                    ),
                     icon: const Icon(Icons.chat_bubble_outline_rounded, size: 15, color: Color(0xFF012A58)),
                     label: const Text('Chat', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF012A58))),
                   ),
                   const SizedBox(width: 4),
                   TextButton.icon(
-                    onPressed: () {
-                      AppointmentManagementDialog.show(
-                        context,
-                        appointment: assignedReq,
-                        initialMode: AppointmentManagementMode.details,
-                        onUpdated: () => setState(() {}),
-                      );
-                    },
+                    onPressed: () => _guardServiceAccess(
+                      context,
+                      serviceTitle: 'Visit Details',
+                      onAllowed: () {
+                        AppointmentManagementDialog.show(
+                          context,
+                          appointment: assignedReq,
+                          initialMode: AppointmentManagementMode.details,
+                          onUpdated: () => setState(() {}),
+                        );
+                      },
+                    ),
                     icon: const Icon(Icons.info_outline_rounded, size: 15),
                     label: const Text('Details', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                   ),
                   const SizedBox(width: 4),
                   TextButton.icon(
-                    onPressed: () {
-                      AppointmentManagementDialog.show(
-                        context,
-                        appointment: assignedReq,
-                        initialMode: AppointmentManagementMode.reschedule,
-                        onUpdated: () => setState(() {}),
-                      );
-                    },
+                    onPressed: () => _guardServiceAccess(
+                      context,
+                      serviceTitle: 'Reschedule Visit',
+                      onAllowed: () {
+                        AppointmentManagementDialog.show(
+                          context,
+                          appointment: assignedReq,
+                          initialMode: AppointmentManagementMode.reschedule,
+                          onUpdated: () => setState(() {}),
+                        );
+                      },
+                    ),
                     icon: const Icon(Icons.edit_calendar_rounded, size: 15),
                     label: const Text('Reschedule', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                   ),
                   const SizedBox(width: 4),
                   TextButton.icon(
-                    onPressed: () {
-                      AppointmentManagementDialog.show(
-                        context,
-                        appointment: assignedReq,
-                        initialMode: AppointmentManagementMode.cancel,
-                        onUpdated: () => setState(() {}),
-                      );
-                    },
+                    onPressed: () => _guardServiceAccess(
+                      context,
+                      serviceTitle: 'Cancel Visit',
+                      onAllowed: () {
+                        AppointmentManagementDialog.show(
+                          context,
+                          appointment: assignedReq,
+                          initialMode: AppointmentManagementMode.cancel,
+                          onUpdated: () => setState(() {}),
+                        );
+                      },
+                    ),
                     icon: const Icon(Icons.cancel_outlined, size: 15, color: Color(0xFFFE3434)),
                     label: const Text('Cancel', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFFE3434))),
                   ),
@@ -2824,7 +2956,11 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               key: Key('cancel_visit_button_${req.id}'),
               onTap: isCancelling
                   ? null
-                  : () => _confirmAndCancelVisit(context, req, doctorName),
+                  : () => _guardServiceAccess(
+                        context,
+                        serviceTitle: 'Cancel Visit',
+                        onAllowed: () => _confirmAndCancelVisit(context, req, doctorName),
+                      ),
               borderRadius: BorderRadius.circular(14),
               child: Container(
                 padding: const EdgeInsets.symmetric(
@@ -3800,7 +3936,11 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               ),
             ElevatedButton.icon(
               key: const Key('add_dental_record_button'),
-              onPressed: () => _showUploadOrEditRecordSheet(context),
+              onPressed: () => _guardServiceAccess(
+                context,
+                serviceTitle: 'Health Locker',
+                onAllowed: () => _showUploadOrEditRecordSheet(context),
+              ),
               icon: const Icon(Icons.cloud_upload_outlined, size: 17),
               label: const Text(
                 '+ Add Record',
@@ -3820,11 +3960,15 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
         ),
         if (allRecords.isNotEmpty) ...[
           const SizedBox(height: 10),
-          OutlinedButton.icon(
+            OutlinedButton.icon(
             key: const Key('share_multiple_records_button'),
-            onPressed: () => _showShareWithDoctorModal(
+            onPressed: () => _guardServiceAccess(
               context,
-              allAvailableRecords: allRecords,
+              serviceTitle: 'Health Locker',
+              onAllowed: () => _showShareWithDoctorModal(
+                context,
+                allAvailableRecords: allRecords,
+              ),
             ),
             icon: const Icon(
               Icons.share_rounded,
@@ -3897,7 +4041,11 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                 const SizedBox(height: 18),
                 ElevatedButton.icon(
                   key: const Key('empty_state_add_record_button'),
-                  onPressed: () => _showUploadOrEditRecordSheet(context),
+                  onPressed: () => _guardServiceAccess(
+                    context,
+                    serviceTitle: 'Health Locker',
+                    onAllowed: () => _showUploadOrEditRecordSheet(context),
+                  ),
                   icon: const Icon(Icons.cloud_upload_rounded, size: 18),
                   label: const Text(
                     '+ Add Record',
@@ -4279,10 +4427,14 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                 icon: Icons.share_rounded,
                 label: 'Share with Doctor',
                 color: AppTheme.gsNavy,
-                onTap: () => _showShareWithDoctorModal(
+                onTap: () => _guardServiceAccess(
                   context,
-                  preselectedRecord: record,
-                  allAvailableRecords: allRecords,
+                  serviceTitle: 'Health Locker',
+                  onAllowed: () => _showShareWithDoctorModal(
+                    context,
+                    preselectedRecord: record,
+                    allAvailableRecords: allRecords,
+                  ),
                 ),
               ),
               if (isPatientUpload || recId.isNotEmpty)
@@ -4290,9 +4442,13 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                   icon: Icons.edit_rounded,
                   label: 'Edit',
                   color: AppTheme.gsRed,
-                  onTap: () => _showUploadOrEditRecordSheet(
+                  onTap: () => _guardServiceAccess(
                     context,
-                    existingRecord: record,
+                    serviceTitle: 'Health Locker',
+                    onAllowed: () => _showUploadOrEditRecordSheet(
+                      context,
+                      existingRecord: record,
+                    ),
                   ),
                 ),
               if (isPatientUpload || recId.isNotEmpty)
@@ -6363,7 +6519,13 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                     children: [
                       InkWell(
                         key: const Key('profile_referrals_row'),
-                        onTap: () => ReferredPatientsSheet.show(context),
+                        onTap: () {
+                          _guardServiceAccess(
+                            context,
+                            serviceTitle: 'My Referrals',
+                            onAllowed: () => ReferredPatientsSheet.show(context),
+                          );
+                        },
                         borderRadius: const BorderRadius.vertical(
                           top: Radius.circular(24),
                         ),
@@ -6410,10 +6572,16 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                       InkWell(
                         key: const Key('profile_refer_friend_row'),
                         onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => const ReferAFriendScreen(),
-                            ),
+                          _guardServiceAccess(
+                            context,
+                            serviceTitle: 'Refer a Friend',
+                            onAllowed: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => const ReferAFriendScreen(),
+                                ),
+                              );
+                            },
                           );
                         },
                         borderRadius: const BorderRadius.vertical(
@@ -6644,8 +6812,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     final emergencyCtrl = TextEditingController(
       text: patient.emergencyContact.trim(),
     );
-    String selectedGender =
-        patient.gender.trim().isNotEmpty ? patient.gender.trim() : 'Female';
+    String selectedGender = patient.hasValidGender ? patient.gender.trim() : '';
     String selectedBloodGroup = _resolvePatientBloodGroup(patient);
     String? errorMsg;
 

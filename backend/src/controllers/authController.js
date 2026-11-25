@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { supabase, supabaseAdmin } = require('../config/supabase');
-const { User, Dentist, Clinic, Referral, Notification, PatientProblemRequest, comparePassword, getDefaultQualificationForSpecialty, resolveMedicalSpecialtyRecord, isDoctorRecordAvailable, extractDoctorLanguages } = require('../models/Schemas');
+const { User, Dentist, Clinic, Referral, Notification, PatientProblemRequest, comparePassword, getDefaultQualificationForSpecialty, resolveMedicalSpecialtyRecord, isDoctorRecordAvailable, extractDoctorLanguages, canonicalPhone10 } = require('../models/Schemas');
 const admin = require('firebase-admin');
 const { sendOtpEmail } = require('../services/emailService');
 const { sendRealSmsOtp, normalizePhoneNumber } = require('../services/smsService');
@@ -23,13 +23,59 @@ const generateTokens = (user) => {
 };
 
 // Normalize 10-digit mobile phone
-const normalizeAdminPhone = (phone) => {
-    if (!phone) return '';
-    const digits = phone.toString().replace(/[^0-9]/g, '');
-    if (digits.length === 12 && digits.startsWith('91')) return digits.substring(2);
-    if (digits.length === 11 && digits.startsWith('0')) return digits.substring(1);
-    if (digits.length > 10) return digits.slice(-10);
-    return digits;
+const normalizeAdminPhone = (phone) => canonicalPhone10(phone);
+
+const isPatientProfileComplete = (user = {}, tokenMeta = {}) => {
+    const rawPhoto = String(user.biometric_token || tokenMeta.profilePhoto || '').trim();
+    const rawPincode = String(user.pincode || tokenMeta.pincode || '').trim();
+    const rawAge = String(user.age || user.patient_age || tokenMeta.age || '').trim();
+    const rawGender = String(user.gender || tokenMeta.gender || '').trim();
+
+    const parsedAge = parseInt(rawAge, 10);
+    const hasValidAge = Boolean(/^\d+$/.test(rawAge) && !Number.isNaN(parsedAge) && parsedAge >= 1 && parsedAge <= 120);
+    const hasValidPincode = /^\d{6}$/.test(rawPincode);
+    const hasValidGender = rawGender.length > 0 && rawGender.toLowerCase() !== 'null';
+    const hasProfilePhoto = rawPhoto.length > 0 && rawPhoto.toLowerCase() !== 'null';
+
+    return hasProfilePhoto && hasValidPincode && hasValidAge && hasValidGender;
+};
+
+const parseUserTokenMeta = (user) => {
+    if (user?.device_token && typeof user.device_token === 'string' && user.device_token.trim().startsWith('{')) {
+        try {
+            return JSON.parse(user.device_token);
+        } catch (_) { }
+    }
+    return {};
+};
+
+const buildPatientUserPayload = (user, overrideMeta = null) => {
+    const tokenMeta = overrideMeta || parseUserTokenMeta(user);
+    const rawAge = user.age || user.patient_age || tokenMeta.age || '';
+    const rawGender = user.gender || tokenMeta.gender || '';
+    const rawPincode = user.pincode || tokenMeta.pincode || '';
+    const resolvedLanguages = Array.isArray(user.languages) && user.languages.length > 0
+        ? user.languages
+        : (Array.isArray(tokenMeta.languages) && tokenMeta.languages.length > 0 ? tokenMeta.languages : ['English']);
+
+    return {
+        id: user.id,
+        name: user.name || 'Patient',
+        email: user.email || '',
+        role: user.role || 'Patient',
+        phone: user.phone || '',
+        city: user.city || tokenMeta.city || '',
+        pincode: String(rawPincode || ''),
+        state: user.state || tokenMeta.state || '',
+        address: user.address || tokenMeta.address || '',
+        age: String(rawAge || ''),
+        gender: String(rawGender || ''),
+        bloodGroup: user.blood_group || tokenMeta.bloodGroup || '',
+        emergencyContact: user.emergency_contact || tokenMeta.emergencyContact || '',
+        languages: resolvedLanguages,
+        profilePhoto: user.biometric_token || tokenMeta.profilePhoto || null,
+        isProfileComplete: isPatientProfileComplete(user, tokenMeta),
+    };
 };
 
 // Single authorized Admin phone number configuration (Environment or Database)
@@ -54,7 +100,9 @@ exports.register = async (req, res) => {
     const { name, email, password, phone, role, fcmToken, specialty, licenseNumber, clinicName, clinicAddress, location, state, city, pincode, latitude, longitude, qualification, experienceYears, profilePhoto, age, gender, bloodGroup, emergencyContact, languages, languagesKnown, referralCode, ref } = req.body;
     try {
         const normalizedRole = (role || 'Patient').toString().trim();
-        const normalizedPhone = (phone || '').toString().trim();
+        const rawPhone = (phone || '').toString().trim();
+        const canonical10 = canonicalPhone10(rawPhone);
+        const normalizedPhone = canonical10.length >= 10 ? canonical10 : rawPhone;
         const normalizedEmail = (email || '').toString().trim().toLowerCase();
 
         // 1. Mobile Phone Number is Mandatory Primary Identifier
@@ -86,15 +134,20 @@ exports.register = async (req, res) => {
         // Email uniqueness check only if real user-provided email
         if (normalizedEmail.length > 0 && !normalizedEmail.endsWith('@dentaguru.internal')) {
             const existingEmail = await User.findOne({ email: normalizedEmail });
-            if (existingEmail && existingEmail.phone !== normalizedPhone) {
+            if (existingEmail && canonicalPhone10(existingEmail.phone) !== canonicalPhone10(normalizedPhone)) {
                 return res.status(400).json({ success: false, message: 'Email already registered.' });
             }
         }
 
-        // Phone uniqueness check
-        const existingPhone = await User.findOne({ phone: normalizedPhone });
+        // Canonical mobile uniqueness check across +91 / 91 / 0 / spaced variants
+        const existingPhone = await User.findByMobile(normalizedPhone);
         if (existingPhone) {
-            return res.status(400).json({ success: false, message: 'Phone number already registered. Please sign in with OTP.' });
+            return res.status(400).json({
+                success: false,
+                code: 'MOBILE_ALREADY_REGISTERED',
+                existingRole: existingPhone.role || 'Patient',
+                message: 'Phone number already registered. Please sign in with OTP.'
+            });
         }
 
         // 2. Mandatory Field Validation: City (Pincode is optional in redesigned GS HEALTH registration)
@@ -1663,6 +1716,7 @@ exports.verifyOTP = async (req, res) => {
                     emergencyContact: user.emergency_contact || tokenMeta.emergencyContact || '',
                     languages: resolvedUserLanguages,
                     profilePhoto: user.biometric_token || null,
+                    isProfileComplete: isPatientProfileComplete(user, tokenMeta),
                     permissions: resolvedPermissions,
                     status: effectiveStatus,
                     districtIds: resolvedDistrictIds,
@@ -1678,6 +1732,75 @@ exports.verifyOTP = async (req, res) => {
             });
         }
 
+        const requestedRoleLower = (req.body.role || '').toString().trim().toLowerCase();
+        const shouldAutoCreatePatient = req.body.autoCreatePatient === true
+            && Boolean(pNum)
+            && !isAdmin
+            && (requestedRoleLower === '' || requestedRoleLower === 'patient');
+
+        if (shouldAutoCreatePatient) {
+            const canonical10 = canonicalPhone10(pNum);
+            if (/^\d{10}$/.test(canonical10)) {
+                // Re-check canonical mobile across variants to guarantee zero duplicate rows
+                let patientUser = await User.findByMobile(canonical10);
+                let isNewPatient = false;
+
+                if (!patientUser) {
+                    const cleanEmail = (eMail && eMail.includes('@') && !eMail.endsWith('@dentaguru.internal'))
+                        ? eMail.toLowerCase()
+                        : `user_${canonical10}@dentaguru.internal`;
+                    const generatedRefCode = `DG-PAT${canonical10.slice(-4)}`;
+                    const metaObj = {
+                        age: '',
+                        gender: '',
+                        bloodGroup: '',
+                        emergencyContact: '',
+                        city: '',
+                        pincode: '',
+                        languages: ['English'],
+                        referral_code: generatedRefCode,
+                        profileCompleted: false
+                    };
+                    const internalPass = `OTP_SECURE_${crypto.randomBytes(12).toString('hex')}`;
+
+                    patientUser = await User.create({
+                        name: 'Patient',
+                        email: cleanEmail,
+                        password: internalPass,
+                        phone: canonical10,
+                        role: 'Patient',
+                        city: '',
+                        pincode: '',
+                        age: '',
+                        gender: '',
+                        languages: ['English'],
+                        referral_code: generatedRefCode,
+                        device_token: JSON.stringify(metaObj),
+                        biometric_token: null
+                    });
+                    isNewPatient = true;
+                }
+
+                const { accessToken, refreshToken } = generateTokens(patientUser);
+                const existingTokens = Array.isArray(patientUser.refresh_tokens) ? [...patientUser.refresh_tokens] : [];
+                if (!existingTokens.includes(refreshToken)) existingTokens.push(refreshToken);
+                await User.findByIdAndUpdate(patientUser.id, {
+                    refresh_tokens: existingTokens.slice(-20)
+                }).catch(() => null);
+
+                return res.json({
+                    success: true,
+                    message: 'OTP verified successfully.',
+                    isNewPatient,
+                    user: buildPatientUserPayload(patientUser),
+                    accessToken,
+                    refreshToken,
+                    isAdmin: false,
+                    isSubAdmin: false
+                });
+            }
+        }
+
         res.json({
             success: true,
             verified: true,
@@ -1686,6 +1809,142 @@ exports.verifyOTP = async (req, res) => {
         });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Verification failed.' });
+    }
+};
+
+// 3b. AUTHENTICATED PATIENT PROFILE READ & DEFERRED COMPLETION UPDATE
+exports.getPatientProfile = async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'Authentication required.' });
+        }
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'Patient account not found.' });
+        }
+        return res.json({
+            success: true,
+            user: buildPatientUserPayload(user)
+        });
+    } catch (err) {
+        console.error('Get Patient Profile Error:', err.message);
+        res.status(500).json({ success: false, message: 'Failed to load patient profile.' });
+    }
+};
+
+exports.updatePatientProfile = async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'Authentication required.' });
+        }
+
+        const existingUser = await User.findById(userId);
+        if (!existingUser) {
+            return res.status(404).json({ success: false, message: 'Patient account not found.' });
+        }
+
+        const roleLower = (existingUser.role || 'Patient').toString().trim().toLowerCase();
+        if (roleLower && roleLower !== 'patient') {
+            return res.status(403).json({
+                success: false,
+                message: 'Patient profile endpoint can only update Patient accounts.'
+            });
+        }
+
+        const existingMeta = parseUserTokenMeta(existingUser);
+        const {
+            name,
+            city,
+            address,
+            bloodGroup,
+            emergencyContact,
+            languages,
+            pincode,
+            age,
+            gender,
+            profilePhoto,
+            completeProfile
+        } = req.body || {};
+
+        const requireComplete = completeProfile !== false;
+
+        const nextPincode = pincode !== undefined
+            ? String(pincode || '').trim()
+            : String(existingUser.pincode || existingMeta.pincode || '').trim();
+        const nextAge = age !== undefined
+            ? String(age || '').trim()
+            : String(existingUser.age || existingMeta.age || '').trim();
+        const nextGender = gender !== undefined
+            ? String(gender || '').trim()
+            : String(existingUser.gender || existingMeta.gender || '').trim();
+        const nextPhoto = profilePhoto !== undefined
+            ? (profilePhoto === null ? '' : String(profilePhoto).trim())
+            : String(existingUser.biometric_token || existingMeta.profilePhoto || '').trim();
+
+        if (requireComplete) {
+            if (!nextPhoto || nextPhoto.toLowerCase() === 'null') {
+                return res.status(400).json({ success: false, message: 'Profile image is required.' });
+            }
+            if (!/^\d{6}$/.test(nextPincode)) {
+                return res.status(400).json({ success: false, message: 'Please enter a valid 6-digit pincode.' });
+            }
+            const ageInt = parseInt(nextAge, 10);
+            if (!/^\d+$/.test(nextAge) || Number.isNaN(ageInt) || ageInt < 1 || ageInt > 120) {
+                return res.status(400).json({ success: false, message: 'Please enter a valid age between 1 and 120.' });
+            }
+            if (!nextGender || nextGender.toLowerCase() === 'null') {
+                return res.status(400).json({ success: false, message: 'Gender selection is required.' });
+            }
+        } else {
+            if (nextPincode.length > 0 && !/^\d{6}$/.test(nextPincode)) {
+                return res.status(400).json({ success: false, message: 'Please enter a valid 6-digit pincode.' });
+            }
+            if (nextAge.length > 0) {
+                const ageInt = parseInt(nextAge, 10);
+                if (!/^\d+$/.test(nextAge) || Number.isNaN(ageInt) || ageInt < 1 || ageInt > 120) {
+                    return res.status(400).json({ success: false, message: 'Please enter a valid age between 1 and 120.' });
+                }
+            }
+        }
+
+        const updatePayload = {
+            pincode: nextPincode,
+            age: nextAge,
+            gender: nextGender,
+        };
+        if (nextPhoto.length > 0) {
+            updatePayload.biometric_token = nextPhoto;
+        }
+        if (name !== undefined && String(name).trim().length > 0) {
+            updatePayload.name = String(name).trim();
+        }
+        if (city !== undefined) {
+            updatePayload.city = String(city || '').trim();
+        }
+        if (address !== undefined) {
+            updatePayload.address = String(address || '').trim();
+        }
+        if (bloodGroup !== undefined) {
+            updatePayload.blood_group = String(bloodGroup || '').trim();
+        }
+        if (emergencyContact !== undefined) {
+            updatePayload.emergency_contact = String(emergencyContact || '').trim();
+        }
+        if (Array.isArray(languages) && languages.length > 0) {
+            updatePayload.languages = languages.map(l => String(l || '').trim()).filter(Boolean);
+        }
+
+        const updatedUser = await User.findByIdAndUpdate(existingUser.id, updatePayload);
+        return res.json({
+            success: true,
+            message: 'Patient profile saved successfully.',
+            user: buildPatientUserPayload(updatedUser || { ...existingUser, ...updatePayload })
+        });
+    } catch (err) {
+        console.error('Update Patient Profile Error:', err.message);
+        res.status(500).json({ success: false, message: err.message || 'Failed to update patient profile.' });
     }
 };
 

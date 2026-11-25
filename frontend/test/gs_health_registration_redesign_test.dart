@@ -352,8 +352,11 @@ void main() {
         String? emergencyContact,
         String? specialty,
         String? licenseNumber,
+        String? clinicId,
         String? clinicName,
         String? clinicAddress,
+        String? consultationFee,
+        String? bio,
         String? location,
         String? state,
         String? city,
@@ -469,8 +472,11 @@ void main() {
         String? emergencyContact,
         String? specialty,
         String? licenseNumber,
+        String? clinicId,
         String? clinicName,
         String? clinicAddress,
+        String? consultationFee,
+        String? bio,
         String? location,
         String? state,
         String? city,
@@ -618,6 +624,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Sign in with mobile'), findsOneWidget);
+      // Select Doctor role (non-Patient flows transition to Registration on unregistered mobile OTP)
+      await tester.tap(find.byKey(const Key('signin_role_dentist')));
+      await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextFormField).first, '9123456789');
       await tester.tap(find.text('Send code'));
       await tester.pumpAndSettle();

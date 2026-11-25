@@ -356,8 +356,8 @@ function httpRequest(port, method, path, headers = {}, body = null) {
 
         console.log('✓ SUCCESS: Test D & Ownership — Unauthorized cross-doctor reads/accepts/rejects & admin-all blocked with 403/401; intended Doctor & owning Clinic permitted.');
         console.log('--- ALL 3-DOCTOR REFERRAL ISOLATION BACKEND TESTS PASSED ---');
-        process.exit(0);
     } finally {
+        if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
         await new Promise(resolve => server.close(resolve));
         Schemas.Clinic.findById = orig.ClinicFindById;
         Schemas.Clinic.findOne = orig.ClinicFindOne;
@@ -377,4 +377,5 @@ function httpRequest(port, method, path, headers = {}, body = null) {
         Schemas.Notification.findForUser = orig.NotifFindForUser;
         Schemas.Appointment.create = orig.ApptCreate;
     }
+    process.exit(0);
 })();

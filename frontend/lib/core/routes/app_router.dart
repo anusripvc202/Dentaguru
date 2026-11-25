@@ -4,6 +4,7 @@ import '../services/session_service.dart';
 import '../services/patient_problem_service.dart';
 import '../widgets/session_gate_screen.dart';
 import '../../features/patient/presentation/screens/patient_dashboard.dart';
+import '../../features/patient/presentation/screens/patient_profile_completion_screen.dart';
 import '../../features/patient/presentation/screens/find_doctors_screen.dart';
 import '../../features/patient/presentation/screens/talk_to_dentist_now_screen.dart';
 import '../../features/patient/presentation/screens/ai_triage_screen.dart';
@@ -34,10 +35,19 @@ final GoRouter appRouter = GoRouter(
     final path = state.uri.path;
     const protectedRoutes = {
       '/patient',
+      '/patient/find-doctors',
+      '/patient/talk-to-dentist',
+      '/patient/ai-triage',
+      '/patient/complete-profile',
       '/dentist',
       '/clinic',
       '/admin',
       '/sub-admin',
+    };
+    const patientServiceRoutes = {
+      '/patient/find-doctors',
+      '/patient/talk-to-dentist',
+      '/patient/ai-triage',
     };
 
     if (!protectedRoutes.contains(path)) {
@@ -55,7 +65,18 @@ final GoRouter appRouter = GoRouter(
     final userRole = session.role.trim().toLowerCase();
     // Allow Admins & Sub-Admins to navigate and inspect Clinic, Doctor, and Patient dashboards
     if (userRole.contains('admin') &&
-        (path == '/clinic' || path == '/dentist' || path == '/patient')) {
+        (path == '/clinic' || path == '/dentist' || path == '/patient' || patientServiceRoutes.contains(path))) {
+      return null;
+    }
+    if (userRole == 'patient' && (patientServiceRoutes.contains(path) || path == '/patient/complete-profile')) {
+      if (patientServiceRoutes.contains(path) &&
+          !PatientProblemService().currentPatient.isProfileComplete) {
+        final nextUri = Uri.encodeComponent(state.uri.toString());
+        final title = path == '/patient/find-doctors'
+            ? 'Find Doctors'
+            : (path == '/patient/talk-to-dentist' ? 'Talk to a Doctor' : 'AI Health Triage');
+        return '/patient/complete-profile?next=$nextUri&service=${Uri.encodeComponent(title)}';
+      }
       return null;
     }
     if (path != expectedRoute) {
@@ -104,6 +125,23 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: '/patient',
       builder: (context, state) => const PatientDashboardScreen(),
+    ),
+    GoRoute(
+      path: '/patient/complete-profile',
+      builder: (context, state) {
+        final nextRaw = state.uri.queryParameters['next'];
+        final serviceTitle = state.uri.queryParameters['service'];
+        return PatientProfileCompletionScreen(
+          serviceTitle: serviceTitle,
+          onCompleted: () {
+            if (nextRaw != null && nextRaw.isNotEmpty) {
+              context.go(Uri.decodeComponent(nextRaw));
+            } else {
+              context.go('/patient');
+            }
+          },
+        );
+      },
     ),
     GoRoute(
       path: '/patient/find-doctors',
