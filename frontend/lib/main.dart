@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/routes/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'core/services/firebase_service.dart';
+import 'core/services/session_service.dart';
 import 'core/services/supabase_service.dart';
 import 'core/services/analytics_service.dart';
 
@@ -24,8 +26,42 @@ Future<void> main() async {
   );
 }
 
-class DentaGuruApp extends StatelessWidget {
+class DentaGuruApp extends StatefulWidget {
   const DentaGuruApp({super.key});
+
+  @override
+  State<DentaGuruApp> createState() => _DentaGuruAppState();
+}
+
+class _DentaGuruAppState extends State<DentaGuruApp>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      final session = SessionService().currentSession;
+      if (session != null && session.token.trim().isNotEmpty) {
+        final roleLower = session.role.trim().toLowerCase();
+        final isSubAdmin = roleLower.contains('sub-admin') ||
+            roleLower.contains('subadmin') ||
+            roleLower.contains('sub_admin');
+        if (!isSubAdmin) {
+          unawaited(SessionService().bindRealtimeSession(session));
+        }
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

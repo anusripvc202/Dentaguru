@@ -485,6 +485,114 @@ void main() {
     );
 
     testWidgets(
+      'Staging Admin Mobile 9281030535 (role: ADMIN from backend OTP verification) opens Admin Dashboard directly with zero onboarding screens',
+      (WidgetTester tester) async {
+        _installGoogleFontsAssetHandler(tester);
+        tester.view.physicalSize = const Size(390 * 2.0, 844 * 2.0);
+        tester.view.devicePixelRatio = 2.0;
+        addTearDown(tester.view.resetPhysicalSize);
+
+        const stagingAdminPhone = '9281030535';
+
+        ApiService.debugRequestOtpOverride = ({required String phone, String email = ''}) async {
+          return {
+            'success': true,
+            'message': 'Verification code ready on screen (testing mode).',
+            'otp': '654321',
+            'deliveryMode': 'on_screen',
+            'isAdmin': phone == stagingAdminPhone,
+          };
+        };
+
+        ApiService.debugVerifyOtpOverride = ({required String phone, String email = '', required String code}) async {
+          if (phone == stagingAdminPhone && code == '654321') {
+            return {
+              'success': true,
+              'message': 'OTP verified successfully.',
+              'isAdmin': true,
+              'accessToken': 'signed_staging_admin_jwt_token',
+              'refreshToken': 'signed_staging_admin_refresh_token',
+              'user': {
+                'id': '339f745b-2192-4055-abec-d7e4adc6c837',
+                'name': 'GS HEALTH Admin',
+                'email': 'user_9281030535@dentaguru.internal',
+                'phone': stagingAdminPhone,
+                'role': 'ADMIN',
+                'status': 'ACTIVE',
+              },
+            };
+          }
+          return {'success': false, 'message': 'Invalid or expired OTP code.'};
+        };
+
+        addTearDown(() {
+          ApiService.debugRequestOtpOverride = null;
+          ApiService.debugVerifyOtpOverride = null;
+          ApiService.debugLoginOverride = null;
+        });
+
+        appRouter.go('/login');
+
+        await tester.pumpWidget(
+          ProviderScope(
+            child: MaterialApp.router(
+              routerConfig: appRouter,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // 1. Enter staging Admin mobile number 9281030535 on the standard Sign-In screen
+        final phoneField = find.byType(TextFormField).first;
+        await tester.enterText(phoneField, stagingAdminPhone);
+        await tester.pumpAndSettle();
+
+        // 2. Request OTP
+        await tester.tap(find.widgetWithText(ElevatedButton, 'Send code'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+
+        expect(find.text('Enter your code'), findsOneWidget);
+        expect(find.text('Sent to +91 92810 *****'), findsOneWidget);
+
+        // 3. Enter 6-digit OTP 654321
+        final digitInputs = find.byType(TextFormField);
+        expect(digitInputs, findsNWidgets(6));
+        const otpDigits = ['6', '5', '4', '3', '2', '1'];
+        for (int i = 0; i < otpDigits.length; i++) {
+          await tester.enterText(digitInputs.at(i), otpDigits[i]);
+          await tester.pump();
+        }
+        await tester.pump(const Duration(milliseconds: 200));
+
+        // 4. Entering the 6th digit auto-submits OTP verification (or tap Verify & continue if still on screen)
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        final verifyBtnFinder = find.widgetWithText(ElevatedButton, 'Verify & continue');
+        if (verifyBtnFinder.evaluate().isNotEmpty && find.text('Admin console').evaluate().isEmpty) {
+          await tester.ensureVisible(verifyBtnFinder);
+          await tester.pumpAndSettle();
+          await tester.tap(verifyBtnFinder);
+        }
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.pump(const Duration(milliseconds: 400));
+
+        expect(find.text('Admin console'), findsOneWidget);
+        // Must NOT show any Patient/Doctor/Clinic onboarding or profile completion screens
+        expect(find.text('Complete your profile'), findsNothing);
+        expect(find.text('Create your account'), findsNothing);
+
+        // Session must persist canonical ADMIN role and route to /admin
+        final savedSession = SessionService().currentSession;
+        expect(savedSession, isNotNull);
+        expect(savedSession!.phone, stagingAdminPhone);
+        expect(savedSession.role, 'ADMIN');
+        expect(savedSession.targetRoute, '/admin');
+      },
+    );
+
+    testWidgets(
       'Special Number-Based Admin Access: Non-admin public number does NOT trigger admin mode',
       (WidgetTester tester) async {
         _installGoogleFontsAssetHandler(tester);

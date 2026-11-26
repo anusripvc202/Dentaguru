@@ -45,20 +45,25 @@ const authenticateJWT = async (req, res, next) => {
                     userPermissions = await SubAdminPermission.getPermissionsForUser(user.id);
                 }
 
+                const resolvedSbRole = dbUser ? (dbUser.role ?? '') : (user.user_metadata?.role ?? '');
+                const resolvedSbStatus = dbUser ? (dbUser.status ?? null) : (user.user_metadata?.status ?? null);
                 req.user = {
-                    id: user.id,
-                    email: user.email,
-                    name: dbUser?.name || user.user_metadata?.name || user.email.split('@')[0],
-                    role: dbUser?.role || user.user_metadata?.role || 'Patient',
-                    status: dbUser?.status || 'ACTIVE',
+                    id: dbUser?.id || user.id,
+                    email: dbUser?.email || user.email,
+                    name: dbUser?.name || user.user_metadata?.name || (user.email ? user.email.split('@')[0] : 'User'),
+                    role: resolvedSbRole,
+                    status: resolvedSbStatus,
                     permissions: userPermissions,
                     user_metadata: user.user_metadata
                 };
 
-                // Check active status
-                if (req.user.status === 'INACTIVE' || req.user.status === 'DEACTIVATED') {
+                // Reject explicitly deactivated/suspended/blocked accounts on all routes;
+                // chat routes additionally require explicit ACTIVE status via requireChatAccess.
+                const upperSbStatus = req.user.status == null ? '' : String(req.user.status).trim().toUpperCase();
+                if (['INACTIVE', 'DEACTIVATED', 'SUSPENDED', 'BLOCKED'].includes(upperSbStatus)) {
                     return res.status(403).json({
                         success: false,
+                        code: 'ACCOUNT_DEACTIVATED',
                         message: 'Access Denied: Your account has been deactivated by the Main Admin.'
                     });
                 }
@@ -83,13 +88,15 @@ const authenticateJWT = async (req, res, next) => {
                         id: dbUser.id,
                         email: dbUser.email,
                         name: dbUser.name || 'User',
-                        role: dbUser.role || 'Patient',
-                        status: dbUser.status || 'ACTIVE',
+                        role: dbUser.role ?? '',
+                        status: dbUser.status ?? null,
                         permissions: userPermissions
                     };
-                    if (req.user.status === 'INACTIVE' || req.user.status === 'DEACTIVATED') {
+                    const upperDirectStatus = req.user.status == null ? '' : String(req.user.status).trim().toUpperCase();
+                    if (['INACTIVE', 'DEACTIVATED', 'SUSPENDED', 'BLOCKED'].includes(upperDirectStatus)) {
                         return res.status(403).json({
                             success: false,
+                            code: 'ACCOUNT_DEACTIVATED',
                             message: 'Access Denied: Your account has been deactivated by the Main Admin.'
                         });
                     }
@@ -116,19 +123,24 @@ const authenticateJWT = async (req, res, next) => {
                 userPermissions = await SubAdminPermission.getPermissionsForUser(decoded.id);
             }
 
+            const resolvedJwtRole = dbUser ? (dbUser.role ?? '') : (decoded.role ?? '');
+            const resolvedJwtStatus = dbUser ? (dbUser.status ?? null) : (decoded.status ?? null);
             req.user = {
                 id: decoded.id,
                 email: dbUser?.email || decoded.email,
                 name: dbUser?.name || decoded.name || 'User',
-                role: dbUser?.role || decoded.role || 'Patient',
-                status: dbUser?.status || 'ACTIVE',
+                role: resolvedJwtRole,
+                status: resolvedJwtStatus,
                 permissions: userPermissions
             };
 
-            // Check active status
-            if (req.user.status === 'INACTIVE' || req.user.status === 'DEACTIVATED') {
+            // Reject explicitly deactivated/suspended/blocked accounts on all routes;
+            // chat routes additionally require explicit ACTIVE status via requireChatAccess.
+            const upperJwtStatus = req.user.status == null ? '' : String(req.user.status).trim().toUpperCase();
+            if (['INACTIVE', 'DEACTIVATED', 'SUSPENDED', 'BLOCKED'].includes(upperJwtStatus)) {
                 return res.status(403).json({
                     success: false,
+                    code: 'ACCOUNT_DEACTIVATED',
                     message: 'Access Denied: Your account has been deactivated by the Main Admin.'
                 });
             }
@@ -353,225 +365,126 @@ const requirePermission = (requiredPermission, alternativePermissions = []) => {
     };
 };
 
-// Strict Chat Access Guard
+// Strict Chat Access Guard (Fail-Closed Role & Conversation Membership Verification)
 // Enforces:
-// - Main Admin: full access to all conversations and messages
-// - Sub-Admin: STRICTLY FORBIDDEN (403) from all chat operations
-// - Doctor/Dentist: only assigned patient conversations
-// - Patient: only own conversation
+// - Verified active DB user identity (never trusts client-supplied senderId / role)
+// - Unknown, empty, or missing roles: STRICTLY FORBIDDEN (403, never defaults to Patient)
+// - Sub-Admin: STRICTLY FORBIDDEN (403, disabled by default even with wildcard '*')
+// - Main Admin: audited platform oversight
+// - Doctor/Dentist: only verified assigned/appointed/referred/saved patient or own clinic conversations
+// - Clinic: only conversations involving affiliated clinic doctors or clinic patients
+// - Patient: only own authorized conversations (never arbitrary rooms or other patients' threads)
 const requireChatAccess = async (req, res, next) => {
-    if (!req.user) {
+    if (!req.user || !req.user.id) {
         return res.status(401).json({
             success: false,
             message: 'Authentication required to access chat services.'
         });
     }
 
-    const role = (req.user.role || '').toString().trim().toLowerCase();
-    const isMainAdmin = role === 'admin' || role === 'primaryadmin' || role === 'primary_admin' || role === 'superadmin' || role === 'super_admin' || req.user.email === 'admin@dentaguru.com';
-    const isSubAdmin = role === 'sub-admin' || role === 'subadmin' || role === 'sub_admin';
+    try {
+        const Schemas = require('../models/Schemas');
+        const dbUser = await Schemas.User.findById(req.user.id);
+        if (!dbUser) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access Denied: Authenticated user account could not be verified.'
+            });
+        }
 
-    // 1. Sub-Admins are strictly FORBIDDEN from all chat endpoints
-    if (isSubAdmin) {
-        return res.status(403).json({
-            success: false,
-            message: 'Access Denied: Sub-Admins are strictly prohibited from viewing, searching, or accessing patient-doctor chat messages and conversations.'
+        // Fail closed: user MUST have explicit status === 'ACTIVE' (NULL or missing status is rejected)
+        const effectiveStatus = (dbUser.status === null || dbUser.status === undefined)
+            ? ''
+            : String(dbUser.status).trim().toUpperCase();
+        if (effectiveStatus !== 'ACTIVE') {
+            return res.status(403).json({
+                success: false,
+                code: 'ACCOUNT_DEACTIVATED',
+                message: 'Access Denied: Only explicitly active accounts are permitted to access chat.'
+            });
+        }
+
+        // Authoritative DB role; NEVER fall back to 'Patient' on empty/unknown roles
+        const authoritativeRawRole = dbUser.role !== undefined ? dbUser.role : req.user.role;
+        const chatRole = Schemas.mapUserRoleToChatRole(authoritativeRawRole);
+
+        if (chatRole === 'SUB_ADMIN') {
+            return res.status(403).json({
+                success: false,
+                message: 'Access Denied: Sub-Admins are strictly prohibited from viewing, searching, or accessing patient-doctor chat messages and conversations.'
+            });
+        }
+
+        if (!chatRole) {
+            return res.status(403).json({
+                success: false,
+                message: `Access Denied: Role '${authoritativeRawRole || '<empty>'}' is not authorized to access chat conversations.`
+            });
+        }
+
+        // Sync authoritative user attributes onto req.user for downstream controllers
+        req.user = {
+            ...req.user,
+            id: dbUser.id,
+            email: dbUser.email || req.user.email,
+            name: dbUser.name || req.user.name,
+            role: authoritativeRawRole,
+            status: effectiveStatus
+        };
+        req.chatRole = chatRole;
+
+        const rawRoomId = req.query?.roomId || req.body?.roomId || req.query?.room_id || req.body?.room_id || '';
+        const rawConvId = req.query?.conversationId || req.body?.conversationId || req.query?.conversation_id || req.body?.conversation_id || '';
+        const roomId = String(rawRoomId).trim() || null;
+        const conversationId = String(rawConvId).trim() || null;
+
+        // Main Admin has audited oversight access (individual endpoints verify scope & fail closed on audit error)
+        if (chatRole === 'ADMIN') {
+            return next();
+        }
+
+        // Only GET /chat/conversations is unscoped (per-user filtered in model); /chat/messages, /chat/send, /chat/read require explicit scope
+        const isConversationsList = req.method === 'GET' && req.path && req.path.endsWith('/conversations');
+        if (!roomId && !conversationId) {
+            if (isConversationsList) {
+                return next();
+            }
+            if (req.path && req.path.endsWith('/clear') && (req.body?.messageId || req.query?.messageId)) {
+                return next();
+            }
+            return res.status(400).json({
+                success: false,
+                message: 'A valid conversationId or roomId is required.'
+            });
+        }
+
+        const isSendEndpoint = req.method === 'POST' && req.path && req.path.endsWith('/send');
+        const isReadEndpoint = req.path && req.path.endsWith('/read');
+        const authCheck = await Schemas.authorizeChatParticipantAndReceiver({
+            callerUser: req.user,
+            roomId,
+            conversationId,
+            receiverId: isSendEndpoint ? (req.body?.receiverId ?? req.body?.receiver_id ?? null) : null,
+            senderIdFromBody: isSendEndpoint ? (req.body?.senderId ?? req.body?.sender_id ?? null) : null,
+            operation: isSendEndpoint ? 'SEND_PRECHECK' : (isReadEndpoint ? 'READ_RECEIPT' : 'ACCESS')
         });
-    }
 
-    // 2. Main Admin has full access
-    if (isMainAdmin) {
+        if (!authCheck.authorized) {
+            return res.status(authCheck.status || 403).json({
+                success: false,
+                message: authCheck.message || 'Access Denied: You are not authorized for this conversation.'
+            });
+        }
+
+        req.authorizedChatContext = authCheck;
         return next();
-    }
-
-    const roomId = req.query?.roomId || req.body?.roomId;
-
-    // 3. Doctor / Dentist Access Verification
-    if (role === 'dentist' || role === 'doctor') {
-        if (!roomId) {
-            // General listing (e.g., GET /chat/conversations) is filtered to this doctor's own rooms
-            return next();
-        }
-
-        try {
-            const { ChatMessage, resolveClinicIds } = require('../models/Schemas');
-            const docId = req.user.id;
-            const docNameClean = (req.user.name || '').replace(/^Dr\.\s*/i, '').trim().toLowerCase();
-
-            // Check if doctor participated in this room
-            const existingInRoom = await ChatMessage.find({ room_id: roomId });
-            const isParticipant = existingInRoom.some(m =>
-                m.sender_id === docId ||
-                m.receiver_id === docId ||
-                (m.sender && (m.sender.id === docId || m.sender.email === req.user.email))
-            );
-
-            if (isParticipant) {
-                return next();
-            }
-
-            const cleanRoom = roomId.replace(/^PATIENT[-_]/i, '').replace(/^CHAT[-_]/i, '').replace(/_/g, ' ').trim().toLowerCase();
-            const roomNormLower = String(roomId).toLowerCase();
-
-            // Allow new room initiation when POSTing into a room explicitly naming this doctor (and not occupied by another doctor)
-            if (req.method === 'POST' && existingInRoom.length === 0) {
-                if (!docNameClean || roomNormLower.includes(docNameClean) || req.body?.senderId === docId) {
-                    return next();
-                }
-            }
-
-            // Check if room belongs to a patient matching consultations, appointments, or referrals for this doctor
-            const { supabaseAdmin } = require('../config/supabase');
-            const { data: dRecord } = await supabaseAdmin.from('dentists').select('id, user_id').or(`id.eq.${docId},user_id.eq.${docId}`).maybeSingle();
-            const allDentistIds = [docId, dRecord?.id, dRecord?.user_id].filter(Boolean);
-
-            const { data: assignedReqs } = await supabaseAdmin.from('patient_problem_requests')
-                .select('id, patient_name, patient_id, suggested_dentist_id')
-                .in('suggested_dentist_id', allDentistIds);
-
-            const isAssigned = (assignedReqs || []).some(r => {
-                const pName = (r.patient_name || '').trim().toLowerCase();
-                const pId = String(r.patient_id || '').toLowerCase();
-                return (pName && (cleanRoom.includes(pName) || pName.includes(cleanRoom))) || (pId && roomNormLower.includes(pId));
-            });
-
-            if (isAssigned) {
-                return next();
-            }
-
-            const { data: assignedApps } = await supabaseAdmin.from('appointments')
-                .select('id, patient_id, dentist_id, patient:users!patient_id(name)')
-                .in('dentist_id', allDentistIds);
-
-            const hasApp = (assignedApps || []).some(a => {
-                const pId = String(a.patient_id || '').toLowerCase();
-                const pObj = Array.isArray(a.patient) ? a.patient[0] : a.patient;
-                const pName = (pObj?.name || '').trim().toLowerCase();
-                return (pId && roomNormLower.includes(pId)) || (pName && cleanRoom.includes(pName));
-            });
-
-            if (hasApp) {
-                return next();
-            }
-
-            const { data: assignedRefs } = await supabaseAdmin.from('referrals')
-                .select('id, referred_doctor_id, patient_id, referred_name')
-                .in('referred_doctor_id', allDentistIds);
-
-            const hasReferral = (assignedRefs || []).some(r => {
-                const pId = String(r.patient_id || '').toLowerCase();
-                const rName = (r.referred_name || '').trim().toLowerCase();
-                return (pId && roomNormLower.includes(pId)) || (rName && cleanRoom.includes(rName));
-            });
-
-            if (hasReferral) {
-                return next();
-            }
-
-            // Allow empty initial room creation if doctor's own name/ID is explicitly in the room identifier
-            if (existingInRoom.length === 0 && docNameClean && roomNormLower.includes(docNameClean)) {
-                return next();
-            }
-
-            return res.status(403).json({
-                success: false,
-                message: 'Access Denied: You can only view or message conversations for patients assigned to you.'
-            });
-        } catch (e) {
-            console.error('Doctor chat auth check error:', e.message);
-            return res.status(500).json({
-                success: false,
-                message: 'Unable to verify doctor conversation access.'
-            });
-        }
-    }
-
-    // 3b. Clinic / Clinic Admin Access Verification
-    if (role === 'clinic' || role === 'clinic_admin') {
-        if (!roomId) {
-            return next();
-        }
-        try {
-            const { ChatMessage, resolveClinicIds } = require('../models/Schemas');
-            const { supabaseAdmin } = require('../config/supabase');
-            const cResolved = await resolveClinicIds(req.user.id);
-            const cId = cResolved.clinicId;
-            if (!cId) {
-                return res.status(403).json({ success: false, message: 'Access Denied: No clinic profile linked.' });
-            }
-            const { data: clinicDocs } = await supabaseAdmin
-                .from('dentists')
-                .select('id, user_id, users(name)')
-                .eq('clinic_id', cId);
-            const clinicDocIds = new Set();
-            const clinicDocNames = [];
-            for (const d of (clinicDocs || [])) {
-                if (d.id) clinicDocIds.add(d.id);
-                if (d.user_id) clinicDocIds.add(d.user_id);
-                const du = Array.isArray(d.users) ? d.users[0] : d.users;
-                const dn = (du?.name || '').replace(/^Dr\.\s*/i, '').trim().toLowerCase();
-                if (dn) clinicDocNames.push(dn);
-            }
-            const existingInRoom = await ChatMessage.find({ room_id: roomId });
-            const hasClinicParticipant = existingInRoom.some(m =>
-                clinicDocIds.has(m.sender_id) || clinicDocIds.has(m.receiver_id) ||
-                clinicDocNames.some(dn => (m.sender?.name || '').toLowerCase().includes(dn))
-            );
-            const roomLower = String(roomId).toLowerCase();
-            if (hasClinicParticipant || clinicDocNames.some(dn => roomLower.includes(dn))) {
-                return next();
-            }
-            return res.status(403).json({
-                success: false,
-                message: 'Access Denied: You can only view conversations involving doctors affiliated with your clinic.'
-            });
-        } catch (e) {
-            return res.status(500).json({ success: false, message: 'Unable to verify clinic conversation access.' });
-        }
-    }
-
-    // 4. Patient Access Verification
-    if (role === 'patient') {
-        if (!roomId) {
-            return next();
-        }
-
-        const patientId = String(req.user.id || '').toLowerCase();
-        const patientName = (req.user.name || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-        const patientEmailPrefix = (req.user.email || '').split('@')[0].trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-        const normalizedRoom = roomId.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-        const matchesRoom = (patientName && normalizedRoom.includes(patientName)) ||
-            (patientName && patientName.includes(normalizedRoom.replace(/^patient/, ''))) ||
-            (patientId && normalizedRoom.includes(patientId)) ||
-            (patientEmailPrefix && normalizedRoom.includes(patientEmailPrefix));
-
-        if (matchesRoom) {
-            return next();
-        }
-
-        // Check if patient has messages in this room
-        try {
-            const { ChatMessage } = require('../models/Schemas');
-            const msgs = await ChatMessage.find({ room_id: roomId });
-            const isOwnRoom = msgs.some(m => m.sender_id === req.user.id || m.receiver_id === req.user.id);
-            if (isOwnRoom || msgs.length === 0) {
-                return next();
-            }
-        } catch (_) { }
-
-        return res.status(403).json({
+    } catch (err) {
+        console.error('Chat access verification error:', err.message);
+        return res.status(500).json({
             success: false,
-            message: 'Access Denied: You can only access your own chat conversations.'
+            message: 'Unable to verify conversation authorization.'
         });
     }
-
-
-    // 5. Default block for any other role
-    return res.status(403).json({
-        success: false,
-        message: `Access Denied: Role '${req.user.role}' is not authorized to access chat conversations.`
-    });
 };
 
 // Middleware: Strict District-Level Access Control (Section 5)

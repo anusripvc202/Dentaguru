@@ -55,6 +55,16 @@ void main() {
       expect(adminSession.targetRoute, '/admin');
       expect(adminSession.displayRole, 'Admin');
 
+      final upperAdminSession = UserSession(
+        token: 'token_789_upper',
+        userId: '339f745b-2192-4055-abec-d7e4adc6c837',
+        role: 'ADMIN',
+        phone: '9281030535',
+        createdAt: now,
+      );
+      expect(upperAdminSession.targetRoute, '/admin');
+      expect(upperAdminSession.displayRole, 'Admin');
+
       final subAdminSession = UserSession(
         token: 'token_999',
         userId: 'subadmin_1',

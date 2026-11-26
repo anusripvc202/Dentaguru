@@ -55,7 +55,8 @@ class WhatsAppChatModal extends StatefulWidget {
   State<WhatsAppChatModal> createState() => _WhatsAppChatModalState();
 }
 
-class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
+class _WhatsAppChatModalState extends State<WhatsAppChatModal>
+    with WidgetsBindingObserver {
   final TextEditingController _msgController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final ApiService _apiService = ApiService();
@@ -73,7 +74,7 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
   bool get _isAdmin => widget.currentUserRole.toLowerCase().contains('admin');
 
   String get _currentUserId {
-    final sessId = SessionService().currentSession?.userId ?? '';
+    final sessId = SessionService().currentSession?.canonicalUserId ?? '';
     if (sessId.isNotEmpty) return sessId;
     return SupabaseService.safeCurrentUser?.id ?? '';
   }
@@ -85,6 +86,7 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _roomId = (widget.roomIdOverride != null && widget.roomIdOverride!.trim().isNotEmpty)
         ? ApiService.normalizeRoomId(widget.roomIdOverride!)
         : ApiService.getChatRoomId(
@@ -103,7 +105,8 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
 
   void _subscribeRealtime() {
     try {
-      final client = Supabase.instance.client;
+      final client = SupabaseService.safeClient;
+      if (client == null) return;
       _realtimeChannel = client
           .channel('chat_messages_$_roomId')
           .onPostgresChanges(
@@ -124,7 +127,37 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      unawaited(_handleAppResumed());
+    }
+  }
+
+  Future<void> _handleAppResumed() async {
+    try {
+      final session = SessionService().currentSession;
+      if (session != null && session.token.trim().isNotEmpty) {
+        final roleLower = session.role.trim().toLowerCase();
+        final isSubAdmin = roleLower.contains('sub-admin') ||
+            roleLower.contains('subadmin') ||
+            roleLower.contains('sub_admin');
+        if (!isSubAdmin) {
+          await SessionService().bindRealtimeSession(session);
+        }
+      }
+    } catch (_) {}
+    if (!mounted) return;
+    try {
+      await _realtimeChannel?.unsubscribe();
+    } catch (_) {}
+    _realtimeChannel = null;
+    _subscribeRealtime();
+    await _pollMessages();
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
     try {
       _realtimeChannel?.unsubscribe();
@@ -220,8 +253,8 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
     final effectiveSenderId = _isAdmin
         ? (currentUserId.isNotEmpty ? currentUserId : 'ADMIN')
         : (_isDentist
-            ? (widget.doctorId?.isNotEmpty == true ? widget.doctorId! : (currentUserId.isNotEmpty ? currentUserId : widget.doctorName))
-            : (widget.patientId?.isNotEmpty == true ? widget.patientId! : (currentUserId.isNotEmpty ? currentUserId : widget.patientName)));
+            ? (currentUserId.isNotEmpty ? currentUserId : (widget.doctorId?.isNotEmpty == true ? widget.doctorId! : widget.doctorName))
+            : (currentUserId.isNotEmpty ? currentUserId : (widget.patientId?.isNotEmpty == true ? widget.patientId! : widget.patientName)));
 
     final msgType = _isAdmin ? 'admin' : (_isDentist ? 'doctor' : 'patient');
     final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
@@ -463,9 +496,12 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal> {
                             children: [
                               Icon(Icons.lock_rounded, size: 14, color: Color(0xFFFE3434)),
                               SizedBox(width: 6),
-                              Text(
-                                'Messages are end-to-end encrypted.',
-                                style: TextStyle(fontSize: 11, color: Color(0xFFFE3434), fontWeight: FontWeight.w500),
+                              Flexible(
+                                child: Text(
+                                  'Messages are end-to-end encrypted.',
+                                  style: TextStyle(fontSize: 11, color: Color(0xFFFE3434), fontWeight: FontWeight.w500),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                             ],
                           ),

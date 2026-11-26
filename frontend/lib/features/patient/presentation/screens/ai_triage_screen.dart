@@ -30,8 +30,10 @@ class AiTriageScreen extends StatefulWidget {
 class _AiTriageScreenState extends State<AiTriageScreen> {
   final PatientProblemService _patientService = PatientProblemService();
   late final TextEditingController _symptomController;
+  late final TextEditingController _specialtySearchController;
 
   late String _selectedSpecialty;
+  String _specialtySearchQuery = '';
   DoctorModel? _selectedDoctor;
   late String _selectedCategory;
   String _selectedSeverity = 'Moderate';
@@ -39,6 +41,7 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
 
   bool _isAnalyzing = false;
   bool _isSubmitting = false;
+  bool _isLoadingDoctors = false;
   Map<String, dynamic>? _triageResult;
   List<DoctorModel> _matchingDoctors = [];
 
@@ -59,7 +62,11 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
   void initState() {
     super.initState();
     _symptomController = TextEditingController(text: widget.initialSymptom ?? '');
-    _selectedDoctor = widget.initialDoctor;
+    _specialtySearchController = TextEditingController();
+    _selectedDoctor = (widget.initialDoctor != null &&
+            _patientService.isDoctorCurrentlyBookable(widget.initialDoctor!))
+        ? widget.initialDoctor
+        : null;
 
     final seedSpecialty = widget.initialDoctor?.specialty.trim().isNotEmpty == true
         ? widget.initialDoctor!.specialty.trim()
@@ -73,7 +80,7 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
 
     _patientService.addListener(_onServiceUpdated);
     _patientService.syncSpecialtiesFromApi();
-    _patientService.syncDoctorsFromApi(includeUnavailable: true);
+    _refreshFilteredDoctorsForCurrentSelection(initialLoad: true);
 
     if ((widget.initialSymptom ?? '').trim().isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -86,24 +93,106 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
   void dispose() {
     _patientService.removeListener(_onServiceUpdated);
     _symptomController.dispose();
+    _specialtySearchController.dispose();
     super.dispose();
   }
 
   void _onServiceUpdated() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {
+      if (_selectedDoctor != null) {
+        final latest = _patientService.allDoctors
+            .where((d) => d.id == _selectedDoctor!.id || (d.userId.isNotEmpty && d.userId == _selectedDoctor!.userId))
+            .firstOrNull;
+        if (latest == null || !_patientService.isDoctorCurrentlyBookable(latest)) {
+          _selectedDoctor = null;
+        } else {
+          _selectedDoctor = latest;
+        }
+      }
+    });
+  }
+
+  Future<void> _refreshFilteredDoctorsForCurrentSelection({bool initialLoad = false}) async {
+    final hasLocalDoctors = _patientService.allDoctors.isNotEmpty;
+    if (!hasLocalDoctors && mounted) {
+      setState(() => _isLoadingDoctors = true);
+    }
+    try {
+      await _patientService.syncDoctorsFromApi(includeUnavailable: false);
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _isLoadingDoctors = false;
+      if (_selectedDoctor != null) {
+        final currentFiltered = _filteredDoctorsResult.doctors;
+        if (!currentFiltered.any((d) => d.id == _selectedDoctor!.id)) {
+          _selectedDoctor = null;
+        }
+      }
+    });
+  }
+
+  void _onSpecialtySearchChanged(String rawQuery) {
+    final query = rawQuery.trim();
+    String? matchedOption;
+    if (query.isNotEmpty) {
+      final qLower = query.toLowerCase();
+      for (final opt in _specialtyOptions) {
+        if (opt.toLowerCase() == qLower) {
+          matchedOption = opt;
+          break;
+        }
+      }
+      matchedOption ??= _specialtyOptions
+          .where((opt) =>
+              opt.toLowerCase().contains(qLower) ||
+              MedicalSpecialtyModel.matchesSpecialtyFilter(opt, query, specialties: _patientService.specialties))
+          .firstOrNull;
+    }
+
+    setState(() {
+      _specialtySearchQuery = query;
+      if (matchedOption != null && matchedOption != _selectedSpecialty) {
+        final profile = SpecialtyClinicalConfig.forSpecialty(matchedOption);
+        _selectedSpecialty = profile.name;
+        _selectedCategory = profile.triageCategories.first;
+        _triageResult = null;
+        _matchingDoctors = [];
+      }
+      if (_selectedDoctor != null) {
+        final currentDocs = _filteredDoctorsResult.doctors;
+        if (!currentDocs.any((d) => d.id == _selectedDoctor!.id)) {
+          _selectedDoctor = null;
+        }
+      }
+    });
+  }
+
+  ({
+    List<DoctorModel> doctors,
+    bool usedGeneralMedicineFallback,
+    String resolvedSpecialty,
+  }) get _filteredDoctorsResult {
+    return _patientService.getAvailableDoctorsForSpecialtyWithFallback(
+      _selectedSpecialty,
+      searchQuery: _specialtySearchQuery,
+    );
   }
 
   void _onSpecialtyChanged(String newSpecialty, {bool keepSelectedDoctor = false}) {
     final profile = SpecialtyClinicalConfig.forSpecialty(newSpecialty);
     setState(() {
       _selectedSpecialty = profile.name;
-      if (!keepSelectedDoctor) {
-        if (_selectedDoctor != null &&
-            !MedicalSpecialtyModel.matchesSpecialtyFilter(
-              _selectedDoctor!.specialty,
-              profile.name,
-              specialties: _patientService.specialties,
-            )) {
+      if (_specialtySearchQuery.isNotEmpty) {
+        _specialtySearchQuery = '';
+        _specialtySearchController.clear();
+      }
+      if (!keepSelectedDoctor && _selectedDoctor != null) {
+        final nextDocs = _patientService
+            .getAvailableDoctorsForSpecialtyWithFallback(profile.name)
+            .doctors;
+        if (!nextDocs.any((d) => d.id == _selectedDoctor!.id)) {
           _selectedDoctor = null;
         }
       }
@@ -118,31 +207,32 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
       setState(() => _selectedDoctor = null);
       return;
     }
+    if (!_patientService.isDoctorCurrentlyBookable(doc)) {
+      setState(() => _selectedDoctor = null);
+      return;
+    }
     final resolved = SpecialtyClinicalConfig.forSpecialty(doc.specialty);
     setState(() {
       _selectedDoctor = doc;
-      _selectedSpecialty = resolved.name;
-      _selectedCategory = resolved.triageCategories.first;
+      // Preserve selected specialty if General Medicine fallback doctor was chosen,
+      // otherwise sync to the selected doctor's specialty.
+      final currentFallback = _filteredDoctorsResult.usedGeneralMedicineFallback;
+      if (!currentFallback) {
+        _selectedSpecialty = resolved.name;
+        _selectedCategory = resolved.triageCategories.first;
+      }
       _triageResult = null;
       _matchingDoctors = [];
     });
   }
 
   List<DoctorModel> _resolveMatchingDoctorsForSpecialty(String specialtyName) {
-    final specs = _patientService.specialties;
-    final matched = _patientService.allDoctors.where((doc) {
-      return MedicalSpecialtyModel.matchesSpecialtyFilter(
-        doc.specialty,
-        specialtyName,
-        specialties: specs,
-      );
-    }).toList();
-    // Put available doctors first
-    matched.sort((a, b) {
-      if (a.isAvailable != b.isAvailable) return a.isAvailable ? -1 : 1;
-      return b.rating.compareTo(a.rating);
-    });
-    return matched;
+    return _patientService
+        .getAvailableDoctorsForSpecialtyWithFallback(
+          specialtyName,
+          searchQuery: _specialtySearchQuery,
+        )
+        .doctors;
   }
 
   Future<void> _runAiTriageAnalysis() async {
@@ -325,7 +415,9 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
     final effectiveCategory = categories.contains(_selectedCategory)
         ? _selectedCategory
         : categories.first;
-    final doctorsList = _patientService.allDoctors;
+    final filteredDoctorsOutcome = _filteredDoctorsResult;
+    final doctorsList = filteredDoctorsOutcome.doctors;
+    final usedGeneralMedicineFallback = filteredDoctorsOutcome.usedGeneralMedicineFallback;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -432,19 +524,115 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
                       ),
                     ),
 
-                    // Optional Specific Doctor Selector (auto-identifies doctor's registered specialty)
-                    if (doctorsList.isNotEmpty) ...[
-                      const SizedBox(height: 14),
-                      const Text(
-                        'OR SELECT A SPECIFIC DOCTOR (AUTO-DETECTS SPECIALTY)',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF64748B),
-                          letterSpacing: 0.5,
+                    // Optional Specific Doctor Selector (filtered strictly by selected specialization + availability + General Medicine fallback)
+                    const SizedBox(height: 14),
+                    const Text(
+                      'OR SELECT A SPECIFIC DOCTOR (AUTO-DETECTS SPECIALTY)',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF64748B),
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: TextField(
+                        key: const Key('ai_triage_specialty_search_input'),
+                        controller: _specialtySearchController,
+                        onChanged: _onSpecialtySearchChanged,
+                        style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500, color: Color(0xFF0F172A)),
+                        decoration: InputDecoration(
+                          hintText: 'Search specialization or doctor (e.g. Cardiology, Neurology)...',
+                          hintStyle: const TextStyle(fontSize: 12.5, color: Color(0xFF94A3B8)),
+                          prefixIcon: const Icon(Icons.search_rounded, size: 18, color: Color(0xFF64748B)),
+                          suffixIcon: _specialtySearchQuery.isNotEmpty
+                              ? IconButton(
+                                  key: const Key('ai_triage_specialty_search_clear'),
+                                  icon: const Icon(Icons.close_rounded, size: 16, color: Color(0xFF64748B)),
+                                  onPressed: () {
+                                    _specialtySearchController.clear();
+                                    _onSpecialtySearchChanged('');
+                                  },
+                                )
+                              : null,
+                          border: InputBorder.none,
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
                         ),
                       ),
-                      const SizedBox(height: 8),
+                    ),
+                    const SizedBox(height: 8),
+                    if (_isLoadingDoctors)
+                      Container(
+                        key: const Key('ai_triage_doctors_loading_indicator'),
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: const Row(
+                          children: [
+                            SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.gsNavy),
+                            ),
+                            SizedBox(width: 10),
+                            Flexible(
+                              child: Text(
+                                'Loading available doctors...',
+                                style: TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    else if (doctorsList.isEmpty)
+                      Container(
+                        key: const Key('ai_triage_no_available_doctors_message'),
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(Icons.info_outline_rounded, size: 18, color: Color(0xFF64748B)),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'No available doctors found for this specialization. Please try again later.',
+                                style: TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    else ...[
+                      if (usedGeneralMedicineFallback)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Text(
+                            'No available $effectiveSpecialty specialists right now — showing available General Medicine doctors.',
+                            key: const Key('ai_triage_general_medicine_fallback_notice'),
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.gsNavy,
+                            ),
+                          ),
+                        ),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
                         decoration: BoxDecoration(
@@ -917,12 +1105,14 @@ class _AiTriageScreenState extends State<AiTriageScreen> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              BookConsultationFab(
-                selectedSpecialty: _selectedSpecialty,
-                onPressed: () => BookVisitFlowDialog.show(
-                  context,
-                  preselectedDoctor: _selectedDoctor,
-                  initialSpecialtyFilter: _selectedSpecialty,
+              Flexible(
+                child: BookConsultationFab(
+                  selectedSpecialty: _selectedSpecialty,
+                  onPressed: () => BookVisitFlowDialog.show(
+                    context,
+                    preselectedDoctor: _selectedDoctor,
+                    initialSpecialtyFilter: _selectedSpecialty,
+                  ),
                 ),
               ),
             ],

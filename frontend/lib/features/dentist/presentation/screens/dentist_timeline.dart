@@ -419,14 +419,16 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     );
   }
 
-  void _showDoctorChatModal(BuildContext context, String patientName, String roomId) {
+  void _showDoctorChatModal(BuildContext context, String patientName, String roomId, {String? patientId}) {
     final doctor = _patientService.currentDoctor;
     WhatsAppChatModal.show(
       context,
       patientName: patientName,
       doctorName: doctor?.name ?? 'Doctor',
       currentUserRole: 'Dentist',
+      patientId: patientId,
       doctorId: doctor?.id,
+      roomIdOverride: roomId,
     );
   }
 
@@ -2771,7 +2773,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                     onPressed: () {
                       final docName = _patientService.currentDoctor?.name ?? 'DOCTOR';
                       final rId = ApiService.getChatRoomId(patientIdOrName: patientName, dentistIdOrName: docName);
-                      _showDoctorChatModal(context, patientName, rId);
+                      _showDoctorChatModal(context, patientName, rId, patientId: req.patientId);
                     },
                   ),
                 ),

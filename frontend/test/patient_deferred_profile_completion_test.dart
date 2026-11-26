@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:dentaguru/core/constants/patient_profile_requirements.dart';
 import 'package:dentaguru/core/routes/app_router.dart';
 import 'package:dentaguru/core/services/api_service.dart';
 import 'package:dentaguru/core/services/patient_problem_service.dart';
@@ -171,7 +172,7 @@ void main() {
     );
 
     testWidgets(
-      'Scenario 2: Clicking any service with incomplete profile redirects to Profile Completion and validates all 4 required fields',
+      'Scenario 2: Clicking any service with incomplete profile redirects to Profile Completion and validates required fields (with optional profile image)',
       (tester) async {
         tester.view.physicalSize = const Size(412, 915);
         tester.view.devicePixelRatio = 1.0;
@@ -204,12 +205,12 @@ void main() {
         expect(find.byType(PatientProfileCompletionScreen), findsOneWidget);
         expect(find.byType(AiTriageScreen), findsNothing);
 
-        // Empty submit fails mandatory checks (image, pincode, age, gender)
+        // Empty submit fails mandatory checks (pincode, age, gender); profile image is optional by default
         final submitBtn = find.byKey(const Key('profile_completion_submit_button'));
         await tester.ensureVisible(submitBtn);
         await tester.tap(submitBtn);
         await _pumpFrames(tester);
-        expect(find.text('Profile image is required.'), findsOneWidget);
+        expect(find.text('Profile image is required.'), findsNothing);
         expect(find.text('Pincode is required'), findsOneWidget);
         expect(find.text('Age is required'), findsOneWidget);
         expect(find.text('Please select your gender.'), findsOneWidget);
@@ -681,6 +682,132 @@ void main() {
           await _pumpFrames(tester, count: 2, ms: 200);
           expect(tester.takeException(), isNull, reason: 'PatientProfileCompletionScreen overflowed at ${width}px');
         }
+      },
+    );
+
+    testWidgets(
+      'Scenario 7: Profile image is optional by default, completion succeeds without image, and existing photo is preserved on update',
+      (tester) async {
+        expect(PatientProfileRequirementsConfig.requireProfileImage, isFalse);
+
+        tester.view.physicalSize = const Size(360, 640);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+
+        const patientId = 'pat-optional-photo-701';
+        await SessionService().saveSession(
+          token: 'pat-jwt-701',
+          role: 'Patient',
+          userId: patientId,
+          phone: '9123456077',
+          name: 'Patient',
+        );
+
+        final service = PatientProblemService();
+        service.currentPatient = PatientProfile(
+          id: patientId,
+          name: 'Patient',
+          phone: '9123456077',
+          age: '',
+          gender: '',
+          pincode: '',
+          photoBytes: null,
+        );
+
+        String? capturedPhoto;
+        ApiService.debugUpdatePatientProfileOverride = ({
+          required String patientId,
+          String? pincode,
+          String? age,
+          String? gender,
+          String? profilePhoto,
+          String? name,
+          String? city,
+          bool completeProfile = true,
+        }) async {
+          capturedPhoto = profilePhoto;
+          return {
+            'success': true,
+            'user': {
+              'id': patientId,
+              'name': name ?? 'Kavya Sharma',
+              'pincode': pincode,
+              'age': age,
+              'gender': gender,
+              'profilePhoto': profilePhoto,
+              'isProfileComplete': true,
+            },
+          };
+        };
+
+        await tester.pumpWidget(
+          const ProviderScope(
+            child: MaterialApp(
+              debugShowCheckedModeBanner: false,
+              home: PatientDashboardScreen(),
+            ),
+          ),
+        );
+        await _pumpFrames(tester);
+
+        await tester.tap(find.byKey(const Key('patient_ai_triage_card')));
+        await _pumpFrames(tester);
+        expect(find.byType(PatientProfileCompletionScreen), findsOneWidget);
+
+        // Fill only pincode, age, gender (no photo uploaded)
+        await tester.enterText(find.byKey(const Key('profile_completion_pincode_field')), '500081');
+        await tester.enterText(find.byKey(const Key('profile_completion_age_field')), '29');
+        final femaleBtn = find.byKey(const Key('profile_completion_gender_Female'));
+        await tester.ensureVisible(femaleBtn);
+        await tester.tap(femaleBtn);
+        await _pumpFrames(tester);
+
+        final submitBtn = find.byKey(const Key('profile_completion_submit_button'));
+        await tester.ensureVisible(submitBtn);
+        await tester.tap(submitBtn);
+        await _pumpFrames(tester, count: 5, ms: 200);
+
+        expect(capturedPhoto, isNull);
+        expect(service.currentPatient.isProfileComplete, isTrue);
+        expect(find.byType(AiTriageScreen), findsOneWidget);
+
+        // Existing photo is preserved when profile fields are updated without a new image
+        service.updatePatientProfile(
+          id: patientId,
+          name: 'Kavya Sharma',
+          email: '',
+          phone: '9123456077',
+          age: '29',
+          gender: 'Female',
+          bloodGroup: 'O+',
+          emergencyContact: '9123456077',
+          address: 'Banjara Hills',
+          city: 'Hyderabad',
+          pincode: '500081',
+          photoBytes: _validTestPngBytes,
+          preserveExistingPhoto: true,
+          syncRemote: false,
+        );
+        expect(service.currentPatient.photoBytes, equals(_validTestPngBytes));
+
+        service.updatePatientProfile(
+          id: patientId,
+          name: 'Kavya Sharma',
+          email: '',
+          phone: '9123456077',
+          age: '30',
+          gender: 'Female',
+          bloodGroup: 'O+',
+          emergencyContact: '9123456077',
+          address: 'Banjara Hills',
+          city: 'Hyderabad',
+          pincode: '500081',
+          photoBytes: null,
+          profileImageUrl: null,
+          preserveExistingPhoto: true,
+          syncRemote: false,
+        );
+        expect(service.currentPatient.photoBytes, equals(_validTestPngBytes));
       },
     );
   });

@@ -27,6 +27,18 @@ android {
         versionName = flutter.versionName
     }
 
+    flavorDimensions += "environment"
+    productFlavors {
+        create("staging") {
+            dimension = "environment"
+            manifestPlaceholders["appName"] = "GS HEALTH Staging"
+        }
+        create("production") {
+            dimension = "environment"
+            manifestPlaceholders["appName"] = "GS HEALTH"
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.

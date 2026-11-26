@@ -1,10 +1,14 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/user_session.dart';
 import 'api_service.dart';
+import 'firebase_service.dart';
 import 'patient_problem_service.dart';
+import 'supabase_service.dart';
 
 /// Central Service managing secure persistent authentication sessions across the DentaGuru application.
 class SessionService {
@@ -41,6 +45,8 @@ class SessionService {
     String? email,
     String? phone,
     String? name,
+    String? realtimeToken,
+    DateTime? realtimeTokenExpiresAt,
     Map<String, dynamic>? metadata,
     Duration validDuration = const Duration(days: 30),
   }) async {
@@ -54,6 +60,8 @@ class SessionService {
       name: name,
       createdAt: now,
       expiresAt: now.add(validDuration),
+      realtimeToken: realtimeToken,
+      realtimeTokenExpiresAt: realtimeTokenExpiresAt,
       metadata: metadata ?? {},
     );
 
@@ -82,7 +90,60 @@ class SessionService {
       debugPrint('⚠️ Error saving secure session to storage: $e');
     }
 
-    return session;
+    await bindRealtimeSession(session);
+    unawaited(FirebaseService.syncFcmTokenAfterLogin(authToken: token));
+
+    return _cachedSession ?? session;
+  }
+
+  /// Ensures Supabase Realtime is authenticated with a valid short-lived JWT (`sub = public.users.id`)
+  /// and automatically refreshes the Realtime token before expiration.
+  Future<bool> bindRealtimeSession([UserSession? sessionOverride]) async {
+    final active = sessionOverride ?? _cachedSession;
+    if (active == null || active.token.trim().isEmpty) return false;
+
+    Future<({String token, DateTime? expiresAt})?> refreshCallback() async {
+      final res = await ApiService().fetchRealtimeToken();
+      if (res['success'] == true && res['realtimeToken'] != null) {
+        final newRt = res['realtimeToken'].toString().trim();
+        final newExp = res['realtimeTokenExpiresAt'] != null
+            ? DateTime.tryParse(res['realtimeTokenExpiresAt'].toString())
+            : null;
+        if (newRt.isNotEmpty && _cachedSession != null) {
+          _cachedSession = _cachedSession!.copyWith(
+            realtimeToken: newRt,
+            realtimeTokenExpiresAt: newExp,
+          );
+          try {
+            await _secureStorage.write(key: _sessionKey, value: _cachedSession!.serialize());
+          } catch (_) {}
+          return (token: newRt, expiresAt: newExp);
+        }
+      }
+      return null;
+    }
+
+    if (active.hasValidRealtimeToken()) {
+      return SupabaseService().authenticateRealtime(
+        realtimeToken: active.realtimeToken!,
+        expiresAt: active.realtimeTokenExpiresAt,
+        onRefreshRequired: refreshCallback,
+      );
+    }
+
+    // If Supabase is initialized (or test override is installed) and token is missing/expired, fetch fresh Realtime JWT
+    if (SupabaseService.isInitialized || ApiService.hasRealtimeTokenOverride) {
+      final fetched = await refreshCallback();
+      if (fetched != null) {
+        return SupabaseService().authenticateRealtime(
+          realtimeToken: fetched.token,
+          expiresAt: fetched.expiresAt,
+          onRefreshRequired: refreshCallback,
+        );
+      }
+    }
+
+    return false;
   }
 
   /// Retrieve the current session from secure storage
@@ -110,6 +171,12 @@ class SessionService {
         ApiService().setAuthToken(session.token);
         return session;
       }
+    } on PlatformException catch (e) {
+      debugPrint('⚠️ Android secure storage decryption/keystore error, clearing corrupted session: $e');
+      try {
+        await _secureStorage.delete(key: _sessionKey);
+        await _secureStorage.delete(key: _tokenKey);
+      } catch (_) {}
     } catch (e) {
       debugPrint('⚠️ Error reading secure session: $e');
     }
@@ -144,6 +211,7 @@ class SessionService {
 
     debugPrint('⚡ Restoring session for ${session.displayRole} (${session.name ?? session.email ?? session.phone})');
     ApiService().setAuthToken(session.token);
+    await bindRealtimeSession(session);
 
     final normalizedRole = session.role.trim().toLowerCase();
 
@@ -205,6 +273,7 @@ class SessionService {
     }
     else if (normalizedRole.contains('admin')) {
       PatientProblemService().clearSubAdminSession();
+      PatientProblemService().setAdminMode(true);
     }
     // 3. Restore Patient State
     else if (normalizedRole.contains('patient')) {
@@ -291,6 +360,7 @@ class SessionService {
     } catch (_) {}
 
     ApiService().clearAuthToken();
+    SupabaseService().clearRealtimeAuth();
     PatientProblemService().clearSubAdminSession();
     await PatientProblemService().clearPatientSessionCache();
 

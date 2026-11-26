@@ -6,6 +6,7 @@ const admin = require('firebase-admin');
 const { sendOtpEmail } = require('../services/emailService');
 const { sendRealSmsOtp, normalizePhoneNumber } = require('../services/smsService');
 const { isCloudEnv, getJwtSecret, getRefreshSecret, isAuthorizedStagingOtpRequest } = require('../config/secrets');
+const { normalizeRealtimeAppRole, mintSupabaseRealtimeTokenForUser, tryMintSupabaseRealtimeTokenForUser } = require('../services/realtimeTokenService');
 
 // Helper: Generate JWT tokens
 const generateTokens = (user) => {
@@ -28,7 +29,7 @@ const normalizeAdminPhone = (phone) => canonicalPhone10(phone);
 // Flexible Patient Profile Completion Mandatory Field Configuration
 // (Pending final client confirmation on optional vs mandatory subset)
 const PATIENT_PROFILE_REQUIREMENTS = {
-    requireProfileImage: process.env.PATIENT_REQ_PROFILE_IMAGE !== 'false',
+    requireProfileImage: process.env.PATIENT_REQ_PROFILE_IMAGE === 'true',
     requirePincode: process.env.PATIENT_REQ_PINCODE !== 'false',
     requireAge: process.env.PATIENT_REQ_AGE !== 'false',
     requireGender: process.env.PATIENT_REQ_GENDER !== 'false',
@@ -117,9 +118,9 @@ const getAuthorizedAdminPhone = async () => {
     if (envAdminPhone) {
         return normalizeAdminPhone(envAdminPhone);
     }
-    // 2. Existing secure admin account record in database
+    // 2. Existing secure admin account record in database (supports both 'ADMIN' and 'Admin')
     try {
-        const adminUser = await User.findOne({ role: 'Admin' });
+        const adminUser = await User.findOne({ role: 'Admin' }) || await User.findOne({ role: 'ADMIN' });
         if (adminUser && adminUser.phone) {
             return normalizeAdminPhone(adminUser.phone);
         }
@@ -524,6 +525,11 @@ exports.register = async (req, res) => {
             });
         } catch (_) { }
 
+        const rtBundle = await tryMintSupabaseRealtimeTokenForUser(user, {
+            dentistId: createdDentistRecord?.id || null,
+            clinicId: createdClinicRecord?.id || createdDentistRecord?.clinic_id || null,
+        }).catch(() => null);
+
         res.status(201).json({
             success: true,
             message: 'User registered successfully in Supabase PostgreSQL.',
@@ -563,7 +569,11 @@ exports.register = async (req, res) => {
                 } : {})
             },
             accessToken,
-            refreshToken
+            refreshToken,
+            ...(rtBundle ? {
+                realtimeToken: rtBundle.realtimeToken,
+                realtimeTokenExpiresAt: rtBundle.realtimeTokenExpiresAt,
+            } : {})
         });
     } catch (err) {
         console.error('Registration Error:', err.message);
@@ -695,11 +705,13 @@ exports.login = async (req, res) => {
             if ((isReqAdmin || isReqSubAdmin) && !isUserAdmin && !isSubAdminUser) {
                 return res.status(403).json({ success: false, message: `Role Mismatch: Your account is registered as '${user.role}'. Cannot log into Admin Portal.` });
             }
-            if (isReqDentist && !isUserDentist) {
-                return res.status(403).json({ success: false, message: `Role Mismatch: Your account is registered as '${user.role}'. Cannot log into Doctor Portal.` });
-            }
-            if (isReqPatient && !isUserPatient) {
-                return res.status(403).json({ success: false, message: `Role Mismatch: Your account is registered as '${user.role}'. Cannot log into Patient Portal.` });
+            if (!isUserAdmin && !isSubAdminUser) {
+                if (isReqDentist && !isUserDentist) {
+                    return res.status(403).json({ success: false, message: `Role Mismatch: Your account is registered as '${user.role}'. Cannot log into Doctor Portal.` });
+                }
+                if (isReqPatient && !isUserPatient) {
+                    return res.status(403).json({ success: false, message: `Role Mismatch: Your account is registered as '${user.role}'. Cannot log into Patient Portal.` });
+                }
             }
         }
 
@@ -784,11 +796,25 @@ exports.login = async (req, res) => {
             } catch (_) { }
         }
 
+        const rtBundle = isSubAdminUser
+            ? null
+            : await tryMintSupabaseRealtimeTokenForUser(
+                { ...user, permissions: userPermissions, status: effectiveStatus },
+                {
+                    dentistId: doctorExtra.dentistId || null,
+                    clinicId: clinicExtra.clinicId || doctorExtra.clinicId || null,
+                }
+            ).catch(() => null);
+
         res.json({
             success: true,
             message: 'Login successful.',
             accessToken,
             refreshToken,
+            ...(rtBundle ? {
+                realtimeToken: rtBundle.realtimeToken,
+                realtimeTokenExpiresAt: rtBundle.realtimeTokenExpiresAt,
+            } : {}),
             user: {
                 id: user.id,
                 name: user.name,
@@ -856,9 +882,65 @@ exports.refreshToken = async (req, res) => {
         }
 
         const { accessToken, refreshToken: newRefreshToken } = generateTokens(user);
-        res.json({ success: true, accessToken, refreshToken: newRefreshToken });
+        const rtBundle = isSubAdmin
+            ? null
+            : await tryMintSupabaseRealtimeTokenForUser(user).catch(() => null);
+        res.json({
+            success: true,
+            accessToken,
+            refreshToken: newRefreshToken,
+            ...(rtBundle ? {
+                realtimeToken: rtBundle.realtimeToken,
+                realtimeTokenExpiresAt: rtBundle.realtimeTokenExpiresAt,
+            } : {})
+        });
     } catch (err) {
         res.status(403).json({ success: false, message: 'Invalid or expired refresh token.' });
+    }
+};
+
+// 7b. MINT / REFRESH SHORT-LIVED SUPABASE REALTIME JWT (Authenticated via Express JWT)
+exports.getRealtimeToken = async (req, res) => {
+    try {
+        if (!req.user || !req.user.id) {
+            return res.status(401).json({ success: false, message: 'Authentication required.' });
+        }
+
+        const dbUser = await User.findById(req.user.id);
+        if (!dbUser) {
+            return res.status(404).json({ success: false, message: 'User account not found.' });
+        }
+
+        if (normalizeRealtimeAppRole(dbUser.role) === 'SUB_ADMIN') {
+            return res.status(403).json({
+                success: false,
+                code: 'CHAT_FORBIDDEN_FOR_ROLE',
+                message: 'Access Denied: Sub-Admins are strictly prohibited from chat and Realtime chat subscriptions.'
+            });
+        }
+
+        const rtBundle = await mintSupabaseRealtimeTokenForUser(dbUser);
+        return res.json({
+            success: true,
+            realtimeToken: rtBundle.realtimeToken,
+            realtimeTokenExpiresAt: rtBundle.realtimeTokenExpiresAt,
+            expiresIn: rtBundle.expiresIn,
+            claims: {
+                sub: rtBundle.claims.sub,
+                aud: rtBundle.claims.aud,
+                role: rtBundle.claims.role,
+                appRole: rtBundle.claims.app_role,
+                dentistId: rtBundle.claims.dentist_id,
+                clinicId: rtBundle.claims.clinic_id,
+            }
+        });
+    } catch (err) {
+        const status = err.statusCode || 500;
+        return res.status(status).json({
+            success: false,
+            ...(err.code ? { code: err.code } : {}),
+            message: err.message || 'Unable to generate Supabase Realtime token.'
+        });
     }
 };
 
@@ -886,7 +968,7 @@ exports.resetDatabase = async (req, res) => {
 exports.getPatients = async (req, res) => {
     try {
         // Fetch admin emails to strictly exclude admin accounts from patient list
-        const adminUsers = await User.find({ role: { $in: ['Admin', 'Sub-Admin'] } });
+        const adminUsers = await User.find({ role: { $in: ['Admin', 'ADMIN', 'Sub-Admin', 'SUB_ADMIN'] } });
         const adminEmails = new Set(adminUsers.map(u => (u.email || '').trim().toLowerCase()));
 
         const dbPatients = await User.find({ role: 'Patient' });
@@ -894,7 +976,7 @@ exports.getPatients = async (req, res) => {
 
         const seenEmails = new Set();
         const seenPhones = new Set();
-        const nonPatientUsers = await User.find({ role: { $in: ['Admin', 'Sub-Admin', 'Dentist', 'Doctor', 'DOCTOR', 'Clinic'] } }).catch(() => []);
+        const nonPatientUsers = await User.find({ role: { $in: ['Admin', 'ADMIN', 'Sub-Admin', 'SUB_ADMIN', 'Dentist', 'Doctor', 'DOCTOR', 'Clinic'] } }).catch(() => []);
         const nonPatientIds = new Set(nonPatientUsers.map(u => String(u.id || '').trim()).filter(Boolean));
         const nonPatientEmails = new Set(nonPatientUsers.map(u => (u.email || '').trim().toLowerCase()).filter(Boolean));
         const normalizePhone10 = (raw) => {
@@ -1727,6 +1809,16 @@ exports.verifyOTP = async (req, res) => {
                 } catch (_) { }
             }
 
+            const rtBundle = isSubAdminUser
+                ? null
+                : await tryMintSupabaseRealtimeTokenForUser(
+                    { ...user, permissions: resolvedPermissions, status: effectiveStatus },
+                    {
+                        dentistId: doctorExtra.dentistId || null,
+                        clinicId: clinicExtra.clinicId || doctorExtra.clinicId || null,
+                    }
+                ).catch(() => null);
+
             return res.json({
                 success: true,
                 message: 'OTP verified successfully.',
@@ -1755,6 +1847,10 @@ exports.verifyOTP = async (req, res) => {
                 },
                 accessToken,
                 refreshToken,
+                ...(rtBundle ? {
+                    realtimeToken: rtBundle.realtimeToken,
+                    realtimeTokenExpiresAt: rtBundle.realtimeTokenExpiresAt,
+                } : {}),
                 isAdmin: isAdmin,
                 isSubAdmin: isSubAdminUser
             });
@@ -1816,6 +1912,8 @@ exports.verifyOTP = async (req, res) => {
                     refresh_tokens: existingTokens.slice(-20)
                 }).catch(() => null);
 
+                const rtBundle = await tryMintSupabaseRealtimeTokenForUser(patientUser).catch(() => null);
+
                 return res.json({
                     success: true,
                     message: 'OTP verified successfully.',
@@ -1823,6 +1921,10 @@ exports.verifyOTP = async (req, res) => {
                     user: buildPatientUserPayload(patientUser),
                     accessToken,
                     refreshToken,
+                    ...(rtBundle ? {
+                        realtimeToken: rtBundle.realtimeToken,
+                        realtimeTokenExpiresAt: rtBundle.realtimeTokenExpiresAt,
+                    } : {}),
                     isAdmin: false,
                     isSubAdmin: false
                 });
@@ -1908,8 +2010,11 @@ exports.updatePatientProfile = async (req, res) => {
         const nextGender = gender !== undefined
             ? String(gender || '').trim()
             : String(existingUser.gender || existingMeta.gender || '').trim();
-        const nextPhoto = profilePhoto !== undefined
-            ? (profilePhoto === null ? '' : String(profilePhoto).trim())
+        const incomingPhoto = profilePhoto !== undefined && profilePhoto !== null
+            ? String(profilePhoto).trim()
+            : '';
+        const nextPhoto = incomingPhoto.length > 0
+            ? incomingPhoto
             : String(existingUser.biometric_token || existingMeta.profilePhoto || '').trim();
         const nextName = name !== undefined
             ? String(name || '').trim()
@@ -1975,17 +2080,17 @@ exports.updatePatientProfile = async (req, res) => {
         if (name !== undefined && String(name).trim().length > 0) {
             updatePayload.name = String(name).trim();
         }
-        if (city !== undefined) {
-            updatePayload.city = String(city || '').trim();
+        if (city !== undefined && city !== null && String(city).trim().length > 0) {
+            updatePayload.city = String(city).trim();
         }
-        if (address !== undefined) {
-            updatePayload.address = String(address || '').trim();
+        if (address !== undefined && address !== null && String(address).trim().length > 0) {
+            updatePayload.address = String(address).trim();
         }
-        if (bloodGroup !== undefined) {
-            updatePayload.blood_group = String(bloodGroup || '').trim();
+        if (bloodGroup !== undefined && bloodGroup !== null && String(bloodGroup).trim().length > 0) {
+            updatePayload.blood_group = String(bloodGroup).trim();
         }
-        if (emergencyContact !== undefined) {
-            updatePayload.emergency_contact = String(emergencyContact || '').trim();
+        if (emergencyContact !== undefined && emergencyContact !== null && String(emergencyContact).trim().length > 0) {
+            updatePayload.emergency_contact = String(emergencyContact).trim();
         }
         if (Array.isArray(languages) && languages.length > 0) {
             updatePayload.languages = languages.map(l => String(l || '').trim()).filter(Boolean);

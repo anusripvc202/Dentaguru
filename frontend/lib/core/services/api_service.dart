@@ -8463,6 +8463,50 @@ class ApiService {
     return const ['English'];
   }
 
+  /// Optional test hook for Phase 2A Supabase Realtime JWT refresh tests.
+  static Future<Map<String, dynamic>> Function()? debugFetchRealtimeTokenOverride;
+
+  static bool get hasRealtimeTokenOverride => debugFetchRealtimeTokenOverride != null;
+
+  /// Mint or refresh short-lived Supabase Realtime JWT (`POST /api/v1/auth/realtime-token`).
+  /// Sub-Admins receive HTTP 403 `CHAT_FORBIDDEN_FOR_ROLE` from the backend guard.
+  Future<Map<String, dynamic>> fetchRealtimeToken() async {
+    if (debugFetchRealtimeTokenOverride != null) {
+      return await debugFetchRealtimeTokenOverride!();
+    }
+    try {
+      final url = Uri.parse(ApiConstants.realtimeToken);
+      final response = await http
+          .post(
+            url,
+            headers: _headersWithUser(),
+            body: jsonEncode(const <String, dynamic>{}),
+          )
+          .timeout(const Duration(seconds: 35));
+      if (response.body.isNotEmpty) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic>) {
+          if (response.statusCode == 200) {
+            return decoded;
+          }
+          return {
+            ...decoded,
+            'success': false,
+            'statusCode': response.statusCode,
+          };
+        }
+      }
+      return {
+        'success': false,
+        'statusCode': response.statusCode,
+        'message': 'Unable to fetch Realtime token.',
+      };
+    } catch (e) {
+      debugPrint('fetchRealtimeToken notice: $e');
+      return {'success': false, 'message': 'Unable to fetch Realtime token.'};
+    }
+  }
+
   /// Optional test overrides for deterministic widget testing of Doctor & Admin Visits Calendars.
   static Future<Map<String, dynamic>> Function({
     required String doctorId,

@@ -11,6 +11,10 @@ const {
     getSpecialtyClinicalConfig,
     analyzeSymptomsForSpecialty
 } = require('../config/specialtyClinicalConfig');
+const {
+    deduplicateFormattedDoctorList,
+    isDoctorBookableForWindow
+} = require('./clinicController');
 
 // 1. GET MEDICAL SPECIALTIES (Public / Patient / Doctor / Admin)
 exports.getSpecialties = async (req, res) => {
@@ -114,31 +118,70 @@ exports.analyzeAiTriage = async (req, res) => {
             duration
         });
 
-        // Match registered doctors for the selected specialty
+        // Match registered available doctors for the selected specialty (with General Medicine fallback when no primary specialist is available)
         const allDoctors = await Dentist.find({});
-        const matchingDoctors = allDoctors
-            .filter(d => matchesSpecialtyQuery(d.speciality || d.specialty, triage.recommendedSpecialty))
-            .map(d => {
-                const u = d.users || {};
-                const c = d.clinics || {};
-                const rawName = d.name || u.name || 'Specialist';
-                return {
-                    id: d.id,
-                    userId: d.user_id || u.id || '',
-                    name: rawName.startsWith('Dr.') ? rawName : `Dr. ${rawName}`,
-                    specialty: d.speciality || d.specialty || triage.recommendedSpecialty,
-                    qualification: d.qualifications || d.qualification || 'MBBS, MD',
-                    clinicName: c.clinic_name || d.clinicName || 'GS HEALTH Clinic',
-                    city: d.city || u.city || '',
-                    availability_status: d.availability_status || 'Available',
-                    isAvailable: isDoctorRecordAvailable(d),
-                    rating: Number(d.rating) > 0 && Number(d.reviews_count || 0) > 0 ? Number(d.rating) : 0
-                };
-            });
+        const mapDoctorSummary = (d, fallbackSpec) => {
+            const u = d.users || {};
+            const c = d.clinics || {};
+            const rawName = d.name || u.name || 'Specialist';
+            return {
+                id: d.id,
+                user_id: d.user_id || u.id || '',
+                userId: d.user_id || u.id || '',
+                name: rawName.startsWith('Dr.') ? rawName : `Dr. ${rawName}`,
+                email: d.email || u.email || '',
+                phone: d.phone || u.phone || '',
+                specialty: d.speciality || d.specialty || fallbackSpec,
+                speciality: d.speciality || d.specialty || fallbackSpec,
+                qualification: d.qualifications || d.qualification || 'MBBS, MD',
+                clinicName: c.clinic_name || d.clinicName || 'GS HEALTH Clinic',
+                city: d.city || u.city || '',
+                availability_status: d.availability_status || 'Available',
+                status: d.availability_status || 'Available',
+                isAvailable: isDoctorRecordAvailable(d),
+                rating: Number(d.rating) > 0 && Number(d.reviews_count || 0) > 0 ? Number(d.rating) : 0
+            };
+        };
+
+        const availableMapped = deduplicateFormattedDoctorList(
+            allDoctors
+                .filter(d => isDoctorRecordAvailable(d))
+                .map(d => mapDoctorSummary(d, triage.recommendedSpecialty))
+        );
+
+        const primaryCandidates = availableMapped.filter(d =>
+            matchesSpecialtyQuery(d.specialty, triage.recommendedSpecialty)
+        );
+        const primaryBookable = [];
+        for (const doc of primaryCandidates) {
+            if (await isDoctorBookableForWindow(doc, { date: req.body?.date, timeSlot: req.body?.timeSlot })) {
+                primaryBookable.push(doc);
+            }
+        }
+
+        let matchingDoctors = primaryBookable;
+        let usedGeneralMedicineFallback = false;
+
+        if (matchingDoctors.length === 0 && !matchesSpecialtyQuery('General Medicine', triage.recommendedSpecialty)) {
+            const gmCandidates = availableMapped.filter(d =>
+                matchesSpecialtyQuery(d.specialty, 'General Medicine')
+            );
+            const gmBookable = [];
+            for (const doc of gmCandidates) {
+                if (await isDoctorBookableForWindow(doc, { date: req.body?.date, timeSlot: req.body?.timeSlot })) {
+                    gmBookable.push(doc);
+                }
+            }
+            if (gmBookable.length > 0) {
+                matchingDoctors = gmBookable;
+                usedGeneralMedicineFallback = true;
+            }
+        }
 
         res.json({
             success: true,
             triage,
+            usedGeneralMedicineFallback,
             doctorContext: resolvedDoctor
                 ? {
                     id: resolvedDoctor.id,

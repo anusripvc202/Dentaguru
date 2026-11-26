@@ -1032,13 +1032,22 @@ async function runTests() {
                 assert.strictEqual(status, 429);
                 assert.strictEqual(body.otp, undefined);
 
-                // forgotPassword rejects missing staging key with 403 and serves OTP with valid key (zero SMS)
+                // forgotPassword rejects missing & invalid staging key with 403 and serves OTP with valid key (zero SMS)
                 status = 200; body = null;
                 await auth.forgotPassword(
                     { body: { phone: '9888877777' }, headers: {} },
                     { status(c) { status = c; return this; }, json(b) { body = b; return this; } }
                 );
                 assert.strictEqual(status, 403);
+                assert.strictEqual(body.otp, undefined);
+
+                status = 200; body = null;
+                await auth.forgotPassword(
+                    { body: { phone: '9888877777' }, headers: { 'x-staging-otp-key': 'wrong-invalid-staging-key' } },
+                    { status(c) { status = c; return this; }, json(b) { body = b; return this; } }
+                );
+                assert.strictEqual(status, 403);
+                assert.strictEqual(body.code, 'STAGING_OTP_KEY_REQUIRED');
                 assert.strictEqual(body.otp, undefined);
 
                 status = 200; body = null;
@@ -1560,6 +1569,163 @@ async function runTests() {
         assert.ok(renderYaml.includes('key: STAGING_OTP_ACCESS_KEY\n        sync: false'), 'Testing service must declare STAGING_OTP_ACCESS_KEY');
         assert.ok(!renderYaml.includes('ON_SCREEN_OTP_ALLOWLIST'), 'Staging render config must not restrict phones via ON_SCREEN_OTP_ALLOWLIST');
         assert.ok(!renderYaml.includes('fommrwxpqzkcktweosgp'), 'render.yaml must never hardcode Supabase project refs or secrets');
+    });
+
+    await asyncTest('42. Staging Admin account 9281030535 (role: ADMIN) completes real OTP flow without duplicates and accesses protected Admin APIs while non-admin roles are rejected', async () => {
+        const httpModule = require('http');
+        const app = require('../src/app');
+        const Schemas = require('../src/models/Schemas');
+        const { supabaseAdmin } = require('../src/config/supabase');
+
+        // 1. Verify live staging database row for 9281030535 has role ADMIN and zero duplicate rows
+        const { data: liveAdminRows, error: dbErr } = await supabaseAdmin
+            .from('users')
+            .select('id, name, email, phone, role, status')
+            .ilike('phone', '%9281030535%');
+        assert.strictEqual(dbErr, null);
+        assert.strictEqual(liveAdminRows.length, 1, 'Must have exactly one user row for 9281030535 (no duplicates)');
+        assert.strictEqual(liveAdminRows[0].phone, '9281030535');
+        assert.strictEqual(liveAdminRows[0].role, 'ADMIN');
+        assert.strictEqual(liveAdminRows[0].status, 'ACTIVE');
+
+        // 2. End-to-end HTTP OTP request -> OTP verify -> login & Admin API access check
+        const prevEnv = process.env.NODE_ENV;
+        const prevMode = process.env.OTP_DELIVERY_MODE;
+        const prevStagingKey = process.env.STAGING_OTP_ACCESS_KEY;
+        const prevJwt = process.env.JWT_SECRET;
+        const prevRefresh = process.env.REFRESH_SECRET;
+        const prevSalt = process.env.OTP_SALT;
+        const prevAdminPhone = process.env.ADMIN_PHONE;
+        const origRpc = otpStoreService.supabaseClient;
+        const origFindById = Schemas.User.findById;
+
+        const rpcStore = new Map();
+        otpStoreService.supabaseClient = {
+            rpc: async (fnName, params) => {
+                if (fnName === 'request_otp_challenge') {
+                    rpcStore.set(params.p_identifier, { hash: params.p_hashed_code, used: false });
+                    return { data: { allowed: true, status: 200, requestCount: 1 }, error: null };
+                }
+                if (fnName === 'verify_otp_challenge') {
+                    const item = rpcStore.get(params.p_identifier);
+                    if (!item || item.used || item.hash !== params.p_incoming_hash) {
+                        return { data: { valid: false, reason: 'INVALID_CODE', message: 'Invalid OTP.' }, error: null };
+                    }
+                    item.used = true;
+                    return { data: { valid: true, reason: 'VERIFIED', message: 'Verified.' }, error: null };
+                }
+                return { data: { allowed: true }, error: null };
+            }
+        };
+
+        const stagingKey = 'staging_admin_9281030535_otp_key_minimum_32chars!';
+        const server = httpModule.createServer(app);
+        await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+        const { port } = server.address();
+
+        const apiReq = (method, urlPath, headers = {}, body = null) => new Promise((resolve, reject) => {
+            const payload = body ? JSON.stringify(body) : null;
+            const req = httpModule.request({
+                hostname: '127.0.0.1',
+                port,
+                path: urlPath,
+                method,
+                headers: {
+                    ...(payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {}),
+                    ...headers,
+                }
+            }, (res) => {
+                let raw = '';
+                res.on('data', (c) => { raw += c; });
+                res.on('end', () => resolve({ status: res.statusCode, json: raw ? JSON.parse(raw) : {} }));
+            });
+            req.on('error', reject);
+            if (payload) req.write(payload);
+            req.end();
+        });
+
+        try {
+            process.env.NODE_ENV = 'staging';
+            process.env.OTP_DELIVERY_MODE = 'on_screen';
+            delete process.env.ADMIN_PHONE; // Verify DB-backed ADMIN role lookup works even without ADMIN_PHONE env var
+            process.env.STAGING_OTP_ACCESS_KEY = stagingKey;
+            process.env.JWT_SECRET = 'staging_strong_jwt_secret_for_9281030535_verify!';
+            process.env.REFRESH_SECRET = 'staging_strong_refresh_secret_for_9281030535!';
+            process.env.OTP_SALT = 'staging_strong_otp_salt_for_9281030535_verify!';
+
+            // Step A: Request OTP for 9281030535 -> recognizes isAdmin: true from DB ADMIN role
+            const otpReq = await apiReq(
+                'POST',
+                '/api/v1/auth/otp/request',
+                { 'x-staging-otp-key': stagingKey },
+                { phone: '9281030535' }
+            );
+            assert.strictEqual(otpReq.status, 200);
+            assert.strictEqual(otpReq.json.success, true);
+            assert.strictEqual(otpReq.json.isAdmin, true, '9281030535 must be recognized as Admin from staging DB');
+            assert.match(String(otpReq.json.otp), /^\d{6}$/);
+
+            // Step B: Verify OTP for 9281030535 (even if client sends default Patient sign-in flags) -> returns ADMIN user + JWT
+            const otpVerify = await apiReq(
+                'POST',
+                '/api/v1/auth/otp/verify',
+                {},
+                { phone: '9281030535', code: otpReq.json.otp, role: 'Patient', autoCreatePatient: true }
+            );
+            assert.strictEqual(otpVerify.status, 200);
+            assert.strictEqual(otpVerify.json.success, true);
+            assert.strictEqual(otpVerify.json.isAdmin, true);
+            assert.strictEqual(otpVerify.json.user.phone, '9281030535');
+            assert.strictEqual(otpVerify.json.user.role, 'ADMIN');
+            assert.ok(otpVerify.json.accessToken, 'Must issue signed JWT accessToken');
+
+            // Step C: Confirm zero duplicate users were created
+            const { data: afterVerifyRows } = await supabaseAdmin
+                .from('users')
+                .select('id, role')
+                .ilike('phone', '%9281030535%');
+            assert.strictEqual(afterVerifyRows.length, 1);
+            assert.strictEqual(afterVerifyRows[0].role, 'ADMIN');
+
+            // Step D: Protected Admin APIs allow 9281030535's ADMIN JWT
+            const adminAuthHeader = { Authorization: `Bearer ${otpVerify.json.accessToken}` };
+            const subAdminsRes = await apiReq('GET', '/api/v1/admin/sub-admins', adminAuthHeader);
+            assert.strictEqual(subAdminsRes.status, 200, 'ADMIN token must access /admin/sub-admins');
+            assert.strictEqual(subAdminsRes.json.success, true);
+
+            const specialtiesRes = await apiReq('GET', '/api/v1/admin/specialties', adminAuthHeader);
+            assert.strictEqual(specialtiesRes.status, 200, 'ADMIN token must access /admin/specialties');
+
+            const calendarUnauth = await apiReq('GET', '/api/v1/visits-calendar/admin');
+            assert.strictEqual(calendarUnauth.status, 401, 'Unauthenticated cloud request to /visits-calendar/admin must return 401');
+
+            const calendarAdmin = await apiReq('GET', '/api/v1/visits-calendar/admin', adminAuthHeader);
+            assert.strictEqual(calendarAdmin.status, 200, 'ADMIN token must access /visits-calendar/admin');
+
+            // Step E: Non-admin Patient token is blocked (403) on protected Admin APIs
+            const jwt = require('jsonwebtoken');
+            const { getJwtSecret } = require('../src/config/secrets');
+            const fakePatient = { id: 'pat-nonadmin-check', name: 'Normal Patient', email: 'p@test.local', phone: '9876500011', role: 'Patient', status: 'ACTIVE' };
+            Schemas.User.findById = async (id) => (id === fakePatient.id ? fakePatient : origFindById.call(Schemas.User, id));
+            const patientJwt = jwt.sign({ id: fakePatient.id, role: 'Patient' }, getJwtSecret(), { expiresIn: '15m' });
+            const patHeader = { Authorization: `Bearer ${patientJwt}` };
+
+            const patSubAdmins = await apiReq('GET', '/api/v1/admin/sub-admins', patHeader);
+            assert.strictEqual(patSubAdmins.status, 403);
+            const patCalendar = await apiReq('GET', '/api/v1/visits-calendar/admin', patHeader);
+            assert.strictEqual(patCalendar.status, 403);
+        } finally {
+            Schemas.User.findById = origFindById;
+            otpStoreService.supabaseClient = origRpc;
+            if (prevEnv !== undefined) process.env.NODE_ENV = prevEnv; else delete process.env.NODE_ENV;
+            if (prevMode !== undefined) process.env.OTP_DELIVERY_MODE = prevMode; else delete process.env.OTP_DELIVERY_MODE;
+            if (prevStagingKey !== undefined) process.env.STAGING_OTP_ACCESS_KEY = prevStagingKey; else delete process.env.STAGING_OTP_ACCESS_KEY;
+            if (prevJwt !== undefined) process.env.JWT_SECRET = prevJwt; else delete process.env.JWT_SECRET;
+            if (prevRefresh !== undefined) process.env.REFRESH_SECRET = prevRefresh; else delete process.env.REFRESH_SECRET;
+            if (prevSalt !== undefined) process.env.OTP_SALT = prevSalt; else delete process.env.OTP_SALT;
+            if (prevAdminPhone !== undefined) process.env.ADMIN_PHONE = prevAdminPhone; else delete process.env.ADMIN_PHONE;
+            await new Promise((resolve) => server.close(resolve));
+        }
     });
 
     console.log('\n=================================================');

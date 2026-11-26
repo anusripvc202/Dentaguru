@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../constants/api_constants.dart';
@@ -12,9 +13,23 @@ class SupabaseService {
   static String? _initializedUrl;
   static String? _lastInitError;
 
+  String? _activeRealtimeToken;
+  DateTime? _activeRealtimeExpiresAt;
+  Timer? _realtimeRefreshTimer;
+  int _realtimeSetAuthCount = 0;
+
   static bool get isInitialized => _isInitialized;
   static String? get initializedUrl => _initializedUrl;
   static String? get lastInitError => _lastInitError;
+
+  String? get activeRealtimeToken => _activeRealtimeToken;
+  DateTime? get activeRealtimeExpiresAt => _activeRealtimeExpiresAt;
+
+  @visibleForTesting
+  int get realtimeSetAuthCallCount => _realtimeSetAuthCount;
+
+  @visibleForTesting
+  static void Function(String token)? debugOnRealtimeSetAuth;
 
   @visibleForTesting
   static Future<void> Function({
@@ -25,6 +40,9 @@ class SupabaseService {
 
   @visibleForTesting
   static void resetForTesting() {
+    _instance.clearRealtimeAuth();
+    _instance._realtimeSetAuthCount = 0;
+    debugOnRealtimeSetAuth = null;
     _isInitialized = false;
     _initializedUrl = null;
     _lastInitError = null;
@@ -49,6 +67,7 @@ class SupabaseService {
   ///   and refuse connecting to production Supabase (`fommrwxpqzkcktweosgp`).
   static Future<void> initialize({
     @visibleForTesting bool? isReleaseOverride,
+    @visibleForTesting bool? isStagingFlavorOverride,
     @visibleForTesting bool? isDebugOverride,
     @visibleForTesting bool? isWebOverride,
     @visibleForTesting TargetPlatform? platformOverride,
@@ -58,20 +77,29 @@ class SupabaseService {
     @visibleForTesting String? testSupabaseAnonKeyOverride,
   }) async {
     final bool effectiveRelease = isReleaseOverride ?? kReleaseMode;
+    final bool effectiveStagingFlavor = isStagingFlavorOverride ?? ApiConstants.isStagingFlavorBuild;
     final bool effectiveDebug = isDebugOverride ?? kDebugMode;
 
     final ({String url, String anonKey}) config;
     try {
-      config = ApiConstants.resolveSupabaseConfig(
-        isRelease: effectiveRelease,
-        isDebug: effectiveDebug,
-        isWeb: isWebOverride ?? kIsWeb,
-        platform: platformOverride,
-        testApiUrl: testApiUrlOverride ?? const String.fromEnvironment('TEST_API_URL', defaultValue: ''),
-        localApiUrl: localApiUrlOverride ?? const String.fromEnvironment('LOCAL_API_URL', defaultValue: ''),
-        testSupabaseUrl: testSupabaseUrlOverride ?? const String.fromEnvironment('TEST_SUPABASE_URL', defaultValue: ''),
-        testSupabaseAnonKey: testSupabaseAnonKeyOverride ?? const String.fromEnvironment('TEST_SUPABASE_ANON_KEY', defaultValue: ''),
-      );
+      if (isStagingFlavorOverride == null && ApiConstants.isStagingFlavorBuild) {
+        config = (
+          url: ApiConstants.supabaseUrl,
+          anonKey: ApiConstants.supabaseAnonKey,
+        );
+      } else {
+        config = ApiConstants.resolveSupabaseConfig(
+          isRelease: effectiveRelease,
+          isStagingFlavor: effectiveStagingFlavor,
+          isDebug: effectiveDebug,
+          isWeb: isWebOverride ?? kIsWeb,
+          platform: platformOverride,
+          testApiUrl: testApiUrlOverride ?? const String.fromEnvironment('TEST_API_URL', defaultValue: ''),
+          localApiUrl: localApiUrlOverride ?? const String.fromEnvironment('LOCAL_API_URL', defaultValue: ''),
+          testSupabaseUrl: testSupabaseUrlOverride ?? const String.fromEnvironment('TEST_SUPABASE_URL', defaultValue: ''),
+          testSupabaseAnonKey: testSupabaseAnonKeyOverride ?? const String.fromEnvironment('TEST_SUPABASE_ANON_KEY', defaultValue: ''),
+        );
+      }
     } on StateError catch (e) {
       _isInitialized = false;
       _initializedUrl = null;
@@ -123,6 +151,73 @@ class SupabaseService {
       return Supabase.instance.client.auth.currentUser;
     } catch (_) {
       return null;
+    }
+  }
+
+  /// Authenticates Supabase Realtime WebSockets using the short-lived backend-minted Supabase JWT
+  /// (`sub == public.users.id`, `role == authenticated`) and schedules automatic proactive renewal
+  /// prior to expiration without logging or exposing raw JWT values.
+  Future<bool> authenticateRealtime({
+    required String realtimeToken,
+    DateTime? expiresAt,
+    Future<({String token, DateTime? expiresAt})?> Function()? onRefreshRequired,
+  }) async {
+    final cleanToken = realtimeToken.trim();
+    if (cleanToken.isEmpty) return false;
+
+    _realtimeRefreshTimer?.cancel();
+    _activeRealtimeToken = cleanToken;
+    _activeRealtimeExpiresAt = expiresAt;
+    _realtimeSetAuthCount += 1;
+    debugOnRealtimeSetAuth?.call(cleanToken);
+
+    final sb = safeClient;
+    if (sb != null) {
+      try {
+        await sb.realtime.setAuth(cleanToken);
+      } catch (e) {
+        debugPrint('⚠️ Supabase Realtime setAuth notice: $e');
+      }
+    }
+
+    if (expiresAt != null && onRefreshRequired != null) {
+      final now = DateTime.now();
+      final totalRemaining = expiresAt.difference(now);
+      // Renew 5 minutes before expiry (or at 75% of remaining lifetime for short test TTLs)
+      final Duration refreshDelay = totalRemaining > const Duration(minutes: 10)
+          ? totalRemaining - const Duration(minutes: 5)
+          : Duration(milliseconds: (totalRemaining.inMilliseconds * 0.75).round().clamp(200, 300000));
+
+      _realtimeRefreshTimer = Timer(refreshDelay, () async {
+        try {
+          final refreshed = await onRefreshRequired();
+          if (refreshed != null && refreshed.token.trim().isNotEmpty) {
+            await authenticateRealtime(
+              realtimeToken: refreshed.token,
+              expiresAt: refreshed.expiresAt,
+              onRefreshRequired: onRefreshRequired,
+            );
+          }
+        } catch (e) {
+          debugPrint('⚠️ Proactive Realtime JWT refresh notice: $e');
+        }
+      });
+    }
+
+    return true;
+  }
+
+  /// Cancels any scheduled Realtime token refresh and clears the active Realtime auth token on logout.
+  void clearRealtimeAuth() {
+    _realtimeRefreshTimer?.cancel();
+    _realtimeRefreshTimer = null;
+    _activeRealtimeToken = null;
+    _activeRealtimeExpiresAt = null;
+    final sb = safeClient;
+    if (sb != null) {
+      try {
+        sb.realtime.setAuth('');
+      } catch (_) {}
     }
   }
 

@@ -317,6 +317,7 @@ class _PatientProfileCompletionScreenState
       body: SafeArea(
         child: SingleChildScrollView(
           key: const Key('profile_completion_scroll_view'),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           physics: const BouncingScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
           child: Center(

@@ -10,6 +10,8 @@ class UserSession {
   final String? name;
   final DateTime createdAt;
   final DateTime? expiresAt;
+  final String? realtimeToken;
+  final DateTime? realtimeTokenExpiresAt;
   final Map<String, dynamic> metadata;
 
   const UserSession({
@@ -21,8 +23,42 @@ class UserSession {
     this.name,
     required this.createdAt,
     this.expiresAt,
+    this.realtimeToken,
+    this.realtimeTokenExpiresAt,
     this.metadata = const {},
   });
+
+  /// Canonical `public.users.id` across all roles (resolves Doctor dual-ID where `userId` may hold `dentists.id`).
+  String get canonicalUserId {
+    final accountId = (metadata['accountUserId'] ?? metadata['userId'] ?? '').toString().trim();
+    if (accountId.isNotEmpty) return accountId;
+    return userId.trim();
+  }
+
+  /// Optional `public.dentists.id` for Doctor accounts.
+  String? get dentistId {
+    final dId = (metadata['dentistId'] ?? '').toString().trim();
+    if (dId.isNotEmpty) return dId;
+    final norm = role.trim().toLowerCase();
+    if (norm.contains('dentist') || norm.contains('doctor')) {
+      return userId.trim().isNotEmpty ? userId.trim() : null;
+    }
+    return null;
+  }
+
+  /// Optional `public.clinics.id` for Clinic or Clinic-affiliated Doctor accounts.
+  String? get clinicId {
+    final cId = (metadata['clinicId'] ?? metadata['clinic_id'] ?? '').toString().trim();
+    return cId.isNotEmpty ? cId : null;
+  }
+
+  /// Returns true when a non-expired Supabase Realtime JWT is present (with safety margin before expiry).
+  bool hasValidRealtimeToken({Duration minRemaining = const Duration(seconds: 90)}) {
+    final rt = (realtimeToken ?? '').trim();
+    if (rt.isEmpty) return false;
+    if (realtimeTokenExpiresAt == null) return true;
+    return DateTime.now().add(minRemaining).isBefore(realtimeTokenExpiresAt!);
+  }
 
   /// Check if the saved session has exceeded its expiration threshold
   bool get isExpired {
@@ -76,6 +112,8 @@ class UserSession {
       'name': name,
       'createdAt': createdAt.toIso8601String(),
       'expiresAt': expiresAt?.toIso8601String(),
+      if (realtimeToken != null) 'realtimeToken': realtimeToken,
+      if (realtimeTokenExpiresAt != null) 'realtimeTokenExpiresAt': realtimeTokenExpiresAt!.toIso8601String(),
       'metadata': metadata,
     };
   }
@@ -93,6 +131,10 @@ class UserSession {
           : DateTime.now(),
       expiresAt: json['expiresAt'] != null
           ? DateTime.tryParse(json['expiresAt'].toString())
+          : null,
+      realtimeToken: json['realtimeToken']?.toString(),
+      realtimeTokenExpiresAt: json['realtimeTokenExpiresAt'] != null
+          ? DateTime.tryParse(json['realtimeTokenExpiresAt'].toString())
           : null,
       metadata: json['metadata'] is Map<String, dynamic>
           ? Map<String, dynamic>.from(json['metadata'])
@@ -122,6 +164,8 @@ class UserSession {
     String? name,
     DateTime? createdAt,
     DateTime? expiresAt,
+    String? realtimeToken,
+    DateTime? realtimeTokenExpiresAt,
     Map<String, dynamic>? metadata,
   }) {
     return UserSession(
@@ -133,6 +177,8 @@ class UserSession {
       name: name ?? this.name,
       createdAt: createdAt ?? this.createdAt,
       expiresAt: expiresAt ?? this.expiresAt,
+      realtimeToken: realtimeToken ?? this.realtimeToken,
+      realtimeTokenExpiresAt: realtimeTokenExpiresAt ?? this.realtimeTokenExpiresAt,
       metadata: metadata ?? this.metadata,
     );
   }

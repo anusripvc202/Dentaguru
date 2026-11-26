@@ -10,6 +10,24 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  String buildSyntheticTestJwt({
+    required String ref,
+    String role = 'anon',
+    String? iss = 'supabase',
+    bool omitRef = false,
+  }) {
+    final header = base64Url.encode(utf8.encode(jsonEncode({'alg': 'HS256', 'typ': 'JWT'}))).replaceAll('=', '');
+    final payloadMap = <String, dynamic>{
+      if (iss != null) 'iss': iss,
+      if (!omitRef) 'ref': ref,
+      'role': role,
+      'iat': 1700000000,
+      'exp': 2000000000,
+    };
+    final payload = base64Url.encode(utf8.encode(jsonEncode(payloadMap))).replaceAll('=', '');
+    return '$header.$payload.synthetic_test_signature_not_a_secret';
+  }
+
   tearDown(() {
     ApiConstants.debugBaseUrlOverride = null;
     ApiConstants.debugAllowOnScreenOtpOverride = null;
@@ -313,6 +331,454 @@ void main() {
       expect(failResult['message'], contains('Unable to reach testing OTP backend'));
       expect(failedUrls.length, 1);
       expect(failedUrls.first.host, 'dentaguru-backend-test.onrender.com');
+    });
+
+    test('7. Profile mode fails closed when TEST_API_URL is missing, empty, malformed, or production', () {
+      for (final badApiUrl in <String>['', '   ']) {
+        expect(
+          () => ApiConstants.resolveBaseUrl(
+            isRelease: false,
+            isDebug: false,
+            isWeb: false,
+            platform: TargetPlatform.android,
+            testApiUrl: badApiUrl,
+            localApiUrl: 'http://10.0.2.2:5000/api/v1',
+          ),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              allOf(
+                contains('Profile Isolation Error'),
+                contains('TEST_API_URL'),
+                contains('Refusing to fall back to production backend'),
+              ),
+            ),
+          ),
+        );
+      }
+
+      for (final malformedUrl in <String>[
+        'dentaguru-backend-test.onrender.com/api/v1',
+        'ftp://dentaguru-backend-test.onrender.com/api/v1',
+        'https://',
+        'not a valid url',
+      ]) {
+        expect(
+          () => ApiConstants.resolveBaseUrl(
+            isRelease: false,
+            isDebug: false,
+            isWeb: false,
+            platform: TargetPlatform.android,
+            testApiUrl: malformedUrl,
+          ),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              contains('valid HTTP(S) URL'),
+            ),
+          ),
+        );
+      }
+
+      for (final prodApiUrl in <String>[
+        ApiConstants.liveBackendUrl,
+        'https://DENTAGURU-BACKEND.ONRENDER.COM/api/v1/',
+        'http://dentaguru-backend.onrender.com/api/v1',
+      ]) {
+        expect(
+          () => ApiConstants.resolveBaseUrl(
+            isRelease: false,
+            isDebug: false,
+            isWeb: false,
+            platform: TargetPlatform.android,
+            testApiUrl: prodApiUrl,
+          ),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              contains('cannot target the production backend URL'),
+            ),
+          ),
+        );
+
+        // Debug mode also refuses explicit production backend override
+        expect(
+          () => ApiConstants.resolveBaseUrl(
+            isRelease: false,
+            isDebug: true,
+            isWeb: false,
+            platform: TargetPlatform.android,
+            testApiUrl: prodApiUrl,
+          ),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              contains('cannot target the production backend URL'),
+            ),
+          ),
+        );
+      }
+    });
+
+    test('8. Profile mode requires valid non-production Supabase credentials and rejects production/malformed/missing values', () async {
+      bool initializerCalled = false;
+      SupabaseService.debugSupabaseInitializer = ({
+        required String url,
+        required String anonKey,
+        required bool debug,
+      }) async {
+        initializerCalled = true;
+      };
+
+      // Missing TEST_API_URL in profile mode blocks Supabase initialization even with valid staging credentials
+      final validStagingAnonJwt = buildSyntheticTestJwt(ref: ApiConstants.stagingSupabaseProjectRef);
+      await expectLater(
+        () => SupabaseService.initialize(
+          isReleaseOverride: false,
+          isDebugOverride: false,
+          isWebOverride: false,
+          platformOverride: TargetPlatform.android,
+          testApiUrlOverride: '',
+          testSupabaseUrlOverride: 'https://ojinzcdldwugpnxrnjcq.supabase.co',
+          testSupabaseAnonKeyOverride: validStagingAnonJwt,
+        ),
+        throwsA(isA<StateError>()),
+      );
+
+      // Missing or empty TEST_SUPABASE_URL / TEST_SUPABASE_ANON_KEY fails closed (never falls back to prod Supabase)
+      for (final pair in <(String, String)>[
+        ('', ''),
+        ('https://ojinzcdldwugpnxrnjcq.supabase.co', '   '),
+        ('   ', validStagingAnonJwt),
+      ]) {
+        await expectLater(
+          () => SupabaseService.initialize(
+            isReleaseOverride: false,
+            isDebugOverride: false,
+            isWebOverride: false,
+            platformOverride: TargetPlatform.android,
+            testApiUrlOverride: ApiConstants.stagingBackendUrl,
+            testSupabaseUrlOverride: pair.$1,
+            testSupabaseAnonKeyOverride: pair.$2,
+          ),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              allOf(
+                contains('Profile Isolation Error'),
+                contains('Refusing to fall back to production Supabase'),
+              ),
+            ),
+          ),
+        );
+      }
+
+      // Malformed TEST_SUPABASE_URL fails closed
+      for (final badSbUrl in <String>['ojinzcdldwugpnxrnjcq.supabase.co', 'ftp://ojinzcdldwugpnxrnjcq.supabase.co', 'https://']) {
+        await expectLater(
+          () => SupabaseService.initialize(
+            isReleaseOverride: false,
+            isDebugOverride: false,
+            isWebOverride: false,
+            platformOverride: TargetPlatform.android,
+            testApiUrlOverride: ApiConstants.stagingBackendUrl,
+            testSupabaseUrlOverride: badSbUrl,
+            testSupabaseAnonKeyOverride: validStagingAnonJwt,
+          ),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              contains('valid HTTP(S) Supabase project URL'),
+            ),
+          ),
+        );
+      }
+
+      // Production Supabase project ref (mixed case) or production anon key rejected in profile mode
+      await expectLater(
+        () => SupabaseService.initialize(
+          isReleaseOverride: false,
+          isDebugOverride: false,
+          isWebOverride: false,
+          platformOverride: TargetPlatform.android,
+          testApiUrlOverride: ApiConstants.stagingBackendUrl,
+          testSupabaseUrlOverride: 'https://FOMMRWXPQZKCKTWEOSGP.supabase.co',
+          testSupabaseAnonKeyOverride: validStagingAnonJwt,
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            allOf(
+              contains('Profile Isolation Error'),
+              contains('fommrwxpqzkcktweosgp'),
+            ),
+          ),
+        ),
+      );
+
+      final prodConfig = ApiConstants.resolveSupabaseConfig(
+        isRelease: true,
+        isDebug: false,
+      );
+      await expectLater(
+        () => SupabaseService.initialize(
+          isReleaseOverride: false,
+          isDebugOverride: false,
+          isWebOverride: false,
+          platformOverride: TargetPlatform.android,
+          testApiUrlOverride: ApiConstants.stagingBackendUrl,
+          testSupabaseUrlOverride: 'https://ojinzcdldwugpnxrnjcq.supabase.co',
+          testSupabaseAnonKeyOverride: prodConfig.anonKey,
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('fommrwxpqzkcktweosgp'),
+          ),
+        ),
+      );
+
+      // Other non-production Supabase project or spoofed URL rejected in profile mode
+      for (final otherNonProdUrl in <String>[
+        'https://otherstagingproj99.supabase.co',
+        'https://ojinzcdldwugpnxrnjcq.evil-proxy.example',
+        'http://ojinzcdldwugpnxrnjcq.supabase.co',
+      ]) {
+        await expectLater(
+          () => SupabaseService.initialize(
+            isReleaseOverride: false,
+            isDebugOverride: false,
+            isWebOverride: false,
+            platformOverride: TargetPlatform.android,
+            testApiUrlOverride: ApiConstants.stagingBackendUrl,
+            testSupabaseUrlOverride: otherNonProdUrl,
+            testSupabaseAnonKeyOverride: validStagingAnonJwt,
+          ),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              allOf(
+                contains('Profile Isolation Error'),
+                contains(ApiConstants.stagingSupabaseProjectRef),
+              ),
+            ),
+          ),
+        );
+      }
+
+      // Mismatched staging URL + anon key (different non-prod ref, rotated prod JWT, service_role JWT, or invalid JWT) rejected without exposing token
+      final otherProjectJwt = buildSyntheticTestJwt(ref: 'otherstagingproj99');
+      final syntheticProdJwt = buildSyntheticTestJwt(ref: ApiConstants.productionSupabaseProjectRef);
+      final serviceRoleStagingJwt = buildSyntheticTestJwt(ref: ApiConstants.stagingSupabaseProjectRef, role: 'service_role');
+      final missingRefJwt = buildSyntheticTestJwt(ref: ApiConstants.stagingSupabaseProjectRef, omitRef: true);
+
+      for (final badAnonKey in <String>[
+        otherProjectJwt,
+        syntheticProdJwt,
+        serviceRoleStagingJwt,
+        missingRefJwt,
+        'not-a-valid-jwt-token',
+      ]) {
+        await expectLater(
+          () => SupabaseService.initialize(
+            isReleaseOverride: false,
+            isDebugOverride: false,
+            isWebOverride: false,
+            platformOverride: TargetPlatform.android,
+            testApiUrlOverride: ApiConstants.stagingBackendUrl,
+            testSupabaseUrlOverride: 'https://ojinzcdldwugpnxrnjcq.supabase.co',
+            testSupabaseAnonKeyOverride: badAnonKey,
+          ),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              allOf(
+                contains('Profile Isolation Error'),
+                isNot(contains(badAnonKey)),
+              ),
+            ),
+          ),
+        );
+      }
+
+      expect(initializerCalled, isFalse);
+
+      // Valid staging configuration in profile mode initializes ONLY staging backend & staging Supabase
+      String? capturedUrl;
+      String? capturedKey;
+      bool? capturedDebug;
+      SupabaseService.debugSupabaseInitializer = ({
+        required String url,
+        required String anonKey,
+        required bool debug,
+      }) async {
+        capturedUrl = url;
+        capturedKey = anonKey;
+        capturedDebug = debug;
+      };
+
+      final resolvedBase = ApiConstants.resolveBaseUrl(
+        isRelease: false,
+        isDebug: false,
+        isWeb: false,
+        platform: TargetPlatform.android,
+        testApiUrl: 'https://dentaguru-backend-test.onrender.com/api/v1/',
+      );
+      expect(resolvedBase, 'https://dentaguru-backend-test.onrender.com/api/v1');
+
+      await SupabaseService.initialize(
+        isReleaseOverride: false,
+        isDebugOverride: false,
+        isWebOverride: false,
+        platformOverride: TargetPlatform.android,
+        testApiUrlOverride: ApiConstants.stagingBackendUrl,
+        testSupabaseUrlOverride: 'https://ojinzcdldwugpnxrnjcq.supabase.co/',
+        testSupabaseAnonKeyOverride: validStagingAnonJwt,
+      );
+
+      expect(capturedUrl, 'https://ojinzcdldwugpnxrnjcq.supabase.co');
+      expect(capturedKey, validStagingAnonJwt);
+      expect(capturedDebug, isFalse);
+      expect(SupabaseService.isInitialized, isTrue);
+      expect(SupabaseService.initializedUrl, 'https://ojinzcdldwugpnxrnjcq.supabase.co');
+    });
+
+    test('Dedicated Android staging flavor resolves strictly to staging backend & Supabase and rejects production mixing', () async {
+      final String validStagingAnonJwt = buildSyntheticTestJwt(
+        ref: 'ojinzcdldwugpnxrnjcq',
+        role: 'anon',
+      );
+      final String fakeProdAnonJwt = buildSyntheticTestJwt(
+        ref: 'fommrwxpqzkcktweosgp',
+        role: 'anon',
+      );
+
+      // 1. Staging flavor in release mode resolves strictly to staging backend
+      expect(
+        ApiConstants.resolveBaseUrl(
+          isRelease: true,
+          isStagingFlavor: true,
+          isDebug: false,
+          isWeb: false,
+          platform: TargetPlatform.android,
+        ),
+        'https://dentaguru-backend-test.onrender.com/api/v1',
+      );
+
+      // 2. Staging flavor rejects production backend URL override
+      expect(
+        () => ApiConstants.resolveBaseUrl(
+          isRelease: true,
+          isStagingFlavor: true,
+          isDebug: false,
+          isWeb: false,
+          platform: TargetPlatform.android,
+          testApiUrl: 'https://dentaguru-backend.onrender.com/api/v1',
+        ),
+        throwsA(isA<StateError>()),
+      );
+
+      // 3. Staging flavor resolves valid staging Supabase and rejects production Supabase
+      final stagingCfg = ApiConstants.resolveSupabaseConfig(
+        isRelease: true,
+        isStagingFlavor: true,
+        isDebug: false,
+        isWeb: false,
+        platform: TargetPlatform.android,
+        testApiUrl: ApiConstants.stagingBackendUrl,
+        testSupabaseUrl: 'https://ojinzcdldwugpnxrnjcq.supabase.co',
+        testSupabaseAnonKey: validStagingAnonJwt,
+      );
+      expect(stagingCfg.url, 'https://ojinzcdldwugpnxrnjcq.supabase.co');
+      expect(stagingCfg.anonKey, validStagingAnonJwt);
+
+      expect(
+        () => ApiConstants.resolveSupabaseConfig(
+          isRelease: true,
+          isStagingFlavor: true,
+          isDebug: false,
+          isWeb: false,
+          platform: TargetPlatform.android,
+          testApiUrl: ApiConstants.stagingBackendUrl,
+          testSupabaseUrl: 'https://fommrwxpqzkcktweosgp.supabase.co',
+          testSupabaseAnonKey: fakeProdAnonJwt,
+        ),
+        throwsA(isA<StateError>()),
+      );
+
+      // 4. Staging OTP key works only when staging flavor + allowOnScreenOtp + staging backend
+      expect(
+        ApiConstants.resolveStagingOtpAccessKey(
+          isRelease: true,
+          isStagingFlavor: true,
+          allowOnScreenOtp: true,
+          stagingOtpAccessKey: 'staging-qa-key',
+        ),
+        'staging-qa-key',
+      );
+      expect(
+        ApiConstants.resolveStagingOtpAccessKey(
+          isRelease: true,
+          isStagingFlavor: true,
+          allowOnScreenOtp: false,
+          stagingOtpAccessKey: 'staging-qa-key',
+        ),
+        '',
+      );
+      expect(
+        ApiConstants.resolveStagingOtpAccessKey(
+          isRelease: true,
+          isStagingFlavor: false,
+          allowOnScreenOtp: true,
+          stagingOtpAccessKey: 'staging-qa-key',
+        ),
+        '',
+      );
+
+      // 5. Production flavor (isStagingFlavor: false) remains strictly locked to production in release mode
+      expect(
+        ApiConstants.resolveBaseUrl(
+          isRelease: true,
+          isStagingFlavor: false,
+          isDebug: false,
+          isWeb: false,
+          platform: TargetPlatform.android,
+          testApiUrl: ApiConstants.stagingBackendUrl,
+        ),
+        'https://dentaguru-backend.onrender.com/api/v1',
+      );
+
+      // 6. SupabaseService.initialize with staging flavor override uses staging URL only
+      String? initUrl;
+      SupabaseService.debugSupabaseInitializer = ({
+        required String url,
+        required String anonKey,
+        required bool debug,
+      }) async {
+        initUrl = url;
+      };
+      await SupabaseService.initialize(
+        isReleaseOverride: true,
+        isStagingFlavorOverride: true,
+        isDebugOverride: false,
+        isWebOverride: false,
+        platformOverride: TargetPlatform.android,
+        testApiUrlOverride: ApiConstants.stagingBackendUrl,
+        testSupabaseUrlOverride: 'https://ojinzcdldwugpnxrnjcq.supabase.co',
+        testSupabaseAnonKeyOverride: validStagingAnonJwt,
+      );
+      expect(initUrl, 'https://ojinzcdldwugpnxrnjcq.supabase.co');
+      expect(SupabaseService.initializedUrl, 'https://ojinzcdldwugpnxrnjcq.supabase.co');
     });
   });
 }

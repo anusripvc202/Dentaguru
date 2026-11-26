@@ -37,7 +37,12 @@ class AppPermissions {
   // 8. Reports & Analytics
   static const String reportView = 'REPORT_VIEW';
 
-  // 9. System Administration (Main Admin only)
+  // 9. Clinical Chat & Messaging (Disabled by default for Sub-Admins; requires explicit grant + district scope)
+  static const String chatView = 'CHAT_VIEW';
+  static const String chatSend = 'CHAT_SEND';
+  static const String chatAttachmentView = 'CHAT_ATTACHMENT_VIEW';
+
+  // 10. System Administration (Main Admin only)
   static const String adminSubAdminManage = 'ADMIN_SUBADMIN_MANAGE';
   static const String adminDistrictManage = 'ADMIN_DISTRICT_MANAGE';
   static const String adminSystemConfig = 'ADMIN_SYSTEM_CONFIG';
@@ -117,6 +122,16 @@ class AppPermissions {
       description: 'View platform volume, assignment analytics, and district reports',
       permissions: [
         PermissionItem(key: reportView, label: 'View Reports & District Analytics', isDefault: false),
+      ],
+    ),
+    PermissionGroup(
+      title: 'Clinical Chat & Messaging',
+      icon: '💭',
+      description: 'Audited district-scoped access to patient and clinic support conversations',
+      permissions: [
+        PermissionItem(key: chatView, label: 'View District Chat Conversations', isDefault: false),
+        PermissionItem(key: chatSend, label: 'Send Replies in Authorized District Chats', isDefault: false),
+        PermissionItem(key: chatAttachmentView, label: 'View Authorized Chat Attachments', isDefault: false),
       ],
     ),
   ];

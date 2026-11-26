@@ -11,7 +11,7 @@
  * 8. Doctor Unavailable/Offline -> existing appointments preserved, new bookings blocked; No-Show frees slot
  * 9. Admin manual time-slot block/unblock + configurable scheduling rules
  */
-require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
+require('dotenv').config();
 const assert = require('assert');
 const crypto = require('crypto');
 const { describe, it, before, after } = require('node:test');

@@ -32,6 +32,7 @@ router.patch('/auth/patient/profile', authenticateJWT, auth.updatePatientProfile
 router.post('/auth/forgot-password', auth.forgotPassword);
 router.post('/auth/reset-password', auth.resetPassword);
 router.post('/auth/refresh', auth.refreshToken);
+router.post('/auth/realtime-token', authenticateJWT, auth.getRealtimeToken);
 router.post('/auth/supabase-sync', auth.supabaseAuthSync);
 router.post('/auth/biometric', authenticateJWT, auth.saveBiometric);
 router.put('/auth/fcm-token', authenticateJWT, auth.updateFcmToken);

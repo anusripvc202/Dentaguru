@@ -17,6 +17,12 @@ async function testChatIsolation() {
   console.log('  - Doctor B (Nikhil):', doctorNikhil.name, '(', doctorNikhil.id, ')');
   console.log('  - Admin User:', admin.name, '(', admin.id, ')\n');
 
+  for (const [label, usr] of [['patient', patient], ['doctorSheshu', doctorSheshu], ['doctorNikhil', doctorNikhil], ['admin', admin]]) {
+    if (!usr || !usr.id || !usr.role || String(usr.status ?? '').trim().toUpperCase() !== 'ACTIVE') {
+      throw new Error(`Invalid or inactive ${label} user record (requires id, role, and explicitly ACTIVE status).`);
+    }
+  }
+
   // 2. Doctor A (Sheshu) chats with Patient Anusha in CHAT_ANUSHA_SHESHU
   console.log('2. Creating Doctor A (Sheshu) conversation with Anusha:');
   await ChatMessage.create({
@@ -25,14 +31,14 @@ async function testChatIsolation() {
     receiver_id: doctorSheshu.id,
     message: 'Hello Dr. Sheshu, I need advice regarding severe pain in my upper tooth.',
     type: 'patient'
-  });
+  }, { authorizedCaller: patient });
   await ChatMessage.create({
     room_id: 'CHAT_ANUSHA_SHESHU',
     sender_id: doctorSheshu.id,
     receiver_id: patient.id,
     message: 'Hello Anusha, please avoid cold items and visit tomorrow for an X-ray.',
     type: 'doctor'
-  });
+  }, { authorizedCaller: doctorSheshu });
   console.log('  ✅ Saved 2 messages in room CHAT_ANUSHA_SHESHU\n');
 
   // 3. Doctor B (Nikhil) chats with Patient Anusha in CHAT_ANUSHA_NIKHIL
@@ -43,14 +49,14 @@ async function testChatIsolation() {
     receiver_id: doctorNikhil.id,
     message: 'Hello Dr. Nikhil, when should I come for my braces alignment checkup?',
     type: 'patient'
-  });
+  }, { authorizedCaller: patient });
   await ChatMessage.create({
     room_id: 'CHAT_ANUSHA_NIKHIL',
     sender_id: doctorNikhil.id,
     receiver_id: patient.id,
     message: 'Hi Anusha, your braces checkup is scheduled for Thursday at 4:00 PM.',
     type: 'doctor'
-  });
+  }, { authorizedCaller: doctorNikhil });
   console.log('  ✅ Saved 2 messages in room CHAT_ANUSHA_NIKHIL\n');
 
   // 4. Verify Doctor A (Sheshu) isolation

@@ -661,7 +661,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         res = await ApiService().loginUser(
           email: identifier,
           phone: identifier,
-          otp: otpAlreadyVerified ? null : (otpToUse.isNotEmpty ? otpToUse : null),
+          otp: otpToUse.isNotEmpty ? otpToUse : null,
           role: _isAdminMode
               ? 'Admin'
               : (_selectedRole == UserRole.clinic ? 'Clinic' : null),
@@ -689,6 +689,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             : (!identifier.contains('@') && identifier.isNotEmpty ? identifier : '');
 
         final String effectiveToken = (responseData['accessToken'] ?? res['accessToken'] ?? res['token'] ?? 'sb_session_${userData['id'] ?? DateTime.now().millisecondsSinceEpoch}').toString();
+        final String? effectiveRealtimeToken = (responseData['realtimeToken'] ?? res['realtimeToken'])?.toString();
+        final DateTime? effectiveRealtimeExpiresAt = DateTime.tryParse(
+          (responseData['realtimeTokenExpiresAt'] ?? res['realtimeTokenExpiresAt'] ?? '').toString(),
+        );
         final String effectiveUserId = (userData['id'] ?? SupabaseService.safeCurrentUser?.id ?? 'user_${DateTime.now().millisecondsSinceEpoch}').toString();
         final String effectiveEmail = userData['email'] ?? (identifier.contains('@') ? identifier : '');
         final String effectiveName = (userData['name'] != null && userData['name'].toString().trim().isNotEmpty)
@@ -736,8 +740,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             email: effectiveEmail,
             phone: userPhone,
             name: effectiveName,
+            realtimeToken: effectiveRealtimeToken,
+            realtimeTokenExpiresAt: effectiveRealtimeExpiresAt,
             metadata: {
               ...userData,
+              'accountUserId': effectiveUserId,
               'clinicId': effectiveClinicSessionId,
               'clinicName': clinicName.isNotEmpty ? clinicName : effectiveName,
               if (clinicAddress.isNotEmpty) 'location': clinicAddress,
@@ -790,8 +797,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             email: effectiveEmail,
             phone: userPhone,
             name: docName,
+            realtimeToken: effectiveRealtimeToken,
+            realtimeTokenExpiresAt: effectiveRealtimeExpiresAt,
             metadata: {
               ...userData,
+              'accountUserId': docUserId,
               'dentistId': docDentistId,
               'userId': docUserId,
               'clinicName': userData['clinicName'] ?? '',
@@ -830,17 +840,21 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             );
           } else {
             PatientProblemService().clearSubAdminSession();
+            PatientProblemService().setAdminMode(true);
           }
 
           await SessionService().saveSession(
             token: effectiveToken,
-            role: isSubAdmin ? 'Sub-Admin' : 'Admin',
+            role: isSubAdmin ? 'Sub-Admin' : 'ADMIN',
             userId: effectiveUserId,
             email: effectiveEmail,
             phone: userPhone,
             name: effectiveName,
+            realtimeToken: effectiveRealtimeToken,
+            realtimeTokenExpiresAt: effectiveRealtimeExpiresAt,
             metadata: {
               ...userData,
+              'accountUserId': effectiveUserId,
               'isSubAdmin': isSubAdmin,
             },
           );
@@ -852,7 +866,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               backgroundColor: const Color(0xFF012A58),
             ),
           );
-          context.go(isSubAdmin ? '/sub-admin' : '/admin');
+          final router = GoRouter.maybeOf(context);
+          if (router != null) {
+            router.go(isSubAdmin ? '/sub-admin' : '/admin');
+          }
         } else {
           // Patient Role (defer profile completion until service access)
           final existingCurId = PatientProblemService().currentPatient.id.trim();
@@ -929,8 +946,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             email: effectiveEmail,
             phone: userPhone,
             name: effectiveName,
+            realtimeToken: effectiveRealtimeToken,
+            realtimeTokenExpiresAt: effectiveRealtimeExpiresAt,
             metadata: {
               ...userData,
+              'accountUserId': effectiveUserId,
               'age': loginAge,
               'gender': loginGender,
               'pincode': loginPincode,
@@ -1151,6 +1171,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             : (res['user'] is Map<String, dynamic> ? res['user'] : {});
 
         final String regToken = (regData['accessToken'] ?? res['accessToken'] ?? res['token'] ?? '').toString().trim();
+        final String? regRealtimeToken = (regData['realtimeToken'] ?? res['realtimeToken'])?.toString();
+        final DateTime? regRealtimeExpiresAt = DateTime.tryParse(
+          (regData['realtimeTokenExpiresAt'] ?? res['realtimeTokenExpiresAt'] ?? '').toString(),
+        );
         if (regToken.isEmpty) {
           setState(() => _isRegistering = false);
           ScaffoldMessenger.of(context).showSnackBar(
@@ -1188,7 +1212,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             email: email,
             phone: phone,
             name: name,
+            realtimeToken: regRealtimeToken,
+            realtimeTokenExpiresAt: regRealtimeExpiresAt,
             metadata: {
+              'accountUserId': regUserId,
               'age': registeredAge,
               'gender': _selectedGender ?? '',
               'bloodGroup': _selectedBloodGroup ?? '',
@@ -1237,7 +1264,12 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             email: email,
             phone: phone,
             name: name,
+            realtimeToken: regRealtimeToken,
+            realtimeTokenExpiresAt: regRealtimeExpiresAt,
             metadata: {
+              'accountUserId': docUserId,
+              'dentistId': docDentistId,
+              'userId': docUserId,
               'licenseNumber': _licenseNoController.text.trim(),
               'specialty': effectiveSpec,
               'qualification': effectiveQual,
@@ -1274,7 +1306,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             email: email,
             phone: phone,
             name: resolvedClinicName,
+            realtimeToken: regRealtimeToken,
+            realtimeTokenExpiresAt: regRealtimeExpiresAt,
             metadata: {
+              'accountUserId': regUserId,
               'clinicName': resolvedClinicName,
               'clinicAddress': resolvedClinicAddr,
               'location': resolvedClinicAddr.isNotEmpty ? resolvedClinicAddr : city,
@@ -1315,7 +1350,10 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             email: email,
             phone: phone,
             name: name,
+            realtimeToken: regRealtimeToken,
+            realtimeTokenExpiresAt: regRealtimeExpiresAt,
             metadata: {
+              'accountUserId': regUserId,
               'city': city,
               'pincode': pincode,
               'isSubAdmin': isSubAdmin,

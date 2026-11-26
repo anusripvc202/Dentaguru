@@ -288,9 +288,12 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
               ),
             ),
           ),
-          body: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 200),
-            child: _buildCurrentStepView(),
+          body: SafeArea(
+            top: false,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              child: _buildCurrentStepView(),
+            ),
           ),
         ),
       ),

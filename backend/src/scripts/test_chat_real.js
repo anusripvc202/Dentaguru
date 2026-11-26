@@ -12,6 +12,12 @@ async function testRealChat() {
   console.log('Dentist User:', doctor.name, '(', doctor.id, ')');
   console.log('Admin User:', admin.name, '(', admin.id, ')');
 
+  for (const [label, usr] of [['patient', patient], ['doctor', doctor], ['admin', admin]]) {
+    if (!usr || !usr.id || !usr.role || String(usr.status ?? '').trim().toUpperCase() !== 'ACTIVE') {
+      throw new Error(`Invalid or inactive ${label} user record (requires id, role, and explicitly ACTIVE status).`);
+    }
+  }
+
   // 1. Patient sends authentic message
   console.log('\n1. Patient sends message...');
   const msg1 = await ChatMessage.create({
@@ -20,7 +26,7 @@ async function testRealChat() {
     receiver_id: doctor.id,
     message: 'Hello Dr. Sheshu, I need advice regarding severe pain in my upper tooth.',
     type: 'patient'
-  });
+  }, { authorizedCaller: patient });
   console.log('  Saved Msg 1 ID:', msg1.id);
   console.log('  Sender resolved name:', msg1.sender?.name, 'Role:', msg1.sender?.role);
 
@@ -32,7 +38,7 @@ async function testRealChat() {
     receiver_id: patient.id,
     message: 'Hello Anusha, please avoid cold items and visit the clinic tomorrow at 11:00 AM for an X-ray.',
     type: 'doctor'
-  });
+  }, { authorizedCaller: doctor });
   console.log('  Saved Msg 2 ID:', msg2.id);
   console.log('  Sender resolved name:', msg2.sender?.name, 'Role:', msg2.sender?.role);
 

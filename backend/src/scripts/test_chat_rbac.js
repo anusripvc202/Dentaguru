@@ -31,6 +31,7 @@ async function runRbacTests() {
             name: 'Main Admin',
             email: 'admin@dentaguru.com',
             role: 'Admin',
+            status: 'ACTIVE',
             password: 'AdminPassword123!'
         });
     }
@@ -41,6 +42,7 @@ async function runRbacTests() {
         email: `test_alice_${testTimestamp}@example.com`,
         phone: '9876543210',
         role: 'Patient',
+        status: 'ACTIVE',
         password: 'Password123!'
     });
 
@@ -50,6 +52,7 @@ async function runRbacTests() {
         email: `test_smith_${testTimestamp}@example.com`,
         phone: '9876543211',
         role: 'Dentist',
+        status: 'ACTIVE',
         password: 'Password123!'
     });
 
@@ -100,6 +103,12 @@ async function runRbacTests() {
         status: 'ACTIVE'
     }, JWT_SECRET, { expiresIn: '1h' });
 
+    for (const [label, usr] of [['mainAdmin', mainAdmin], ['testPatient', testPatient], ['testDentist', testDentist]]) {
+        if (!usr || !usr.id || !usr.role || String(usr.status ?? '').trim().toUpperCase() !== 'ACTIVE') {
+            throw new Error(`Invalid or inactive ${label} user record (requires id, role, and explicitly ACTIVE status).`);
+        }
+    }
+
     const aliceRoomId = `PATIENT_ALICE_WONDER_${testTimestamp}`;
     const otherRoomId = `PATIENT_BOB_SECRET_${testTimestamp}`;
 
@@ -109,13 +118,13 @@ async function runRbacTests() {
         sender_id: testPatient.id,
         message: 'Hello Doctor, I have severe toothache in my lower molar.',
         type: 'patient'
-    });
+    }, { authorizedCaller: testPatient });
     await ChatMessage.create({
         room_id: aliceRoomId,
         sender_id: testDentist.id,
         message: 'Hello Alice, please visit our clinic tomorrow at 10 AM.',
         type: 'doctor'
-    });
+    }, { authorizedCaller: testDentist });
     console.log('✅ Seeded test chat messages into room: ' + aliceRoomId + '\n');
 
     try {
@@ -199,7 +208,7 @@ async function runRbacTests() {
             sender_id: mainAdmin.id,
             message: 'Confidential patient message for another patient',
             type: 'patient'
-        });
+        }, { authorizedCaller: mainAdmin });
         const resPatOther = await fetch(`${baseUrl}/chat/messages?roomId=${otherRoomId}`, {
             headers: { Authorization: `Bearer ${patientToken}` }
         });

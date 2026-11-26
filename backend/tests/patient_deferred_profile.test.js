@@ -283,7 +283,7 @@ async function runTests() {
             assert.strictEqual(authed.body.user.isProfileComplete, false);
         });
 
-        await asyncTest('6. PUT /auth/patient/profile validates required photo, 6-digit pincode, age 1-120, gender & rejects non-Patient role', async () => {
+        await asyncTest('6. PUT /auth/patient/profile allows optional photo, validates 6-digit pincode, age 1-120, gender, preserves photo on null & rejects non-Patient role', async () => {
             const validPhoto = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
             const noPhoto = await requestJson(baseUrl, 'PUT', '/auth/patient/profile', {
@@ -291,7 +291,28 @@ async function runTests() {
                 age: '28',
                 gender: 'Female',
             }, { Authorization: `Bearer ${patientJwt}` });
-            assert.strictEqual(noPhoto.status, 400);
+            assert.strictEqual(noPhoto.status, 200);
+            assert.strictEqual(noPhoto.body.success, true);
+            assert.strictEqual(noPhoto.body.user.isProfileComplete, true);
+
+            // Setting a photo and then updating with profilePhoto: null must preserve existing photo
+            const withPhoto = await requestJson(baseUrl, 'PUT', '/auth/patient/profile', {
+                profilePhoto: validPhoto,
+                pincode: '500081',
+                age: '28',
+                gender: 'Female',
+            }, { Authorization: `Bearer ${patientJwt}` });
+            assert.strictEqual(withPhoto.status, 200);
+            assert.strictEqual(withPhoto.body.user.profilePhoto, validPhoto);
+
+            const nullPhotoUpdate = await requestJson(baseUrl, 'PUT', '/auth/patient/profile', {
+                profilePhoto: null,
+                pincode: '500081',
+                age: '29',
+                gender: 'Female',
+            }, { Authorization: `Bearer ${patientJwt}` });
+            assert.strictEqual(nullPhotoUpdate.status, 200);
+            assert.strictEqual(nullPhotoUpdate.body.user.profilePhoto, validPhoto);
 
             const badPin = await requestJson(baseUrl, 'PUT', '/auth/patient/profile', {
                 profilePhoto: validPhoto,

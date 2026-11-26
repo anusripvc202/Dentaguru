@@ -253,4 +253,73 @@ test('GS HEALTH Multi-Specialty AI Triage & Prescription E2E Suite', async (t) =
     assert.ok(ids.includes(cardioRx.json.record.id));
     assert.ok(ids.includes(dermRx.json.record.id));
   });
+
+  await t.test('4. Dynamic Specialization Filtering, Availability Slot Filtering & General Medicine Fallback on /dentists and /triage/analyze', async () => {
+    // Register a General Medicine doctor and an Endodontist
+    const gmReg = await api('/auth/register', {
+      method: 'POST',
+      body: {
+        name: `GmFallbackDoc ${suffix}`,
+        phone: `84000${suffix.slice(-5)}`,
+        role: 'Dentist',
+        specialty: 'General Medicine',
+        qualification: 'MBBS, MD',
+        city: 'Hyderabad',
+        pincode: '500081',
+        languages: ['English'],
+      },
+    });
+    assert.equal(gmReg.status, 201);
+    const gmDocId = gmReg.json.user.dentistId;
+    const gmToken = gmReg.json.accessToken;
+    cleanupUserIds.push(gmReg.json.user.id);
+    cleanupDentistIds.push(gmDocId);
+
+    const endoReg = await api('/auth/register', {
+      method: 'POST',
+      body: {
+        name: `EndoDentalDoc ${suffix}`,
+        phone: `85000${suffix.slice(-5)}`,
+        role: 'Dentist',
+        specialty: 'Endodontist',
+        qualification: 'BDS, MDS',
+        city: 'Hyderabad',
+        pincode: '500081',
+        languages: ['English'],
+      },
+    });
+    assert.equal(endoReg.status, 201);
+    const endoDocId = endoReg.json.user.dentistId;
+    cleanupUserIds.push(endoReg.json.user.id);
+    cleanupDentistIds.push(endoDocId);
+
+    // 1. Cardiology with available Cardiologist -> returns ONLY Cardiology doctors (never Endodontist or Dermatology)
+    const cardioSearch = await api('/dentists?specialty=cArDiOlOgY&requireBookableSlots=true&fallbackToGeneralMedicine=true');
+    assert.equal(cardioSearch.status, 200);
+    assert.equal(cardioSearch.json.usedGeneralMedicineFallback, false);
+    assert.ok(cardioSearch.json.doctors.some((d) => d.id === cardioDocId));
+    assert.ok(!cardioSearch.json.doctors.some((d) => d.id === endoDocId), 'Endodontist must NOT appear under Cardiology');
+    assert.ok(!cardioSearch.json.doctors.some((d) => d.id === dermDocId), 'Dermatologist must NOT appear under Cardiology');
+    assert.ok(!cardioSearch.json.doctors.some((d) => d.id === gmDocId), 'General Medicine must NOT mix into Cardiology when Cardiologist is available');
+
+    // 2. Specialty with NO registered doctors (e.g. "Pediatric RheumatologyCustom") + fallbackToGeneralMedicine=true -> falls back to available General Medicine doctors
+    const fallbackSearch = await api(`/dentists?specialty=${encodeURIComponent(`CustomSpec_${suffix}`)}&requireBookableSlots=true&fallbackToGeneralMedicine=true`);
+    assert.equal(fallbackSearch.status, 200);
+    assert.equal(fallbackSearch.json.usedGeneralMedicineFallback, true);
+    assert.equal(fallbackSearch.json.resolvedSpecialty, 'General Medicine');
+    assert.ok(fallbackSearch.json.doctors.some((d) => d.id === gmDocId), 'Available General Medicine doctor must be returned as fallback');
+    assert.ok(!fallbackSearch.json.doctors.some((d) => d.id === endoDocId), 'Dental doctors must NOT be returned in General Medicine fallback');
+
+    // 3. When General Medicine doctor toggles availability OFF -> excluded from fallback
+    const gmOff = await api(`/doctors/${encodeURIComponent(gmDocId)}/availability`, {
+      method: 'PATCH',
+      token: gmToken,
+      body: { isAvailable: false, status: 'Unavailable' },
+    });
+    assert.equal(gmOff.status, 200);
+
+    const fallbackAfterOff = await api(`/dentists?specialty=${encodeURIComponent(`CustomSpec_${suffix}`)}&requireBookableSlots=true&fallbackToGeneralMedicine=true`);
+    assert.equal(fallbackAfterOff.status, 200);
+    assert.ok(!fallbackAfterOff.json.doctors.some((d) => d.id === gmDocId), 'Unavailable General Medicine doctor must NEVER appear as fallback');
+  });
 });

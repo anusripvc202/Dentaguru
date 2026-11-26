@@ -77,6 +77,28 @@ function getOtpSalt(env = process.env) {
 }
 
 /**
+ * Returns true if a valid non-placeholder SUPABASE_JWT_SECRET (>=16 chars) is configured in env.
+ */
+function hasSupabaseJwtSecret(env = process.env) {
+    const raw = (env.SUPABASE_JWT_SECRET || '').toString().trim();
+    return Boolean(raw && raw.length >= 16 && !isPlaceholderOrWeakSecret(raw));
+}
+
+/**
+ * Resolves the Supabase project HS256 JWT signing secret exclusively from backend environment variables.
+ * Fails closed when missing or weak; never falls back to ephemeral or application JWT secrets.
+ */
+function getSupabaseJwtSecret(env = process.env) {
+    const raw = (env.SUPABASE_JWT_SECRET || '').toString().trim();
+    if (!raw || raw.length < 16 || isPlaceholderOrWeakSecret(raw)) {
+        throw new Error(
+            `GS HEALTH Security Configuration Error (${getNodeEnv(env)}): Missing or weak SUPABASE_JWT_SECRET. Configure the staging Supabase JWT Secret in backend environment variables.`
+        );
+    }
+    return raw;
+}
+
+/**
  * Staging-only OTP access secret key:
  * - Production: ALWAYS null (never enabled, never accepted, never required).
  * - Staging + OTP_DELIVERY_MODE=on_screen: strictly requires a strong >=16-char STAGING_OTP_ACCESS_KEY.
@@ -177,6 +199,8 @@ module.exports = {
     getJwtSecret,
     getRefreshSecret,
     getOtpSalt,
+    hasSupabaseJwtSecret,
+    getSupabaseJwtSecret,
     getStagingOtpAccessKey,
     isAuthorizedStagingOtpRequest,
     validateCloudSecuritySecrets,

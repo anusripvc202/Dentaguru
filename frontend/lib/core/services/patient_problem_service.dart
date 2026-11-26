@@ -11,6 +11,7 @@ import '../constants/patient_profile_requirements.dart';
 import '../models/referral_model.dart';
 import '../models/doctor_availability.dart';
 import '../models/medical_specialty_model.dart';
+import '../models/specialty_clinical_config.dart';
 
 /// Model representing a Doctor/Dentist registered in DentaGuru platform
 class DoctorModel {
@@ -1292,6 +1293,122 @@ class PatientProblemService extends ChangeNotifier {
   /// Patient-facing available doctors only (excludes doctors whose availability is OFF or suspended).
   List<DoctorModel> get availableDoctors =>
       List.unmodifiable(_allDoctors.where((d) => d.isAvailable));
+
+  /// Returns true when [doc] has availability enabled and is not completely blocked/zero-slot
+  /// across the upcoming 7-day booking window in cache.
+  bool isDoctorCurrentlyBookable(DoctorModel doc) {
+    if (!doc.isAvailable) return false;
+    final now = DateTime.now();
+    int cachedDays = 0;
+    int openDays = 0;
+    for (int offset = 1; offset <= 7; offset++) {
+      final d = DateTime(now.year, now.month, now.day).add(Duration(days: offset));
+      final dStr =
+          '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+      DoctorAvailabilityModel? avail = _availabilityCache['${doc.id}_$dStr'];
+      if (avail == null) {
+        final prefix = '${doc.id}_${dStr}_';
+        for (final entry in _availabilityCache.entries) {
+          if (entry.key.startsWith(prefix)) {
+            avail = entry.value;
+            break;
+          }
+        }
+      }
+      if (avail == null && doc.userId.isNotEmpty) {
+        avail = _availabilityCache['${doc.userId}_$dStr'];
+      }
+      if (avail != null) {
+        cachedDays++;
+        if (!avail.isBlocked && avail.isWorkingDay && avail.availableSlots.isNotEmpty) {
+          openDays++;
+        }
+      }
+    }
+    if (cachedDays >= 7 && openDays == 0) {
+      return false;
+    }
+    return true;
+  }
+
+  /// Resolves deduplicated, bookable doctors matching [specialtyName], falling back to
+  /// available General Medicine doctors when the selected specialty has zero bookable doctors.
+  ({
+    List<DoctorModel> doctors,
+    bool usedGeneralMedicineFallback,
+    String resolvedSpecialty,
+  }) getAvailableDoctorsForSpecialtyWithFallback(
+    String specialtyName, {
+    String searchQuery = '',
+  }) {
+    final resolvedSpecialty = SpecialtyClinicalConfig.forSpecialty(specialtyName).name;
+
+    // 1. Deduplicate bookable doctors by canonical identity (userId > email > phone > name|specialty)
+    final seenKeys = <String>{};
+    final uniqueBookable = <DoctorModel>[];
+    for (final d in _allDoctors) {
+      if (!isDoctorCurrentlyBookable(d)) continue;
+      final canonicalKey = d.userId.trim().isNotEmpty
+          ? 'uid:${d.userId.trim().toLowerCase()}'
+          : (d.email.trim().isNotEmpty
+              ? 'email:${d.email.trim().toLowerCase()}'
+              : (d.phone.trim().isNotEmpty
+                  ? 'phone:${d.phone.trim()}'
+                  : 'ns:${d.name.trim().toLowerCase()}|${d.specialty.trim().toLowerCase()}'));
+      if (seenKeys.add(canonicalKey)) {
+        uniqueBookable.add(d);
+      }
+    }
+
+    bool matchesSpec(DoctorModel d, String targetSpec) {
+      final targetNorm = SpecialtyClinicalConfig.forSpecialty(targetSpec).name.toLowerCase();
+      final docNorm = SpecialtyClinicalConfig.forSpecialty(d.specialty).name.toLowerCase();
+      if (docNorm == targetNorm) return true;
+      return MedicalSpecialtyModel.matchesSpecialtyFilter(
+        d.specialty,
+        targetSpec,
+        specialties: _specialties,
+      );
+    }
+
+    final q = searchQuery.trim().toLowerCase();
+    final qMatchesSelectedSpec = q.isEmpty ||
+        resolvedSpecialty.toLowerCase().contains(q) ||
+        SpecialtyClinicalConfig.forSpecialty(resolvedSpecialty).aliases.any((a) => a.contains(q));
+
+    final primaryMatches = uniqueBookable.where((d) {
+      if (!matchesSpec(d, resolvedSpecialty)) return false;
+      if (q.isEmpty || qMatchesSelectedSpec) return true;
+      return d.name.toLowerCase().contains(q) ||
+          d.specialty.toLowerCase().contains(q) ||
+          d.clinicName.toLowerCase().contains(q);
+    }).toList();
+
+    if (primaryMatches.isNotEmpty) {
+      return (
+        doctors: primaryMatches,
+        usedGeneralMedicineFallback: false,
+        resolvedSpecialty: resolvedSpecialty,
+      );
+    }
+
+    if (resolvedSpecialty.toLowerCase() != 'general medicine') {
+      final gmFallback = uniqueBookable.where((d) => matchesSpec(d, 'General Medicine')).toList();
+      if (gmFallback.isNotEmpty) {
+        return (
+          doctors: gmFallback,
+          usedGeneralMedicineFallback: true,
+          resolvedSpecialty: resolvedSpecialty,
+        );
+      }
+    }
+
+    return (
+      doctors: const <DoctorModel>[],
+      usedGeneralMedicineFallback: false,
+      resolvedSpecialty: resolvedSpecialty,
+    );
+  }
 
   void addTestDoctor(DoctorModel doc) {
     _allDoctors.add(doc);

@@ -11,6 +11,7 @@ import '../constants/api_constants.dart';
 
 import 'analytics_service.dart';
 import 'crashlytics_service.dart';
+import 'session_service.dart';
 
 // ─────────────────────────────────────────────────────────────
 // Background message handler (must be a top-level function)
@@ -39,8 +40,17 @@ const AndroidNotificationChannel _channel = AndroidNotificationChannel(
 class FirebaseService {
   static FirebaseMessaging get _messaging => FirebaseMessaging.instance;
   static FirebaseAuth get _auth => FirebaseAuth.instance;
-  static const _secureStorage = FlutterSecureStorage();
+  static const String _sessionTokenKey = 'dentaguru_secure_auth_token';
+  static const _secureStorage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
   static String? _verificationId;
+
+  @visibleForTesting
+  static FlutterSecureStorage get secureStorageForTesting => _secureStorage;
+
+  @visibleForTesting
+  static String get authTokenStorageKey => _sessionTokenKey;
 
   /// Send Real SMS OTP via Firebase Phone Auth
   static Future<void> sendFirebasePhoneOtp(
@@ -274,19 +284,42 @@ class FirebaseService {
     return await _messaging.getToken();
   }
 
-  /// Sync the FCM token to the DentaGuru backend
-  static Future<void> _syncFcmToken({String? token}) async {
+  /// Sync FCM device token immediately after user login/session creation.
+  /// Safe no-op on Web or when Firebase has not been initialized (e.g. unit tests).
+  static Future<void> syncFcmTokenAfterLogin({String? authToken}) async {
+    if (kIsWeb) return;
     try {
+      if (Firebase.apps.isEmpty) return;
+      await _syncFcmToken(authToken: authToken);
+    } catch (e) {
+      debugPrint('⚠️ Post-login FCM token sync skipped: $e');
+    }
+  }
+
+  /// Sync the FCM token to the DentaGuru backend
+  static Future<void> _syncFcmToken({String? token, String? authToken}) async {
+    try {
+      if (kIsWeb || Firebase.apps.isEmpty) return;
       final fcmToken = token ?? await _messaging.getToken();
-      if (fcmToken == null) return;
+      if (fcmToken == null || fcmToken.trim().isEmpty) return;
 
-      // Store locally
+      // Store locally in encrypted shared preferences
       await _secureStorage.write(key: 'fcm_token', value: fcmToken);
-      debugPrint('📲 FCM Token: $fcmToken');
+      debugPrint('📲 FCM Token synced locally');
 
-      // Send to backend if user is authenticated
-      final authToken = await _secureStorage.read(key: 'auth_token');
-      if (authToken == null) return;
+      // Resolve authenticated JWT from explicit param, SessionService, or aligned secure storage key
+      String? resolvedAuthToken = authToken?.trim();
+      if (resolvedAuthToken == null || resolvedAuthToken.isEmpty) {
+        resolvedAuthToken = SessionService().currentSession?.token.trim();
+      }
+      if (resolvedAuthToken == null || resolvedAuthToken.isEmpty) {
+        resolvedAuthToken =
+            (await _secureStorage.read(key: _sessionTokenKey))?.trim();
+      }
+      if (resolvedAuthToken == null || resolvedAuthToken.isEmpty) {
+        resolvedAuthToken = (await _secureStorage.read(key: 'auth_token'))?.trim();
+      }
+      if (resolvedAuthToken == null || resolvedAuthToken.isEmpty) return;
 
       final baseUrl = ApiConstants.baseUrl;
 
@@ -294,10 +327,10 @@ class FirebaseService {
         Uri.parse('$baseUrl/auth/fcm-token'),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer $authToken',
+          'Authorization': 'Bearer $resolvedAuthToken',
         },
         body: jsonEncode({'fcmToken': fcmToken}),
-      );
+      ).timeout(const Duration(seconds: 35));
       debugPrint('✅ FCM token synced to backend');
     } catch (e) {
       debugPrint('❌ FCM token sync error: $e');

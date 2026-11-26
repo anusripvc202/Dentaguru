@@ -1,4 +1,5 @@
 const { supabaseAdmin } = require('../config/supabase');
+const { isCloudEnv } = require('../config/secrets');
 const { Appointment, Clinic, Dentist, User, Notification, MedicalRecord, Referral, DoctorAvailability, PatientAssignmentHistory, District, SubAdminDistrict, SubAdminPermission, ASSIGNMENT_SOURCES, isDoctorRecordAvailable, resolveClinicIds, resolveDentistIds } = require('../models/Schemas');
 const { sendPushNotification } = require('../services/notificationService');
 const { generateTimeSlots } = require('./availabilityController');
@@ -2123,6 +2124,12 @@ exports.getDoctorVisitsCalendar = async (req, res) => {
         const nowParts = getNowPartsInTimezone(rules.debugNowOverride || new Date(), tz);
 
         const caller = await _resolveCalendarCaller(req);
+        if (!caller && isCloudEnv()) {
+            return res.status(401).json({
+                success: false,
+                message: 'Authentication required to access the Doctor Visits Calendar.',
+            });
+        }
         const callerRoleLower = String(caller?.role || '').trim().toLowerCase();
         const isCallerAdmin = ['admin', 'primaryadmin', 'primary_admin', 'superadmin', 'super_admin', 'sub-admin', 'subadmin', 'sub_admin'].includes(callerRoleLower);
         const isCallerDoctor = ['dentist', 'doctor'].includes(callerRoleLower);
@@ -2463,6 +2470,12 @@ exports.getAdminGlobalVisitsCalendar = async (req, res) => {
         const nowParts = getNowPartsInTimezone(rules.debugNowOverride || new Date(), tz);
 
         const caller = await _resolveCalendarCaller(req);
+        if (!caller && isCloudEnv()) {
+            return res.status(401).json({
+                success: false,
+                message: 'Authentication required to access the Admin Visits Calendar.',
+            });
+        }
         const callerRoleLower = String(caller?.role || '').trim().toLowerCase();
         const isMainAdmin = !caller || ['admin', 'primaryadmin', 'primary_admin', 'superadmin', 'super_admin'].includes(callerRoleLower);
         const isSubAdmin = ['sub-admin', 'subadmin', 'sub_admin'].includes(callerRoleLower);
