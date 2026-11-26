@@ -12,6 +12,7 @@ import '../models/referral_model.dart';
 import '../models/doctor_availability.dart';
 import '../models/medical_specialty_model.dart';
 import '../models/specialty_clinical_config.dart';
+import '../utils/clinic_directions_helper.dart';
 
 /// Model representing a Doctor/Dentist registered in DentaGuru platform
 class DoctorModel {
@@ -34,6 +35,7 @@ class DoctorModel {
   final String consultationFee;
   final String licenseNumber;
   final Uint8List? photoBytes;
+  final String? profileImageUrl;
   final String clinicAddress;
   final String pincode;
   final String city;
@@ -42,6 +44,7 @@ class DoctorModel {
   final List<String> languages;
   final double? latitude;
   final double? longitude;
+  final String consultationMode; // 'BOTH', 'IN_PERSON', 'ONLINE_ONLY'
   final Map<String, String> procedureFees;
 
   DoctorModel({
@@ -64,6 +67,7 @@ class DoctorModel {
     required this.consultationFee,
     this.licenseNumber = 'MED-LIC-REG',
     this.photoBytes,
+    this.profileImageUrl,
     this.clinicAddress = '',
     this.pincode = '',
     this.city = '',
@@ -72,8 +76,31 @@ class DoctorModel {
     this.languages = const ['English'],
     this.latitude,
     this.longitude,
+    String? consultationMode,
     Map<String, String>? procedureFees,
-  }) : procedureFees = procedureFees ?? const {};
+  })  : consultationMode = DoctorConsultationMode.normalize(consultationMode),
+        procedureFees = procedureFees ?? const {};
+
+  bool get isOnlineOnly => DoctorConsultationMode.isOnlineOnly(consultationMode);
+  bool get offersInPerson => !isOnlineOnly;
+  bool get hasCoordinates =>
+      !isOnlineOnly && ClinicDirectionsHelper.hasValidCoordinates(latitude, longitude);
+  bool get hasPhysicalClinicLocation =>
+      !isOnlineOnly &&
+      (hasCoordinates ||
+          ClinicDirectionsHelper.composeAddressQuery(
+            clinicName: clinicName,
+            clinicAddress: clinicAddress,
+            city: city,
+            state: state,
+            pincode: pincode,
+          ).isNotEmpty);
+  String get formattedFullAddress => ClinicDirectionsHelper.composeAddressQuery(
+        clinicAddress: clinicAddress,
+        city: city,
+        state: state,
+        pincode: pincode,
+      );
 
   DoctorModel copyWith({
     String? status,
@@ -81,6 +108,15 @@ class DoctorModel {
     String? verificationStatus,
     List<String>? nextAvailableSlots,
     String? consultationFee,
+    String? clinicName,
+    String? clinicAddress,
+    String? city,
+    String? state,
+    String? pincode,
+    double? latitude,
+    double? longitude,
+    bool clearCoordinates = false,
+    String? consultationMode,
   }) {
     return DoctorModel(
       id: id,
@@ -92,7 +128,7 @@ class DoctorModel {
       experienceYears: experienceYears,
       rating: rating,
       reviewCount: reviewCount,
-      clinicName: clinicName,
+      clinicName: clinicName ?? this.clinicName,
       phone: phone,
       email: email,
       status: status ?? this.status,
@@ -102,14 +138,16 @@ class DoctorModel {
       consultationFee: consultationFee ?? this.consultationFee,
       licenseNumber: licenseNumber,
       photoBytes: photoBytes,
-      clinicAddress: clinicAddress,
-      pincode: pincode,
-      city: city,
-      state: state,
+      profileImageUrl: profileImageUrl,
+      clinicAddress: clinicAddress ?? this.clinicAddress,
+      pincode: pincode ?? this.pincode,
+      city: city ?? this.city,
+      state: state ?? this.state,
       bio: bio,
       languages: languages,
-      latitude: latitude,
-      longitude: longitude,
+      latitude: clearCoordinates ? null : (latitude ?? this.latitude),
+      longitude: clearCoordinates ? null : (longitude ?? this.longitude),
+      consultationMode: consultationMode ?? this.consultationMode,
       procedureFees: procedureFees,
     );
   }
@@ -205,24 +243,50 @@ class DoctorModel {
         'languages': languages,
         'latitude': latitude,
         'longitude': longitude,
+        'consultationMode': consultationMode,
         'procedureFees': procedureFees,
         'photoBase64': photoBytes != null ? base64Encode(photoBytes!) : null,
+        'profileImageUrl': profileImageUrl,
       };
 
-  factory DoctorModel.fromJson(Map<String, dynamic> json) {
-    Uint8List? bytes;
-    final rawPhoto = (json['photoBase64'] ??
-            json['profilePhoto'] ??
-            json['profile_photo'] ??
-            (json['users'] is Map ? json['users']['biometric_token'] : null) ??
-            '')
-        .toString();
-    if (rawPhoto.isNotEmpty && rawPhoto.length > 20) {
+  static ({Uint8List? bytes, String? url}) parseProfilePhoto(dynamic raw) {
+    final value = (raw ?? '').toString().trim();
+    if (value.isEmpty || value.toLowerCase() == 'null') {
+      return (bytes: null, url: null);
+    }
+    if (value.startsWith('http://') || value.startsWith('https://')) {
+      return (bytes: null, url: value);
+    }
+    if (value.length > 20) {
       try {
-        final clean = rawPhoto.contains(',') ? rawPhoto.split(',').last : rawPhoto;
-        bytes = base64Decode(clean);
+        final clean = value.contains(',') ? value.split(',').last : value;
+        final decoded = base64Decode(clean);
+        if (decoded.isNotEmpty) {
+          return (bytes: decoded, url: null);
+        }
       } catch (_) {}
     }
+    return (bytes: null, url: null);
+  }
+
+  bool get hasProfileImage =>
+      (photoBytes != null && photoBytes!.isNotEmpty) ||
+      (profileImageUrl != null && profileImageUrl!.trim().isNotEmpty);
+
+  factory DoctorModel.fromJson(Map<String, dynamic> json) {
+    final parsedPhoto = parseProfilePhoto(
+      json['photoBase64'] ??
+          json['profileImageUrl'] ??
+          json['profilePhoto'] ??
+          json['profile_photo'] ??
+          (json['users'] is Map ? json['users']['biometric_token'] : null) ??
+          '',
+    );
+    final Uint8List? bytes = parsedPhoto.bytes;
+    final String? photoUrl = parsedPhoto.url ??
+        ((json['profileImageUrl']?.toString().trim().startsWith('http') ?? false)
+            ? json['profileImageUrl'].toString().trim()
+            : null);
     Map<String, String> pFees = {};
     if (json['procedureFees'] != null && json['procedureFees'] is Map) {
       (json['procedureFees'] as Map).forEach((k, v) => pFees[k.toString()] = v.toString());
@@ -258,7 +322,7 @@ class DoctorModel {
           ? ((json['rating'] ?? 0.0) as num).toDouble()
           : 0.0,
       reviewCount: int.tryParse((json['reviewCount'] ?? json['reviews_count'] ?? '0').toString()) ?? 0,
-      clinicName: json['clinicName'] ?? (json['clinics'] != null ? json['clinics']['clinic_name'] : '') ?? '',
+      clinicName: (json['clinicName'] ?? json['clinic_name'] ?? (json['clinics'] != null ? json['clinics']['clinic_name'] : '') ?? '').toString(),
       phone: json['phone'] ?? (json['users'] != null ? json['users']['phone'] : '') ?? '',
       email: json['email'] ?? (json['users'] != null ? json['users']['email'] : '') ?? '',
       status: json['status'] ?? json['availability_status'] ?? 'Available',
@@ -268,18 +332,38 @@ class DoctorModel {
       consultationFee: (json['consultationFee'] ?? json['consultation_fee'] ?? '').toString(),
       licenseNumber: (json['licenseNumber'] ?? json['license_number'] ?? '').toString(),
       photoBytes: bytes,
-      clinicAddress: json['clinicAddress'] ?? json['location'] ?? (json['clinics'] != null ? json['clinics']['location'] : '') ?? '',
+      profileImageUrl: photoUrl,
+      clinicAddress: (json['clinicAddress'] ?? json['clinic_address'] ?? json['location'] ?? (json['clinics'] != null ? json['clinics']['location'] : '') ?? '').toString(),
       pincode: json['pincode'] ?? json['postal_code'] ?? (json['users'] != null ? (json['users']['pincode'] ?? '') : '') ?? '',
       city: json['city'] ?? (json['users'] != null ? (json['users']['city'] ?? '') : '') ?? '',
       state: json['state'] ?? (json['users'] != null ? (json['users']['state'] ?? '') : '') ?? '',
       bio: (json['bio'] ?? json['about'] ?? json['description'] ?? (json['users'] is Map ? (json['users']['bio'] ?? '') : '') ?? '').toString(),
       languages: parsedLanguages,
-      latitude: (json['latitude'] ?? json['lat'] ?? (json['users'] != null ? json['users']['latitude'] : null)) != null
-          ? double.tryParse((json['latitude'] ?? json['lat'] ?? json['users']['latitude']).toString())
+      latitude: (json['latitude'] ??
+                  json['lat'] ??
+                  (json['clinics'] is Map ? json['clinics']['latitude'] : null) ??
+                  (json['users'] is Map ? json['users']['latitude'] : null)) !=
+              null
+          ? double.tryParse((json['latitude'] ??
+                  json['lat'] ??
+                  (json['clinics'] is Map ? json['clinics']['latitude'] : null) ??
+                  (json['users'] is Map ? json['users']['latitude'] : null))
+              .toString())
           : null,
-      longitude: (json['longitude'] ?? json['lng'] ?? (json['users'] != null ? json['users']['longitude'] : null)) != null
-          ? double.tryParse((json['longitude'] ?? json['lng'] ?? json['users']['longitude']).toString())
+      longitude: (json['longitude'] ??
+                  json['lng'] ??
+                  (json['clinics'] is Map ? json['clinics']['longitude'] : null) ??
+                  (json['users'] is Map ? json['users']['longitude'] : null)) !=
+              null
+          ? double.tryParse((json['longitude'] ??
+                  json['lng'] ??
+                  (json['clinics'] is Map ? json['clinics']['longitude'] : null) ??
+                  (json['users'] is Map ? json['users']['longitude'] : null))
+              .toString())
           : null,
+      consultationMode: DoctorConsultationMode.normalize(
+        (json['consultationMode'] ?? json['consultation_mode'])?.toString(),
+      ),
       procedureFees: pFees.isNotEmpty ? pFees : null,
     );
   }
@@ -3256,12 +3340,15 @@ class PatientProblemService extends ChangeNotifier {
         }
 
         if (pName.isEmpty || pName.toLowerCase() == 'patient') {
-          final matchingPatient = _allPatients.firstWhere(
-            (p) => p.name.isNotEmpty && p.name.toLowerCase() != 'patient',
-            orElse: () => currentPatient.name.isNotEmpty ? currentPatient : PatientProfile(name: 'Patient'),
-          );
-          pName = matchingPatient.name.isNotEmpty ? matchingPatient.name : 'Patient';
-          if (pPhone.isEmpty) pPhone = matchingPatient.phone;
+          final matchingPatient = reqPatientId.isNotEmpty
+              ? _allPatients.where((p) => p.id == reqPatientId && p.name.isNotEmpty).firstOrNull
+              : null;
+          pName = matchingPatient != null && matchingPatient.name.isNotEmpty
+              ? matchingPatient.name
+              : 'Patient';
+          if (pPhone.isEmpty && matchingPatient != null) {
+            pPhone = matchingPatient.phone;
+          }
         }
 
         final newReq = PatientConsultationRequest(
@@ -3395,8 +3482,12 @@ class PatientProblemService extends ChangeNotifier {
             : (currentDoctor!.userId.isNotEmpty ? currentDoctor!.userId : currentDoctor!.email);
       } else if (_safeAuthUserId != null) {
         targetDocId = _safeAuthUserId!;
-      } else if (_allDoctors.isNotEmpty) {
-        targetDocId = _allDoctors.first.id;
+      }
+
+      if (targetDocId.isEmpty) {
+        _dentistAssignedRequests.clear();
+        notifyListeners();
+        return;
       }
       
       final List problemReqs = await ApiService().fetchDentistAssignedRequests(
@@ -3480,12 +3571,15 @@ class PatientProblemService extends ChangeNotifier {
         String pPhone = (pr['patientPhone'] ?? pr['patient_phone'] ?? patientObj['phone'] ?? '').toString().trim();
 
         if (pName.isEmpty || pName.toLowerCase() == 'patient') {
-          final matchingPatient = _allPatients.firstWhere(
-            (p) => p.name.isNotEmpty && p.name.toLowerCase() != 'patient',
-            orElse: () => currentPatient.name.isNotEmpty ? currentPatient : PatientProfile(name: 'Patient'),
-          );
-          pName = matchingPatient.name.isNotEmpty ? matchingPatient.name : 'Patient';
-          if (pPhone.isEmpty) pPhone = matchingPatient.phone;
+          final matchingPatient = reqPatientId.isNotEmpty
+              ? _allPatients.where((p) => p.id == reqPatientId && p.name.isNotEmpty).firstOrNull
+              : null;
+          pName = matchingPatient != null && matchingPatient.name.isNotEmpty
+              ? matchingPatient.name
+              : 'Patient';
+          if (pPhone.isEmpty && matchingPatient != null) {
+            pPhone = matchingPatient.phone;
+          }
         }
 
         freshAssigned.add(
@@ -3855,14 +3949,18 @@ class PatientProblemService extends ChangeNotifier {
           if (emailLower.isNotEmpty && !seenEmails.add(emailLower)) continue;
           if (phone10.length >= 10 && !seenPhones.add(phone10)) continue;
 
-          Uint8List? docPhotoBytes;
-          final rawPhoto = (userObj['biometric_token'] ?? dMap['profile_photo'] ?? dMap['profilePhoto'] ?? dMap['photo'] ?? dMap['avatar'] ?? userObj['avatar'] ?? '').toString();
-          if (rawPhoto.isNotEmpty && rawPhoto.length > 20) {
-            try {
-              final cleanBase64 = rawPhoto.contains(',') ? rawPhoto.split(',').last : rawPhoto;
-              docPhotoBytes = base64Decode(cleanBase64);
-            } catch (_) {}
-          }
+          final parsedPhoto = DoctorModel.parseProfilePhoto(
+            userObj['biometric_token'] ??
+                dMap['profilePhoto'] ??
+                dMap['profile_photo'] ??
+                dMap['profileImageUrl'] ??
+                dMap['photo'] ??
+                dMap['avatar'] ??
+                userObj['avatar'] ??
+                '',
+          );
+          final Uint8List? docPhotoBytes = parsedPhoto.bytes;
+          final String? docPhotoUrl = parsedPhoto.url;
 
           final rawSlots = dMap['slots'] ?? dMap['available_slots'] ?? dMap['nextAvailableSlots'];
           final List<String> parsedSlots = rawSlots is List
@@ -3888,10 +3986,13 @@ class PatientProblemService extends ChangeNotifier {
             phone: phone,
             email: email,
             status: (dMap['availability_status'] ?? dMap['status'] ?? 'Available').toString(),
+            onlineStatus: (dMap['onlineStatus'] ?? dMap['online_status'] ?? '').toString(),
+            verificationStatus: (dMap['verificationStatus'] ?? dMap['verification_status'] ?? 'VERIFIED').toString(),
             nextAvailableSlots: parsedSlots,
             consultationFee: (dMap['consultation_fee'] ?? dMap['consultationFee'] ?? '').toString(),
             licenseNumber: licNum,
             photoBytes: docPhotoBytes,
+            profileImageUrl: docPhotoUrl,
             state: doctorState,
             city: doctorCity,
             pincode: doctorPincode,
@@ -3985,14 +4086,18 @@ class PatientProblemService extends ChangeNotifier {
         final lng = (dMap['longitude'] ?? userObj['longitude']) != null ? double.tryParse((dMap['longitude'] ?? userObj['longitude']).toString()) : null;
         final doctorUserId = (dMap['user_id'] ?? userObj['id'] ?? '').toString();
 
-        Uint8List? docPhotoBytes;
-        final rawPhoto = (userObj['biometric_token'] ?? dMap['profile_photo'] ?? dMap['photo'] ?? dMap['avatar'] ?? userObj['avatar'] ?? '').toString();
-        if (rawPhoto.isNotEmpty && rawPhoto.length > 20) {
-          try {
-            final cleanBase64 = rawPhoto.contains(',') ? rawPhoto.split(',').last : rawPhoto;
-            docPhotoBytes = base64Decode(cleanBase64);
-          } catch (_) {}
-        }
+        final parsedPhoto = DoctorModel.parseProfilePhoto(
+          userObj['biometric_token'] ??
+              dMap['profilePhoto'] ??
+              dMap['profile_photo'] ??
+              dMap['profileImageUrl'] ??
+              dMap['photo'] ??
+              dMap['avatar'] ??
+              userObj['avatar'] ??
+              '',
+        );
+        final Uint8List? docPhotoBytes = parsedPhoto.bytes;
+        final String? docPhotoUrl = parsedPhoto.url;
 
         final rawSlots = dMap['slots'] ?? dMap['available_slots'] ?? dMap['nextAvailableSlots'];
         final List<String> parsedSlots = rawSlots is List
@@ -4025,10 +4130,13 @@ class PatientProblemService extends ChangeNotifier {
           phone: phone,
           email: email,
           status: (dMap['availability_status'] ?? dMap['status'] ?? 'Available').toString(),
+          onlineStatus: (dMap['onlineStatus'] ?? dMap['online_status'] ?? '').toString(),
+          verificationStatus: (dMap['verificationStatus'] ?? dMap['verification_status'] ?? 'VERIFIED').toString(),
           nextAvailableSlots: parsedSlots,
           consultationFee: (dMap['consultation_fee'] ?? dMap['consultationFee'] ?? '').toString(),
           licenseNumber: licNum,
           photoBytes: docPhotoBytes,
+          profileImageUrl: docPhotoUrl,
           state: doctorState,
           city: doctorCity,
           pincode: doctorPincode,
@@ -4104,6 +4212,7 @@ class PatientProblemService extends ChangeNotifier {
               consultationFee: currentDoctor!.consultationFee,
               licenseNumber: currentDoctor!.licenseNumber,
               photoBytes: currentDoctor!.photoBytes ?? d.photoBytes,
+              profileImageUrl: currentDoctor!.profileImageUrl ?? d.profileImageUrl,
               clinicAddress: currentDoctor!.clinicAddress.isNotEmpty ? currentDoctor!.clinicAddress : d.clinicAddress,
               pincode: currentDoctor!.pincode.isNotEmpty ? currentDoctor!.pincode : d.pincode,
               city: currentDoctor!.city.isNotEmpty ? currentDoctor!.city : d.city,
@@ -4138,10 +4247,13 @@ class PatientProblemService extends ChangeNotifier {
               : (pId != null ? await _api.fetchAppointments(patientId: pId) : <dynamic>[]));
 
       if (list.isEmpty) {
-        if (_isDentistMode) {
-          _requests.removeWhere((r) =>
-              r.problemDescription == 'Scheduled dental consultation' ||
-              r.problemDescription == 'Scheduled medical consultation');
+        if (_isDentistMode && myDoctorIds.isNotEmpty) {
+          // Strict doctor isolation: purge any cached entries belonging to other doctors
+          // without wiping the logged-in doctor's own appointments on temporary offline/empty responses.
+          _requests.removeWhere((r) {
+            final aId = (r.assignedDoctorId ?? '').trim();
+            return aId.isNotEmpty && !myDoctorIds.contains(aId);
+          });
           _saveToStorage();
           notifyListeners();
         }
@@ -4167,8 +4279,8 @@ class PatientProblemService extends ChangeNotifier {
         if (_isDentistMode && myDoctorIds.isNotEmpty) {
           final matchesId = (itemDentistId != null && itemDentistId.isNotEmpty && myDoctorIds.contains(itemDentistId)) ||
               (itemDentistUserId != null && itemDentistUserId.isNotEmpty && myDoctorIds.contains(itemDentistUserId));
-          if (!matchesId && itemDentistId != null && itemDentistId.isNotEmpty) {
-            continue; // Skip appointments for other doctors
+          if (!matchesId) {
+            continue; // Strict doctor isolation: skip unassigned or other doctors' appointments
           }
         }
 
@@ -4482,7 +4594,7 @@ class PatientProblemService extends ChangeNotifier {
     }
   }
 
-  /// Book a new appointment directly with selected doctor & time slot
+  /// Book a new appointment directly with selected doctor & time slot (supports mandatory lockId & releasedSlotId)
   Future<Map<String, dynamic>> bookAppointment({
     required String dentistId,
     String clinicId = '',
@@ -4491,6 +4603,9 @@ class PatientProblemService extends ChangeNotifier {
     required String treatment,
     String consultationMode = '',
     String symptoms = '',
+    String? lockId,
+    String? releasedSlotId,
+    bool requireLock = false,
   }) async {
     final cleanDate = date.contains('T') ? date.split('T').first : date.trim();
     final cleanSlot = timeSlot.trim();
@@ -4502,7 +4617,7 @@ class PatientProblemService extends ChangeNotifier {
     }
 
     final parsedDate = DateTime.tryParse(cleanDate);
-    if (parsedDate != null && !BookingRulesConfig.isSlotBookableForDate(parsedDate, cleanSlot)) {
+    if (releasedSlotId == null && parsedDate != null && !BookingRulesConfig.isSlotBookableForDate(parsedDate, cleanSlot)) {
       return {
         'success': false,
         'message': 'Appointments must be booked at least ${BookingRulesConfig.minAdvanceBookingMinutes} minutes in advance and cannot use past slots.',
@@ -4607,22 +4722,38 @@ class PatientProblemService extends ChangeNotifier {
       timeSlot: cleanSlot,
       treatment: effectiveTreatment,
       consultationMode: reqMode,
+      lockId: lockId,
+      releasedSlotId: releasedSlotId,
+      requireLock: requireLock,
     );
 
     final msgLower = (res['message']?.toString() ?? '').toLowerCase();
+    final reasonUpper = (res['reason']?.toString() ?? '').toUpperCase();
     final isExplicitSlotConflict = res['success'] == false &&
         (msgLower.contains('already booked') ||
          msgLower.contains('blocked') ||
          msgLower.contains('unavailable') ||
+         msgLower.contains('no longer available') ||
          msgLower.contains('working day') ||
          msgLower.contains('does not consult') ||
          msgLower.contains('lunch break') ||
+         msgLower.contains('break period') ||
          msgLower.contains('published slot') ||
          msgLower.contains('past dates') ||
          msgLower.contains('passed') ||
          msgLower.contains('in advance') ||
          msgLower.contains('conflicts') ||
          msgLower.contains('overlap') ||
+         msgLower.contains('lock') ||
+         msgLower.contains('maximum') ||
+         reasonUpper == 'LOCK_REQUIRED' ||
+         reasonUpper == 'LOCK_MISMATCH_OR_EXPIRED' ||
+         reasonUpper == 'RELEASED_SLOT_UNAVAILABLE' ||
+         reasonUpper == 'RELEASED_SLOT_LOCK_MISMATCH' ||
+         reasonUpper == 'RELEASED_SLOT_LOCK_REQUIRED' ||
+         reasonUpper == 'SLOT_LOCKED' ||
+         reasonUpper == 'DAILY_LIMIT_REACHED' ||
+         res['conflict'] == true ||
          res['isBlocked'] == true ||
          res['unavailable'] == true);
 
@@ -6153,12 +6284,14 @@ class PatientProblemService extends ChangeNotifier {
     String bio = '',
     String status = 'Available',
     Uint8List? photoBytes,
+    String? profileImageUrl,
     String clinicAddress = '',
     String state = '',
     String city = '',
     String pincode = '',
     double? latitude,
     double? longitude,
+    String consultationMode = DoctorConsultationMode.both,
     List<String>? languages,
     bool skipApiRegister = false,
     bool setAsCurrentDoctor = true,
@@ -6219,17 +6352,19 @@ class PatientProblemService extends ChangeNotifier {
                 .firstOrNull ??
             '');
 
+    final resolvedMode = DoctorConsultationMode.normalize(consultationMode);
+    final bool isOnlineOnlyMode = DoctorConsultationMode.isOnlineOnly(resolvedMode);
     final newDoctor = DoctorModel(
       id: doctorId,
       userId: doctorUserId,
-      clinicId: resolvedClinicId,
+      clinicId: isOnlineOnlyMode ? '' : resolvedClinicId,
       name: formattedName.isEmpty ? (cleanEmail.isNotEmpty ? cleanEmail : 'Doctor') : formattedName,
       specialty: cleanSpecialty,
       qualification: cleanQual,
       experienceYears: experienceYears <= 0 ? 5 : experienceYears,
       rating: 5.0,
       reviewCount: 1,
-      clinicName: cleanClinic,
+      clinicName: isOnlineOnlyMode ? '' : cleanClinic,
       phone: cleanPhone,
       email: cleanEmail,
       status: status.trim().isNotEmpty ? status.trim() : (existingDoc.status.isNotEmpty ? existingDoc.status : 'Available'),
@@ -6237,12 +6372,17 @@ class PatientProblemService extends ChangeNotifier {
       consultationFee: consultationFee.trim(),
       licenseNumber: cleanLicense,
       photoBytes: cachedPhoto,
-      clinicAddress: cleanAddress,
+      profileImageUrl: (profileImageUrl != null && profileImageUrl.trim().isNotEmpty)
+          ? profileImageUrl.trim()
+          : existingDoc.profileImageUrl,
+      clinicAddress: isOnlineOnlyMode ? '' : cleanAddress,
       city: cleanCity,
-      pincode: cleanPincode,
+      state: isOnlineOnlyMode ? '' : state.trim(),
+      pincode: isOnlineOnlyMode ? '' : cleanPincode,
       bio: bio.trim(),
-      latitude: latitude,
-      longitude: longitude,
+      latitude: isOnlineOnlyMode ? null : latitude,
+      longitude: isOnlineOnlyMode ? null : longitude,
+      consultationMode: resolvedMode,
       languages: doctorLangs,
     );
 
@@ -6295,9 +6435,10 @@ class PatientProblemService extends ChangeNotifier {
         specialty: cleanSpecialty,
         licenseNumber: cleanLicense.isEmpty ? null : cleanLicense,
         clinicId: resolvedClinicId.isNotEmpty ? resolvedClinicId : null,
-        clinicName: cleanClinic,
-        clinicAddress: cleanAddress,
+        clinicName: isOnlineOnlyMode ? null : cleanClinic,
+        clinicAddress: isOnlineOnlyMode ? null : cleanAddress,
         consultationFee: consultationFee.trim().isEmpty ? null : consultationFee.trim(),
+        consultationMode: resolvedMode,
         bio: bio.trim().isEmpty ? null : bio.trim(),
         location: cleanAddress,
         city: cleanCity,
@@ -6791,13 +6932,13 @@ class PatientProblemService extends ChangeNotifier {
     }
 
     bool isAssignedToMe(PatientConsultationRequest r) {
+      if (myDoctorIds.isEmpty && docNameClean.isEmpty) return false;
       final aId = r.assignedDoctorId?.trim();
-      if (aId != null && aId.isNotEmpty && myDoctorIds.contains(aId)) {
-        return true;
+      if (aId != null && aId.isNotEmpty) {
+        return myDoctorIds.contains(aId);
       }
-      final aName = r.assignedDoctorName?.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
-      if (docNameClean.isNotEmpty &&
-          aName != null && aName.isNotEmpty && (aName == docNameClean || docNameClean.contains(aName) || aName.contains(docNameClean))) {
+      final aName = r.assignedDoctorName?.replaceAll(RegExp(r'^dr\.?\s*', caseSensitive: false), '').trim().toLowerCase();
+      if (docNameClean.isNotEmpty && aName != null && aName.isNotEmpty && aName == docNameClean) {
         return true;
       }
       return false;
@@ -6805,9 +6946,9 @@ class PatientProblemService extends ChangeNotifier {
 
     final Map<String, PatientProfile> associatedMap = {};
 
-    // 1. From dentist assigned requests & timeline requests
+    // 1. From dentist assigned requests & timeline requests (strictly assigned to this doctor)
     final allPool = [
-      ..._dentistAssignedRequests,
+      ..._dentistAssignedRequests.where((r) => isAssignedToMe(r)),
       ..._requests.where((r) => isAssignedToMe(r)),
     ];
 
@@ -6824,14 +6965,14 @@ class PatientProblemService extends ChangeNotifier {
       }).firstOrNull;
 
       associatedMap[key] = PatientProfile(
-        id: matchedProfile?.id.isNotEmpty == true ? matchedProfile!.id : (req.id.isNotEmpty ? req.id : 'pat_${req.patientName.hashCode}'),
+        id: matchedProfile?.id.isNotEmpty == true ? matchedProfile!.id : (req.patientId?.isNotEmpty == true ? req.patientId! : req.id),
         name: req.patientName.trim(),
         phone: raw10.isNotEmpty ? raw10 : (matchedProfile?.phone.isNotEmpty == true ? matchedProfile!.phone : req.patientPhone),
-        email: matchedProfile?.email.isNotEmpty == true ? matchedProfile!.email : (raw10.isNotEmpty ? 'user_$raw10@dentaguru.internal' : ''),
-        age: (matchedProfile?.age.isNotEmpty == true) ? matchedProfile!.age : '28',
-        gender: (matchedProfile?.gender.isNotEmpty == true) ? matchedProfile!.gender : 'Female',
-        city: req.city.isNotEmpty ? req.city : (matchedProfile?.city.isNotEmpty == true ? matchedProfile!.city : 'Hyderabad'),
-        pincode: req.pincode.isNotEmpty ? req.pincode : (matchedProfile?.pincode.isNotEmpty == true ? matchedProfile!.pincode : ''),
+        email: matchedProfile?.email.isNotEmpty == true ? matchedProfile!.email : '',
+        age: matchedProfile?.age ?? '',
+        gender: matchedProfile?.gender ?? '',
+        city: req.city.isNotEmpty ? req.city : (matchedProfile?.city ?? ''),
+        pincode: req.pincode.isNotEmpty ? req.pincode : (matchedProfile?.pincode ?? ''),
         address: req.preferredLocation.isNotEmpty ? req.preferredLocation : (matchedProfile?.address.isNotEmpty == true ? matchedProfile!.address : req.state),
         emergencyContact: req.problemDescription.isNotEmpty ? req.problemDescription : (matchedProfile?.emergencyContact ?? ''),
       );
@@ -7019,8 +7160,32 @@ class PatientProblemService extends ChangeNotifier {
     }
   }
 
+  bool _canCurrentRoleMutateReferralStatus() {
+    final role = (SessionService().currentSession?.role ?? '').trim().toLowerCase();
+    if (role == 'patient') return false;
+    if (role == 'dentist' ||
+        role == 'doctor' ||
+        role == 'clinic' ||
+        role == 'clinic_admin' ||
+        role == 'admin' ||
+        role == 'sub-admin' ||
+        role == 'subadmin' ||
+        role == 'superadmin') {
+      return true;
+    }
+    return _isDentistMode ||
+        _isClinicMode ||
+        _isAdminMode ||
+        _isSubAdminMode ||
+        currentDoctor != null;
+  }
+
   /// Doctor Accepts Referral
   Future<bool> acceptPatientReferralByDoctor(String referralId, {String? confirmedTimeSlot}) async {
+    if (!_canCurrentRoleMutateReferralStatus()) {
+      debugPrint('Blocked referral accept attempt from non-doctor/patient session.');
+      return false;
+    }
     try {
       final res = await ApiService().acceptPatientReferral(referralId, confirmedTimeSlot: confirmedTimeSlot);
       if (res['success'] == true) {
@@ -7035,6 +7200,10 @@ class PatientProblemService extends ChangeNotifier {
 
   /// Doctor Rejects Referral
   Future<bool> rejectPatientReferralByDoctor(String referralId, {String? rejectionReason}) async {
+    if (!_canCurrentRoleMutateReferralStatus()) {
+      debugPrint('Blocked referral reject attempt from non-doctor/patient session.');
+      return false;
+    }
     try {
       final res = await ApiService().rejectPatientReferral(referralId, rejectionReason: rejectionReason);
       if (res['success'] == true) {
@@ -7053,6 +7222,10 @@ class PatientProblemService extends ChangeNotifier {
     required String status,
     String? reason,
   }) async {
+    if (!_canCurrentRoleMutateReferralStatus()) {
+      debugPrint('Blocked referral status update attempt from non-doctor/patient session.');
+      return false;
+    }
     try {
       final res = await ApiService().updatePatientReferralStatus(referralId, status: status, reason: reason);
       if (res['success'] == true) {
@@ -7767,7 +7940,16 @@ class PatientProblemService extends ChangeNotifier {
       date: dateStr,
       startTime: sched?.startTime ?? '09:00 AM',
       endTime: sched?.endTime ?? '05:00 PM',
-      slotDurationMinutes: sched?.slotDurationMinutes ?? 30,
+      slotDurationMinutes: normMode == 'Online'
+          ? (sched?.onlineDurationMinutes ?? BookingRulesConfig.durationForMode('Online'))
+          : (sched?.inPersonDurationMinutes ?? sched?.slotDurationMinutes ?? 30),
+      consultationType: normMode,
+      consultationDurationMinutes: normMode == 'Online'
+          ? (sched?.onlineDurationMinutes ?? BookingRulesConfig.durationForMode('Online'))
+          : (sched?.inPersonDurationMinutes ?? BookingRulesConfig.durationForMode('In-Person')),
+      bufferMinutes: normMode == 'Online'
+          ? (sched?.onlineBufferMinutes ?? BookingRulesConfig.bufferForMode('Online'))
+          : (sched?.inPersonBufferMinutes ?? BookingRulesConfig.bufferForMode('In-Person')),
       hasBreak: sched?.hasBreak ?? true,
       breakStartTime: sched?.breakStartTime,
       breakEndTime: sched?.breakEndTime,
@@ -7782,7 +7964,7 @@ class PatientProblemService extends ChangeNotifier {
     return fallbackModel;
   }
 
-  /// Update persisted weekly schedule (working days, hours, lunch break, duration)
+  /// Update persisted weekly & smart schedule (working days, hours, multiple breaks, Online/In-Person schedules, durations, buffers, daily limits)
   Future<Map<String, dynamic>> saveDoctorSchedule({
     required String doctorId,
     required List<String> workingDays,
@@ -7792,6 +7974,19 @@ class PatientProblemService extends ChangeNotifier {
     required bool hasBreak,
     String? breakStartTime,
     String? breakEndTime,
+    List<Map<String, String>>? breaks,
+    bool? inPersonEnabled,
+    int? inPersonDurationMinutes,
+    bool? onlineEnabled,
+    int? onlineDurationMinutes,
+    List<String>? onlineWorkingDays,
+    String? onlineStartTime,
+    String? onlineEndTime,
+    int? inPersonBufferMinutes,
+    int? onlineBufferMinutes,
+    int? maxAppointmentsPerDay,
+    bool? allowSimultaneousOnlineAndInPerson,
+    Map<String, List<Map<String, dynamic>>>? blockedTimeRanges,
     List<String>? slots,
     bool applyToUpcomingDays = true,
   }) async {
@@ -7800,10 +7995,23 @@ class PatientProblemService extends ChangeNotifier {
       workingDays: workingDays,
       startTime: startTime,
       endTime: endTime,
-      slotDurationMinutes: slotDurationMinutes,
+      slotDurationMinutes: inPersonDurationMinutes ?? slotDurationMinutes,
       hasBreak: hasBreak,
       breakStartTime: breakStartTime,
       breakEndTime: breakEndTime,
+      breaks: breaks,
+      inPersonEnabled: inPersonEnabled,
+      inPersonDurationMinutes: inPersonDurationMinutes,
+      onlineEnabled: onlineEnabled,
+      onlineDurationMinutes: onlineDurationMinutes,
+      onlineWorkingDays: onlineWorkingDays,
+      onlineStartTime: onlineStartTime,
+      onlineEndTime: onlineEndTime,
+      inPersonBufferMinutes: inPersonBufferMinutes,
+      onlineBufferMinutes: onlineBufferMinutes,
+      maxAppointmentsPerDay: maxAppointmentsPerDay,
+      allowSimultaneousOnlineAndInPerson: allowSimultaneousOnlineAndInPerson,
+      blockedTimeRanges: blockedTimeRanges,
       slots: slots,
       applyToUpcomingDays: applyToUpcomingDays,
     );
@@ -7815,10 +8023,23 @@ class PatientProblemService extends ChangeNotifier {
           workingDays: workingDays,
           startTime: startTime,
           endTime: endTime,
-          slotDurationMinutes: slotDurationMinutes,
+          slotDurationMinutes: inPersonDurationMinutes ?? slotDurationMinutes,
           hasBreak: hasBreak,
           breakStartTime: hasBreak ? breakStartTime : null,
           breakEndTime: hasBreak ? breakEndTime : null,
+          breaks: breaks ?? const [],
+          inPersonEnabled: inPersonEnabled ?? true,
+          inPersonDurationMinutes: inPersonDurationMinutes ?? slotDurationMinutes,
+          onlineEnabled: onlineEnabled ?? true,
+          onlineDurationMinutes: onlineDurationMinutes ?? 20,
+          onlineWorkingDays: onlineWorkingDays,
+          onlineStartTime: onlineStartTime,
+          onlineEndTime: onlineEndTime,
+          inPersonBufferMinutes: inPersonBufferMinutes ?? 10,
+          onlineBufferMinutes: onlineBufferMinutes ?? 5,
+          maxAppointmentsPerDay: maxAppointmentsPerDay,
+          allowSimultaneousOnlineAndInPerson: allowSimultaneousOnlineAndInPerson ?? false,
+          blockedTimeRanges: blockedTimeRanges ?? const {},
           isConfigured: true,
         );
       }
@@ -7827,6 +8048,97 @@ class PatientProblemService extends ChangeNotifier {
       notifyListeners();
     }
     return res;
+  }
+
+  /// Acquire a temporary slot lock for secure atomic booking
+  Future<Map<String, dynamic>> acquireSlotLock({
+    required String dentistId,
+    required DateTime date,
+    required String timeSlot,
+    String consultationType = 'In-Person',
+    String? releasedSlotId,
+    int ttlSeconds = 300,
+  }) async {
+    final pId = currentPatient.id.isNotEmpty ? currentPatient.id : (_safeAuthUserId ?? '');
+    if (pId.isEmpty) {
+      return {
+        'success': false,
+        'reason': 'AUTH_REQUIRED',
+        'message': 'Please sign in to reserve a time slot.',
+      };
+    }
+    return _api.acquireSlotLock(
+      dentistId: dentistId,
+      patientId: pId,
+      date: _formatYmdLocal(date),
+      timeSlot: timeSlot,
+      consultationType: consultationType,
+      releasedSlotId: releasedSlotId,
+      ttlSeconds: ttlSeconds,
+    );
+  }
+
+  /// Release an active slot lock
+  Future<void> releaseSlotLock(String lockId) async {
+    if (lockId.trim().isEmpty) return;
+    final pId = currentPatient.id.isNotEmpty ? currentPatient.id : (_safeAuthUserId ?? '');
+    await _api.releaseSlotLock(lockId: lockId, patientId: pId.isNotEmpty ? pId : null);
+  }
+
+  /// Test helper: seed cached availability for deterministic widget testing
+  void seedAvailabilityForTest(
+    String doctorId,
+    DateTime date,
+    DoctorAvailabilityModel availability, {
+    String? consultationType,
+  }) {
+    final dateStr = _formatYmdLocal(date);
+    final mode = BookingRulesConfig.normalizeConsultationMode(
+      consultationType ?? availability.consultationType,
+    );
+    _availabilityCache['${doctorId}_${dateStr}_$mode'] = availability;
+    _availabilityCache['${doctorId}_$dateStr'] = availability;
+    notifyListeners();
+  }
+
+  /// Fetch patient notification preference for a specific doctor
+  Future<PatientDoctorPreferenceModel?> getPatientDoctorPreference(String dentistId) async {
+    final pId = currentPatient.id.isNotEmpty ? currentPatient.id : (_safeAuthUserId ?? '');
+    if (pId.isEmpty || dentistId.trim().isEmpty) return null;
+    final res = await _api.fetchPatientDoctorPreferences(patientId: pId, dentistId: dentistId);
+    if (res['success'] == true && res['preferences'] is List) {
+      final list = res['preferences'] as List;
+      if (list.isNotEmpty && list.first is Map) {
+        return PatientDoctorPreferenceModel.fromJson(Map<String, dynamic>.from(list.first as Map));
+      }
+    }
+    return null;
+  }
+
+  /// Save patient favorite & earlier-slot notification preference for a doctor
+  Future<Map<String, dynamic>> savePatientDoctorPreference({
+    required String dentistId,
+    required bool isFavorite,
+    required bool notifyEarlierSlots,
+    String preferredConsultationType = 'Any',
+    String? preferredDate,
+    int? earliestTimeMin,
+    int? latestTimeMin,
+  }) async {
+    final pId = currentPatient.id.isNotEmpty ? currentPatient.id : (_safeAuthUserId ?? '');
+    if (pId.isEmpty) {
+      return {'success': false, 'message': 'Sign in to save earlier-slot alerts.'};
+    }
+    return _api.upsertPatientDoctorPreference(
+      patientId: pId,
+      dentistId: dentistId,
+      isFavorite: isFavorite,
+      notifyEarlierSlots: notifyEarlierSlots,
+      preferredConsultationType: preferredConsultationType,
+      preferredDate: preferredDate,
+      earliestTimeMin: earliestTimeMin,
+      latestTimeMin: latestTimeMin,
+    );
   }
 
   /// Admin, Clinic Admin or Doctor publishes/saves availability slots
@@ -8145,7 +8457,7 @@ class PatientProblemService extends ChangeNotifier {
     }
   }
 
-  Future<void> updateDoctorProfessionalProfile({
+  Future<Map<String, dynamic>> updateDoctorProfessionalProfile({
     required String doctorId,
     String? name,
     String? phone,
@@ -8160,40 +8472,119 @@ class PatientProblemService extends ChangeNotifier {
     String? verificationStatus,
     String? bio,
     String? city,
+    String? state,
     String? pincode,
+    double? latitude,
+    double? longitude,
+    bool clearLocation = false,
+    String? consultationMode,
     List<String>? languages,
     Uint8List? photoBytes,
+    String? profilePhotoDataUri,
+    String? profileImageUrl,
+    bool removeProfilePhoto = false,
   }) async {
     int idx = _allDoctors.indexWhere((d) => d.id == doctorId || (d.userId.isNotEmpty && d.userId == doctorId));
     DoctorModel? baseDoc = idx != -1 ? _allDoctors[idx] : currentDoctor;
-    if (baseDoc == null) return;
+    if (baseDoc == null) {
+      return {'success': false, 'message': 'Doctor profile not found.'};
+    }
+
+    final resolvedMode = consultationMode != null
+        ? DoctorConsultationMode.normalize(consultationMode)
+        : baseDoc.consultationMode;
+    final switchingToOnlineOnly = DoctorConsultationMode.isOnlineOnly(resolvedMode);
+
+    final payload = <String, dynamic>{
+      if (name != null) 'name': name,
+      if (phone != null) 'phone': phone,
+      if (specialty != null) 'specialty': specialty,
+      if (qualification != null) 'qualification': qualification,
+      if (experienceYears != null) 'experienceYears': experienceYears,
+      if (consultationMode != null) 'consultationMode': resolvedMode,
+      if (switchingToOnlineOnly) ...{
+        'clinicName': '',
+        'clinicAddress': '',
+        'state': '',
+        'pincode': '',
+        'clearLocation': true,
+      } else ...{
+        if (clinicName != null) 'clinicName': clinicName,
+        if (clinicAddress != null) 'clinicAddress': clinicAddress,
+        if (state != null) 'state': state,
+        if (pincode != null) 'pincode': pincode,
+        if (clearLocation) 'clearLocation': true,
+        if (!clearLocation && latitude != null && longitude != null) ...{
+          'latitude': latitude,
+          'longitude': longitude,
+        },
+      },
+      if (consultationFee != null) 'consultationFee': consultationFee,
+      if (licenseNumber != null) 'licenseNumber': licenseNumber,
+      if (status != null) 'status': status,
+      if (verificationStatus != null) 'verificationStatus': verificationStatus,
+      if (bio != null) 'bio': bio,
+      if (city != null) 'city': city,
+      if (languages != null) 'languages': languages,
+      if (removeProfilePhoto) 'removeProfilePhoto': true,
+      if (!removeProfilePhoto && profilePhotoDataUri != null && profilePhotoDataUri.trim().isNotEmpty)
+        'profilePhoto': profilePhotoDataUri.trim()
+      else if (!removeProfilePhoto && profileImageUrl != null && profileImageUrl.trim().isNotEmpty)
+        'profilePhoto': profileImageUrl.trim(),
+    };
+
+    final apiRes = await ApiService().updateDoctorProfileWithResult(doctorId, payload);
+    final apiCode = (apiRes['code'] ?? '').toString();
+    if (apiRes['success'] != true && apiCode.startsWith('PROFILE_IMAGE_')) {
+      return apiRes;
+    }
+
+    String? resolvedImageUrl = removeProfilePhoto ? null : (profileImageUrl ?? baseDoc.profileImageUrl);
+    Uint8List? resolvedPhotoBytes = removeProfilePhoto ? null : (photoBytes ?? baseDoc.photoBytes);
+    final returnedDoctor = apiRes['doctor'];
+    if (returnedDoctor is Map && returnedDoctor.containsKey('profilePhoto')) {
+      final parsed = DoctorModel.parseProfilePhoto(returnedDoctor['profilePhoto']);
+      if (parsed.url != null && parsed.url!.isNotEmpty) {
+        resolvedImageUrl = parsed.url;
+      } else if (removeProfilePhoto) {
+        resolvedImageUrl = null;
+        resolvedPhotoBytes = null;
+      }
+      if (parsed.bytes != null && parsed.bytes!.isNotEmpty) {
+        resolvedPhotoBytes = parsed.bytes;
+      }
+    }
 
     final updatedDoc = DoctorModel(
       id: baseDoc.id,
       userId: baseDoc.userId,
+      clinicId: switchingToOnlineOnly ? '' : baseDoc.clinicId,
       name: name ?? baseDoc.name,
       specialty: specialty ?? baseDoc.specialty,
       qualification: qualification ?? baseDoc.qualification,
       experienceYears: experienceYears ?? baseDoc.experienceYears,
       rating: baseDoc.rating,
       reviewCount: baseDoc.reviewCount,
-      clinicName: clinicName ?? baseDoc.clinicName,
+      clinicName: switchingToOnlineOnly ? '' : (clinicName ?? baseDoc.clinicName),
       phone: phone ?? baseDoc.phone,
       email: baseDoc.email,
       status: status ?? baseDoc.status,
+      onlineStatus: baseDoc.onlineStatus,
       verificationStatus: verificationStatus ?? baseDoc.verificationStatus,
       nextAvailableSlots: baseDoc.nextAvailableSlots,
       consultationFee: consultationFee ?? baseDoc.consultationFee,
       licenseNumber: licenseNumber ?? baseDoc.licenseNumber,
-      photoBytes: photoBytes ?? baseDoc.photoBytes,
-      clinicAddress: clinicAddress ?? baseDoc.clinicAddress,
-      pincode: pincode ?? baseDoc.pincode,
+      photoBytes: resolvedPhotoBytes,
+      profileImageUrl: resolvedImageUrl,
+      clinicAddress: switchingToOnlineOnly ? '' : (clinicAddress ?? baseDoc.clinicAddress),
+      pincode: switchingToOnlineOnly ? '' : (pincode ?? baseDoc.pincode),
       city: city ?? baseDoc.city,
-      state: baseDoc.state,
+      state: switchingToOnlineOnly ? '' : (state ?? baseDoc.state),
       bio: bio ?? baseDoc.bio,
       languages: languages ?? baseDoc.languages,
-      latitude: baseDoc.latitude,
-      longitude: baseDoc.longitude,
+      latitude: (switchingToOnlineOnly || clearLocation) ? null : (latitude ?? baseDoc.latitude),
+      longitude: (switchingToOnlineOnly || clearLocation) ? null : (longitude ?? baseDoc.longitude),
+      consultationMode: resolvedMode,
       procedureFees: baseDoc.procedureFees,
     );
 
@@ -8212,24 +8603,11 @@ class PatientProblemService extends ChangeNotifier {
 
     _saveToStorage();
     notifyListeners();
-
-    await ApiService().updateDoctorProfileApi(doctorId, {
-      if (name != null) 'name': name,
-      if (phone != null) 'phone': phone,
-      if (specialty != null) 'specialty': specialty,
-      if (qualification != null) 'qualification': qualification,
-      if (experienceYears != null) 'experienceYears': experienceYears,
-      if (clinicName != null) 'clinicName': clinicName,
-      if (clinicAddress != null) 'clinicAddress': clinicAddress,
-      if (consultationFee != null) 'consultationFee': consultationFee,
-      if (licenseNumber != null) 'licenseNumber': licenseNumber,
-      if (status != null) 'status': status,
-      if (verificationStatus != null) 'verificationStatus': verificationStatus,
-      if (bio != null) 'bio': bio,
-      if (city != null) 'city': city,
-      if (pincode != null) 'pincode': pincode,
-      if (languages != null) 'languages': languages,
-    });
+    return {
+      'success': apiRes['success'] == true || !apiCode.startsWith('PROFILE_IMAGE_'),
+      'doctor': updatedDoc,
+      if (apiRes['message'] != null) 'message': apiRes['message'],
+    };
   }
 
   /// Toggle Doctor Availability ON/OFF persistently and update local + patient-facing state immediately.
@@ -8265,6 +8643,7 @@ class PatientProblemService extends ChangeNotifier {
         consultationFee: previousDoc.consultationFee,
         licenseNumber: previousDoc.licenseNumber,
         photoBytes: previousDoc.photoBytes,
+        profileImageUrl: previousDoc.profileImageUrl,
         clinicAddress: previousDoc.clinicAddress,
         pincode: previousDoc.pincode,
         city: previousDoc.city,

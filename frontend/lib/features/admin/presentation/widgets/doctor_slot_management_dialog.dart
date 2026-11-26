@@ -53,6 +53,20 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
   bool _hasBreak = true;
   String _breakStartTime = '01:00 PM';
   String _breakEndTime = '02:00 PM';
+  List<Map<String, String>> _extraBreaks = [];
+  bool _inPersonEnabled = true;
+  bool _onlineEnabled = true;
+  int _onlineDuration = 20;
+  int _inPersonBuffer = 10;
+  int _onlineBuffer = 5;
+  bool _useSeparateOnlineHours = false;
+  String _onlineStartTime = '10:00 AM';
+  String _onlineEndTime = '04:00 PM';
+  bool _allowSimultaneousOnlineAndInPerson = false;
+  final TextEditingController _maxPerDayController = TextEditingController();
+  String _customBlockStartTime = '11:00 AM';
+  String _customBlockEndTime = '12:00 PM';
+  final TextEditingController _customBlockReasonController = TextEditingController();
   List<String> _selectedWorkingDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
   bool _applyBatchWorkingDays = true;
 
@@ -173,6 +187,8 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
   void dispose() {
     _blockedReasonController.dispose();
     _customSlotController.dispose();
+    _maxPerDayController.dispose();
+    _customBlockReasonController.dispose();
     super.dispose();
   }
 
@@ -256,13 +272,43 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
 
         if (candidateStart.trim().isNotEmpty) _startTime = candidateStart;
         if (candidateEnd.trim().isNotEmpty) _endTime = candidateEnd;
-        if ([15, 30, 45, 60].contains(candidateDur)) _slotDuration = candidateDur;
+        if ([15, 20, 30, 45, 60].contains(candidateDur)) _slotDuration = candidateDur;
         _hasBreak = candidateHasBreak;
         if (candidateBreakStart != null && candidateBreakStart.trim().isNotEmpty) {
           _breakStartTime = candidateBreakStart;
         }
         if (candidateBreakEnd != null && candidateBreakEnd.trim().isNotEmpty) {
           _breakEndTime = candidateBreakEnd;
+        }
+        if (schedule != null) {
+          _inPersonEnabled = schedule.inPersonEnabled;
+          _onlineEnabled = schedule.onlineEnabled;
+          if ([15, 20, 30, 45, 60].contains(schedule.onlineDurationMinutes)) {
+            _onlineDuration = schedule.onlineDurationMinutes;
+          }
+          _inPersonBuffer = schedule.inPersonBufferMinutes;
+          _onlineBuffer = schedule.onlineBufferMinutes;
+          _allowSimultaneousOnlineAndInPerson = schedule.allowSimultaneousOnlineAndInPerson;
+          _maxPerDayController.text =
+              schedule.maxAppointmentsPerDay != null ? '${schedule.maxAppointmentsPerDay}' : '';
+          if (schedule.onlineStartTime != null &&
+              schedule.onlineStartTime!.trim().isNotEmpty &&
+              schedule.onlineEndTime != null &&
+              schedule.onlineEndTime!.trim().isNotEmpty) {
+            _useSeparateOnlineHours = true;
+            _onlineStartTime = schedule.onlineStartTime!;
+            _onlineEndTime = schedule.onlineEndTime!;
+          } else {
+            _useSeparateOnlineHours = false;
+          }
+          if (schedule.breaks.length > 1) {
+            _extraBreaks = schedule.breaks
+                .skip(1)
+                .map((b) => Map<String, String>.from(b))
+                .toList();
+          } else {
+            _extraBreaks = [];
+          }
         }
 
         _slots = List<String>.from(avail.allSlots);
@@ -472,6 +518,60 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
     });
   }
 
+  List<Map<String, String>> _buildAllBreaksPayload() {
+    if (!_hasBreak) return const [];
+    final all = <Map<String, String>>[
+      {'startTime': _breakStartTime, 'endTime': _breakEndTime, 'label': 'Lunch Break'},
+    ];
+    for (final b in _extraBreaks) {
+      final s = (b['startTime'] ?? '').trim();
+      final e = (b['endTime'] ?? '').trim();
+      if (s.isNotEmpty && e.isNotEmpty && _timeToMinutes(e) > _timeToMinutes(s)) {
+        all.add({'startTime': s, 'endTime': e, 'label': (b['label'] ?? 'Break').trim()});
+      }
+    }
+    return all;
+  }
+
+  Future<void> _handleAddCustomBlockedRange() async {
+    if (_selectedDoctor == null) return;
+    if (_timeToMinutes(_customBlockEndTime) <= _timeToMinutes(_customBlockStartTime)) {
+      setState(() {
+        _statusIsError = true;
+        _statusMessage = '⚠️ Blocked range end time must be after start time.';
+      });
+      return;
+    }
+    final docId = _selectedDoctor!.id.isNotEmpty ? _selectedDoctor!.id : _selectedDoctor!.userId;
+    setState(() {
+      _isLoading = true;
+      _statusMessage = null;
+    });
+    final res = await _service.blockDoctorTimeSlot(
+      doctorId: docId,
+      date: _selectedDate,
+      startTime: _customBlockStartTime,
+      endTime: _customBlockEndTime,
+      reason: _customBlockReasonController.text.trim().isNotEmpty
+          ? _customBlockReasonController.text.trim()
+          : 'Blocked Time Range',
+    );
+    if (!mounted) return;
+    setState(() {
+      _isLoading = false;
+      if (res['success'] == true) {
+        final rawBlocked = (res['blockedSlots'] as List<dynamic>?) ?? const [];
+        _blockedSlots = rawBlocked.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        _customBlockReasonController.clear();
+        _statusIsError = false;
+        _statusMessage = '✓ Blocked range $_customBlockStartTime - $_customBlockEndTime saved.';
+      } else {
+        _statusIsError = true;
+        _statusMessage = '⚠️ ${res['message'] ?? 'Failed to save blocked range.'}';
+      }
+    });
+  }
+
   void _generateSlots() {
     if (_timeToMinutes(_endTime) <= _timeToMinutes(_startTime)) {
       setState(() {
@@ -489,13 +589,27 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
       return;
     }
 
-    final generated = _service.generateTimeSlots(
+    final baseGenerated = _service.generateTimeSlots(
       startTime: _startTime,
       endTime: _endTime,
       durationMinutes: _slotDuration,
       breakStartTime: _hasBreak ? _breakStartTime : null,
       breakEndTime: _hasBreak ? _breakEndTime : null,
     );
+    // Filter out any additional breaks beyond the primary break
+    final extraBreakRanges = _hasBreak
+        ? _extraBreaks
+            .map((b) => (start: _timeToMinutes(b['startTime'] ?? ''), end: _timeToMinutes(b['endTime'] ?? '')))
+            .where((r) => r.end > r.start)
+            .toList()
+        : const <({int start, int end})>[];
+    final generated = extraBreakRanges.isEmpty
+        ? baseGenerated
+        : baseGenerated.where((slot) {
+            final s = _timeToMinutes(slot);
+            final e = s + _slotDuration;
+            return !extraBreakRanges.any((br) => s < br.end && e > br.start);
+          }).toList();
     setState(() {
       _slots = generated;
       if (_statusIsError) {
@@ -545,7 +659,18 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
         .map((d) => _shortToFullDay[d] ?? d)
         .toList();
 
-    // 1. Save persistent weekly schedule (Working Days, Hours, Lunch Break, Slot Duration)
+    final maxPerDayText = _maxPerDayController.text.trim();
+    final parsedMaxPerDay = maxPerDayText.isNotEmpty ? int.tryParse(maxPerDayText) : null;
+    if (_useSeparateOnlineHours && _timeToMinutes(_onlineEndTime) <= _timeToMinutes(_onlineStartTime)) {
+      setState(() {
+        _isSaving = false;
+        _statusIsError = true;
+        _statusMessage = '⚠️ Online end time must be after Online start time.';
+      });
+      return;
+    }
+
+    // 1. Save persistent weekly & smart schedule (never affects existing confirmed bookings)
     final schedRes = await _service.saveDoctorSchedule(
       doctorId: docId,
       workingDays: fullWorkingDays,
@@ -555,6 +680,17 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
       hasBreak: _hasBreak,
       breakStartTime: _hasBreak ? _breakStartTime : null,
       breakEndTime: _hasBreak ? _breakEndTime : null,
+      breaks: _buildAllBreaksPayload(),
+      inPersonEnabled: _inPersonEnabled,
+      inPersonDurationMinutes: _slotDuration,
+      onlineEnabled: _onlineEnabled,
+      onlineDurationMinutes: _onlineDuration,
+      onlineStartTime: _useSeparateOnlineHours ? _onlineStartTime : null,
+      onlineEndTime: _useSeparateOnlineHours ? _onlineEndTime : null,
+      inPersonBufferMinutes: _inPersonBuffer,
+      onlineBufferMinutes: _onlineBuffer,
+      maxAppointmentsPerDay: (parsedMaxPerDay != null && parsedMaxPerDay > 0) ? parsedMaxPerDay : null,
+      allowSimultaneousOnlineAndInPerson: _allowSimultaneousOnlineAndInPerson,
       slots: _isBlocked ? null : _slots,
       applyToUpcomingDays: _applyBatchWorkingDays,
     );
@@ -1377,7 +1513,7 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
                                         const SizedBox(height: 4),
                                         DropdownButtonFormField<int>(
                                           key: const Key('schedule_duration_dropdown'),
-                                          value: [15, 30, 45, 60].contains(_slotDuration) ? _slotDuration : 30,
+                                          value: [15, 20, 30, 45, 60].contains(_slotDuration) ? _slotDuration : 30,
                                           decoration: InputDecoration(
                                             filled: true,
                                             fillColor: const Color(0xFFF8FAFC),
@@ -1386,6 +1522,7 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
                                           ),
                                           items: const [
                                             DropdownMenuItem(value: 15, child: Text('15m', style: TextStyle(fontSize: 12))),
+                                            DropdownMenuItem(value: 20, child: Text('20m', style: TextStyle(fontSize: 12))),
                                             DropdownMenuItem(value: 30, child: Text('30m', style: TextStyle(fontSize: 12))),
                                             DropdownMenuItem(value: 45, child: Text('45m', style: TextStyle(fontSize: 12))),
                                             DropdownMenuItem(value: 60, child: Text('60m', style: TextStyle(fontSize: 12))),
@@ -1489,7 +1626,422 @@ class _DoctorSlotManagementDialogState extends State<DoctorSlotManagementDialog>
                                           ),
                                         ],
                                       ),
+                                      const SizedBox(height: 8),
+                                      // Additional Breaks (Multiple Breaks Per Day)
+                                      ..._extraBreaks.asMap().entries.map((entry) {
+                                        final idx = entry.key;
+                                        final br = entry.value;
+                                        return Padding(
+                                          padding: const EdgeInsets.only(bottom: 6),
+                                          child: Row(
+                                            children: [
+                                              Expanded(
+                                                child: DropdownButtonFormField<String>(
+                                                  key: Key('extra_break_start_$idx'),
+                                                  value: br['startTime'] ?? '04:00 PM',
+                                                  decoration: InputDecoration(
+                                                    labelText: 'Break ${idx + 2} Start',
+                                                    filled: true,
+                                                    fillColor: Colors.white,
+                                                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                                  ),
+                                                  items: _dropdownOptions(
+                                                    [..._startTimes, '03:00 PM', '03:30 PM', '04:00 PM', '04:30 PM', '05:00 PM'],
+                                                    br['startTime'] ?? '04:00 PM',
+                                                  ).toSet().map((t) => DropdownMenuItem(value: t, child: Text(t, style: const TextStyle(fontSize: 11.5)))).toList(),
+                                                  onChanged: (val) {
+                                                    if (val == null) return;
+                                                    setState(() => _extraBreaks[idx]['startTime'] = val);
+                                                    _generateSlots();
+                                                  },
+                                                ),
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Expanded(
+                                                child: DropdownButtonFormField<String>(
+                                                  key: Key('extra_break_end_$idx'),
+                                                  value: br['endTime'] ?? '04:30 PM',
+                                                  decoration: InputDecoration(
+                                                    labelText: 'Break ${idx + 2} End',
+                                                    filled: true,
+                                                    fillColor: Colors.white,
+                                                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                                  ),
+                                                  items: _dropdownOptions(
+                                                    [..._endTimes, '10:30 AM', '11:30 AM', '04:30 PM', '05:30 PM'],
+                                                    br['endTime'] ?? '04:30 PM',
+                                                  ).toSet().map((t) => DropdownMenuItem(value: t, child: Text(t, style: const TextStyle(fontSize: 11.5)))).toList(),
+                                                  onChanged: (val) {
+                                                    if (val == null) return;
+                                                    setState(() => _extraBreaks[idx]['endTime'] = val);
+                                                    _generateSlots();
+                                                  },
+                                                ),
+                                              ),
+                                              IconButton(
+                                                key: Key('remove_extra_break_$idx'),
+                                                icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Color(0xFFFE3434)),
+                                                onPressed: () {
+                                                  setState(() => _extraBreaks.removeAt(idx));
+                                                  _generateSlots();
+                                                },
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      }),
+                                      Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: TextButton.icon(
+                                          key: const Key('add_extra_break_btn'),
+                                          onPressed: () {
+                                            setState(() {
+                                              _extraBreaks.add({
+                                                'startTime': '04:00 PM',
+                                                'endTime': '04:30 PM',
+                                                'label': 'Tea Break',
+                                              });
+                                            });
+                                            _generateSlots();
+                                          },
+                                          icon: const Icon(Icons.add_circle_outline_rounded, size: 15),
+                                          label: const Text('Add Another Break', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                                        ),
+                                      ),
                                     ],
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+
+                              // 6B. Smart Online & In-Person Configuration, Buffers & Daily Limits
+                              Container(
+                                key: const Key('smart_online_inperson_config_card'),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Online & In-Person Rules (Asia/Kolkata)',
+                                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: AppTheme.textDark),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Row(
+                                            children: [
+                                              const Expanded(
+                                                child: Text(
+                                                  'In-Person',
+                                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                              Switch(
+                                                key: const Key('in_person_enabled_switch'),
+                                                value: _inPersonEnabled,
+                                                activeColor: AppTheme.primaryBlue,
+                                                onChanged: (v) => setState(() => _inPersonEnabled = v),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Row(
+                                            children: [
+                                              const Expanded(
+                                                child: Text(
+                                                  'Online',
+                                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                              Switch(
+                                                key: const Key('online_enabled_switch'),
+                                                value: _onlineEnabled,
+                                                activeColor: AppTheme.primaryBlue,
+                                                onChanged: (v) => setState(() => _onlineEnabled = v),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: DropdownButtonFormField<int>(
+                                            key: const Key('online_duration_dropdown'),
+                                            value: [15, 20, 30, 45, 60].contains(_onlineDuration) ? _onlineDuration : 20,
+                                            decoration: InputDecoration(
+                                              labelText: 'Online Duration',
+                                              filled: true,
+                                              fillColor: Colors.white,
+                                              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                            ),
+                                            items: const [15, 20, 30, 45, 60]
+                                                .map((m) => DropdownMenuItem(value: m, child: Text('${m}m', style: const TextStyle(fontSize: 12))))
+                                                .toList(),
+                                            onChanged: (v) => setState(() => _onlineDuration = v ?? 20),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: DropdownButtonFormField<int>(
+                                            key: const Key('in_person_buffer_dropdown'),
+                                            value: [0, 5, 10, 15, 20, 30].contains(_inPersonBuffer) ? _inPersonBuffer : 10,
+                                            decoration: InputDecoration(
+                                              labelText: 'In-Person Buffer',
+                                              filled: true,
+                                              fillColor: Colors.white,
+                                              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                            ),
+                                            items: const [0, 5, 10, 15, 20, 30]
+                                                .map((m) => DropdownMenuItem(value: m, child: Text('${m}m', style: const TextStyle(fontSize: 12))))
+                                                .toList(),
+                                            onChanged: (v) => setState(() => _inPersonBuffer = v ?? 10),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: DropdownButtonFormField<int>(
+                                            key: const Key('online_buffer_dropdown'),
+                                            value: [0, 5, 10, 15, 20, 30].contains(_onlineBuffer) ? _onlineBuffer : 5,
+                                            decoration: InputDecoration(
+                                              labelText: 'Online Buffer',
+                                              filled: true,
+                                              fillColor: Colors.white,
+                                              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                            ),
+                                            items: const [0, 5, 10, 15, 20, 30]
+                                                .map((m) => DropdownMenuItem(value: m, child: Text('${m}m', style: const TextStyle(fontSize: 12))))
+                                                .toList(),
+                                            onChanged: (v) => setState(() => _onlineBuffer = v ?? 5),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: TextField(
+                                            key: const Key('max_appointments_per_day_input'),
+                                            controller: _maxPerDayController,
+                                            keyboardType: TextInputType.number,
+                                            decoration: InputDecoration(
+                                              labelText: 'Max Appointments / Day (optional)',
+                                              hintText: 'Unlimited',
+                                              filled: true,
+                                              fillColor: Colors.white,
+                                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                            ),
+                                            style: const TextStyle(fontSize: 12),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Row(
+                                      children: [
+                                        const Expanded(
+                                          child: Text(
+                                            'Use separate Online working hours',
+                                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        Switch(
+                                          key: const Key('separate_online_hours_switch'),
+                                          value: _useSeparateOnlineHours,
+                                          activeColor: AppTheme.primaryBlue,
+                                          onChanged: (v) => setState(() => _useSeparateOnlineHours = v),
+                                        ),
+                                      ],
+                                    ),
+                                    if (_useSeparateOnlineHours) ...[
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: DropdownButtonFormField<String>(
+                                              key: const Key('online_start_time_dropdown'),
+                                              value: _onlineStartTime,
+                                              decoration: InputDecoration(
+                                                labelText: 'Online Start',
+                                                filled: true,
+                                                fillColor: Colors.white,
+                                                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                              ),
+                                              items: _dropdownOptions(_startTimes, _onlineStartTime)
+                                                  .map((t) => DropdownMenuItem(value: t, child: Text(t, style: const TextStyle(fontSize: 12))))
+                                                  .toList(),
+                                              onChanged: (v) => setState(() => _onlineStartTime = v ?? _onlineStartTime),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: DropdownButtonFormField<String>(
+                                              key: const Key('online_end_time_dropdown'),
+                                              value: _onlineEndTime,
+                                              decoration: InputDecoration(
+                                                labelText: 'Online End',
+                                                filled: true,
+                                                fillColor: Colors.white,
+                                                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                              ),
+                                              items: _dropdownOptions(_endTimes, _onlineEndTime)
+                                                  .map((t) => DropdownMenuItem(value: t, child: Text(t, style: const TextStyle(fontSize: 12))))
+                                                  .toList(),
+                                              onChanged: (v) => setState(() => _onlineEndTime = v ?? _onlineEndTime),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 6),
+                                    ],
+                                    Row(
+                                      children: [
+                                        const Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                'Allow simultaneous Online & In-Person capacity',
+                                                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                              Text(
+                                                'Off by default so one doctor cannot be double-booked across modes',
+                                                style: TextStyle(fontSize: 10.5, color: AppTheme.textMuted),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        Switch(
+                                          key: const Key('allow_simultaneous_modes_switch'),
+                                          value: _allowSimultaneousOnlineAndInPerson,
+                                          activeColor: AppTheme.primaryBlue,
+                                          onChanged: (v) => setState(() => _allowSimultaneousOnlineAndInPerson = v),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    const Text(
+                                      'Note: Schedule updates never cancel or alter existing confirmed appointments.',
+                                      style: TextStyle(fontSize: 10.5, color: AppTheme.textMuted, fontStyle: FontStyle.italic),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+
+                              // 6C. Custom Blocked Time Range for Selected Date
+                              Container(
+                                key: const Key('custom_blocked_range_card'),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Block Custom Time Range ($dateStr)',
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: AppTheme.textDark),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: DropdownButtonFormField<String>(
+                                            key: const Key('custom_block_start_dropdown'),
+                                            value: _customBlockStartTime,
+                                            decoration: InputDecoration(
+                                              labelText: 'From',
+                                              filled: true,
+                                              fillColor: Colors.white,
+                                              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                            ),
+                                            items: _dropdownOptions([..._startTimes, '03:00 PM', '04:00 PM'], _customBlockStartTime)
+                                                .toSet()
+                                                .map((t) => DropdownMenuItem(value: t, child: Text(t, style: const TextStyle(fontSize: 11.5))))
+                                                .toList(),
+                                            onChanged: (v) => setState(() => _customBlockStartTime = v ?? _customBlockStartTime),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: DropdownButtonFormField<String>(
+                                            key: const Key('custom_block_end_dropdown'),
+                                            value: _customBlockEndTime,
+                                            decoration: InputDecoration(
+                                              labelText: 'To',
+                                              filled: true,
+                                              fillColor: Colors.white,
+                                              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                            ),
+                                            items: _dropdownOptions([..._endTimes, '11:30 AM', '12:00 PM', '12:30 PM'], _customBlockEndTime)
+                                                .toSet()
+                                                .map((t) => DropdownMenuItem(value: t, child: Text(t, style: const TextStyle(fontSize: 11.5))))
+                                                .toList(),
+                                            onChanged: (v) => setState(() => _customBlockEndTime = v ?? _customBlockEndTime),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: TextField(
+                                            key: const Key('custom_block_reason_input'),
+                                            controller: _customBlockReasonController,
+                                            decoration: InputDecoration(
+                                              hintText: 'Reason (e.g. Surgery / Rounds)',
+                                              filled: true,
+                                              fillColor: Colors.white,
+                                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                            ),
+                                            style: const TextStyle(fontSize: 12),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        ElevatedButton(
+                                          key: const Key('add_custom_block_range_btn'),
+                                          onPressed: _handleAddCustomBlockedRange,
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: const Color(0xFFFE3434),
+                                            foregroundColor: Colors.white,
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                          ),
+                                          child: const Text('Block Range', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                                        ),
+                                      ],
+                                    ),
                                   ],
                                 ),
                               ),

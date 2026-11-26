@@ -411,6 +411,7 @@ async function runTests() {
         });
 
         await asyncTest('8. Schemas.User.findByIdAndUpdate strips unsupported address column from Supabase users update payload', async () => {
+            const mockFindByIdAndUpdate = User.findByIdAndUpdate;
             User.findByIdAndUpdate = origFindByIdAndUpdate;
             const origFrom = supabaseAdmin.from;
             const capturedUpdates = [];
@@ -463,6 +464,196 @@ async function runTests() {
                 assert.strictEqual(updated.address, 'Madhapur Lane 2', 'address must still unpack from device_token metadata');
             } finally {
                 supabaseAdmin.from = origFrom;
+                User.findByIdAndUpdate = mockFindByIdAndUpdate;
+            }
+        });
+
+        await asyncTest('9. Patient POST /auth/register & PUT /auth/patient/profile accept null/empty image, pincode, and age (and also accept all optional fields)', async () => {
+            // 9A. Patient registration without image, age, and pincode
+            const regNoOpts = await requestJson(baseUrl, 'POST', '/auth/register', {
+                name: 'Sita Devi',
+                phone: '9876511001',
+                role: 'Patient',
+                city: 'Hyderabad',
+                age: null,
+                pincode: '',
+                profilePhoto: null,
+            });
+            assert.strictEqual(regNoOpts.status, 201);
+            assert.strictEqual(regNoOpts.body.success, true);
+            assert.strictEqual(regNoOpts.body.user.age, '');
+            assert.strictEqual(regNoOpts.body.user.pincode, '');
+            assert.strictEqual(regNoOpts.body.user.profilePhoto, null);
+
+            // 9B. Patient profile completion without image, pincode, or age (Gender only)
+            const patToken = regNoOpts.body.accessToken;
+            const completeMinimal = await requestJson(baseUrl, 'PUT', '/auth/patient/profile', {
+                gender: 'Female',
+                pincode: '',
+                age: null,
+                profilePhoto: null,
+                completeProfile: true,
+            }, { Authorization: `Bearer ${patToken}` });
+            assert.strictEqual(completeMinimal.status, 200);
+            assert.strictEqual(completeMinimal.body.success, true);
+            assert.strictEqual(completeMinimal.body.user.isProfileComplete, true);
+
+            // 9C. Patient registration WITH all optional fields
+            const regWithAll = await requestJson(baseUrl, 'POST', '/auth/register', {
+                name: 'Lakshmi Rao',
+                phone: '9876511002',
+                role: 'Patient',
+                city: 'Hyderabad',
+                age: '31',
+                gender: 'Female',
+                pincode: '500081',
+                profilePhoto: 'https://ojinzcdldwugpnxrnjcq.supabase.co/storage/v1/object/public/dentaguru-storage/avatars/patients/p1.png',
+            });
+            assert.strictEqual(regWithAll.status, 201);
+            assert.strictEqual(regWithAll.body.user.age, '31');
+            assert.strictEqual(regWithAll.body.user.pincode, '500081');
+            assert.ok(regWithAll.body.user.profilePhoto.includes('/dentaguru-storage/'));
+        });
+
+        await asyncTest('10. Doctor POST /auth/register uploads profile image to Supabase Storage, saves URL, succeeds without image, and handles upload failures clearly', async () => {
+            const supabaseStorageService = require('../src/services/supabaseStorageService');
+            const origUploadFile = supabaseStorageService.uploadFile;
+            const origDentistCreate = Dentist.create;
+            const origNotifCreate = Schemas.Notification.create;
+            let capturedUploadArgs = null;
+            const mockPublicUrl = 'https://ojinzcdldwugpnxrnjcq.supabase.co/storage/v1/object/public/dentaguru-storage/avatars/doctors/test_doc.png';
+            const tinyPngDataUri = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+            Dentist.create = async (doc) => ({ id: `dent-${Date.now()}`, ...doc });
+            Schemas.Notification.create = async () => ({ id: 'notif-mock' });
+
+            try {
+                // 10A. Upload succeeds -> URL saved to users.biometric_token and returned in user.profilePhoto
+                supabaseStorageService.uploadFile = async (buf, filePath, mime) => {
+                    capturedUploadArgs = { size: buf.length, filePath, mime };
+                    return { success: true, path: filePath, publicUrl: mockPublicUrl, bucket: 'dentaguru-storage' };
+                };
+
+                const docWithPhoto = await requestJson(baseUrl, 'POST', '/auth/register', {
+                    name: 'Dr. Kavitha Menon',
+                    phone: '9876522001',
+                    role: 'Dentist',
+                    city: 'Hyderabad',
+                    specialty: 'Cardiology',
+                    qualification: 'MBBS, MD',
+                    experienceYears: 7,
+                    profilePhoto: tinyPngDataUri,
+                });
+                assert.strictEqual(docWithPhoto.status, 201);
+                assert.strictEqual(docWithPhoto.body.success, true);
+                assert.ok(capturedUploadArgs && capturedUploadArgs.filePath.startsWith('avatars/doctors/'));
+                assert.strictEqual(capturedUploadArgs.mime, 'image/png');
+                assert.strictEqual(docWithPhoto.body.user.profilePhoto, mockPublicUrl);
+
+                // 10B. Doctor registration WITHOUT image succeeds cleanly (optional)
+                const docNoPhoto = await requestJson(baseUrl, 'POST', '/auth/register', {
+                    name: 'Dr. Vikram Patel',
+                    phone: '9876522002',
+                    role: 'Dentist',
+                    city: 'Hyderabad',
+                    specialty: 'General Medicine',
+                    profilePhoto: null,
+                });
+                assert.strictEqual(docNoPhoto.status, 201);
+                assert.strictEqual(docNoPhoto.body.success, true);
+                assert.strictEqual(docNoPhoto.body.user.profilePhoto, null);
+
+                // 10C. Upload failure returns clear 502 error with PROFILE_IMAGE_UPLOAD_FAILED
+                supabaseStorageService.uploadFile = async () => {
+                    throw new Error('Bucket temporarily unavailable');
+                };
+                const docFailedUpload = await requestJson(baseUrl, 'POST', '/auth/register', {
+                    name: 'Dr. Upload Fail',
+                    phone: '9876522003',
+                    role: 'Dentist',
+                    city: 'Hyderabad',
+                    specialty: 'Dentistry',
+                    profilePhoto: tinyPngDataUri,
+                });
+                assert.strictEqual(docFailedUpload.status, 502);
+                assert.strictEqual(docFailedUpload.body.success, false);
+                assert.strictEqual(docFailedUpload.body.code, 'PROFILE_IMAGE_UPLOAD_FAILED');
+                assert.ok(String(docFailedUpload.body.message || '').toLowerCase().includes('upload'));
+            } finally {
+                supabaseStorageService.uploadFile = origUploadFile;
+                Dentist.create = origDentistCreate;
+                Schemas.Notification.create = origNotifCreate;
+            }
+        });
+
+        await asyncTest('11. PUT /doctors/:id/profile uploads new doctor photo to Supabase Storage, saves URL, removes photo, and handles upload failure', async () => {
+            const supabaseStorageService = require('../src/services/supabaseStorageService');
+            const jwt = require('jsonwebtoken');
+            const { getJwtSecret } = require('../src/config/secrets');
+            const origUploadFile = supabaseStorageService.uploadFile;
+            const origDentistUpdate = Dentist.findByIdAndUpdate;
+            const origDentistFindByIdLocal = Dentist.findById;
+            const tinyPngDataUri = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+            const editedPublicUrl = 'https://ojinzcdldwugpnxrnjcq.supabase.co/storage/v1/object/public/dentaguru-storage/avatars/doctors/edited_doc.png';
+
+            const docUser = await User.create({
+                id: 'doc-edit-usr-1',
+                name: 'Dr. Edit Test',
+                phone: '9876533001',
+                email: 'docedit@test.in',
+                role: 'DOCTOR',
+            });
+            const docToken = jwt.sign({ id: docUser.id, role: 'DOCTOR' }, getJwtSecret(), { expiresIn: '1h' });
+
+            const dentistRec = {
+                id: 'dent-edit-1',
+                user_id: docUser.id,
+                speciality: 'Cardiology',
+                qualifications: 'MBBS, MD',
+                availability_status: 'Available',
+            };
+            Dentist.findByIdAndUpdate = async (_id, data) => {
+                Object.assign(dentistRec, data);
+                return { ...dentistRec, users: await User.findById(docUser.id) };
+            };
+            Dentist.findById = async () => ({ ...dentistRec, users: await User.findById(docUser.id) });
+
+            try {
+                // 11A. Upload succeeds on Edit Profile
+                supabaseStorageService.uploadFile = async (_buf, filePath) => ({
+                    success: true,
+                    path: filePath,
+                    publicUrl: editedPublicUrl,
+                    bucket: 'dentaguru-storage',
+                });
+                const editUpload = await requestJson(baseUrl, 'PUT', '/doctors/dent-edit-1/profile', {
+                    name: 'Dr. Edit Updated',
+                    profilePhoto: tinyPngDataUri,
+                }, { Authorization: `Bearer ${docToken}` });
+                assert.strictEqual(editUpload.status, 200);
+                assert.strictEqual(editUpload.body.success, true);
+                assert.strictEqual(editUpload.body.doctor.profilePhoto, editedPublicUrl);
+                assert.strictEqual((await User.findById(docUser.id)).biometric_token, editedPublicUrl);
+
+                // 11B. Remove photo clears users.biometric_token
+                const editRemove = await requestJson(baseUrl, 'PUT', '/doctors/dent-edit-1/profile', {
+                    removeProfilePhoto: true,
+                }, { Authorization: `Bearer ${docToken}` });
+                assert.strictEqual(editRemove.status, 200);
+                assert.strictEqual(editRemove.body.doctor.profilePhoto, null);
+                assert.strictEqual((await User.findById(docUser.id)).biometric_token, null);
+
+                // 11C. Upload failure returns 502 PROFILE_IMAGE_UPLOAD_FAILED
+                supabaseStorageService.uploadFile = async () => { throw new Error('Storage down'); };
+                const editFail = await requestJson(baseUrl, 'PUT', '/doctors/dent-edit-1/profile', {
+                    profilePhoto: tinyPngDataUri,
+                }, { Authorization: `Bearer ${docToken}` });
+                assert.strictEqual(editFail.status, 502);
+                assert.strictEqual(editFail.body.code, 'PROFILE_IMAGE_UPLOAD_FAILED');
+            } finally {
+                supabaseStorageService.uploadFile = origUploadFile;
+                Dentist.findByIdAndUpdate = origDentistUpdate;
+                Dentist.findById = origDentistFindByIdLocal;
             }
         });
     } finally {

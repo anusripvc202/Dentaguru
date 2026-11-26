@@ -15,6 +15,7 @@ import '../../../../core/services/supabase_service.dart';
 import '../../../../core/services/analytics_service.dart';
 import '../../../../core/services/session_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../../core/utils/clinic_directions_helper.dart';
 import '../../../../core/widgets/map_location_picker_dialog.dart';
 import '../widgets/gs_health_registration_view.dart';
 export '../widgets/gs_health_registration_view.dart' show UserRole;
@@ -32,6 +33,11 @@ class AuthScreen extends StatefulWidget {
     this.allowAdminRole,
     this.initialVerifiedPhone,
   });
+
+  /// Deterministic image picker hook for widget/integration tests.
+  @visibleForTesting
+  static Future<({Uint8List bytes, String name})?> Function(ImageSource source)?
+      debugPickRegistrationImageOverride;
 
   @override
   State<AuthScreen> createState() => _AuthScreenState();
@@ -66,11 +72,14 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
   // Common & Location Fields
   final _cityController = TextEditingController();
+  final _stateController = TextEditingController();
   final _pincodeController = TextEditingController();
   final _locationController = TextEditingController();
   double? _selectedLatitude;
   double? _selectedLongitude;
   String? _selectedMapLocationName;
+  String _selectedConsultationMode = DoctorConsultationMode.both;
+  String? _selectedClinicId;
 
   // Role-Specific Fields - Patient
   final _ageController = TextEditingController();
@@ -110,6 +119,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   // Profile Image Picker Bytes
   Uint8List? _pickedImageBytes;
   String? _pickedImageName;
+  String? _registrationImageError;
 
   // OTP Verification States for Registration Flow
   bool _isOtpVerified = false;
@@ -232,6 +242,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     _adminEmployeeIdController.dispose();
     _adminDeptController.dispose();
     _cityController.dispose();
+    _stateController.dispose();
     _pincodeController.dispose();
     _locationController.dispose();
     _otpController.dispose();
@@ -250,24 +261,73 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     }
   }
 
-  Future<void> _pickGalleryImage() async {
+  static const int _maxProfileImageBytes = 5 * 1024 * 1024; // 5 MB
+
+  String _resolveImageMimeType(String? fileName) {
+    final lower = (fileName ?? '').trim().toLowerCase();
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    return 'image/png';
+  }
+
+  Future<void> _pickRegistrationImage(ImageSource source) async {
     try {
-      final ImagePicker picker = ImagePicker();
-      final XFile? image = await picker.pickImage(
-        source: ImageSource.gallery,
-        imageQuality: 85,
-        maxWidth: 800,
-      );
-      if (image != null) {
-        final bytes = await image.readAsBytes();
-        setState(() {
-          _pickedImageBytes = bytes;
-          _pickedImageName = image.name;
-        });
+      Uint8List? bytes;
+      String? fileName;
+
+      if (AuthScreen.debugPickRegistrationImageOverride != null) {
+        final picked = await AuthScreen.debugPickRegistrationImageOverride!(source);
+        if (picked == null) return;
+        bytes = picked.bytes;
+        fileName = picked.name;
+      } else {
+        final ImagePicker picker = ImagePicker();
+        final XFile? image = await picker.pickImage(
+          source: source,
+          imageQuality: 85,
+          maxWidth: 800,
+        );
+        if (image == null) return;
+        bytes = await image.readAsBytes();
+        fileName = image.name;
       }
+
+      if (!mounted) return;
+      if (bytes.isEmpty) {
+        setState(() {
+          _registrationImageError = 'Selected image is empty. Please choose another photo.';
+        });
+        return;
+      }
+      if (bytes.length > _maxProfileImageBytes) {
+        setState(() {
+          _registrationImageError = 'Image exceeds the 5 MB size limit. Please select a smaller photo.';
+        });
+        return;
+      }
+
+      setState(() {
+        _pickedImageBytes = bytes;
+        _pickedImageName = fileName;
+        _registrationImageError = null;
+      });
     } catch (e) {
-      debugPrint('Error picking gallery photo: $e');
+      debugPrint('Error picking registration photo: $e');
+      if (!mounted) return;
+      final msg = 'Unable to select profile image. Please try again.';
+      setState(() => _registrationImageError = msg);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), backgroundColor: AppTheme.gsRed),
+      );
     }
+  }
+
+  void _removeRegistrationImage() {
+    setState(() {
+      _pickedImageBytes = null;
+      _pickedImageName = null;
+      _registrationImageError = null;
+    });
   }
 
   String _maskPhone(String raw) {
@@ -1077,16 +1137,20 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     }
 
     String? photoBase64;
-    if (_pickedImageBytes != null) {
-      photoBase64 = 'data:image/png;base64,${base64Encode(_pickedImageBytes!)}';
+    if (_pickedImageBytes != null && _pickedImageBytes!.isNotEmpty) {
+      final mime = _resolveImageMimeType(_pickedImageName);
+      photoBase64 = 'data:$mime;base64,${base64Encode(_pickedImageBytes!)}';
     }
 
-    final clinicAddress = _clinicAddressController.text.trim();
+    final bool isDentistOnlineOnly = _selectedRole == UserRole.dentist &&
+        DoctorConsultationMode.isOnlineOnly(_selectedConsultationMode);
+    final clinicAddress = isDentistOnlineOnly ? '' : _clinicAddressController.text.trim();
+    final stateValue = isDentistOnlineOnly ? '' : _stateController.text.trim();
     final location = (_selectedRole == UserRole.dentist || _selectedRole == UserRole.clinic)
         ? clinicAddress
         : _locationController.text.trim();
     final city = _cityController.text.trim();
-    final pincode = _pincodeController.text.trim();
+    final pincode = isDentistOnlineOnly ? '' : _pincodeController.text.trim();
     final String chosenRole = _selectedRole == UserRole.dentist
         ? 'Dentist'
         : (_selectedRole == UserRole.clinic
@@ -1101,7 +1165,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       return;
     }
 
-    if (pincode.isNotEmpty && !RegExp(r'^\d{6}$').hasMatch(pincode)) {
+    if (!isDentistOnlineOnly && pincode.isNotEmpty && !RegExp(r'^\d{6}$').hasMatch(pincode)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('⚠️ Please enter a valid 6-digit Pincode.'), backgroundColor: AppTheme.gsRed),
       );
@@ -1119,14 +1183,18 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     }
 
     final bool isFacilityRole = _selectedRole == UserRole.dentist || _selectedRole == UserRole.clinic;
-    final String? submittedClinicName = isFacilityRole
+    final String? submittedClinicName = isFacilityRole && !isDentistOnlineOnly
         ? (_clinicNameController.text.trim().isNotEmpty
             ? _clinicNameController.text.trim()
             : (_selectedRole == UserRole.clinic ? name : null))
         : null;
-    final String? submittedClinicAddress = isFacilityRole && clinicAddress.isNotEmpty
+    final String? submittedClinicAddress = isFacilityRole && !isDentistOnlineOnly && clinicAddress.isNotEmpty
         ? clinicAddress
         : (_selectedRole == UserRole.clinic && location.isNotEmpty ? location : null);
+    final double? submittedLatitude =
+        (_selectedRole == UserRole.patient || isDentistOnlineOnly) ? null : _selectedLatitude;
+    final double? submittedLongitude =
+        (_selectedRole == UserRole.patient || isDentistOnlineOnly) ? null : _selectedLongitude;
 
     try {
       final res = await ApiService().registerUser(
@@ -1148,13 +1216,16 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ? (int.tryParse(_experienceController.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 5)
             : null,
         licenseNumber: _selectedRole == UserRole.dentist ? _licenseNoController.text.trim() : null,
+        clinicId: (_selectedRole == UserRole.dentist && !isDentistOnlineOnly) ? _selectedClinicId : null,
         clinicName: submittedClinicName,
         clinicAddress: submittedClinicAddress,
         location: location.isNotEmpty ? location : (clinicAddress.isNotEmpty ? clinicAddress : null),
+        state: stateValue.isNotEmpty ? stateValue : null,
         city: city,
         pincode: pincode,
-        latitude: _selectedRole == UserRole.patient ? null : _selectedLatitude,
-        longitude: _selectedRole == UserRole.patient ? null : _selectedLongitude,
+        latitude: submittedLatitude,
+        longitude: submittedLongitude,
+        consultationMode: _selectedRole == UserRole.dentist ? _selectedConsultationMode : null,
         profilePhoto: photoBase64,
         languages: selectedLangs,
         referralCode: _selectedRole == UserRole.patient && _referralCodeController.text.trim().isNotEmpty
@@ -1229,6 +1300,8 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             },
           );
         } else if (_selectedRole == UserRole.dentist) {
+          // Wipe any cached visits/requests/patients from prior sessions before onboarding new doctor
+          await PatientProblemService().clearAllDataAndStorage();
           final exp = int.tryParse(_experienceController.text.replaceAll(RegExp(r'[^0-9]'), '')) ?? 5;
           final effectiveSpec = _selectedSpecialty ?? 'General Medicine';
           final effectiveQual = _qualificationController.text.trim().isNotEmpty
@@ -1236,24 +1309,31 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               : MedicalSpecialtyModel.getDefaultQualificationForSpecialty(effectiveSpec);
           final docUserId = (regUser['userId'] ?? regUser['id'] ?? res['user']?['id'] ?? SupabaseService.safeCurrentUser?.id ?? regUserId).toString();
           final docDentistId = (regUser['dentistId'] ?? res['user']?['dentistId'] ?? docUserId).toString();
+          final uploadedPhotoRaw = (regUser['profilePhoto'] ?? res['user']?['profilePhoto'] ?? '').toString().trim();
+          final String? uploadedPhotoUrl = (uploadedPhotoRaw.startsWith('http://') || uploadedPhotoRaw.startsWith('https://'))
+              ? uploadedPhotoRaw
+              : null;
           PatientProblemService().registerDoctor(
             id: docDentistId,
             userId: docUserId,
-            clinicId: (regUser['clinicId'] ?? regUser['clinic_id'] ?? '').toString(),
+            clinicId: isDentistOnlineOnly ? '' : (regUser['clinicId'] ?? regUser['clinic_id'] ?? _selectedClinicId ?? '').toString(),
             name: name,
             email: email,
             phone: phone,
             licenseNumber: _licenseNoController.text.trim(),
             specialty: effectiveSpec,
-            clinicName: (regUser['clinicName'] ?? _clinicNameController.text).toString().trim(),
-            clinicAddress: clinicAddress.isNotEmpty ? clinicAddress : location,
+            clinicName: isDentistOnlineOnly ? '' : (regUser['clinicName'] ?? _clinicNameController.text).toString().trim(),
+            clinicAddress: isDentistOnlineOnly ? '' : (clinicAddress.isNotEmpty ? clinicAddress : location),
+            state: stateValue,
             city: city,
             pincode: pincode,
-            latitude: _selectedLatitude,
-            longitude: _selectedLongitude,
+            latitude: submittedLatitude,
+            longitude: submittedLongitude,
+            consultationMode: _selectedConsultationMode,
             qualification: effectiveQual,
             experienceYears: exp,
             photoBytes: _pickedImageBytes,
+            profileImageUrl: uploadedPhotoUrl,
             languages: selectedLangs,
             skipApiRegister: true,
           );
@@ -1273,12 +1353,14 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               'licenseNumber': _licenseNoController.text.trim(),
               'specialty': effectiveSpec,
               'qualification': effectiveQual,
-              'clinicName': _clinicNameController.text.trim(),
-              'clinicAddress': clinicAddress.isNotEmpty ? clinicAddress : location,
+              'consultationMode': _selectedConsultationMode,
+              'clinicName': isDentistOnlineOnly ? '' : _clinicNameController.text.trim(),
+              'clinicAddress': isDentistOnlineOnly ? '' : (clinicAddress.isNotEmpty ? clinicAddress : location),
+              'state': stateValue,
               'city': city,
               'pincode': pincode,
-              if (_selectedLatitude != null) 'latitude': _selectedLatitude,
-              if (_selectedLongitude != null) 'longitude': _selectedLongitude,
+              if (submittedLatitude != null) 'latitude': submittedLatitude,
+              if (submittedLongitude != null) 'longitude': submittedLongitude,
               'experienceYears': exp,
               'languages': selectedLangs,
             },
@@ -1379,10 +1461,17 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         );
         context.go(SessionService().currentSession?.targetRoute ?? _targetRoute);
       } else {
-        setState(() => _isRegistering = false);
+        final String errCode = (res['code'] ?? '').toString().toUpperCase();
+        final String errMsg = (res['message'] ?? 'Could not register user.').toString();
+        setState(() {
+          _isRegistering = false;
+          if (errCode.contains('PROFILE_IMAGE') || errMsg.toLowerCase().contains('profile image')) {
+            _registrationImageError = errMsg;
+          }
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('❌ ${res['message'] ?? 'Could not register user.'}'),
+            content: Text('❌ $errMsg'),
             backgroundColor: const Color(0xFFFE3434),
           ),
         );
@@ -2530,6 +2619,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       isRegistering: _isRegistering,
       nameController: _nameController,
       cityController: _cityController,
+      stateController: _stateController,
       pincodeController: _pincodeController,
       emailController: _emailController,
       phoneController: _phoneController,
@@ -2545,9 +2635,28 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       selectedSpecialty: _selectedSpecialty,
       specialtyOptions: specialtyOptions,
       selectedLanguages: _selectedLanguages,
+      selectedConsultationMode: _selectedConsultationMode,
+      onConsultationModeChanged: (mode) {
+        setState(() {
+          _selectedConsultationMode = DoctorConsultationMode.normalize(mode);
+          if (DoctorConsultationMode.isOnlineOnly(_selectedConsultationMode)) {
+            _selectedClinicId = null;
+            _selectedLatitude = null;
+            _selectedLongitude = null;
+            _selectedMapLocationName = null;
+          }
+        });
+      },
       selectedLatitude: _selectedLatitude,
       selectedLongitude: _selectedLongitude,
       selectedMapLocationName: _selectedMapLocationName,
+      onClearMapLocation: () {
+        setState(() {
+          _selectedLatitude = null;
+          _selectedLongitude = null;
+          _selectedMapLocationName = null;
+        });
+      },
       pickedImageBytes: _pickedImageBytes,
       pickedImageName: _pickedImageName,
       mobileOtpSectionBuilder: _buildOtpVerificationSection,
@@ -2584,15 +2693,20 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       onClinicSelected: (clinic) {
         setState(() {
           if (clinic == null) {
+            _selectedClinicId = null;
             _clinicNameController.clear();
             _clinicAddressController.clear();
           } else {
+            _selectedClinicId = clinic.id.isNotEmpty ? clinic.id : null;
             _clinicNameController.text = clinic.name;
             _clinicAddressController.text = clinic.location;
           }
         });
       },
-      onPickImage: _pickGalleryImage,
+      onPickImage: () => _pickRegistrationImage(ImageSource.gallery),
+      onPickCameraImage: () => _pickRegistrationImage(ImageSource.camera),
+      onRemoveImage: _removeRegistrationImage,
+      imageErrorText: _registrationImageError,
       onOpenMapPicker: _openMapLocationPicker,
       onContinuePressed: _handleRegister,
       onUseAnotherNumber: () {
@@ -2745,26 +2859,32 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           ? _clinicAddressController.text
           : _locationController.text,
       initialCity: _cityController.text,
+      initialState: _stateController.text,
       initialPincode: _pincodeController.text,
       initialLat: _selectedLatitude,
       initialLng: _selectedLongitude,
       isDentist: useClinicController,
-      onLocationSelected: (address, city, pincode, lat, lng, locationName) {
+      onSelectionConfirmed: (result) {
         setState(() {
-          if (useClinicController) {
-            _clinicAddressController.text = address;
-          } else {
-            _locationController.text = address;
+          if (result.address.isNotEmpty) {
+            if (useClinicController) {
+              _clinicAddressController.text = result.address;
+            } else {
+              _locationController.text = result.address;
+            }
           }
-          if (city.isNotEmpty) _cityController.text = city;
-          if (pincode.isNotEmpty) _pincodeController.text = pincode;
-          _selectedLatitude = lat;
-          _selectedLongitude = lng;
-          _selectedMapLocationName = locationName;
+          if (result.city.isNotEmpty) _cityController.text = result.city;
+          if (result.state.isNotEmpty) _stateController.text = result.state;
+          if (result.pincode.isNotEmpty) _pincodeController.text = result.pincode;
+          _selectedLatitude = result.latitude;
+          _selectedLongitude = result.longitude;
+          _selectedMapLocationName = result.locationName;
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('📍 Map Location Attached: $address, $city ($pincode)'),
+            content: Text(
+              '📍 Clinic map location pinned (${result.latitude.toStringAsFixed(4)}, ${result.longitude.toStringAsFixed(4)})',
+            ),
             backgroundColor: AppTheme.gsNavy,
             duration: const Duration(seconds: 2),
           ),

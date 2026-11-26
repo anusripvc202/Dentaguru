@@ -716,11 +716,15 @@ exports.createReferral = async (req, res) => {
  */
 exports.getMyReferrals = async (req, res) => {
     try {
-        const rawUserId = getUserIdFromReq(req);
+        const caller = await resolveCallerIdentity(req);
+        const callerIsAdmin = Boolean(caller && isAdminRoleString(caller.role));
+        const rawUserId = caller && !callerIsAdmin
+            ? caller.id
+            : (getUserIdFromReq(req) || caller?.id);
         if (!rawUserId) {
-            return res.status(400).json({
+            return res.status(401).json({
                 success: false,
-                message: 'User ID is required to fetch referrals.'
+                message: 'Authentication required to fetch referrals.'
             });
         }
 
@@ -919,12 +923,23 @@ exports.getClinicReferrals = async (req, res) => {
  */
 exports.getReferralsForReferredPatient = async (req, res) => {
     try {
-        const userId = getUserIdFromReq(req);
-        let phone = req.query.phone;
+        const caller = await resolveCallerIdentity(req);
+        const callerIsAdmin = Boolean(caller && isAdminRoleString(caller.role));
+        const userId = caller && !callerIsAdmin
+            ? caller.id
+            : (getUserIdFromReq(req) || caller?.id);
+        let phone = callerIsAdmin || !caller ? req.query.phone : null;
 
         if (userId) {
             const u = await User.findById(userId);
             if (u && u.phone) phone = u.phone;
+        }
+        if (!userId && !phone) {
+            return res.status(200).json({
+                success: true,
+                count: 0,
+                referrals: []
+            });
         }
 
         const allReferrals = await Referral.find();
@@ -1027,12 +1042,23 @@ exports.acceptReferral = async (req, res) => {
         }
         if (patientId && doctorId) {
             try {
+                const { normalizeDateToTimezoneYmd, parseClockSlotMinutes, minutesToClockSlot } = require('../config/bookingRulesConfig');
+                const todayIstYmd = normalizeDateToTimezoneYmd(new Date(), 'Asia/Kolkata') || new Date().toISOString().split('T')[0];
+                const rawSlot = String(confirmedTimeSlot || '10:00 AM').trim();
+                const parsedStart = parseClockSlotMinutes(rawSlot);
+                const safeStartMin = parsedStart !== null ? parsedStart : 600;
+                const safeSlot = parsedStart !== null ? minutesToClockSlot(parsedStart) : '10:00 AM';
                 const appt = await Appointment.create({
                     patient_id: patientId,
                     dentist_id: doctorId,
                     clinic_id: docClinicId,
-                    appointment_date: new Date().toISOString().split('T')[0],
-                    time_slot: confirmedTimeSlot || '10:00 AM',
+                    date: `${todayIstYmd}T00:00:00.000Z`,
+                    appointment_date: todayIstYmd,
+                    time_slot: safeSlot,
+                    consultation_type: 'In-Person',
+                    duration_minutes: 30,
+                    buffer_minutes: 10,
+                    scheduled_start_min: safeStartMin,
                     treatment: ref.required_specialist || 'Specialist Consultation',
                     status: 'CONFIRMED',
                     notes: `Referred Patient: ${ref.referred_patient_name} (${ref.referred_patient_mobile}). Clinical complaint: ${ref.clinical_complaint || ''}`

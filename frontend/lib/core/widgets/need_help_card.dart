@@ -11,6 +11,7 @@ class NeedHelpCard extends StatelessWidget {
   final String whatsappNumber;
   final String? customMessage;
   final EdgeInsetsGeometry? margin;
+  final bool showCallAction;
 
   const NeedHelpCard({
     super.key,
@@ -19,6 +20,7 @@ class NeedHelpCard extends StatelessWidget {
     this.whatsappNumber = '9550686566',
     this.customMessage,
     this.margin,
+    this.showCallAction = true,
   });
 
   String _cleanNumber(String phone) {
@@ -334,21 +336,23 @@ class NeedHelpCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
 
-                // Action Buttons: Call Us Now & Chat on WhatsApp side-by-side
+                // Action Buttons: Optional Call Us Now & Chat on WhatsApp
                 Row(
                   children: [
-                    Expanded(
-                      child: _SupportActionButton(
-                        onTap: () => _makeCall(context),
-                        icon: Icons.phone_in_talk_rounded,
-                        title: 'Call Us Now',
-                        subtitle: displayHelplineNumber,
-                        gradientColors: const [Color(0xFFFE3434), Color(0xFF012A58)],
-                        shadowColor: const Color(0xFF012A58).withValues(alpha: 0.22),
-                        iconBgColor: Colors.white.withValues(alpha: 0.2),
+                    if (showCallAction) ...[
+                      Expanded(
+                        child: _SupportActionButton(
+                          onTap: () => _makeCall(context),
+                          icon: Icons.phone_in_talk_rounded,
+                          title: 'Call Us Now',
+                          subtitle: displayHelplineNumber,
+                          gradientColors: const [Color(0xFFFE3434), Color(0xFF012A58)],
+                          shadowColor: const Color(0xFF012A58).withValues(alpha: 0.22),
+                          iconBgColor: Colors.white.withValues(alpha: 0.2),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
+                      const SizedBox(width: 8),
+                    ],
                     Expanded(
                       child: _SupportActionButton(
                         onTap: () => _chatOnWhatsApp(context),

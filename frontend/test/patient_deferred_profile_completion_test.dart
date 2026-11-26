@@ -205,15 +205,18 @@ void main() {
         expect(find.byType(PatientProfileCompletionScreen), findsOneWidget);
         expect(find.byType(AiTriageScreen), findsNothing);
 
-        // Empty submit fails mandatory checks (pincode, age, gender); profile image is optional by default
+        // Empty submit fails only mandatory Gender check; Profile Image, Pincode, and Age are optional by default
         final submitBtn = find.byKey(const Key('profile_completion_submit_button'));
         await tester.ensureVisible(submitBtn);
         await tester.tap(submitBtn);
         await _pumpFrames(tester);
         expect(find.text('Profile image is required.'), findsNothing);
-        expect(find.text('Pincode is required'), findsOneWidget);
-        expect(find.text('Age is required'), findsOneWidget);
+        expect(find.text('Pincode is required'), findsNothing);
+        expect(find.text('Age is required'), findsNothing);
         expect(find.text('Please select your gender.'), findsOneWidget);
+        expect(find.text('PROFILE IMAGE (OPTIONAL)'), findsOneWidget);
+        expect(find.text('PINCODE (OPTIONAL)'), findsOneWidget);
+        expect(find.text('AGE (OPTIONAL)'), findsOneWidget);
 
         // Invalid pincode (<6 digits) & age (>120) also rejected
         await tester.enterText(find.byKey(const Key('profile_completion_pincode_field')), '500');

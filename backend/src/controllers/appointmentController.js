@@ -1,10 +1,37 @@
 const { supabaseAdmin } = require('../config/supabase');
 const { isCloudEnv } = require('../config/secrets');
-const { Appointment, Clinic, Dentist, User, Notification, MedicalRecord, Referral, DoctorAvailability, PatientAssignmentHistory, District, SubAdminDistrict, SubAdminPermission, ASSIGNMENT_SOURCES, isDoctorRecordAvailable, resolveClinicIds, resolveDentistIds } = require('../models/Schemas');
+const {
+    Appointment,
+    AppointmentSlotLock,
+    ReleasedSlot,
+    DoctorSchedulingSettings,
+    Clinic,
+    Dentist,
+    User,
+    Notification,
+    MedicalRecord,
+    Referral,
+    DoctorAvailability,
+    PatientAssignmentHistory,
+    District,
+    SubAdminDistrict,
+    SubAdminPermission,
+    ASSIGNMENT_SOURCES,
+    isDoctorRecordAvailable,
+    resolveClinicIds,
+    resolveDentistIds,
+} = require('../models/Schemas');
 const { sendPushNotification } = require('../services/notificationService');
+const { extractFcmToken, mergeDeviceTokenPayload } = require('../utils/deviceTokenHelper');
 const { generateTimeSlots } = require('./availabilityController');
 const { resolveClinicRecordAndDoctorIds } = require('./clinicController');
 const { sendDoctorBookingAlert, sendClinicBookingAlert, isWhatsAppProviderConfigured } = require('../services/whatsappService');
+const {
+    sanitizeSmartSchedule,
+    validateSlotAgainstSchedule,
+    computeEarlyCompletionReleasedSlot,
+} = require('../services/smartSchedulingEngine');
+const { notifyEligiblePatientsForReleasedSlot } = require('../services/releasedSlotNotificationService');
 const {
     getBookingRulesConfig,
     getNowPartsInTimezone,
@@ -180,9 +207,22 @@ async function _withDoctorBookingLock(doctorKey, taskFn) {
     }
 }
 
-// 1. BOOK APPOINTMENT (Patient -> Dentist) [Initial Status: PENDING]
+// 1. BOOK APPOINTMENT (Patient -> Dentist) [Initial Status: PENDING, Mandatory Lock + Atomic Confirmation]
 exports.bookAppointment = async (req, res) => {
-    const { dentistId, clinicId, date, timeSlot, treatment, consultationMode, consultationType, patientId, requestId } = req.body;
+    const {
+        dentistId,
+        clinicId,
+        date,
+        timeSlot,
+        treatment,
+        consultationMode,
+        consultationType,
+        patientId,
+        requestId,
+        lockId = undefined,
+        releasedSlotId = null,
+        requireLock = false,
+    } = req.body;
     try {
         const targetPatientId = patientId || (req.user ? req.user.id : null);
         const requestedDateStr = date ? DoctorAvailability.extractDateYmd(date) : formatLocalYmd(new Date());
@@ -194,17 +234,38 @@ exports.bookAppointment = async (req, res) => {
             });
         }
 
-        // 🛡️ Prevent past-date, past-slot, and <30-minute advance bookings on backend
-        const advanceCheck = checkSlotBookableForDateYmd(requestedDateStr, normalizedSlot);
-        if (!advanceCheck.bookable) {
-            return res.status(400).json({
+        // 🛡️ Mandatory lock enforcement:
+        // 1. Direct booking of a released slot without an active owning lock is NEVER allowed
+        if (releasedSlotId && !lockId) {
+            return res.status(409).json({
                 success: false,
-                reason: advanceCheck.reason,
-                message: advanceCheck.message
+                reason: 'LOCK_REQUIRED',
+                message: 'An active slot lock is required to book a released slot.'
+            });
+        }
+        // 2. Explicit requireLock=true or explicit lockId=null is ALWAYS rejected
+        const hasExplicitLockKey = Object.prototype.hasOwnProperty.call(req.body || {}, 'lockId');
+        if ((requireLock === true || (hasExplicitLockKey && !lockId)) && !lockId) {
+            return res.status(409).json({
+                success: false,
+                reason: 'LOCK_REQUIRED',
+                message: 'An active slot lock is required to confirm this booking.'
             });
         }
 
-        // Serialize availability verification, unified conflict check, and booking creation per doctor
+        // 🛡️ Prevent past-date, past-slot, and <30-minute advance bookings on regular slots
+        if (!releasedSlotId) {
+            const advanceCheck = checkSlotBookableForDateYmd(requestedDateStr, normalizedSlot);
+            if (!advanceCheck.bookable) {
+                return res.status(400).json({
+                    success: false,
+                    reason: advanceCheck.reason,
+                    message: advanceCheck.message
+                });
+            }
+        }
+
+        // Serialize availability verification, unified conflict check, and atomic lock+confirm per doctor
         const resolvedLockIds = dentistId
             ? await resolveDentistIds(dentistId).catch(() => ({ canonicalId: dentistId }))
             : { canonicalId: null };
@@ -214,10 +275,7 @@ exports.bookAppointment = async (req, res) => {
             const rules = getBookingRulesConfig();
             const rawModeInput = String(consultationMode || consultationType || '').trim();
             const baseTreatmentInput = (treatment || 'Medical Consultation').toString().trim();
-            const timing = getConsultationTimingForType(rawModeInput || baseTreatmentInput, rules);
-            const candStartMin = parseClockSlotMinutes(normalizedSlot);
-            const candConsultEndMin = candStartMin !== null ? candStartMin + timing.durationMinutes : null;
-            const candOccupiedEndMin = candStartMin !== null ? candStartMin + timing.totalBlockedMinutes : null;
+            const requestedMode = normalizeConsultationType(rawModeInput || baseTreatmentInput);
 
             // 🛡️ Enforce Doctor Availability ON/OFF strictly at backend (prevents direct API bypass)
             let resolvedDoctor = null;
@@ -236,157 +294,80 @@ exports.bookAppointment = async (req, res) => {
                 }
             }
 
-            // 🛡️ Verify doctor availability publication, working schedule, lunch break, manually blocked slots, and block status
+            const effectiveDentistId = resolvedDoctor?.id || dentistId || null;
+            let timing = getConsultationTimingForType(requestedMode, rules);
+            let capacityLane = 'SHARED';
+            let candStartMin = parseClockSlotMinutes(normalizedSlot);
+            let candConsultEndMin = candStartMin !== null ? candStartMin + timing.durationMinutes : null;
+            let candOccupiedEndMin = candStartMin !== null ? candStartMin + timing.totalBlockedMinutes : null;
+
+            // 🛡️ Full smart schedule validation (blocked date, working days, working hours, multiple breaks,
+            //    separate Online/In-Person schedules, daily limit, blocked time ranges, capacity lane conflicts)
             if (dentistId) {
                 const avail = await DoctorAvailability.findOne({ dentist_id: dentistId, date: requestedDateStr });
-                if (avail && avail.is_blocked) {
-                    return {
-                        errorStatus: 409,
-                        errorBody: {
-                            success: false,
-                            isBlocked: true,
-                            message: `The doctor is unavailable on this date (${avail.blocked_reason || 'Blocked / On Leave'}). Please choose another date.`
-                        }
-                    };
-                }
-
-                const schedule = await DoctorAvailability.getSchedule(dentistId);
-                const weekdayName = DoctorAvailability.getWeekdayNameFromYmd(requestedDateStr);
-                const hasCustomDateSlots = Boolean(avail && !avail.is_blocked && Array.isArray(avail.slots) && avail.slots.length > 0);
-
-                if (schedule && schedule.isConfigured && !hasCustomDateSlots) {
-                    const workingDays = Array.isArray(schedule.workingDays) ? schedule.workingDays : [];
-                    if (workingDays.length > 0 && weekdayName && !workingDays.includes(weekdayName)) {
-                        return {
-                            errorStatus: 409,
-                            errorBody: {
-                                success: false,
-                                message: `The doctor does not consult on ${weekdayName}s. Please select a configured working day.`
-                            }
-                        };
-                    }
-                }
-
-                const workingStartTime = avail?.start_time || schedule.startTime || '09:00 AM';
-                const workingEndTime = avail?.end_time || schedule.endTime || '05:00 PM';
-                const slotInterval = avail?.slot_duration_minutes || schedule.slotIntervalMinutes || schedule.slotDurationMinutes || rules.defaultSlotIntervalMinutes || 30;
-                const breakStartTime = schedule.hasBreak ? schedule.breakStartTime : null;
-                const breakEndTime = schedule.hasBreak ? schedule.breakEndTime : null;
-
-                const effectiveSlots = hasCustomDateSlots
-                    ? avail.slots
-                    : (schedule && schedule.isConfigured
-                        ? generateTimeSlots(workingStartTime, workingEndTime, slotInterval, breakStartTime, breakEndTime)
-                        : []);
-
-                const looksLikeClockSlot = /^\d{1,2}:\d{2}\s*(AM|PM)$/i.test(normalizedSlot);
-                if (effectiveSlots.length > 0 && (hasCustomDateSlots || looksLikeClockSlot)) {
-                    const inSlots = effectiveSlots.some(s => s.trim().toLowerCase() === normalizedSlot.toLowerCase());
-                    if (!inSlots) {
-                        return {
-                            errorStatus: 400,
-                            errorBody: {
-                                success: false,
-                                message: `The time slot (${normalizedSlot}) is unavailable or falls outside working hours / during lunch break.`
-                            }
-                        };
-                    }
-                }
-
-                // Check break & working-hour boundary when clock times exist
-                if (candStartMin !== null && !hasCustomDateSlots) {
-                    if (schedule && schedule.isConfigured) {
-                        const workStartMin = parseClockSlotMinutes(workingStartTime);
-                        const workEndMin = parseClockSlotMinutes(workingEndTime);
-                        if (workStartMin !== null && workEndMin !== null && (candStartMin < workStartMin || candConsultEndMin > workEndMin)) {
-                            return {
-                                errorStatus: 400,
-                                errorBody: {
-                                    success: false,
-                                    message: `The ${timing.consultationType} consultation at ${normalizedSlot} (${timing.durationMinutes} min) falls outside doctor working hours (${workingStartTime} - ${workingEndTime}).`
-                                }
-                            };
-                        }
-                    }
-                    if (breakStartTime && breakEndTime) {
-                        const bStart = parseClockSlotMinutes(breakStartTime);
-                        const bEnd = parseClockSlotMinutes(breakEndTime);
-                        if (bStart !== null && bEnd !== null && intervalsOverlap(candStartMin, candConsultEndMin, bStart, bEnd)) {
-                            return {
-                                errorStatus: 400,
-                                errorBody: {
-                                    success: false,
-                                    message: `The time slot (${normalizedSlot}) overlaps with the doctor's break period (${breakStartTime} - ${breakEndTime}).`
-                                }
-                            };
-                        }
-                    }
-                }
-
-                // Check Admin / Doctor manually blocked individual time slots
+                const schedule = sanitizeSmartSchedule(await DoctorAvailability.getSchedule(dentistId));
                 const blockedSlots = await DoctorAvailability.getBlockedSlotsForDate(dentistId, requestedDateStr);
-                if (Array.isArray(blockedSlots) && blockedSlots.length > 0) {
-                    const blockedMatch = blockedSlots.find(b => {
-                        const bStart = b.startMin !== undefined ? Number(b.startMin) : parseClockSlotMinutes(b.startTime || b.slot);
-                        const bEnd = b.endMin !== undefined
-                            ? Number(b.endMin)
-                            : (b.endTime ? parseClockSlotMinutes(b.endTime) : (bStart !== null ? bStart + timing.durationMinutes : null));
-                        if (candStartMin !== null && bStart !== null && bEnd !== null) {
-                            return intervalsOverlap(candStartMin, candConsultEndMin, bStart, bEnd);
-                        }
-                        return String(b.startTime || b.slot || '').trim().toLowerCase() === normalizedSlot.toLowerCase();
-                    });
-                    if (blockedMatch) {
+                const existingDentistAppts = await Appointment.find({ dentistId });
+
+                let releasedSlotRecord = null;
+                if (releasedSlotId) {
+                    releasedSlotRecord = await ReleasedSlot.findById(releasedSlotId);
+                    if (!releasedSlotRecord) {
                         return {
                             errorStatus: 409,
                             errorBody: {
                                 success: false,
-                                isBlocked: true,
-                                message: `The time slot (${normalizedSlot}) has been manually blocked (${blockedMatch.reason || 'Unavailable'}). Please select another slot.`
+                                reason: 'RELEASED_SLOT_UNAVAILABLE',
+                                message: 'This slot is no longer available. Please select another time.'
                             }
                         };
                     }
                 }
-            }
 
-            // 🛡️ Unified cross-type interval & buffer conflict check across doctor's calendar
-            if (dentistId) {
-                const existingDentistAppts = await Appointment.find({ dentistId });
-                const conflictAppt = existingDentistAppts.find(a => {
-                    const aStatus = (a.status || '').toUpperCase();
-                    if (aStatus === 'CANCELLED' || aStatus === 'REJECTED' || aStatus === 'NO_SHOW') return false;
-                    const aDateStr = (a.date || a.appointment_date || '').split('T')[0];
-                    if (aDateStr !== requestedDateStr) return false;
-
-                    const occ = getAppointmentOccupiedInterval(a, rules);
-                    if (candStartMin !== null && occ) {
-                        return intervalsOverlap(candStartMin, candOccupiedEndMin, occ.startMin, occ.occupiedEndMin);
-                    }
-                    const aSlot = (a.time_slot || a.timeSlot || '').trim();
-                    return aSlot.toLowerCase() === normalizedSlot.toLowerCase();
+                const schedValidation = validateSlotAgainstSchedule({
+                    schedule,
+                    dateYmd: requestedDateStr,
+                    timeSlot: normalizedSlot,
+                    consultationType: requestedMode,
+                    activeAppointments: existingDentistAppts,
+                    blockedSlots,
+                    explicitDateRecord: avail,
+                    releasedSlot: releasedSlotRecord,
+                    rulesOverride: rules,
                 });
-                if (conflictAppt) {
-                    const occ = getAppointmentOccupiedInterval(conflictAppt, rules);
-                    const detailMsg = occ
-                        ? `The time slot (${normalizedSlot}) overlaps with an existing ${occ.consultationType} appointment (${occ.timeSlot} - ${occ.scheduledEndTime}, reserved with ${occ.bufferMinutes}m buffer until ${occ.bufferEndTime}).`
-                        : `The time slot (${normalizedSlot}) is already booked for this doctor on this date.`;
+
+                if (!schedValidation.valid) {
                     return {
-                        errorStatus: 409,
+                        errorStatus: schedValidation.status || 409,
                         errorBody: {
                             success: false,
-                            conflict: true,
-                            message: `${detailMsg} Please select another slot.`
+                            reason: schedValidation.reason,
+                            isBlocked: Boolean(schedValidation.isBlocked),
+                            conflict: Boolean(schedValidation.conflict),
+                            message: schedValidation.message
                         }
                     };
                 }
+
+                timing = {
+                    consultationType: schedValidation.timing.consultationType,
+                    durationMinutes: schedValidation.timing.durationMinutes,
+                    bufferMinutes: schedValidation.timing.bufferMinutes,
+                    totalBlockedMinutes: schedValidation.timing.durationMinutes + schedValidation.timing.bufferMinutes,
+                };
+                capacityLane = schedValidation.timing.capacityLane;
+                candStartMin = schedValidation.timing.startMin;
+                candConsultEndMin = schedValidation.timing.consultEndMin;
+                candOccupiedEndMin = schedValidation.timing.occupiedEndMin;
             }
 
+            // 🛡️ Prevent same patient double-booking overlapping consultations
             if (targetPatientId) {
                 const existingPatientAppts = await Appointment.find({ patientId: targetPatientId });
                 const patientConflict = existingPatientAppts.find(a => {
                     const aStatus = (a.status || '').toUpperCase();
-                    if (aStatus === 'CANCELLED' || aStatus === 'REJECTED' || aStatus === 'NO_SHOW') return false;
-                    const aDateStr = (a.date || a.appointment_date || '').split('T')[0];
+                    if (aStatus === 'CANCELLED' || aStatus === 'CANCELED' || aStatus === 'REJECTED' || aStatus === 'NO_SHOW') return false;
+                    const aDateStr = (a.appointment_date || a.date || '').split('T')[0];
                     if (aDateStr !== requestedDateStr) return false;
                     const occ = getAppointmentOccupiedInterval(a, rules);
                     if (candStartMin !== null && occ) {
@@ -400,13 +381,13 @@ exports.bookAppointment = async (req, res) => {
                         errorStatus: 409,
                         errorBody: {
                             success: false,
+                            reason: 'PATIENT_CONFLICT',
                             message: `You already have an appointment booked for ${normalizedSlot} on this date. Please select another slot.`
                         }
                     };
                 }
             }
 
-            const effectiveDentistId = resolvedDoctor?.id || dentistId || null;
             let effectiveClinicId = null;
             if (clinicId) {
                 const resolvedExplicitClinic = await resolveClinicIds(clinicId);
@@ -437,32 +418,110 @@ exports.bookAppointment = async (req, res) => {
                 scheduledEndTime: candConsultEndMin !== null ? minutesToClockSlot(candConsultEndMin) : null,
                 bufferEndTime: candOccupiedEndMin !== null ? minutesToClockSlot(candOccupiedEndMin) : null,
                 delayMinutes: 0,
+                releasedSlotId: releasedSlotId || null,
             };
+            const qrPayload = encodeAppointmentQrWithMeta(`DENTAGURU-${targetPatientId || 'PATIENT'}-${Date.now()}`, scheduleMeta);
 
-            const appointment = await Appointment.create({
-                patient_id: targetPatientId,
-                dentist_id: effectiveDentistId,
-                clinic_id: effectiveClinicId,
-                request_id: requestId || null,
-                date: date ? new Date(date).toISOString() : new Date().toISOString(),
-                time_slot: normalizedSlot,
-                treatment: finalTreatment,
-                status: 'PENDING',
-                qr_code_string: encodeAppointmentQrWithMeta(`DENTAGURU-${targetPatientId || 'PATIENT'}-${Date.now()}`, scheduleMeta)
-            });
+            // 🛡️ Atomic mandatory-lock booking confirmation path
+            let appointment = null;
+            if (effectiveDentistId && targetPatientId && candStartMin !== null) {
+                let effectiveLockId = lockId || null;
+                let acquiredInternally = false;
 
-            // Cross-process race safety check immediately after insert
-            if (effectiveDentistId) {
+                if (!effectiveLockId) {
+                    const internalLock = await AppointmentSlotLock.acquire({
+                        dentistId: effectiveDentistId,
+                        patientId: targetPatientId,
+                        date: requestedDateStr,
+                        startTime: normalizedSlot,
+                        endTime: minutesToClockSlot(candOccupiedEndMin),
+                        startMin: candStartMin,
+                        endMin: candOccupiedEndMin,
+                        consultationType: timing.consultationType,
+                        releasedSlotId: null,
+                        ttlSeconds: 60,
+                    });
+                    if (!internalLock.success) {
+                        return {
+                            errorStatus: 409,
+                            errorBody: {
+                                success: false,
+                                conflict: true,
+                                reason: internalLock.reason || 'SLOT_LOCKED',
+                                message: internalLock.message || 'This slot is no longer available. Please select another time.'
+                            }
+                        };
+                    }
+                    effectiveLockId = internalLock.lockId;
+                    acquiredInternally = true;
+                }
+
+                const confirmRes = await AppointmentSlotLock.confirmBooking({
+                    patientId: targetPatientId,
+                    dentistId: effectiveDentistId,
+                    clinicId: effectiveClinicId,
+                    date: requestedDateStr,
+                    timeSlot: normalizedSlot,
+                    startMin: candStartMin,
+                    durationMinutes: timing.durationMinutes,
+                    bufferMinutes: timing.bufferMinutes,
+                    consultationType: timing.consultationType,
+                    treatment: finalTreatment,
+                    status: 'PENDING',
+                    qrCodeString: qrPayload,
+                    lockId: effectiveLockId,
+                    releasedSlotId: releasedSlotId || null,
+                });
+
+                if (!confirmRes.success) {
+                    if (acquiredInternally && effectiveLockId) {
+                        await AppointmentSlotLock.release(effectiveLockId, targetPatientId).catch(() => {});
+                    }
+                    return {
+                        errorStatus: 409,
+                        errorBody: {
+                            success: false,
+                            conflict: true,
+                            reason: confirmRes.reason || 'BOOKING_CONFLICT',
+                            message: confirmRes.message || 'This slot is no longer available. Please select another time.'
+                        }
+                    };
+                }
+                appointment = confirmRes.appointment;
+            } else {
+                appointment = await Appointment.create({
+                    patient_id: targetPatientId,
+                    dentist_id: effectiveDentistId,
+                    clinic_id: effectiveClinicId,
+                    request_id: requestId || null,
+                    date: `${requestedDateStr}T00:00:00.000Z`,
+                    appointment_date: requestedDateStr,
+                    time_slot: normalizedSlot,
+                    treatment: finalTreatment,
+                    status: 'PENDING',
+                    consultation_type: timing.consultationType,
+                    capacity_lane: capacityLane,
+                    duration_minutes: timing.durationMinutes,
+                    buffer_minutes: timing.bufferMinutes,
+                    scheduled_start_min: candStartMin,
+                    released_slot_id: releasedSlotId || null,
+                    qr_code_string: qrPayload,
+                });
+            }
+
+            // Cross-process race safety check immediately after insert (defense-in-depth for pre-Migration-04 DBs)
+            if (effectiveDentistId && appointment?.id) {
                 try {
                     const postInsertAppts = await Appointment.find({ dentistId: effectiveDentistId });
                     const competing = postInsertAppts.filter(a => {
                         if (String(a.id) === String(appointment.id)) return false;
                         const aStatus = (a.status || '').toUpperCase();
-                        if (aStatus === 'CANCELLED' || aStatus === 'REJECTED' || aStatus === 'NO_SHOW') return false;
-                        const aDateStr = (a.date || a.appointment_date || '').split('T')[0];
+                        if (aStatus === 'CANCELLED' || aStatus === 'CANCELED' || aStatus === 'REJECTED' || aStatus === 'NO_SHOW') return false;
+                        const aDateStr = (a.appointment_date || a.date || '').split('T')[0];
                         if (aDateStr !== requestedDateStr) return false;
                         const occ = getAppointmentOccupiedInterval(a, rules);
                         if (candStartMin !== null && occ) {
+                            if (capacityLane !== 'SHARED' && occ.consultationType.toUpperCase() !== capacityLane) return false;
                             return intervalsOverlap(candStartMin, candOccupiedEndMin, occ.startMin, occ.occupiedEndMin);
                         }
                         return String(a.time_slot || '').trim().toLowerCase() === normalizedSlot.toLowerCase();
@@ -618,9 +677,10 @@ exports.bookAppointment = async (req, res) => {
                 const docRec = await Dentist.findById(targetDocId).catch(() => null);
                 const docUser = docRec?.users || (docRec?.user_id ? await User.findById(docRec.user_id).catch(() => null) : null);
                 const docPhone = docUser?.phone || docRec?.phone || '';
-                if (docUser?.device_token && !String(docUser.device_token).startsWith('{')) {
+                const docFcmToken = extractFcmToken(docUser);
+                if (docFcmToken) {
                     await sendPushNotification(
-                        docUser.device_token,
+                        docFcmToken,
                         'New Appointment Booking',
                         `${patientDisplayName} booked an appointment on ${requestedDateStr} at ${normalizedSlot}.`,
                         { appointmentId: String(appointment.id), type: 'appointment_request' }
@@ -640,9 +700,10 @@ exports.bookAppointment = async (req, res) => {
             }
             if (resolvedClinicId) {
                 const clinicPhone = clinicRecord?.phone || clinicUser?.phone || '';
-                if (clinicUser?.device_token && !String(clinicUser.device_token).startsWith('{')) {
+                const clinicFcmToken = extractFcmToken(clinicUser);
+                if (clinicFcmToken) {
                     await sendPushNotification(
-                        clinicUser.device_token,
+                        clinicFcmToken,
                         'New Appointment Booking',
                         `${patientDisplayName} booked with ${doctorDisplayName} on ${requestedDateStr} at ${normalizedSlot}.`,
                         { appointmentId: String(appointment.id), clinicId: String(resolvedClinicId), type: 'clinic_appointment_booked' }
@@ -667,9 +728,10 @@ exports.bookAppointment = async (req, res) => {
         const patientAccountId = targetPatientId || (req.user && req.user.id);
         if (patientAccountId) {
             const patient = await User.findById(patientAccountId).catch(() => null);
-            if (patient?.device_token && !String(patient.device_token).startsWith('{')) {
+            const patientFcmToken = extractFcmToken(patient);
+            if (patientFcmToken) {
                 await sendPushNotification(
-                    patient.device_token,
+                    patientFcmToken,
                     '📋 Appointment Request Submitted',
                     `Your appointment request with ${doctorDisplayName} for ${effectiveTreatment} is pending confirmation.`,
                     { appointmentId: String(appointment.id), type: 'appointment_pending' }
@@ -717,7 +779,30 @@ exports.getAppointments = async (req, res) => {
             query.patient_id = { $in: possibleIds };
         }
 
-        if (dentistId) {
+        const callerRoleLower = (req.user?.role || '').toString().trim().toLowerCase();
+        const isCallerDoctor = callerRoleLower === 'dentist' || callerRoleLower === 'doctor';
+        const isCallerClinic = callerRoleLower === 'clinic' || callerRoleLower === 'clinic_admin';
+
+        if (isCallerDoctor && req.user?.id) {
+            // Strict doctor RBAC isolation: logged-in doctor can ONLY read their own appointments
+            const dentist = await Dentist.findById(req.user.id).catch(() => null)
+                || await Dentist.findOne({ user_id: req.user.id }).catch(() => null);
+            const ownDocIds = new Set([String(req.user.id).trim()]);
+            if (dentist?.id) ownDocIds.add(String(dentist.id).trim());
+            if (dentist?.user_id) ownDocIds.add(String(dentist.user_id).trim());
+
+            const requestedDocId = dentistId ? String(dentistId).trim() : '';
+            if (requestedDocId && !ownDocIds.has(requestedDocId)) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Access Denied: You cannot view another doctor's appointments."
+                });
+            }
+            const possibleDocIds = Array.from(ownDocIds);
+            if (dentist?.name) possibleDocIds.push(dentist.name);
+            if (req.user.name) possibleDocIds.push(req.user.name);
+            query.dentist_id = { $in: possibleDocIds };
+        } else if (dentistId) {
             const dentist = await Dentist.findById(dentistId).catch(() => null) || await Dentist.findOne({ user_id: dentistId }).catch(() => null);
             const possibleDocIds = [dentistId];
             if (dentist) {
@@ -726,20 +811,7 @@ exports.getAppointments = async (req, res) => {
                 if (dentist.name) possibleDocIds.push(dentist.name);
             }
             query.dentist_id = { $in: possibleDocIds };
-        } else if (req.user && (req.user.role === 'Dentist' || req.user.role === 'doctor' || req.user.role === 'dentist' || req.user.role === 'Doctor')) {
-            const dentist = await Dentist.findById(req.user.id).catch(() => null) || await Dentist.findOne({ user_id: req.user.id }).catch(() => null);
-            const possibleDocIds = [req.user.id];
-            if (dentist) {
-                if (dentist.id) possibleDocIds.push(dentist.id);
-                if (dentist.user_id) possibleDocIds.push(dentist.user_id);
-                if (dentist.name) possibleDocIds.push(dentist.name);
-            }
-            if (req.user.name) possibleDocIds.push(req.user.name);
-            query.dentist_id = { $in: possibleDocIds };
         }
-
-        const callerRoleLower = (req.user?.role || '').toString().trim().toLowerCase();
-        const isCallerClinic = callerRoleLower === 'clinic' || callerRoleLower === 'clinic_admin';
 
         if (isCallerClinic) {
             // Strict clinic RBAC isolation: clinic user can only read bookings of its own clinic
@@ -764,13 +836,31 @@ exports.getAppointments = async (req, res) => {
         }
 
         const rawList = await Appointment.find(query);
+        // Deduplicate appointment records by primary id so clients never receive duplicate visits
+        const seenAppointmentIds = new Set();
+        const uniqueRawList = [];
+        for (const row of (rawList || [])) {
+            const key = row && row.id != null ? String(row.id).trim() : '';
+            if (key && seenAppointmentIds.has(key)) continue;
+            if (key) seenAppointmentIds.add(key);
+            uniqueRawList.push(row);
+        }
+
+        const totalCount = uniqueRawList.length;
+        const parsedLimit = req.query.limit !== undefined ? parseInt(String(req.query.limit), 10) : NaN;
+        const parsedOffset = req.query.offset !== undefined ? parseInt(String(req.query.offset), 10) : 0;
+        const safeOffset = Number.isFinite(parsedOffset) && parsedOffset > 0 ? parsedOffset : 0;
+        const pagedRawList = Number.isFinite(parsedLimit) && parsedLimit > 0
+            ? uniqueRawList.slice(safeOffset, safeOffset + parsedLimit)
+            : (safeOffset > 0 ? uniqueRawList.slice(safeOffset) : uniqueRawList);
+
         const allReferrals = await Referral.find().catch(() => []);
         const referralByApptId = new Map();
         for (const r of (allReferrals || [])) {
             if (r?.appointment_id) referralByApptId.set(String(r.appointment_id), r);
         }
 
-        const enrichedList = await Promise.all(rawList.map(async (a) => {
+        const enrichedList = await Promise.all(pagedRawList.map(async (a) => {
             const enriched = enrichAppointmentRecord(a);
             const linkedRef = referralByApptId.get(String(a.id));
             if (linkedRef) {
@@ -802,7 +892,14 @@ exports.getAppointments = async (req, res) => {
             return enriched;
         }));
 
-        res.json({ success: true, count: enrichedList.length, appointments: enrichedList });
+        res.json({
+            success: true,
+            count: enrichedList.length,
+            totalCount,
+            offset: safeOffset,
+            hasMore: safeOffset + enrichedList.length < totalCount,
+            appointments: enrichedList
+        });
     } catch (err) {
         console.error('Get Appointments Error:', err.message);
         res.status(500).json({ success: false, message: 'Failed to fetch appointments.' });
@@ -853,9 +950,10 @@ exports.acceptAppointment = async (req, res) => {
         }
 
         const patient = await User.findById(appointment.patient_id).catch(() => null);
-        if (patient?.device_token && !String(patient.device_token).startsWith('{')) {
+        const acceptFcmToken = extractFcmToken(patient);
+        if (acceptFcmToken) {
             await sendPushNotification(
-                patient.device_token,
+                acceptFcmToken,
                 '🎉 Appointment Confirmed!',
                 `Your doctor confirmed your visit for ${appointment.treatment}.`,
                 { appointmentId: String(id), type: 'appointment_confirmed' }
@@ -902,9 +1000,10 @@ exports.rejectAppointment = async (req, res) => {
         });
 
         const patient = await User.findById(appointment.patient_id).catch(() => null);
-        if (patient?.device_token && !String(patient.device_token).startsWith('{')) {
+        const rejectFcmToken = extractFcmToken(patient);
+        if (rejectFcmToken) {
             await sendPushNotification(
-                patient.device_token,
+                rejectFcmToken,
                 '❌ Appointment Request Declined',
                 `Your appointment request was declined. Please try another slot.`,
                 { appointmentId: String(id), type: 'appointment_rejected' }
@@ -965,10 +1064,11 @@ exports.rescheduleAppointment = async (req, res) => {
             const rules = getBookingRulesConfig();
             const prevMeta = extractAppointmentScheduleMeta(appointment);
             const mode = normalizeConsultationType(prevMeta.consultationType || appointment.consultation_type, appointment.treatment || '');
-            const timing = getConsultationTimingForType(mode, rules);
-            const candStart = parseClockSlotMinutes(newSlot);
-            const candConsultEnd = candStart !== null ? candStart + timing.durationMinutes : null;
-            const candOccupiedEnd = candStart !== null ? candStart + timing.totalBlockedMinutes : null;
+            let timing = getConsultationTimingForType(mode, rules);
+            let candStart = parseClockSlotMinutes(newSlot);
+            let candConsultEnd = candStart !== null ? candStart + timing.durationMinutes : null;
+            let candOccupiedEnd = candStart !== null ? candStart + timing.totalBlockedMinutes : null;
+            let capacityLane = 'SHARED';
 
             if (appointment.dentist_id) {
                 const resolvedDoctor = await Dentist.findById(appointment.dentist_id).catch(() => null);
@@ -979,48 +1079,60 @@ exports.rescheduleAppointment = async (req, res) => {
                     };
                 }
                 const avail = await DoctorAvailability.findOne({ dentist_id: appointment.dentist_id, date: newDateStr });
-                if (avail && avail.is_blocked) {
+                const schedule = sanitizeSmartSchedule(await DoctorAvailability.getSchedule(appointment.dentist_id));
+                const blockedSlots = await DoctorAvailability.getBlockedSlotsForDate(appointment.dentist_id, newDateStr);
+                const existingDentistAppts = await Appointment.find({ dentistId: appointment.dentist_id });
+
+                const schedCheck = validateSlotAgainstSchedule({
+                    schedule,
+                    dateYmd: newDateStr,
+                    timeSlot: newSlot,
+                    consultationType: mode,
+                    activeAppointments: existingDentistAppts,
+                    blockedSlots,
+                    explicitDateRecord: avail,
+                    excludeAppointmentId: id,
+                    rulesOverride: rules,
+                });
+                if (!schedCheck.valid) {
                     return {
-                        errorStatus: 409,
-                        errorBody: { success: false, isBlocked: true, message: `Doctor is unavailable on ${newDateStr} (${avail.blocked_reason || 'Blocked'}).` }
+                        errorStatus: schedCheck.status || 409,
+                        errorBody: {
+                            success: false,
+                            reason: schedCheck.reason,
+                            isBlocked: Boolean(schedCheck.isBlocked),
+                            conflict: Boolean(schedCheck.conflict),
+                            message: schedCheck.message,
+                        }
                     };
                 }
-                const blockedSlots = await DoctorAvailability.getBlockedSlotsForDate(appointment.dentist_id, newDateStr);
-                if (Array.isArray(blockedSlots) && blockedSlots.length > 0 && candStart !== null) {
-                    const hitBlock = blockedSlots.find(b => {
-                        const bStart = b.startMin !== undefined ? Number(b.startMin) : parseClockSlotMinutes(b.startTime || b.slot);
-                        const bEnd = b.endMin !== undefined ? Number(b.endMin) : (b.endTime ? parseClockSlotMinutes(b.endTime) : (bStart !== null ? bStart + timing.durationMinutes : null));
-                        return bStart !== null && bEnd !== null && intervalsOverlap(candStart, candConsultEnd, bStart, bEnd);
-                    });
-                    if (hitBlock) {
-                        return {
-                            errorStatus: 409,
-                            errorBody: { success: false, isBlocked: true, message: `The time slot (${newSlot}) is blocked (${hitBlock.reason || 'Unavailable'}).` }
-                        };
-                    }
-                }
 
-                const existingDentistAppts = await Appointment.find({ dentistId: appointment.dentist_id });
-                const conflict = existingDentistAppts.find(a => {
-                    if (String(a.id) === String(id)) return false;
-                    const aStatus = (a.status || '').toUpperCase();
-                    if (aStatus === 'CANCELLED' || aStatus === 'REJECTED' || aStatus === 'NO_SHOW') return false;
-                    const aDateStr = (a.date || a.appointment_date || '').split('T')[0];
-                    if (aDateStr !== newDateStr) return false;
-                    const occ = getAppointmentOccupiedInterval(a, rules);
-                    if (candStart !== null && occ) {
-                        return intervalsOverlap(candStart, candOccupiedEnd, occ.startMin, occ.occupiedEndMin);
-                    }
-                    const aSlot = (a.time_slot || a.timeSlot || '').trim();
-                    return aSlot.toLowerCase() === newSlot.toLowerCase();
-                });
-                if (conflict) {
+                timing = {
+                    consultationType: schedCheck.timing.consultationType,
+                    durationMinutes: schedCheck.timing.durationMinutes,
+                    bufferMinutes: schedCheck.timing.bufferMinutes,
+                    totalBlockedMinutes: schedCheck.timing.durationMinutes + schedCheck.timing.bufferMinutes,
+                };
+                capacityLane = schedCheck.timing.capacityLane;
+                candStart = schedCheck.timing.startMin;
+                candConsultEnd = schedCheck.timing.consultEndMin;
+                candOccupiedEnd = schedCheck.timing.occupiedEndMin;
+
+                // Ensure no other patient currently holds an active lock on the target rescheduled slot
+                const activeLocks = await AppointmentSlotLock.findActiveForDoctorAndDate(appointment.dentist_id, newDateStr).catch(() => []);
+                const lockConflict = (activeLocks || []).find(l =>
+                    String(l.patient_id) !== String(appointment.patient_id || '') &&
+                    (capacityLane === 'SHARED' || String(l.consultation_type || '').toUpperCase() === capacityLane) &&
+                    intervalsOverlap(candStart, candOccupiedEnd, Number(l.start_min), Number(l.end_min))
+                );
+                if (lockConflict) {
                     return {
                         errorStatus: 409,
                         errorBody: {
                             success: false,
                             conflict: true,
-                            message: `The time slot (${newSlot}) overlaps with another consultation or buffer period for this doctor.`
+                            reason: 'SLOT_LOCKED',
+                            message: 'This slot is currently being reserved by another patient. Please select another time.'
                         }
                     };
                 }
@@ -1042,9 +1154,16 @@ exports.rescheduleAppointment = async (req, res) => {
             };
 
             await Appointment.findByIdAndUpdate(id, {
-                date: date ? new Date(date).toISOString() : appointment.date,
+                date: `${newDateStr}T00:00:00.000Z`,
+                appointment_date: newDateStr,
                 time_slot: newSlot,
                 status: 'RESCHEDULED',
+                consultation_type: timing.consultationType,
+                capacity_lane: capacityLane,
+                duration_minutes: timing.durationMinutes,
+                buffer_minutes: timing.bufferMinutes,
+                delay_minutes: 0,
+                scheduled_start_min: candStart,
                 qr_code_string: encodeAppointmentQrWithMeta(appointment.qr_code_string, nextMeta),
             });
             return { nextMeta };
@@ -1091,9 +1210,10 @@ exports.rescheduleAppointment = async (req, res) => {
         });
 
         const patient = await User.findById(appointment.patient_id).catch(() => null);
-        if (patient?.device_token && !String(patient.device_token).startsWith('{')) {
+        const reschedFcmToken = extractFcmToken(patient);
+        if (reschedFcmToken) {
             await sendPushNotification(
-                patient.device_token,
+                reschedFcmToken,
                 '📅 Rescheduling confirmation',
                 `Your appointment has been rescheduled to ${newDateStr} at ${newSlot}.`,
                 { appointmentId: String(id), type: 'appointment_rescheduled' }
@@ -1193,9 +1313,10 @@ exports.cancelAppointment = async (req, res) => {
         }
 
         const patient = await User.findById(appointment.patient_id).catch(() => null);
-        if (patient?.device_token && !String(patient.device_token).startsWith('{')) {
+        const cancelFcmToken = extractFcmToken(patient);
+        if (cancelFcmToken) {
             await sendPushNotification(
-                patient.device_token,
+                cancelFcmToken,
                 '🚫 Appointment Cancelled',
                 `Your appointment has been cancelled.`,
                 { appointmentId: String(id), type: 'appointment_cancelled' }
@@ -1222,12 +1343,8 @@ async function _updateDoctorLiveStatus(dentistId, liveStatus) {
         await Dentist.findByIdAndUpdate(doc.id, { availability_status: liveStatus });
         if (doc.user_id) {
             const docUser = await User.findById(doc.user_id).catch(() => null);
-            let meta = {};
-            if (docUser?.device_token && typeof docUser.device_token === 'string' && docUser.device_token.trim().startsWith('{')) {
-                try { meta = JSON.parse(docUser.device_token); } catch (_) {}
-            }
-            meta.onlineStatus = liveStatus;
-            await User.findByIdAndUpdate(doc.user_id, { device_token: JSON.stringify(meta) });
+            const mergedToken = mergeDeviceTokenPayload(docUser?.device_token, { onlineStatus: liveStatus });
+            await User.findByIdAndUpdate(doc.user_id, { device_token: mergedToken });
         }
     } catch (e) {
         console.warn('⚠️ _updateDoctorLiveStatus notice:', e.message);
@@ -1285,9 +1402,13 @@ exports.completeConsultation = async (req, res) => {
             delayMinutes: 0,
         };
 
-        // 1. Mark Appointment Status COMPLETED with actualEndAt & early-finish detection
+        // 1. Mark Appointment Status COMPLETED with actual_end_at, truncated effective_end_min & early-finish detection
         await Appointment.findByIdAndUpdate(id, {
             status: 'COMPLETED',
+            actual_end_at: completedAtIso,
+            finished_early: finishedEarly,
+            delay_minutes: 0,
+            ...(interval?.occupiedEndMin ? { effective_end_min: interval.occupiedEndMin } : {}),
             qr_code_string: encodeAppointmentQrWithMeta(appointment.qr_code_string, nextMeta),
         });
         if (appointment.dentist_id) {
@@ -1297,10 +1418,55 @@ exports.completeConsultation = async (req, res) => {
         const enriched = enrichAppointmentRecord(fullAppt || {
             ...appointment,
             status: 'COMPLETED',
+            actual_end_at: completedAtIso,
+            finished_early: finishedEarly,
             qr_code_string: encodeAppointmentQrWithMeta(appointment.qr_code_string, nextMeta),
         });
         const docName = enriched.dentist_name || 'Doctor';
         const patName = enriched.patient_name || 'Patient';
+
+        // 1b. Early Completion -> Compute & Release Genuinely Available Slot + Notify Eligible Patients
+        //     Never moves existing confirmed appointments; never creates duplicate released slots.
+        let releasedSlot = null;
+        let releasedSlotNotifications = null;
+        if (finishedEarly && appointment.dentist_id) {
+            try {
+                const apptDateYmd = normalizeDateToTimezoneYmd(appointment.appointment_date || appointment.date, rules.timezone);
+                const docSchedule = sanitizeSmartSchedule(await DoctorAvailability.getSchedule(appointment.dentist_id));
+                const sameDocAppts = await Appointment.find({ dentistId: appointment.dentist_id });
+                const blockedSlots = await DoctorAvailability.getBlockedSlotsForDate(appointment.dentist_id, apptDateYmd);
+                const existingReleased = await ReleasedSlot.findForDoctorAndDate(appointment.dentist_id, apptDateYmd);
+
+                const candidateRelease = computeEarlyCompletionReleasedSlot({
+                    completedAppointment: {
+                        ...appointment,
+                        appointment_date: apptDateYmd,
+                        actual_end_at: completedAtIso,
+                        status: 'COMPLETED',
+                    },
+                    actualEndAt: completedAtIso,
+                    schedule: docSchedule,
+                    activeAppointments: sameDocAppts,
+                    blockedSlots,
+                    existingReleasedSlots: existingReleased,
+                    rulesOverride: rules,
+                });
+
+                if (candidateRelease) {
+                    releasedSlot = await ReleasedSlot.create(candidateRelease);
+                    if (releasedSlot && releasedSlot.id) {
+                        releasedSlotNotifications = await notifyEligiblePatientsForReleasedSlot({
+                            dentistId: appointment.dentist_id,
+                            doctorName: docName,
+                            releasedSlot,
+                            excludePatientId: appointment.patient_id,
+                        });
+                    }
+                }
+            } catch (relErr) {
+                console.warn('⚠️ Early-completion released slot notice:', relErr.message);
+            }
+        }
 
         // 🔗 Update Referral Attribution to CONSULTATION_COMPLETED
         if (appointment.patient_id) {
@@ -1380,9 +1546,10 @@ exports.completeConsultation = async (req, res) => {
         }
 
         const patient = await User.findById(appointment.patient_id).catch(() => null);
-        if (patient?.device_token && !String(patient.device_token).startsWith('{')) {
+        const completeFcmToken = extractFcmToken(patient);
+        if (completeFcmToken) {
             await sendPushNotification(
-                patient.device_token,
+                completeFcmToken,
                 '✅ Consultation Completed',
                 `New medical record and prescription added to your account.`,
                 { appointmentId: String(id), recordId: String(newRecord.id), type: 'consultation_completed' }
@@ -1393,6 +1560,8 @@ exports.completeConsultation = async (req, res) => {
             success: true,
             message: 'Consultation completed and medical record generated successfully.',
             finishedEarly,
+            releasedSlot,
+            releasedSlotNotifications,
             doctorStatus: 'Available',
             appointment: enriched,
             record: newRecord
@@ -1434,6 +1603,7 @@ exports.startConsultation = async (req, res) => {
 
         await Appointment.findByIdAndUpdate(id, {
             status: 'IN_PROGRESS',
+            actual_start_at: actualStartIso,
             qr_code_string: nextQr,
         });
         if (appointment.dentist_id) {
@@ -1967,9 +2137,26 @@ exports.markAllNotificationsRead = async (req, res) => {
 function _classifyCalendarAppointment(a) {
     const rawStatus = String(a?.status || 'PENDING').trim().toUpperCase();
     const isCompleted = rawStatus === 'COMPLETED';
-    const isCancelled = rawStatus === 'CANCELLED' || rawStatus === 'CANCELED' || rawStatus === 'REJECTED';
-    const isNoShow = rawStatus === 'NO_SHOW' || rawStatus === 'NOSHOW';
-    const isInProgress = rawStatus === 'IN_PROGRESS' || rawStatus === 'STARTED';
+    const isRejected = rawStatus === 'REJECTED' || rawStatus === 'DECLINED';
+    const isCancelledOnly = rawStatus === 'CANCELLED' || rawStatus === 'CANCELED';
+    const isCancelled = isCancelledOnly || isRejected;
+    const isNoShow = rawStatus === 'NO_SHOW' || rawStatus === 'NOSHOW' || rawStatus === 'NO-SHOW';
+    const isRescheduled = rawStatus === 'RESCHEDULED';
+    const isInProgress = rawStatus === 'IN_PROGRESS' || rawStatus === 'IN PROGRESS' || rawStatus === 'STARTED';
+    const isAccepted =
+        rawStatus === 'ACCEPTED' ||
+        rawStatus === 'CONFIRMED' ||
+        rawStatus === 'APPROVED' ||
+        rawStatus === 'DENTIST_ACCEPTED' ||
+        isInProgress ||
+        rawStatus === 'DELAYED';
+    const isAwaitingPending =
+        !isCompleted &&
+        !isCancelled &&
+        !isNoShow &&
+        !isRescheduled &&
+        !isAccepted;
+    // Legacy aggregate pending count (awaiting action + accepted/confirmed + rescheduled) kept for backwards compatibility
     const isPending = !isCompleted && !isCancelled && !isNoShow;
     // Actual visit requires consultation completion or active in-progress session (never pending/cancelled/no-show/referral)
     const actuallyVisited = !isCancelled && !isNoShow && (
@@ -1987,8 +2174,13 @@ function _classifyCalendarAppointment(a) {
     return {
         rawStatus,
         isCompleted,
+        isAccepted,
+        isAwaitingPending,
+        isRejected,
+        isCancelledOnly,
         isCancelled,
         isNoShow,
+        isRescheduled,
         isInProgress,
         isPending,
         actuallyVisited,
@@ -2182,6 +2374,7 @@ exports.getDoctorVisitsCalendar = async (req, res) => {
         const filterConsultationType = String(req.query.consultationType || '').trim();
         const filterStatus = String(req.query.status || '').trim().toUpperCase();
         const filterSpecialty = String(req.query.specialty || '').trim().toLowerCase();
+        const filterReferredOnly = String(req.query.referredOnly || '').trim().toLowerCase() === 'true';
 
         const [allAppts, allReferrals, allUsers, allDoctors, allRecords] = await Promise.all([
             Appointment.find({}).catch(() => []),
@@ -2222,11 +2415,17 @@ exports.getDoctorVisitsCalendar = async (req, res) => {
                 return { ...enriched, asiaKolkataDate: apptYmd };
             });
 
-        // Filter strictly to referrals assigned to this doctor
+        // Filter strictly to referrals assigned to this doctor and deduplicate by referral ID
+        const seenReferralIds = new Set();
         const doctorReferralsRaw = (allReferrals || []).filter(r => {
             const rDocId = String(r?.doctor_id || '').trim();
             const rAssignedId = String(r?.assigned_doctor_id || '').trim();
-            return (rDocId && doctorIdSet.has(rDocId)) || (rAssignedId && doctorIdSet.has(rAssignedId));
+            const isMine = (rDocId && doctorIdSet.has(rDocId)) || (rAssignedId && doctorIdSet.has(rAssignedId));
+            if (!isMine) return false;
+            const refIdKey = String(r?.id || '').trim();
+            if (refIdKey && seenReferralIds.has(refIdKey)) return false;
+            if (refIdKey) seenReferralIds.add(refIdKey);
+            return true;
         });
 
         const doctorReferrals = doctorReferralsRaw.map(r =>
@@ -2262,14 +2461,21 @@ exports.getDoctorVisitsCalendar = async (req, res) => {
                     actualPatientVisits: 0,
                     _visitedPatientsSet: new Set(),
                     completedConsultations: 0,
+                    acceptedAppointments: 0,
+                    pendingAppointments: 0,
                     pendingConsultations: 0,
+                    rejectedAppointments: 0,
+                    rescheduledAppointments: 0,
                     cancelledAppointments: 0,
                     noShowAppointments: 0,
                     onlineConsultations: 0,
                     inPersonConsultations: 0,
                     patientReferralsReceived: 0,
                     hasCompleted: false,
+                    hasAccepted: false,
                     hasPending: false,
+                    hasRejected: false,
+                    hasRescheduled: false,
                     hasCancelled: false,
                     hasNoShow: false,
                     hasReferrals: false,
@@ -2290,13 +2496,28 @@ exports.getDoctorVisitsCalendar = async (req, res) => {
             if (cls.isCompleted) {
                 bucket.completedConsultations += 1;
                 bucket.hasCompleted = true;
-            } else if (cls.isCancelled) {
+            } else if (cls.isRejected) {
+                bucket.rejectedAppointments += 1;
+                bucket.hasRejected = true;
+                bucket.hasCancelled = true;
+            } else if (cls.isCancelledOnly) {
                 bucket.cancelledAppointments += 1;
                 bucket.hasCancelled = true;
             } else if (cls.isNoShow) {
                 bucket.noShowAppointments += 1;
                 bucket.hasNoShow = true;
-            } else if (cls.isPending) {
+            } else if (cls.isRescheduled) {
+                bucket.rescheduledAppointments += 1;
+                bucket.pendingConsultations += 1;
+                bucket.hasRescheduled = true;
+                bucket.hasPending = true;
+            } else if (cls.isAccepted) {
+                bucket.acceptedAppointments += 1;
+                bucket.pendingConsultations += 1;
+                bucket.hasAccepted = true;
+                bucket.hasPending = true;
+            } else if (cls.isAwaitingPending) {
+                bucket.pendingAppointments += 1;
                 bucket.pendingConsultations += 1;
                 bucket.hasPending = true;
             }
@@ -2317,20 +2538,47 @@ exports.getDoctorVisitsCalendar = async (req, res) => {
             delete monthlyCalendar[ymd]._visitedPatientsSet;
         }
 
-        // Selected Date Filtering & Stats
-        const apptsOnSelectedDate = doctorAppts.filter(a => {
-            if (a.asiaKolkataDate !== selectedDate) return false;
+        // All appointments for this doctor on the selected date (used for accurate daily summary stats)
+        const allApptsOnSelectedDate = doctorAppts.filter(a => a.asiaKolkataDate === selectedDate);
+
+        // Filtered appointments list for selected date based on active filter query params
+        const apptsOnSelectedDate = allApptsOnSelectedDate.filter(a => {
             const cls = _classifyCalendarAppointment(a);
             if (filterConsultationType && filterConsultationType.toLowerCase() !== 'all') {
                 const wantType = normalizeConsultationType(filterConsultationType);
                 if (cls.consultType !== wantType) return false;
             }
             if (filterStatus && filterStatus !== 'ALL') {
-                if (cls.rawStatus !== filterStatus) return false;
+                if (filterStatus === 'ACCEPTED' || filterStatus === 'CONFIRMED') {
+                    if (!cls.isAccepted) return false;
+                } else if (filterStatus === 'PENDING') {
+                    if (!cls.isAwaitingPending) return false;
+                } else if (filterStatus === 'COMPLETED') {
+                    if (!cls.isCompleted) return false;
+                } else if (filterStatus === 'REJECTED') {
+                    if (!cls.isRejected) return false;
+                } else if (filterStatus === 'CANCELLED' || filterStatus === 'CANCELED') {
+                    if (!cls.isCancelledOnly) return false;
+                } else if (filterStatus === 'RESCHEDULED') {
+                    if (!cls.isRescheduled) return false;
+                } else if (filterStatus === 'NO_SHOW' || filterStatus === 'NOSHOW') {
+                    if (!cls.isNoShow) return false;
+                } else if (cls.rawStatus !== filterStatus) {
+                    return false;
+                }
             }
             if (filterSpecialty && filterSpecialty !== 'all') {
                 const sp = String(a.doctor_specialty || currentDoctorObj?.speciality || currentDoctorObj?.specialty || '').trim().toLowerCase();
                 if (!sp.includes(filterSpecialty)) return false;
+            }
+            if (filterReferredOnly) {
+                const pId = String(a.patient_id || a.patient?.id || '').trim();
+                const pUser = (pId && usersById.get(pId)) || null;
+                const ph10 = String(a.patient_phone || a.patient?.phone || pUser?.phone || '').replace(/\D/g, '').slice(-10);
+                const matchedRef = (pId && referralByPatientId.get(pId)) ||
+                    (ph10.length === 10 && referralByPatientPhone.get(ph10)) ||
+                    null;
+                if (!matchedRef) return false;
             }
             return true;
         });
@@ -2344,24 +2592,65 @@ exports.getDoctorVisitsCalendar = async (req, res) => {
         const referralsOnSelectedDate = doctorReferrals.filter(r => r.referralDate === selectedDate);
         const visitedPatientsOnDate = new Set();
         let completedCount = 0;
-        let pendingCount = 0;
+        let acceptedCount = 0;
+        let awaitingPendingCount = 0;
+        let pendingLegacyCount = 0;
+        let rejectedCount = 0;
+        let rescheduledCount = 0;
         let cancelledCount = 0;
         let noShowCount = 0;
         let onlineCount = 0;
         let inPersonCount = 0;
+        let referredApptsCount = 0;
 
-        for (const a of apptsOnSelectedDate) {
+        for (const a of allApptsOnSelectedDate) {
             const cls = _classifyCalendarAppointment(a);
             if (cls.actuallyVisited) {
                 visitedPatientsOnDate.add(_getUniquePatientKeyFromAppointment(a));
             }
             if (cls.isCompleted) completedCount += 1;
-            else if (cls.isCancelled) cancelledCount += 1;
+            else if (cls.isRejected) rejectedCount += 1;
+            else if (cls.isCancelledOnly) cancelledCount += 1;
             else if (cls.isNoShow) noShowCount += 1;
-            else if (cls.isPending) pendingCount += 1;
+            else if (cls.isRescheduled) {
+                rescheduledCount += 1;
+                pendingLegacyCount += 1;
+            } else if (cls.isAccepted) {
+                acceptedCount += 1;
+                pendingLegacyCount += 1;
+            } else if (cls.isAwaitingPending) {
+                awaitingPendingCount += 1;
+                pendingLegacyCount += 1;
+            }
 
             if (cls.isOnline) onlineCount += 1;
             else inPersonCount += 1;
+
+            const pId = String(a.patient_id || a.patient?.id || '').trim();
+            const pUser = (pId && usersById.get(pId)) || null;
+            const ph10 = String(a.patient_phone || a.patient?.phone || pUser?.phone || '').replace(/\D/g, '').slice(-10);
+            if ((pId && referralByPatientId.has(pId)) || (ph10.length === 10 && referralByPatientPhone.has(ph10))) {
+                referredApptsCount += 1;
+            }
+        }
+
+        // Referral breakdown for selected date (deduplicated, never double-counted)
+        let acceptedReferralsCount = 0;
+        let pendingReferralsCount = 0;
+        let rejectedReferralsCount = 0;
+        let completedReferredVisitsCount = 0;
+        for (const r of referralsOnSelectedDate) {
+            const rSt = String(r.referralStatus || 'Pending').trim().toUpperCase();
+            if (rSt === 'ACCEPTED' || rSt === 'CONFIRMED' || rSt === 'APPROVED') {
+                acceptedReferralsCount += 1;
+            } else if (rSt === 'REJECTED' || rSt === 'DECLINED' || rSt === 'CANCELLED') {
+                rejectedReferralsCount += 1;
+            } else if (rSt !== 'COMPLETED') {
+                pendingReferralsCount += 1;
+            }
+            if (r.hasCompletedConsultation || rSt === 'COMPLETED') {
+                completedReferredVisitsCount += 1;
+            }
         }
 
         // Check role permissions for contact & prescription visibility
@@ -2386,12 +2675,16 @@ exports.getDoctorVisitsCalendar = async (req, res) => {
                 return pId && recPid === pId;
             });
 
+            const rawNotes = String(a.notes || '').trim();
+            const cleanNotes = rawNotes && !rawNotes.startsWith('{') ? rawNotes : '';
+            const resolvedProblem = cleanNotes || a.problem_description || a.reason || a.treatment || 'Medical Consultation';
+
             return {
                 appointmentId: a.id,
                 id: a.id,
                 patientId: pId || null,
                 patientName: a.patient_name || pUser?.name || 'Patient',
-                patientProfileImage: pUser?.biometric_token || a.patient?.profilePhoto || null,
+                patientProfileImage: pUser?.profile_image_url || pUser?.profile_photo || pUser?.biometric_token || a.patient?.profile_image_url || a.patient?.profilePhoto || null,
                 patientPhone: canViewPatientContact ? (a.patient_phone || pUser?.phone || '') : null,
                 patientEmail: canViewPatientContact ? (a.patient_email || pUser?.email || '') : null,
                 patientCity: a.patient_city || pUser?.city || '',
@@ -2404,16 +2697,21 @@ exports.getDoctorVisitsCalendar = async (req, res) => {
                 actualEndAt: a.actual_end_at || null,
                 consultationType: cls.consultType,
                 specialty: a.doctor_specialty || currentDoctorObj?.speciality || currentDoctorObj?.specialty || 'General Medicine',
+                clinicName: a.clinic_name || '',
                 treatment: a.treatment || 'Medical Consultation',
+                problemDescription: resolvedProblem,
+                symptoms: a.symptoms || '',
                 status: cls.rawStatus,
                 actuallyVisited: cls.actuallyVisited,
                 delayMinutes: Number(a.delay_minutes || 0) || 0,
+                isReferred: Boolean(matchedRef),
                 referralSource: matchedRef ? {
                     referralId: matchedRef.referralId,
                     referringPatientName: matchedRef.referringPatientName,
                     referringPatientPhone: canViewPatientContact ? matchedRef.referringPatientPhone : null,
                     referralDate: matchedRef.referralDate,
                     referralStatus: matchedRef.referralStatus,
+                    clinicalComplaint: matchedRef.clinicalComplaint || '',
                 } : null,
                 canViewPatientContact,
                 canAccessConsultationDetails,
@@ -2424,31 +2722,99 @@ exports.getDoctorVisitsCalendar = async (req, res) => {
             };
         });
 
+        const selectedDateReferralStats = {
+            totalReferralsReceived: referralsOnSelectedDate.length,
+            acceptedReferrals: acceptedReferralsCount,
+            pendingReferrals: pendingReferralsCount,
+            rejectedReferrals: rejectedReferralsCount,
+            completedReferredVisits: completedReferredVisitsCount,
+        };
+
         const selectedDateStats = {
             date: selectedDate,
-            totalAppointments: apptsOnSelectedDate.length,
+            totalAppointments: allApptsOnSelectedDate.length,
             actualPatientVisits: visitedPatientsOnDate.size,
+            acceptedAppointments: acceptedCount,
+            pendingAppointments: awaitingPendingCount,
             completedConsultations: completedCount,
-            pendingConsultations: pendingCount,
+            pendingConsultations: pendingLegacyCount,
+            rejectedAppointments: rejectedCount,
+            rescheduledAppointments: rescheduledCount,
             cancelledAppointments: cancelledCount,
             noShowAppointments: noShowCount,
             onlineConsultations: onlineCount,
             inPersonConsultations: inPersonCount,
+            referredAppointments: referredApptsCount,
             patientReferralsReceived: referralsOnSelectedDate.length,
+            acceptedReferrals: acceptedReferralsCount,
+            pendingReferrals: pendingReferralsCount,
+            rejectedReferrals: rejectedReferralsCount,
+            completedReferredVisits: completedReferredVisitsCount,
             patientsReferredByOtherPatients: referralsOnSelectedDate.filter(r => r.isReferredByPatient).length,
             totalReferralsAllTime: doctorReferrals.length,
         };
 
+        // Include doctor's smart schedule, blocked ranges, released slots, and 7-day weekly calendar summary
+        const effectiveDocCalendarId = resolvedDoc.dentistId || targetDoctorId;
+        const doctorSchedule = sanitizeSmartSchedule(
+            await DoctorAvailability.getSchedule(effectiveDocCalendarId).catch(() => ({}))
+        );
+        const selectedDateBlockedSlots = await DoctorAvailability.getBlockedSlotsForDate(
+            effectiveDocCalendarId,
+            selectedDate
+        ).catch(() => []);
+        const selectedDateAvailRec = await DoctorAvailability.findOne({
+            dentist_id: effectiveDocCalendarId,
+            date: selectedDate,
+        }).catch(() => null);
+        const selectedDateReleasedSlots = await ReleasedSlot.findForDoctorAndDate(
+            effectiveDocCalendarId,
+            selectedDate,
+            { onlyAvailable: true }
+        ).catch(() => []);
+
+        // Build 7-day Mon..Sun weekly calendar around selectedDate
+        const selParts = selectedDate.split('-').map(n => parseInt(n, 10));
+        const selUtc = new Date(Date.UTC(selParts[0], selParts[1] - 1, selParts[2], 12, 0, 0));
+        const dayOfWeekIso = (selUtc.getUTCDay() + 6) % 7; // 0=Mon..6=Sun
+        const weekStartUtc = new Date(selUtc.getTime() - dayOfWeekIso * 86400000);
+        const weeklyCalendar = [];
+        for (let i = 0; i < 7; i++) {
+            const dUtc = new Date(weekStartUtc.getTime() + i * 86400000);
+            const ymd = dUtc.toISOString().split('T')[0];
+            const bucket = monthlyCalendar[ymd] || null;
+            const dayAppts = doctorAppts.filter(a => a.asiaKolkataDate === ymd);
+            weeklyCalendar.push({
+                date: ymd,
+                dayOfWeek: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][i],
+                totalAppointments: bucket ? bucket.totalAppointments : dayAppts.length,
+                completedConsultations: bucket ? bucket.completedConsultations : dayAppts.filter(a => _classifyCalendarAppointment(a).isCompleted).length,
+                acceptedAppointments: bucket ? bucket.acceptedAppointments : dayAppts.filter(a => _classifyCalendarAppointment(a).isAccepted).length,
+                pendingAppointments: bucket ? bucket.pendingAppointments : dayAppts.filter(a => _classifyCalendarAppointment(a).isAwaitingPending).length,
+                onlineConsultations: bucket ? bucket.onlineConsultations : dayAppts.filter(a => _classifyCalendarAppointment(a).isOnline).length,
+                inPersonConsultations: bucket ? bucket.inPersonConsultations : dayAppts.filter(a => _classifyCalendarAppointment(a).isInPerson).length,
+            });
+        }
+
         res.json({
             success: true,
             timezone: tz,
-            doctorId: resolvedDoc.dentistId || targetDoctorId,
+            doctorId: effectiveDocCalendarId,
             doctorName: currentDoctorObj?.users?.name || currentDoctorObj?.name || 'Doctor',
             specialty: currentDoctorObj?.speciality || currentDoctorObj?.specialty || 'General Medicine',
             selectedDate,
             month: selectedMonth,
             selectedDateStats,
+            selectedDateReferralStats,
             monthlyCalendar,
+            weeklyCalendar,
+            schedule: {
+                ...doctorSchedule,
+                selectedDateBlocked: Boolean(selectedDateAvailRec?.is_blocked),
+                selectedDateBlockedReason: selectedDateAvailRec?.blocked_reason || null,
+                selectedDateBlockedSlots,
+            },
+            releasedSlots: selectedDateReleasedSlots,
             visits: visitsList,
             referralsOnDate: referralsOnSelectedDate,
             allReferrals: doctorReferrals,

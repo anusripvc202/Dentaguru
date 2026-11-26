@@ -224,7 +224,7 @@ void main() {
           ),
           findsOneWidget,
         );
-        // Completed = 2, Pending = 1, Cancelled = 1, No-Show = 1
+        // Completed = 2, Accepted (Confirmed) = 1, Pending (awaiting action) = 0, Cancelled = 1, No-Show = 1
         expect(
           find.descendant(
             of: find.byKey(const Key('doctor_cal_stat_completed')),
@@ -234,8 +234,15 @@ void main() {
         );
         expect(
           find.descendant(
-            of: find.byKey(const Key('doctor_cal_stat_pending')),
+            of: find.byKey(const Key('doctor_cal_stat_accepted')),
             matching: find.text('1'),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('doctor_cal_stat_pending')),
+            matching: find.text('0'),
           ),
           findsOneWidget,
         );

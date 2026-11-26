@@ -1,5 +1,26 @@
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { supabaseAdmin } = require('../config/supabase');
+const {
+    parseDeviceTokenPayload,
+    extractFcmToken,
+    extractFcmTokens,
+    mergeDeviceTokenPayload,
+} = require('../utils/deviceTokenHelper');
+const {
+    normalizeDateToTimezoneYmd,
+    parseClockSlotMinutes,
+    minutesToClockSlot,
+    normalizeConsultationType,
+    getConsultationTimingForType,
+    getAppointmentOccupiedInterval,
+    intervalsOverlap,
+} = require('../config/bookingRulesConfig');
+const {
+    DEFAULT_SMART_SCHEDULE,
+    sanitizeSmartSchedule,
+    getModeScheduleWindow,
+} = require('../services/smartSchedulingEngine');
 
 // Helper to hash password
 const hashPassword = async (password) => {
@@ -113,6 +134,14 @@ function _unpackUserRecord(record) {
             if (meta.address && !record.address) record.address = meta.address;
             if (meta.profilePhoto && !record.biometric_token) record.biometric_token = meta.profilePhoto;
         } catch (_) { }
+    }
+    const resolvedFcmToken = extractFcmToken(record);
+    if (resolvedFcmToken && !record.fcm_token) {
+        record.fcm_token = resolvedFcmToken;
+    }
+    const resolvedFcmTokens = extractFcmTokens(record);
+    if (resolvedFcmTokens.length > 0 && !record.fcm_tokens) {
+        record.fcm_tokens = resolvedFcmTokens;
     }
     return record;
 }
@@ -341,6 +370,23 @@ const User = {
         return insertedData;
     },
 
+    async updateFcmToken(id, fcmToken) {
+        const cleanToken = typeof fcmToken === 'string' ? fcmToken.trim() : '';
+        if (!id || !cleanToken || cleanToken.startsWith('{')) {
+            return null;
+        }
+        const existing = await supabaseAdmin.from('users').select('device_token').eq('id', id).maybeSingle();
+        const mergedDeviceToken = mergeDeviceTokenPayload(existing.data?.device_token, { fcmToken: cleanToken });
+        const { data, error } = await supabaseAdmin
+            .from('users')
+            .update({ device_token: mergedDeviceToken })
+            .eq('id', id)
+            .select()
+            .maybeSingle();
+        if (error) throw error;
+        return _unpackUserRecord(data);
+    },
+
     async findByIdAndUpdate(id, updateData) {
         if (updateData.password && !updateData.password.startsWith('$2a$') && !updateData.password.startsWith('$2b$')) {
             updateData.password = await hashPassword(updateData.password);
@@ -354,6 +400,15 @@ const User = {
         delete dbPayload.status_updated_by;
         if (dbPayload.status !== undefined) {
             dbPayload.status = String(dbPayload.status).trim().toUpperCase();
+        }
+        // Non-destructive guard: never allow raw device_token updates to overwrite existing schedule/profile metadata or FCM tokens
+        if (dbPayload.device_token !== undefined && dbPayload.device_token !== null) {
+            try {
+                const existing = await supabaseAdmin.from('users').select('device_token').eq('id', id).maybeSingle();
+                dbPayload.device_token = mergeDeviceTokenPayload(existing.data?.device_token, dbPayload.device_token);
+            } catch (_) {
+                dbPayload.device_token = mergeDeviceTokenPayload(null, dbPayload.device_token);
+            }
         }
 
         try {
@@ -1091,6 +1146,13 @@ const Clinic = {
         const isUuid = rawUserId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawUserId.toString());
         const validUserId = isUuid ? rawUserId.toString() : null;
 
+        const parsedLat = clinicData.latitude !== undefined && clinicData.latitude !== null && String(clinicData.latitude).trim() !== ''
+            ? Number(clinicData.latitude)
+            : (clinicData.coordinates?.coordinates?.[1] !== undefined ? Number(clinicData.coordinates.coordinates[1]) : null);
+        const parsedLng = clinicData.longitude !== undefined && clinicData.longitude !== null && String(clinicData.longitude).trim() !== ''
+            ? Number(clinicData.longitude)
+            : (clinicData.coordinates?.coordinates?.[0] !== undefined ? Number(clinicData.coordinates.coordinates[0]) : null);
+
         const payload = {
             user_id: validUserId,
             clinic_name: clinicData.clinic_name || clinicData.clinicName || '',
@@ -1100,8 +1162,8 @@ const Clinic = {
             verified: clinicData.verified !== undefined ? clinicData.verified : true,
             services: clinicData.services || clinicData.departments || ['General Medicine', 'General Consultation'],
             pricing: clinicData.pricing || [],
-            latitude: clinicData.latitude || clinicData.coordinates?.coordinates?.[1] || null,
-            longitude: clinicData.longitude || clinicData.coordinates?.coordinates?.[0] || null
+            latitude: Number.isFinite(parsedLat) ? parsedLat : null,
+            longitude: Number.isFinite(parsedLng) ? parsedLng : null
         };
         const { data, error } = await supabaseAdmin.from('clinics').insert(payload).select().single();
         if (error) {
@@ -1600,7 +1662,7 @@ const Dentist = {
 
     async find(query = {}) {
         try {
-            let req = supabaseAdmin.from('dentists').select('*, users(name, email, phone, state, city, pincode, latitude, longitude, device_token, biometric_token), clinics(clinic_name, location)');
+            let req = supabaseAdmin.from('dentists').select('*, users(name, email, phone, state, city, pincode, latitude, longitude, device_token, biometric_token), clinics(clinic_name, location, latitude, longitude)');
             // Apply direct dentists table filters
             if (query.state) {
                 req = req.ilike('state', `%${query.state}%`);
@@ -1654,7 +1716,7 @@ const Dentist = {
                 return await this.findOne({ $or: [{ name: str }, { email: str }] });
             }
             const { data, error } = await supabaseAdmin.from('dentists')
-                .select('*, users(name, email, phone, state, city, pincode, device_token, biometric_token), clinics(clinic_name, location)')
+                .select('*, users(name, email, phone, state, city, pincode, latitude, longitude, device_token, biometric_token), clinics(clinic_name, location, latitude, longitude)')
                 .or(`id.eq.${str},user_id.eq.${str}`)
                 .maybeSingle();
             if (error || !data) {
@@ -1692,9 +1754,16 @@ const Dentist = {
             }
         }
 
+        const { normalizeConsultationMode, validateCoordinates } = require('../utils/doctorClinicLocationHelper');
+        const resolvedConsultationMode = normalizeConsultationMode(
+            dentistData.consultation_mode || dentistData.consultationMode,
+            'BOTH'
+        );
+        const coordCheck = validateCoordinates(dentistData.latitude, dentistData.longitude, false);
+
         const payload = {
             user_id: validUserId,
-            clinic_id: validClinicId,
+            clinic_id: resolvedConsultationMode === 'ONLINE_ONLY' ? null : validClinicId,
             speciality: resolvedSpec,
             specialty_id: specResolution.specialty_id || null,
             department: dentistData.department || specResolution.department || '',
@@ -1707,18 +1776,35 @@ const Dentist = {
             rating: dentistData.rating ?? 0,
             reviews_count: dentistData.reviews_count ?? 0,
             consultation_fee: (dentistData.consultation_fee || dentistData.consultationFee || '').toString(),
-            bio: (dentistData.bio || '').toString()
+            bio: (dentistData.bio || '').toString(),
+            consultation_mode: resolvedConsultationMode
         };
-        if (dentistData.state) payload.state = dentistData.state;
-        if (dentistData.city) payload.city = dentistData.city;
-        if (dentistData.pincode) payload.pincode = dentistData.pincode;
+        if (resolvedConsultationMode !== 'ONLINE_ONLY') {
+            const rawClinicName = (dentistData.clinic_name ?? dentistData.clinicName ?? '').toString().trim();
+            const rawClinicAddress = (dentistData.clinic_address ?? dentistData.clinicAddress ?? '').toString().trim();
+            if (rawClinicName) payload.clinic_name = rawClinicName;
+            if (rawClinicAddress) payload.clinic_address = rawClinicAddress;
+            if (coordCheck.ok && coordCheck.hasUpdate) {
+                payload.latitude = coordCheck.latitude;
+                payload.longitude = coordCheck.longitude;
+            }
+        } else {
+            payload.clinic_name = null;
+            payload.clinic_address = null;
+            payload.latitude = null;
+            payload.longitude = null;
+        }
+        if (dentistData.state !== undefined && dentistData.state !== null) payload.state = String(dentistData.state).trim();
+        if (dentistData.city !== undefined && dentistData.city !== null) payload.city = String(dentistData.city).trim();
+        if (dentistData.pincode !== undefined && dentistData.pincode !== null) payload.pincode = String(dentistData.pincode).trim();
 
         try {
             const { data, error } = await supabaseAdmin.from('dentists').insert(payload).select().single();
             if (error) throw error;
             return data;
         } catch (err) {
-            if (err && err.message && err.message.toLowerCase().includes('dentists_license_number_key')) {
+            const errMsg = (err && err.message ? err.message : '').toLowerCase();
+            if (errMsg.includes('dentists_license_number_key')) {
                 const retryPayload = {
                     ...payload,
                     license_number: `MED-LIC-${Date.now()}-${Math.floor(10000 + Math.random() * 90000)}`
@@ -1726,8 +1812,18 @@ const Dentist = {
                 const { data: retryData, error: retryErr } = await supabaseAdmin.from('dentists').insert(retryPayload).select().single();
                 if (!retryErr && retryData) return retryData;
             }
-            if (err && err.message && err.message.toLowerCase().includes('languages')) {
-                const { languages: _omitted, ...fallbackPayload } = payload;
+            if (
+                errMsg.includes('languages') ||
+                errMsg.includes('clinic_name') ||
+                errMsg.includes('clinic_address') ||
+                errMsg.includes('consultation_mode') ||
+                errMsg.includes('column')
+            ) {
+                const fallbackPayload = { ...payload };
+                if (errMsg.includes('languages')) delete fallbackPayload.languages;
+                delete fallbackPayload.clinic_name;
+                delete fallbackPayload.clinic_address;
+                delete fallbackPayload.consultation_mode;
                 const { data: retryData, error: retryErr } = await supabaseAdmin.from('dentists').insert(fallbackPayload).select().single();
                 if (!retryErr && retryData) return retryData;
             }
@@ -1767,10 +1863,34 @@ const Dentist = {
         if (updateData.bio !== undefined) {
             payload.bio = String(updateData.bio ?? '');
         }
+        const { normalizeConsultationMode, validateCoordinates } = require('../utils/doctorClinicLocationHelper');
         if (updateData.clinic_id !== undefined) payload.clinic_id = updateData.clinic_id;
+        if (updateData.clinic_name !== undefined || updateData.clinicName !== undefined) {
+            const val = updateData.clinic_name ?? updateData.clinicName;
+            payload.clinic_name = val === null ? null : String(val).trim();
+        }
+        if (updateData.clinic_address !== undefined || updateData.clinicAddress !== undefined) {
+            const val = updateData.clinic_address ?? updateData.clinicAddress;
+            payload.clinic_address = val === null ? null : String(val).trim();
+        }
+        if (updateData.consultation_mode !== undefined || updateData.consultationMode !== undefined) {
+            payload.consultation_mode = normalizeConsultationMode(
+                updateData.consultation_mode ?? updateData.consultationMode,
+                'BOTH'
+            );
+        }
         if (updateData.city !== undefined) payload.city = updateData.city;
         if (updateData.pincode !== undefined) payload.pincode = updateData.pincode;
         if (updateData.state !== undefined) payload.state = updateData.state;
+        const coordCheck = validateCoordinates(
+            updateData.latitude,
+            updateData.longitude,
+            updateData.clearLocation === true
+        );
+        if (coordCheck.ok && coordCheck.hasUpdate) {
+            payload.latitude = coordCheck.latitude;
+            payload.longitude = coordCheck.longitude;
+        }
         if (updateData.languages !== undefined || updateData.languagesKnown !== undefined) {
             const normalizedLangs = normalizeLanguagesList(updateData.languages ?? updateData.languagesKnown);
             if (normalizedLangs.length > 0) {
@@ -1787,6 +1907,27 @@ const Dentist = {
                 .select()
                 .maybeSingle();
             if (!error && data) return data;
+            if (error) {
+                const errMsg = (error.message || '').toLowerCase();
+                if (
+                    errMsg.includes('clinic_name') ||
+                    errMsg.includes('clinic_address') ||
+                    errMsg.includes('consultation_mode') ||
+                    errMsg.includes('column')
+                ) {
+                    const fallbackPayload = { ...payload };
+                    delete fallbackPayload.clinic_name;
+                    delete fallbackPayload.clinic_address;
+                    delete fallbackPayload.consultation_mode;
+                    const retry = await supabaseAdmin
+                        .from('dentists')
+                        .update(fallbackPayload)
+                        .or(`id.eq.${str},user_id.eq.${str}`)
+                        .select()
+                        .maybeSingle();
+                    if (!retry.error && retry.data) return retry.data;
+                }
+            }
         } catch (e) {
             console.warn('⚠️ Dentist.findByIdAndUpdate warning:', e.message);
         }
@@ -1967,34 +2108,73 @@ const Appointment = {
         const dentistId = await resolveDentistUuid(appData.dentist_id || appData.dentistId);
         const clinicId = await resolveClinicUuid(appData.clinic_id || appData.clinicId);
 
-        const apptDate = appData.date || appData.appointment_date || appData.appointmentDate || new Date().toISOString();
-        const timeSlot = appData.time_slot || appData.timeSlot || 'Today, 2:30 PM';
+        const rawDate = appData.date || appData.appointment_date || appData.appointmentDate || new Date().toISOString();
+        const apptDateYmd = normalizeDateToTimezoneYmd(appData.appointment_date || appData.appointmentDate || rawDate) || new Date().toISOString().split('T')[0];
+        const apptDateTs = `${apptDateYmd}T00:00:00.000Z`;
+        const timeSlot = String(appData.time_slot || appData.timeSlot || '10:00 AM').trim();
         const treatmentName = appData.treatment || appData.notes || 'Medical Consultation';
         const statusVal = appData.status || 'PENDING';
+        const mode = normalizeConsultationType(appData.consultation_type || appData.consultationType || appData.consultationMode, treatmentName);
+        const defaultTiming = getConsultationTimingForType(mode);
+        const startMin = appData.scheduled_start_min !== undefined && appData.scheduled_start_min !== null
+            ? Number(appData.scheduled_start_min)
+            : parseClockSlotMinutes(timeSlot);
+        const durMin = Number(appData.duration_minutes || appData.durationMinutes) > 0
+            ? Number(appData.duration_minutes || appData.durationMinutes)
+            : defaultTiming.durationMinutes;
+        const bufMin = appData.buffer_minutes !== undefined && Number(appData.buffer_minutes) >= 0
+            ? Number(appData.buffer_minutes)
+            : (appData.bufferMinutes !== undefined && Number(appData.bufferMinutes) >= 0 ? Number(appData.bufferMinutes) : defaultTiming.bufferMinutes);
 
-        const payload = {
+        const basePayload = {
             patient_id: patientId,
             dentist_id: dentistId,
             clinic_id: clinicId,
-            date: apptDate,
+            date: apptDateTs,
             time_slot: timeSlot,
             treatment: treatmentName,
             status: statusVal,
             qr_code_string: appData.qr_code_string || `DENTAGURU-${patientId || 'PATIENT'}-${Date.now()}`
         };
 
+        const richPayload = {
+            ...basePayload,
+            appointment_date: apptDateYmd,
+            consultation_type: mode,
+            ...(appData.capacity_lane ? { capacity_lane: appData.capacity_lane } : {}),
+            duration_minutes: durMin,
+            buffer_minutes: bufMin,
+            delay_minutes: Number(appData.delay_minutes || 0) || 0,
+            ...(startMin !== null && Number.isFinite(startMin) ? {
+                scheduled_start_min: startMin,
+                scheduled_end_min: startMin + durMin,
+                effective_end_min: startMin + durMin + bufMin,
+            } : {}),
+            ...(appData.actual_start_at ? { actual_start_at: appData.actual_start_at } : {}),
+            ...(appData.actual_end_at ? { actual_end_at: appData.actual_end_at } : {}),
+            ...(appData.finished_early !== undefined ? { finished_early: Boolean(appData.finished_early) } : {}),
+            ...(appData.released_slot_id ? { released_slot_id: appData.released_slot_id } : {}),
+        };
+
         try {
-            const { data, error } = await supabaseAdmin.from('appointments').insert(payload).select().single();
+            const { data, error } = await supabaseAdmin.from('appointments').insert(richPayload).select().single();
             if (!error && data) return data;
             if (error) {
-                // Fallback attempt with legacy column names
+                const msg = String(error.message || '').toLowerCase();
+                // Re-throw real constraint/exclusion violations immediately (never silently bypass GiST!)
+                if (error.code === '23P01' || error.code === '23514' || msg.includes('exclusion') || msg.includes('chk_appointments')) {
+                    throw error;
+                }
+                // Fallback to pre-Migration-04 base columns when new columns do not exist yet
+                const { data: dBase, error: eBase } = await supabaseAdmin.from('appointments').insert(basePayload).select().single();
+                if (!eBase && dBase) return dBase;
                 const legacyPayload = {
                     patient_id: patientId,
                     dentist_id: dentistId,
                     clinic_id: clinicId,
-                    appointment_date: apptDate,
+                    appointment_date: apptDateTs,
                     status: statusVal,
-                    type: 'In-Person',
+                    type: mode,
                     notes: treatmentName
                 };
                 const { data: d2, error: e2 } = await supabaseAdmin.from('appointments').insert(legacyPayload).select().single();
@@ -2073,9 +2253,51 @@ const Appointment = {
         }
         const { data, error } = await req.order('created_at', { ascending: false });
         if (error) {
-            console.warn('⚠️ Appointment query error, falling back to simple select:', error.message);
+            console.warn('⚠️ Appointment query error, falling back to filtered simple select:', error.message);
+            // Strict isolation: never return unfiltered appointments when a doctor, patient, or clinic filter was requested
+            if (pId || dId || cId) {
+                try {
+                    let fallbackReq = supabaseAdmin.from('appointments').select('*');
+                    if (pId) {
+                        const resolvedP = await resolveUserUuid(pId);
+                        if (Array.isArray(resolvedP) && resolvedP.length > 0) {
+                            fallbackReq = fallbackReq.in('patient_id', resolvedP);
+                        } else if (typeof resolvedP === 'string' && resolvedP.length > 0) {
+                            fallbackReq = fallbackReq.eq('patient_id', resolvedP);
+                        } else {
+                            return [];
+                        }
+                    }
+                    if (dId) {
+                        const { dentistTableId, userTableId, uuidIds } = await resolveDentistIds(dId);
+                        if (Array.isArray(uuidIds) && uuidIds.length > 1) {
+                            fallbackReq = fallbackReq.in('dentist_id', uuidIds);
+                        } else if (Array.isArray(uuidIds) && uuidIds.length === 1) {
+                            fallbackReq = fallbackReq.eq('dentist_id', uuidIds[0]);
+                        } else if (dentistTableId && userTableId && dentistTableId !== userTableId) {
+                            fallbackReq = fallbackReq.or(`dentist_id.eq.${dentistTableId},dentist_id.eq.${userTableId}`);
+                        } else if (dentistTableId) {
+                            fallbackReq = fallbackReq.eq('dentist_id', dentistTableId);
+                        } else {
+                            return [];
+                        }
+                    }
+                    if (cId) {
+                        const { clinicId: resolvedC } = await resolveClinicIds(cId);
+                        if (!resolvedC) return [];
+                        fallbackReq = fallbackReq.eq('clinic_id', resolvedC);
+                    }
+                    if (query.status) {
+                        fallbackReq = fallbackReq.eq('status', query.status);
+                    }
+                    const simple = await fallbackReq.order('created_at', { ascending: false });
+                    return simple.error ? [] : (simple.data || []);
+                } catch (_) {
+                    return [];
+                }
+            }
             const simple = await supabaseAdmin.from('appointments').select('*').order('created_at', { ascending: false });
-            return simple.data || [];
+            return simple.error ? [] : (simple.data || []);
         }
         return data || [];
     },
@@ -2088,7 +2310,34 @@ const Appointment = {
 
     async findByIdAndUpdate(id, updateData) {
         const { data, error } = await supabaseAdmin.from('appointments').update(updateData).eq('id', id).select().single();
-        if (error) throw error;
+        if (!error && data) return data;
+        if (error) {
+            const msg = String(error.message || '').toLowerCase();
+            if (error.code === '23P01' || error.code === '23514' || msg.includes('exclusion') || msg.includes('chk_appointments')) {
+                throw error;
+            }
+            // Pre-Migration-04 graceful fallback: strip Phase 2 columns if DB does not have them yet
+            const PHASE2_COLS = [
+                'appointment_date', 'consultation_type', 'capacity_lane', 'duration_minutes',
+                'buffer_minutes', 'delay_minutes', 'scheduled_start_min', 'scheduled_end_min',
+                'effective_end_min', 'scheduled_start_at', 'scheduled_end_at', 'actual_start_at',
+                'actual_end_at', 'finished_early', 'released_slot_id'
+            ];
+            const safeUpdate = { ...updateData };
+            let stripped = false;
+            for (const col of PHASE2_COLS) {
+                if (col in safeUpdate) {
+                    delete safeUpdate[col];
+                    stripped = true;
+                }
+            }
+            if (stripped && Object.keys(safeUpdate).length > 0) {
+                const { data: d2, error: e2 } = await supabaseAdmin.from('appointments').update(safeUpdate).eq('id', id).select().single();
+                if (e2) throw e2;
+                return d2;
+            }
+            throw error;
+        }
         return data;
     }
 };
@@ -2842,6 +3091,9 @@ const Notification = {
         if (notifData.referral_id || notifData.referralId) {
             payload.referral_id = notifData.referral_id || notifData.referralId;
         }
+        if (notifData.data && typeof notifData.data === 'object') {
+            payload.data = notifData.data;
+        }
 
         try {
             // Avoid duplicate notifications created within a 15-second window for the same recipient + title + message
@@ -2865,9 +3117,10 @@ const Notification = {
             const { data, error } = await supabaseAdmin.from('notifications').insert(payload).select().single();
             if (!error && data) return data;
             if (error) {
-                // Fallback without referral_id column if not yet migrated in Supabase
+                // Fallback without referral_id / data columns if not yet migrated in Supabase
                 const safePayload = /** @type {Record<string, any>} */ ({ ...payload });
                 delete safePayload.referral_id;
+                delete safePayload.data;
                 const { data: d2, error: e2 } = await supabaseAdmin.from('notifications').insert(safePayload).select().single();
                 if (e2) throw e2;
                 return d2;
@@ -3530,34 +3783,872 @@ const DEFAULT_DOCTOR_SCHEDULE = {
     isConfigured: false,
 };
 
-function sanitizeSchedulePayload(raw = {}, fallback = DEFAULT_DOCTOR_SCHEDULE) {
-    const workingDays = normalizeWorkingDays(raw.workingDays ?? raw.working_days);
-    const hasBreakVal = raw.hasBreak !== undefined
-        ? Boolean(raw.hasBreak)
-        : (raw.has_break !== undefined ? Boolean(raw.has_break) : (raw.breakStartTime ? true : fallback.hasBreak));
-    const breakStart = hasBreakVal
-        ? String(raw.breakStartTime || raw.break_start_time || fallback.breakStartTime || '01:00 PM').trim()
-        : null;
-    const breakEnd = hasBreakVal
-        ? String(raw.breakEndTime || raw.break_end_time || fallback.breakEndTime || '02:00 PM').trim()
-        : null;
-    const dur = parseInt(raw.slotDurationMinutes || raw.slot_duration_minutes || fallback.slotDurationMinutes, 10);
-    const interval = parseInt(raw.slotIntervalMinutes || raw.slot_interval_minutes || dur || fallback.slotIntervalMinutes || fallback.slotDurationMinutes, 10);
-    return {
-        workingDays: workingDays.length > 0 ? workingDays : [...fallback.workingDays],
-        startTime: String(raw.startTime || raw.start_time || fallback.startTime || '09:00 AM').trim(),
-        endTime: String(raw.endTime || raw.end_time || fallback.endTime || '05:00 PM').trim(),
-        slotDurationMinutes: dur >= 5 ? dur : 30,
-        slotIntervalMinutes: interval >= 5 ? interval : (dur >= 5 ? dur : 30),
-        hasBreak: hasBreakVal,
-        breakStartTime: breakStart,
-        breakEndTime: breakEnd,
-        isConfigured: raw.isConfigured !== undefined ? Boolean(raw.isConfigured) : Boolean(fallback.isConfigured),
-        updatedAt: raw.updatedAt || new Date().toISOString(),
-    };
+function sanitizeSchedulePayload(raw = {}, fallback = DEFAULT_SMART_SCHEDULE) {
+    return sanitizeSmartSchedule(raw, fallback);
 }
 
 const _inMemoryBlockedSlots = new Map(); // key: `${dentistId}_${dateYmd}` -> Array<{startTime, endTime, reason, ...}>
+const _inMemorySlotLocks = new Map(); // key: lockId -> lock row
+const _inMemoryReleasedSlots = new Map(); // key: releasedSlotId -> released slot row
+const _inMemoryPatientPrefs = new Map(); // key: `${patientId}::${dentistId}` -> preference row
+const _inMemoryNotifDeliveries = new Map(); // key: `${releasedSlotId}::${patientId}` -> delivery row
+
+const DoctorSchedulingSettings = {
+    async getByDentistId(dentistId) {
+        if (!dentistId) return { ...DEFAULT_SMART_SCHEDULE };
+        const { canonicalId, dentistTableId, userTableId, idsToMatch } = await DoctorAvailability.resolveCanonicalIds(dentistId);
+
+        // 1. Primary source of truth: dedicated public.doctor_scheduling_settings table
+        const lookupId = dentistTableId || (isUUID(canonicalId) ? canonicalId : null);
+        if (lookupId && isUUID(lookupId)) {
+            try {
+                const { data, error } = await supabaseAdmin
+                    .from('doctor_scheduling_settings')
+                    .select('*')
+                    .eq('dentist_id', lookupId)
+                    .maybeSingle();
+                if (!error && data) {
+                    const sanitized = sanitizeSmartSchedule({ ...data, isConfigured: true });
+                    for (const k of idsToMatch) _inMemorySchedule.set(k, sanitized);
+                    return sanitized;
+                }
+            } catch (e) {
+                console.warn('⚠️ DoctorSchedulingSettings.getByDentistId notice:', e.message);
+            }
+        }
+
+        // 2. In-memory cache (for pre-migration staging or mocked unit tests)
+        for (const k of idsToMatch) {
+            if (_inMemorySchedule.has(k)) {
+                return sanitizeSmartSchedule(_inMemorySchedule.get(k));
+            }
+        }
+
+        // 3. Read-only legacy migration fallback from users.device_token.schedule (NEVER writes back to device_token!)
+        const targetUserId = userTableId || (dentistTableId ? null : dentistId);
+        if (targetUserId && isUUID(targetUserId)) {
+            try {
+                const { data: uRow } = await supabaseAdmin
+                    .from('users')
+                    .select('id, device_token')
+                    .eq('id', targetUserId)
+                    .maybeSingle();
+                if (uRow?.device_token && typeof uRow.device_token === 'string' && uRow.device_token.startsWith('{')) {
+                    const meta = JSON.parse(uRow.device_token);
+                    if (meta?.schedule && typeof meta.schedule === 'object') {
+                        return sanitizeSmartSchedule({
+                            ...meta.schedule,
+                            blockedTimeRanges: meta.blockedSlotsByDate || meta.schedule.blockedTimeRanges || {},
+                            isConfigured: meta.schedule.isConfigured !== false,
+                        });
+                    }
+                }
+            } catch (_) { }
+        }
+
+        return { ...DEFAULT_SMART_SCHEDULE };
+    },
+
+    async upsert(dentistId, scheduleData = {}) {
+        if (!dentistId) return { ...DEFAULT_SMART_SCHEDULE };
+        const { canonicalId, dentistTableId, idsToMatch } = await DoctorAvailability.resolveCanonicalIds(dentistId);
+        const existing = await this.getByDentistId(dentistId);
+        const nextSchedule = sanitizeSmartSchedule({ ...scheduleData, isConfigured: true }, existing);
+
+        for (const k of idsToMatch) {
+            _inMemorySchedule.set(k, nextSchedule);
+        }
+
+        const targetDentistId = dentistTableId || (isUUID(canonicalId) ? canonicalId : null);
+        if (targetDentistId && isUUID(targetDentistId)) {
+            try {
+                const dbPayload = {
+                    dentist_id: targetDentistId,
+                    working_days: nextSchedule.workingDays,
+                    start_time: nextSchedule.startTime,
+                    end_time: nextSchedule.endTime,
+                    breaks: nextSchedule.breaks,
+                    default_duration_minutes: nextSchedule.defaultDurationMinutes,
+                    in_person_enabled: nextSchedule.inPersonEnabled,
+                    in_person_duration_minutes: nextSchedule.inPersonDurationMinutes,
+                    online_enabled: nextSchedule.onlineEnabled,
+                    online_duration_minutes: nextSchedule.onlineDurationMinutes,
+                    online_working_days: nextSchedule.onlineWorkingDays,
+                    online_start_time: nextSchedule.onlineStartTime,
+                    online_end_time: nextSchedule.onlineEndTime,
+                    buffer_minutes: nextSchedule.bufferMinutes,
+                    online_buffer_minutes: nextSchedule.onlineBufferMinutes,
+                    in_person_buffer_minutes: nextSchedule.inPersonBufferMinutes,
+                    max_appointments_per_day: nextSchedule.maxAppointmentsPerDay,
+                    allow_simultaneous_online_and_in_person: nextSchedule.allowSimultaneousOnlineAndInPerson,
+                    blocked_time_ranges: nextSchedule.blockedTimeRanges || {},
+                    updated_at: new Date().toISOString(),
+                };
+                const { data, error } = await supabaseAdmin
+                    .from('doctor_scheduling_settings')
+                    .upsert(dbPayload, { onConflict: 'dentist_id' })
+                    .select()
+                    .single();
+                if (!error && data) {
+                    const persisted = sanitizeSmartSchedule({ ...data, isConfigured: true });
+                    for (const k of idsToMatch) _inMemorySchedule.set(k, persisted);
+                    return persisted;
+                }
+                if (error) {
+                    console.warn('⚠️ DoctorSchedulingSettings.upsert Supabase notice (keeping scheduling out of users.device_token):', error.message);
+                }
+            } catch (e) {
+                console.warn('⚠️ DoctorSchedulingSettings.upsert notice:', e.message);
+            }
+        }
+        return nextSchedule;
+    },
+
+    _clearInMemory() {
+        _inMemorySchedule.clear();
+        _inMemoryBlockedSlots.clear();
+    },
+};
+
+const ReleasedSlot = {
+    async create(slotData) {
+        const cleanDate = normalizeDateToTimezoneYmd(slotData.appointment_date || slotData.appointmentDate);
+        const mode = normalizeConsultationType(slotData.consultation_type || slotData.consultationType);
+        const startMin = Number(slotData.start_min ?? slotData.startMin ?? parseClockSlotMinutes(slotData.start_time || slotData.startTime));
+        const durMin = Number(slotData.duration_minutes ?? slotData.durationMinutes ?? 20);
+        const endMin = Number(slotData.end_min ?? slotData.endMin ?? (startMin + durMin));
+        const bufMin = Number(slotData.buffer_minutes ?? slotData.bufferMinutes ?? 0);
+        const dentistId = slotData.dentist_id || slotData.dentistId;
+
+        const payload = {
+            dentist_id: dentistId,
+            source_appointment_id: slotData.source_appointment_id || slotData.sourceAppointmentId || null,
+            appointment_date: cleanDate,
+            start_time: slotData.start_time || slotData.startTime || minutesToClockSlot(startMin),
+            end_time: slotData.end_time || slotData.endTime || minutesToClockSlot(endMin),
+            start_min: startMin,
+            end_min: endMin,
+            duration_minutes: durMin,
+            buffer_minutes: bufMin,
+            consultation_type: mode,
+            status: 'AVAILABLE',
+            claimed_by_appointment_id: null,
+            expires_at: slotData.expires_at || slotData.expiresAt || new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+        };
+
+        // In-memory duplicate guard (same doctor/date/mode/overlapping window)
+        for (const existing of _inMemoryReleasedSlots.values()) {
+            if (
+                String(existing.dentist_id) === String(dentistId) &&
+                existing.appointment_date === cleanDate &&
+                existing.consultation_type === mode &&
+                (existing.status === 'AVAILABLE' || existing.status === 'LOCKED') &&
+                intervalsOverlap(startMin, endMin, existing.start_min, existing.end_min)
+            ) {
+                return existing;
+            }
+        }
+
+        if (isUUID(dentistId)) {
+            try {
+                const { data, error } = await supabaseAdmin
+                    .from('released_slots')
+                    .insert(payload)
+                    .select()
+                    .single();
+                if (!error && data) {
+                    _inMemoryReleasedSlots.set(String(data.id), data);
+                    return data;
+                }
+            } catch (e) {
+                console.warn('⚠️ ReleasedSlot.create Supabase notice:', e.message);
+            }
+        }
+
+        const memRow = {
+            id: slotData.id || crypto.randomUUID(),
+            ...payload,
+            created_at: new Date().toISOString(),
+        };
+        _inMemoryReleasedSlots.set(String(memRow.id), memRow);
+        return memRow;
+    },
+
+    async findById(id) {
+        if (!id) return null;
+        if (isUUID(id)) {
+            try {
+                const { data, error } = await supabaseAdmin
+                    .from('released_slots')
+                    .select('*')
+                    .eq('id', id)
+                    .maybeSingle();
+                if (!error && data) return data;
+            } catch (_) { }
+        }
+        return _inMemoryReleasedSlots.get(String(id)) || null;
+    },
+
+    async findForDoctorAndDate(dentistId, dateYmd, options = {}) {
+        const cleanDate = normalizeDateToTimezoneYmd(dateYmd);
+        if (!dentistId || !cleanDate) return [];
+        const nowMs = (options.now ? new Date(options.now) : new Date()).getTime();
+        const { idsToMatch } = await DoctorAvailability.resolveCanonicalIds(dentistId);
+
+        // Auto-expire stale in-memory released slots
+        for (const row of _inMemoryReleasedSlots.values()) {
+            if (row.status === 'AVAILABLE' && new Date(row.expires_at).getTime() <= nowMs) {
+                row.status = 'EXPIRED';
+            }
+        }
+
+        const uuidIds = idsToMatch.filter(id => isUUID(id));
+        if (uuidIds.length > 0) {
+            try {
+                let req = supabaseAdmin
+                    .from('released_slots')
+                    .select('*')
+                    .eq('appointment_date', cleanDate);
+                if (uuidIds.length === 1) req = req.eq('dentist_id', uuidIds[0]);
+                else req = req.in('dentist_id', uuidIds);
+                if (options.onlyAvailable) {
+                    req = req.eq('status', 'AVAILABLE').gt('expires_at', new Date(nowMs).toISOString());
+                }
+                const { data, error } = await req.order('start_min', { ascending: true });
+                if (!error && Array.isArray(data)) {
+                    for (const row of data) _inMemoryReleasedSlots.set(String(row.id), row);
+                    return data;
+                }
+            } catch (_) { }
+        }
+
+        return Array.from(_inMemoryReleasedSlots.values())
+            .filter(r => {
+                if (!idsToMatch.includes(String(r.dentist_id))) return false;
+                if (r.appointment_date !== cleanDate) return false;
+                if (options.onlyAvailable) {
+                    if (r.status !== 'AVAILABLE') return false;
+                    if (new Date(r.expires_at).getTime() <= nowMs) return false;
+                }
+                return true;
+            })
+            .sort((a, b) => a.start_min - b.start_min);
+    },
+
+    _clearInMemory() {
+        _inMemoryReleasedSlots.clear();
+    },
+};
+
+const AppointmentSlotLock = {
+    _expireInMemory(dentistId, cleanDate, nowMs = Date.now()) {
+        for (const lock of _inMemorySlotLocks.values()) {
+            if (
+                String(lock.dentist_id) === String(dentistId) &&
+                lock.appointment_date === cleanDate &&
+                lock.status === 'ACTIVE' &&
+                new Date(lock.expires_at).getTime() <= nowMs
+            ) {
+                lock.status = 'EXPIRED';
+                if (lock.released_slot_id) {
+                    const rel = _inMemoryReleasedSlots.get(String(lock.released_slot_id));
+                    if (rel && rel.status === 'LOCKED') {
+                        rel.status = new Date(rel.expires_at).getTime() > nowMs ? 'AVAILABLE' : 'EXPIRED';
+                    }
+                }
+            }
+        }
+        for (const rel of _inMemoryReleasedSlots.values()) {
+            if (
+                String(rel.dentist_id) === String(dentistId) &&
+                rel.appointment_date === cleanDate &&
+                rel.status === 'AVAILABLE' &&
+                new Date(rel.expires_at).getTime() <= nowMs
+            ) {
+                rel.status = 'EXPIRED';
+            }
+        }
+    },
+
+    async findActiveForDoctorAndDate(dentistId, dateYmd, options = {}) {
+        const cleanDate = normalizeDateToTimezoneYmd(dateYmd);
+        if (!dentistId || !cleanDate) return [];
+        const nowMs = (options.now ? new Date(options.now) : new Date()).getTime();
+        const { idsToMatch } = await DoctorAvailability.resolveCanonicalIds(dentistId);
+        for (const id of idsToMatch) this._expireInMemory(id, cleanDate, nowMs);
+
+        const uuidIds = idsToMatch.filter(id => isUUID(id));
+        if (uuidIds.length > 0) {
+            try {
+                let req = supabaseAdmin
+                    .from('appointment_slot_locks')
+                    .select('*')
+                    .eq('appointment_date', cleanDate)
+                    .eq('status', 'ACTIVE')
+                    .gt('expires_at', new Date(nowMs).toISOString());
+                if (uuidIds.length === 1) req = req.eq('dentist_id', uuidIds[0]);
+                else req = req.in('dentist_id', uuidIds);
+                const { data, error } = await req;
+                if (!error && Array.isArray(data)) return data;
+            } catch (_) { }
+        }
+
+        return Array.from(_inMemorySlotLocks.values()).filter(l =>
+            idsToMatch.includes(String(l.dentist_id)) &&
+            l.appointment_date === cleanDate &&
+            l.status === 'ACTIVE' &&
+            new Date(l.expires_at).getTime() > nowMs
+        );
+    },
+
+    async acquire({
+        dentistId,
+        patientId,
+        date,
+        startTime,
+        endTime,
+        startMin,
+        endMin,
+        consultationType = 'In-Person',
+        releasedSlotId = null,
+        ttlSeconds = 300,
+        now = null,
+    }) {
+        const cleanDate = normalizeDateToTimezoneYmd(date);
+        const mode = normalizeConsultationType(consultationType);
+        const sMin = Number(startMin ?? parseClockSlotMinutes(startTime));
+        const eMin = Number(endMin);
+        const safeTtl = Math.max(30, Math.min(900, parseInt(String(ttlSeconds || 300), 10) || 300));
+        const nowDate = now ? new Date(now) : new Date();
+        const nowMs = nowDate.getTime();
+
+        if (!dentistId || !patientId || !cleanDate || !Number.isFinite(sMin) || !Number.isFinite(eMin) || sMin < 0 || sMin >= 1440 || eMin <= sMin) {
+            return { success: false, reason: 'INVALID_INTERVAL', message: 'Invalid appointment slot parameters.' };
+        }
+        if (parseClockSlotMinutes(startTime) !== sMin) {
+            return { success: false, reason: 'INVALID_INTERVAL', message: 'startTime does not match startMin.' };
+        }
+
+        const { canonicalId, dentistTableId } = await DoctorAvailability.resolveCanonicalIds(dentistId);
+        const effectiveDentistId = dentistTableId || canonicalId || dentistId;
+
+        // 1. Primary path: Supabase atomic RPC acquire_appointment_slot_lock (when Migration 04 is applied & IDs are UUIDs)
+        if (!now && isUUID(effectiveDentistId) && isUUID(patientId) && (!releasedSlotId || isUUID(releasedSlotId))) {
+            try {
+                const { data, error } = await supabaseAdmin.rpc('acquire_appointment_slot_lock', {
+                    p_dentist_id: effectiveDentistId,
+                    p_patient_id: patientId,
+                    p_date: cleanDate,
+                    p_start_time: String(startTime).trim(),
+                    p_end_time: String(endTime || minutesToClockSlot(eMin)).trim(),
+                    p_start_min: sMin,
+                    p_end_min: eMin,
+                    p_consultation_type: mode,
+                    p_released_slot_id: releasedSlotId || null,
+                    p_ttl_seconds: safeTtl,
+                });
+                if (!error && data && typeof data === 'object') {
+                    return data;
+                }
+            } catch (_) { }
+        }
+
+        // 2. Atomic in-memory fallback (full parity with Migration 04 RPC!)
+        this._expireInMemory(effectiveDentistId, cleanDate, nowMs);
+        const schedule = await DoctorSchedulingSettings.getByDentistId(effectiveDentistId);
+        const modeWin = getModeScheduleWindow(schedule, mode);
+        const lane = modeWin.capacityLane;
+
+        // Validate daily limit
+        const existingAppts = await Appointment.find({ dentistId: effectiveDentistId }).catch(() => []);
+        const activeDateAppts = (existingAppts || []).filter(a => {
+            const st = String(a.status || 'PENDING').toUpperCase();
+            if (['CANCELLED', 'CANCELED', 'REJECTED', 'NO_SHOW'].includes(st)) return false;
+            return normalizeDateToTimezoneYmd(a.appointment_date || a.date) === cleanDate;
+        });
+        if (schedule.maxAppointmentsPerDay !== null && activeDateAppts.length >= schedule.maxAppointmentsPerDay) {
+            return { success: false, reason: 'DAILY_LIMIT_REACHED', message: 'Maximum appointments for this date have been reached.' };
+        }
+
+        // Step C: Validate released slot OR block regular lock from hijacking an active released slot
+        let targetRel = null;
+        if (releasedSlotId) {
+            targetRel = _inMemoryReleasedSlots.get(String(releasedSlotId)) || null;
+            if (
+                !targetRel ||
+                String(targetRel.dentist_id) !== String(effectiveDentistId) ||
+                targetRel.appointment_date !== cleanDate ||
+                targetRel.consultation_type !== mode ||
+                targetRel.start_min !== sMin ||
+                (targetRel.start_min + targetRel.duration_minutes + targetRel.buffer_minutes) !== eMin ||
+                targetRel.status !== 'AVAILABLE' ||
+                new Date(targetRel.expires_at).getTime() <= nowMs
+            ) {
+                return { success: false, reason: 'RELEASED_SLOT_UNAVAILABLE', message: 'This slot is no longer available. Please select another time.' };
+            }
+        } else {
+            const overlappingRel = Array.from(_inMemoryReleasedSlots.values()).find(r =>
+                String(r.dentist_id) === String(effectiveDentistId) &&
+                r.appointment_date === cleanDate &&
+                (r.status === 'AVAILABLE' || r.status === 'LOCKED') &&
+                new Date(r.expires_at).getTime() > nowMs &&
+                (lane === 'SHARED' || r.consultation_type.toUpperCase() === lane) &&
+                intervalsOverlap(sMin, eMin, r.start_min, r.start_min + r.duration_minutes + r.buffer_minutes)
+            );
+            if (overlappingRel) {
+                return { success: false, reason: 'RELEASED_SLOT_LOCK_REQUIRED', message: 'This released slot must be locked using its released slot ID.' };
+            }
+        }
+
+        // Step D: Validate no overlapping active appointment (uses getAppointmentOccupiedInterval for early-completion truncation & delays)
+        const conflictAppt = activeDateAppts.find(a => {
+            const occ = getAppointmentOccupiedInterval(a);
+            if (!occ) return false;
+            if (lane !== 'SHARED' && occ.consultationType.toUpperCase() !== lane) return false;
+            return intervalsOverlap(sMin, eMin, occ.startMin, occ.occupiedEndMin);
+        });
+        if (conflictAppt) {
+            return { success: false, reason: 'APPOINTMENT_CONFLICT', message: 'This slot is no longer available. Please select another time.' };
+        }
+
+        // Step E: Validate no overlapping active lock held by another patient
+        const conflictLock = Array.from(_inMemorySlotLocks.values()).find(l =>
+            String(l.dentist_id) === String(effectiveDentistId) &&
+            l.appointment_date === cleanDate &&
+            l.status === 'ACTIVE' &&
+            new Date(l.expires_at).getTime() > nowMs &&
+            String(l.patient_id) !== String(patientId) &&
+            (lane === 'SHARED' || l.consultation_type.toUpperCase() === lane) &&
+            intervalsOverlap(sMin, eMin, l.start_min, l.end_min)
+        );
+        if (conflictLock) {
+            return { success: false, reason: 'SLOT_LOCKED', message: 'This slot is no longer available. Please select another time.' };
+        }
+
+        // Step F: All validations passed -> safely release caller's previous active lock on this doctor/date
+        for (const prev of _inMemorySlotLocks.values()) {
+            if (
+                String(prev.dentist_id) === String(effectiveDentistId) &&
+                String(prev.patient_id) === String(patientId) &&
+                prev.appointment_date === cleanDate &&
+                prev.status === 'ACTIVE'
+            ) {
+                prev.status = 'RELEASED';
+                if (prev.released_slot_id && String(prev.released_slot_id) !== String(releasedSlotId || '')) {
+                    const oldRel = _inMemoryReleasedSlots.get(String(prev.released_slot_id));
+                    if (oldRel && oldRel.status === 'LOCKED') {
+                        oldRel.status = new Date(oldRel.expires_at).getTime() > nowMs ? 'AVAILABLE' : 'EXPIRED';
+                    }
+                }
+            }
+        }
+
+        const lockId = crypto.randomUUID();
+        const expiresAt = new Date(nowMs + safeTtl * 1000).toISOString();
+        const lockRow = {
+            id: lockId,
+            dentist_id: effectiveDentistId,
+            patient_id: patientId,
+            appointment_date: cleanDate,
+            start_time: String(startTime).trim(),
+            end_time: String(endTime || minutesToClockSlot(eMin)).trim(),
+            start_min: sMin,
+            end_min: eMin,
+            consultation_type: mode,
+            released_slot_id: releasedSlotId || null,
+            status: 'ACTIVE',
+            expires_at: expiresAt,
+            created_at: nowDate.toISOString(),
+        };
+        _inMemorySlotLocks.set(lockId, lockRow);
+        if (targetRel) {
+            targetRel.status = 'LOCKED';
+        }
+
+        return { success: true, lockId, expiresAt };
+    },
+
+    async release(lockId, patientId) {
+        if (!lockId) return { success: false, reason: 'NOT_FOUND' };
+        if (isUUID(lockId) && isUUID(patientId)) {
+            try {
+                const { data, error } = await supabaseAdmin.rpc('release_appointment_slot_lock', {
+                    p_lock_id: lockId,
+                    p_patient_id: patientId,
+                });
+                if (!error && data && typeof data === 'object') {
+                    return data;
+                }
+            } catch (_) { }
+        }
+
+        const lock = _inMemorySlotLocks.get(String(lockId));
+        if (!lock) return { success: false, reason: 'NOT_FOUND' };
+        if (patientId && String(lock.patient_id) !== String(patientId)) {
+            return { success: false, reason: 'FORBIDDEN' };
+        }
+        if (lock.status !== 'ACTIVE') {
+            return { success: true, status: lock.status };
+        }
+        lock.status = 'RELEASED';
+        if (lock.released_slot_id) {
+            const rel = _inMemoryReleasedSlots.get(String(lock.released_slot_id));
+            if (rel && rel.status === 'LOCKED') {
+                rel.status = new Date(rel.expires_at).getTime() > Date.now() ? 'AVAILABLE' : 'EXPIRED';
+            }
+        }
+        return { success: true, status: 'RELEASED' };
+    },
+
+    /**
+     * Mandatory-lock atomic booking confirmation. Mirrors Migration 04 `confirm_appointment_booking` RPC exactly:
+     * - Rejects NULL / missing / expired / mismatched lockId
+     * - Rejects direct booking of AVAILABLE released slot without an owning active lock
+     */
+    async confirmBooking({
+        patientId,
+        dentistId,
+        clinicId = null,
+        date,
+        timeSlot,
+        startMin,
+        durationMinutes,
+        bufferMinutes = 0,
+        consultationType = 'In-Person',
+        treatment = 'Medical Consultation',
+        status = 'PENDING',
+        qrCodeString = null,
+        lockId,
+        releasedSlotId = null,
+        now = null,
+    }) {
+        if (!lockId) {
+            return {
+                success: false,
+                reason: 'LOCK_REQUIRED',
+                message: 'An active slot lock is required to confirm this booking.',
+            };
+        }
+
+        const cleanDate = normalizeDateToTimezoneYmd(date);
+        const mode = normalizeConsultationType(consultationType, treatment);
+        const sMin = Number(startMin ?? parseClockSlotMinutes(timeSlot));
+        const durMin = Number(durationMinutes);
+        const bufMin = Math.max(0, Number(bufferMinutes || 0));
+        const occupiedEndMin = sMin + durMin + bufMin;
+
+        if (!patientId || !dentistId || !cleanDate || !Number.isFinite(sMin) || !Number.isFinite(durMin) || durMin <= 0 || parseClockSlotMinutes(timeSlot) !== sMin) {
+            return { success: false, reason: 'INVALID_PARAMETERS', message: 'Invalid booking parameters.' };
+        }
+
+        const { canonicalId, dentistTableId } = await DoctorAvailability.resolveCanonicalIds(dentistId);
+        const effectiveDentistId = dentistTableId || canonicalId || dentistId;
+
+        // 1. Primary path: Supabase atomic RPC confirm_appointment_booking
+        if (!now && isUUID(effectiveDentistId) && isUUID(patientId) && isUUID(lockId) && (!releasedSlotId || isUUID(releasedSlotId))) {
+            try {
+                const { data, error } = await supabaseAdmin.rpc('confirm_appointment_booking', {
+                    p_patient_id: patientId,
+                    p_dentist_id: effectiveDentistId,
+                    p_clinic_id: isUUID(clinicId) ? clinicId : null,
+                    p_date: cleanDate,
+                    p_time_slot: String(timeSlot).trim(),
+                    p_start_min: sMin,
+                    p_duration_minutes: durMin,
+                    p_buffer_minutes: bufMin,
+                    p_consultation_type: mode,
+                    p_treatment: treatment,
+                    p_status: status || 'PENDING',
+                    p_qr_code_string: qrCodeString || `DENTAGURU-${patientId}-${Date.now()}`,
+                    p_lock_id: lockId,
+                    p_released_slot_id: releasedSlotId || null,
+                });
+                if (!error && data && typeof data === 'object') {
+                    return data;
+                }
+            } catch (_) { }
+        }
+
+        // 2. Full-parity in-memory + Appointment.create fallback
+        const nowMs = (now ? new Date(now) : new Date()).getTime();
+        this._expireInMemory(effectiveDentistId, cleanDate, nowMs);
+
+        const lock = _inMemorySlotLocks.get(String(lockId));
+        if (
+            !lock ||
+            String(lock.patient_id) !== String(patientId) ||
+            String(lock.dentist_id) !== String(effectiveDentistId) ||
+            lock.appointment_date !== cleanDate ||
+            lock.start_min !== sMin ||
+            lock.end_min !== occupiedEndMin ||
+            String(lock.start_time || '').trim().toLowerCase() !== String(timeSlot || '').trim().toLowerCase() ||
+            lock.consultation_type !== mode ||
+            (lock.released_slot_id || null) !== (releasedSlotId || null) ||
+            lock.status !== 'ACTIVE' ||
+            new Date(lock.expires_at).getTime() <= nowMs
+        ) {
+            return {
+                success: false,
+                reason: 'LOCK_MISMATCH_OR_EXPIRED',
+                message: 'This slot is no longer available. Please select another time.',
+            };
+        }
+
+        const schedule = await DoctorSchedulingSettings.getByDentistId(effectiveDentistId);
+        const modeWin = getModeScheduleWindow(schedule, mode);
+        const lane = modeWin.capacityLane;
+
+        // Strict released-slot ownership validation: MUST be LOCKED and owned by this exact active lock!
+        let targetRel = null;
+        if (releasedSlotId) {
+            targetRel = _inMemoryReleasedSlots.get(String(releasedSlotId)) || null;
+            if (
+                !targetRel ||
+                String(targetRel.dentist_id) !== String(effectiveDentistId) ||
+                targetRel.appointment_date !== cleanDate ||
+                targetRel.consultation_type !== mode ||
+                targetRel.start_min !== sMin ||
+                targetRel.duration_minutes !== durMin ||
+                (targetRel.start_min + targetRel.duration_minutes + targetRel.buffer_minutes) !== occupiedEndMin ||
+                new Date(targetRel.expires_at).getTime() <= nowMs ||
+                targetRel.status !== 'LOCKED' ||
+                String(lock.released_slot_id || '') !== String(releasedSlotId)
+            ) {
+                return {
+                    success: false,
+                    reason: 'RELEASED_SLOT_LOCK_MISMATCH',
+                    message: 'This slot is no longer available. Please select another time.',
+                };
+            }
+        } else {
+            const overlappingRel = Array.from(_inMemoryReleasedSlots.values()).find(r =>
+                String(r.dentist_id) === String(effectiveDentistId) &&
+                r.appointment_date === cleanDate &&
+                (r.status === 'AVAILABLE' || r.status === 'LOCKED') &&
+                new Date(r.expires_at).getTime() > nowMs &&
+                (lane === 'SHARED' || r.consultation_type.toUpperCase() === lane) &&
+                intervalsOverlap(sMin, occupiedEndMin, r.start_min, r.start_min + r.duration_minutes + r.buffer_minutes)
+            );
+            if (overlappingRel) {
+                return {
+                    success: false,
+                    reason: 'RELEASED_SLOT_LOCK_REQUIRED',
+                    message: 'This released slot must be booked via its active released-slot lock.',
+                };
+            }
+        }
+
+        const otherLock = Array.from(_inMemorySlotLocks.values()).find(l =>
+            String(l.dentist_id) === String(effectiveDentistId) &&
+            l.appointment_date === cleanDate &&
+            l.status === 'ACTIVE' &&
+            new Date(l.expires_at).getTime() > nowMs &&
+            String(l.patient_id) !== String(patientId) &&
+            (lane === 'SHARED' || l.consultation_type.toUpperCase() === lane) &&
+            intervalsOverlap(sMin, occupiedEndMin, l.start_min, l.end_min)
+        );
+        if (otherLock) {
+            return { success: false, reason: 'SLOT_LOCKED', message: 'This slot is no longer available. Please select another time.' };
+        }
+
+        const created = await Appointment.create({
+            patient_id: patientId,
+            dentist_id: effectiveDentistId,
+            clinic_id: clinicId,
+            date: `${cleanDate}T00:00:00.000Z`,
+            appointment_date: cleanDate,
+            time_slot: String(timeSlot).trim(),
+            treatment,
+            status: status || 'PENDING',
+            qr_code_string: qrCodeString,
+            consultation_type: mode,
+            capacity_lane: lane,
+            duration_minutes: durMin,
+            buffer_minutes: bufMin,
+            scheduled_start_min: sMin,
+            released_slot_id: releasedSlotId || null,
+        });
+
+        lock.status = 'CONFIRMED';
+        if (targetRel) {
+            targetRel.status = 'BOOKED';
+            targetRel.claimed_by_appointment_id = created?.id || null;
+        }
+
+        return { success: true, appointment: created };
+    },
+
+    getInMemoryLock(lockId) {
+        return _inMemorySlotLocks.get(String(lockId)) || null;
+    },
+
+    _clearInMemory() {
+        _inMemorySlotLocks.clear();
+    },
+};
+
+const PatientDoctorPreference = {
+    async upsert({
+        patientId,
+        dentistId,
+        isFavorite = false,
+        notifyEarlierSlots = false,
+        preferredConsultationType = 'Any',
+        preferredDate = null,
+        earliestTimeMin = null,
+        latestTimeMin = null,
+    }) {
+        if (!patientId || !dentistId) throw new Error('patientId and dentistId are required.');
+        const { canonicalId, dentistTableId } = await DoctorAvailability.resolveCanonicalIds(dentistId);
+        const effectiveDentistId = dentistTableId || canonicalId || dentistId;
+        const cleanPrefMode = ['Any', 'Online', 'In-Person'].includes(String(preferredConsultationType))
+            ? String(preferredConsultationType)
+            : 'Any';
+        const cleanPrefDate = preferredDate ? normalizeDateToTimezoneYmd(preferredDate) : null;
+
+        const payload = {
+            patient_id: patientId,
+            dentist_id: effectiveDentistId,
+            is_favorite: Boolean(isFavorite),
+            notify_earlier_slots: Boolean(notifyEarlierSlots),
+            preferred_consultation_type: cleanPrefMode,
+            preferred_date: cleanPrefDate || null,
+            earliest_time_min: earliestTimeMin !== null && earliestTimeMin !== undefined && earliestTimeMin !== '' ? Number(earliestTimeMin) : null,
+            latest_time_min: latestTimeMin !== null && latestTimeMin !== undefined && latestTimeMin !== '' ? Number(latestTimeMin) : null,
+            updated_at: new Date().toISOString(),
+        };
+
+        const key = `${patientId}::${effectiveDentistId}`;
+        if (isUUID(patientId) && isUUID(effectiveDentistId)) {
+            try {
+                const { data, error } = await supabaseAdmin
+                    .from('patient_doctor_preferences')
+                    .upsert(payload, { onConflict: 'patient_id,dentist_id' })
+                    .select()
+                    .single();
+                if (!error && data) {
+                    _inMemoryPatientPrefs.set(key, data);
+                    return data;
+                }
+            } catch (e) {
+                console.warn('⚠️ PatientDoctorPreference.upsert Supabase notice:', e.message);
+            }
+        }
+
+        const existing = _inMemoryPatientPrefs.get(key);
+        const row = { id: existing?.id || crypto.randomUUID(), created_at: existing?.created_at || new Date().toISOString(), ...payload };
+        _inMemoryPatientPrefs.set(key, row);
+        return row;
+    },
+
+    async findForPatient(patientId, dentistId = null) {
+        if (!patientId) return [];
+        const targetDoc = dentistId ? (await DoctorAvailability.resolveCanonicalIds(dentistId)).canonicalId : null;
+        if (isUUID(patientId)) {
+            try {
+                let req = supabaseAdmin.from('patient_doctor_preferences').select('*').eq('patient_id', patientId);
+                if (targetDoc && isUUID(targetDoc)) req = req.eq('dentist_id', targetDoc);
+                const { data, error } = await req;
+                if (!error && Array.isArray(data)) return data;
+            } catch (_) { }
+        }
+        return Array.from(_inMemoryPatientPrefs.values()).filter(p =>
+            String(p.patient_id) === String(patientId) &&
+            (!targetDoc || String(p.dentist_id) === String(targetDoc))
+        );
+    },
+
+    async findNotifyEligibleForDoctor(dentistId) {
+        if (!dentistId) return [];
+        const { idsToMatch } = await DoctorAvailability.resolveCanonicalIds(dentistId);
+        const uuidIds = idsToMatch.filter(id => isUUID(id));
+        if (uuidIds.length > 0) {
+            try {
+                let req = supabaseAdmin
+                    .from('patient_doctor_preferences')
+                    .select('*')
+                    .eq('notify_earlier_slots', true);
+                if (uuidIds.length === 1) req = req.eq('dentist_id', uuidIds[0]);
+                else req = req.in('dentist_id', uuidIds);
+                const { data, error } = await req;
+                if (!error && Array.isArray(data)) return data;
+            } catch (_) { }
+        }
+        return Array.from(_inMemoryPatientPrefs.values()).filter(p =>
+            idsToMatch.includes(String(p.dentist_id)) && Boolean(p.notify_earlier_slots)
+        );
+    },
+
+    _clearInMemory() {
+        _inMemoryPatientPrefs.clear();
+    },
+};
+
+const SlotNotificationDelivery = {
+    async tryClaim(releasedSlotId, patientId) {
+        if (!releasedSlotId || !patientId) return { claimed: false };
+        const key = `${releasedSlotId}::${patientId}`;
+        if (_inMemoryNotifDeliveries.has(key)) {
+            return { claimed: false, duplicate: true };
+        }
+
+        if (isUUID(releasedSlotId) && isUUID(patientId)) {
+            try {
+                const { data, error } = await supabaseAdmin
+                    .from('slot_notification_deliveries')
+                    .insert({
+                        released_slot_id: releasedSlotId,
+                        patient_id: patientId,
+                        delivery_status: 'PENDING',
+                    })
+                    .select()
+                    .single();
+                if (!error && data) {
+                    _inMemoryNotifDeliveries.set(key, data);
+                    return { claimed: true, record: data };
+                }
+                if (error && (error.code === '23505' || String(error.message || '').toLowerCase().includes('duplicate'))) {
+                    return { claimed: false, duplicate: true };
+                }
+            } catch (_) { }
+        }
+
+        const row = {
+            id: crypto.randomUUID(),
+            released_slot_id: releasedSlotId,
+            patient_id: patientId,
+            delivery_status: 'PENDING',
+            created_at: new Date().toISOString(),
+        };
+        _inMemoryNotifDeliveries.set(key, row);
+        return { claimed: true, record: row };
+    },
+
+    async updateStatus(releasedSlotId, patientId, patch = {}) {
+        const key = `${releasedSlotId}::${patientId}`;
+        const existing = _inMemoryNotifDeliveries.get(key);
+        if (existing) {
+            Object.assign(existing, patch);
+        }
+        if (isUUID(releasedSlotId) && isUUID(patientId)) {
+            try {
+                await supabaseAdmin
+                    .from('slot_notification_deliveries')
+                    .update(patch)
+                    .eq('released_slot_id', releasedSlotId)
+                    .eq('patient_id', patientId);
+            } catch (_) { }
+        }
+    },
+
+    getAllInMemory() {
+        return Array.from(_inMemoryNotifDeliveries.values());
+    },
+
+    _clearInMemory() {
+        _inMemoryNotifDeliveries.clear();
+    },
+};
 
 const DoctorAvailability = {
     extractDateYmd,
@@ -3579,104 +4670,11 @@ const DoctorAvailability = {
     },
 
     async getSchedule(dentistId) {
-        if (!dentistId) return { ...DEFAULT_DOCTOR_SCHEDULE };
-        const { canonicalId, dentistTableId, userTableId, idsToMatch } = await this.resolveCanonicalIds(dentistId);
-        // Check users.device_token metadata first (persistent Supabase source of truth)
-        const targetUserId = userTableId || (dentistTableId ? null : dentistId);
-        if (targetUserId) {
-            try {
-                const { data: uRow } = await supabaseAdmin
-                    .from('users')
-                    .select('id, device_token')
-                    .eq('id', targetUserId)
-                    .maybeSingle();
-                if (uRow && uRow.device_token && typeof uRow.device_token === 'string' && uRow.device_token.startsWith('{')) {
-                    const meta = JSON.parse(uRow.device_token);
-                    if (meta && meta.schedule && typeof meta.schedule === 'object') {
-                        return sanitizeSchedulePayload({ ...meta.schedule, isConfigured: meta.schedule.isConfigured !== false });
-                    }
-                }
-            } catch (e) {
-                console.warn('⚠️ DoctorAvailability.getSchedule Supabase notice:', e.message);
-            }
-        }
-        // Fallback: look up user via dentists.user_id if userTableId wasn't resolved
-        if (!targetUserId && isUUID(canonicalId)) {
-            try {
-                const { data: dRow } = await supabaseAdmin
-                    .from('dentists')
-                    .select('user_id')
-                    .or(`id.eq.${canonicalId},user_id.eq.${canonicalId}`)
-                    .limit(1)
-                    .maybeSingle();
-                if (dRow?.user_id) {
-                    const { data: uRow } = await supabaseAdmin
-                        .from('users')
-                        .select('id, device_token')
-                        .eq('id', dRow.user_id)
-                        .maybeSingle();
-                    if (uRow?.device_token && typeof uRow.device_token === 'string' && uRow.device_token.startsWith('{')) {
-                        const meta = JSON.parse(uRow.device_token);
-                        if (meta && meta.schedule && typeof meta.schedule === 'object') {
-                            return sanitizeSchedulePayload({ ...meta.schedule, isConfigured: meta.schedule.isConfigured !== false });
-                        }
-                    }
-                }
-            } catch (_) { }
-        }
-
-        for (const k of idsToMatch) {
-            if (_inMemorySchedule.has(k)) {
-                return sanitizeSchedulePayload(_inMemorySchedule.get(k));
-            }
-        }
-        return { ...DEFAULT_DOCTOR_SCHEDULE };
+        return await DoctorSchedulingSettings.getByDentistId(dentistId);
     },
 
     async saveSchedule(dentistId, scheduleData = {}) {
-        if (!dentistId) return { ...DEFAULT_DOCTOR_SCHEDULE };
-        const { canonicalId, dentistTableId, userTableId, idsToMatch } = await this.resolveCanonicalIds(dentistId);
-        const existing = await this.getSchedule(dentistId);
-        const nextSchedule = sanitizeSchedulePayload({ ...scheduleData, isConfigured: true }, existing);
-
-        for (const k of idsToMatch) {
-            _inMemorySchedule.set(k, nextSchedule);
-        }
-
-        let targetUserId = userTableId;
-        if (!targetUserId && isUUID(dentistTableId || dentistId)) {
-            try {
-                const { data: dRow } = await supabaseAdmin
-                    .from('dentists')
-                    .select('user_id')
-                    .or(`id.eq.${dentistTableId || dentistId},user_id.eq.${dentistId}`)
-                    .limit(1)
-                    .maybeSingle();
-                if (dRow?.user_id) targetUserId = dRow.user_id;
-            } catch (_) { }
-        }
-
-        if (targetUserId) {
-            try {
-                const { data: uRow } = await supabaseAdmin
-                    .from('users')
-                    .select('id, device_token')
-                    .eq('id', targetUserId)
-                    .maybeSingle();
-                let meta = {};
-                if (uRow?.device_token && typeof uRow.device_token === 'string' && uRow.device_token.startsWith('{')) {
-                    try { meta = JSON.parse(uRow.device_token); } catch (_) { }
-                }
-                meta.schedule = nextSchedule;
-                await supabaseAdmin
-                    .from('users')
-                    .update({ device_token: JSON.stringify(meta) })
-                    .eq('id', targetUserId);
-            } catch (e) {
-                console.warn('⚠️ DoctorAvailability.saveSchedule Supabase notice:', e.message);
-            }
-        }
-        return nextSchedule;
+        return await DoctorSchedulingSettings.upsert(dentistId, scheduleData);
     },
 
     async findOne(query = {}) {
@@ -3842,38 +4840,12 @@ const DoctorAvailability = {
     async getBlockedSlotsForDate(dentistId, dateYmd) {
         const cleanDate = extractDateYmd(dateYmd);
         if (!dentistId || !cleanDate) return [];
-        const { userTableId, idsToMatch } = await this.resolveCanonicalIds(dentistId);
+        const { idsToMatch } = await this.resolveCanonicalIds(dentistId);
 
-        let targetUserId = userTableId;
-        if (!targetUserId) {
-            const firstUuid = idsToMatch.find(id => isUUID(id));
-            if (firstUuid) {
-                try {
-                    const { data: dRow } = await supabaseAdmin
-                        .from('dentists')
-                        .select('user_id')
-                        .or(`id.eq.${firstUuid},user_id.eq.${firstUuid}`)
-                        .limit(1)
-                        .maybeSingle();
-                    if (dRow?.user_id) targetUserId = dRow.user_id;
-                } catch (_) {}
-            }
-        }
-
-        if (targetUserId) {
-            try {
-                const { data: uRow } = await supabaseAdmin
-                    .from('users')
-                    .select('id, device_token')
-                    .eq('id', targetUserId)
-                    .maybeSingle();
-                if (uRow?.device_token && typeof uRow.device_token === 'string' && uRow.device_token.trim().startsWith('{')) {
-                    const meta = JSON.parse(uRow.device_token);
-                    if (meta?.blockedSlotsByDate && Array.isArray(meta.blockedSlotsByDate[cleanDate])) {
-                        return meta.blockedSlotsByDate[cleanDate];
-                    }
-                }
-            } catch (_) {}
+        // 1. Primary source: doctor_scheduling_settings.blocked_time_ranges (keeps scheduling out of users.device_token)
+        const settings = await DoctorSchedulingSettings.getByDentistId(dentistId);
+        if (settings?.blockedTimeRanges && Array.isArray(settings.blockedTimeRanges[cleanDate]) && settings.blockedTimeRanges[cleanDate].length > 0) {
+            return settings.blockedTimeRanges[cleanDate];
         }
 
         for (const k of idsToMatch) {
@@ -3886,54 +4858,25 @@ const DoctorAvailability = {
     async saveBlockedSlotsForDate(dentistId, dateYmd, blockedSlots = []) {
         const cleanDate = extractDateYmd(dateYmd);
         if (!dentistId || !cleanDate) return [];
-        const { userTableId, dentistTableId, idsToMatch } = await this.resolveCanonicalIds(dentistId);
+        const { idsToMatch } = await this.resolveCanonicalIds(dentistId);
         const sanitized = Array.isArray(blockedSlots) ? blockedSlots : [];
 
         for (const k of idsToMatch) {
             _inMemoryBlockedSlots.set(`${k}_${cleanDate}`, sanitized);
         }
 
-        let targetUserId = userTableId;
-        if (!targetUserId && isUUID(dentistTableId || dentistId)) {
-            try {
-                const { data: dRow } = await supabaseAdmin
-                    .from('dentists')
-                    .select('user_id')
-                    .or(`id.eq.${dentistTableId || dentistId},user_id.eq.${dentistId}`)
-                    .limit(1)
-                    .maybeSingle();
-                if (dRow?.user_id) targetUserId = dRow.user_id;
-            } catch (_) {}
+        // Persist strictly into doctor_scheduling_settings.blocked_time_ranges (NEVER writes to users.device_token!)
+        const current = await DoctorSchedulingSettings.getByDentistId(dentistId);
+        const nextMap = { ...(current.blockedTimeRanges || {}) };
+        if (sanitized.length === 0) {
+            delete nextMap[cleanDate];
+        } else {
+            nextMap[cleanDate] = sanitized;
         }
-
-        if (targetUserId) {
-            try {
-                const { data: uRow } = await supabaseAdmin
-                    .from('users')
-                    .select('id, device_token')
-                    .eq('id', targetUserId)
-                    .maybeSingle();
-                let meta = {};
-                if (uRow?.device_token && typeof uRow.device_token === 'string' && uRow.device_token.trim().startsWith('{')) {
-                    try { meta = JSON.parse(uRow.device_token); } catch (_) {}
-                }
-                const nextMap = (meta.blockedSlotsByDate && typeof meta.blockedSlotsByDate === 'object')
-                    ? { ...meta.blockedSlotsByDate }
-                    : {};
-                if (sanitized.length === 0) {
-                    delete nextMap[cleanDate];
-                } else {
-                    nextMap[cleanDate] = sanitized;
-                }
-                meta.blockedSlotsByDate = nextMap;
-                await supabaseAdmin
-                    .from('users')
-                    .update({ device_token: JSON.stringify(meta) })
-                    .eq('id', targetUserId);
-            } catch (e) {
-                console.warn('⚠️ DoctorAvailability.saveBlockedSlotsForDate Supabase notice:', e.message);
-            }
-        }
+        await DoctorSchedulingSettings.upsert(dentistId, {
+            ...current,
+            blockedTimeRanges: nextMap,
+        });
         return sanitized;
     }
 };
@@ -4418,6 +5361,11 @@ module.exports = {
     Referral,
     PatientDoctor,
     DoctorAvailability,
+    DoctorSchedulingSettings,
+    AppointmentSlotLock,
+    ReleasedSlot,
+    PatientDoctorPreference,
+    SlotNotificationDelivery,
     MedicalSpecialty,
     DEFAULT_MEDICAL_SPECIALTIES,
     District,

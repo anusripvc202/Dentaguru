@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/constants/booking_rules_config.dart';
 import '../../../../core/models/medical_specialty_model.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -10,6 +12,10 @@ class BookVisitFlowDialog extends StatefulWidget {
   final DoctorModel? preselectedDoctor;
   final String? initialSpecialtyFilter;
   final String initialConsultationMode;
+  final DateTime? initialDate;
+  final String? initialTimeSlot;
+  final Duration autoRefreshInterval;
+  final bool enableAutoRefresh;
   final VoidCallback? onBookingSuccess;
 
   const BookVisitFlowDialog({
@@ -17,6 +23,10 @@ class BookVisitFlowDialog extends StatefulWidget {
     this.preselectedDoctor,
     this.initialSpecialtyFilter,
     this.initialConsultationMode = 'In-Person',
+    this.initialDate,
+    this.initialTimeSlot,
+    this.autoRefreshInterval = const Duration(seconds: 15),
+    this.enableAutoRefresh = true,
     this.onBookingSuccess,
   });
 
@@ -25,6 +35,10 @@ class BookVisitFlowDialog extends StatefulWidget {
     DoctorModel? preselectedDoctor,
     String? initialSpecialtyFilter,
     String initialConsultationMode = 'In-Person',
+    DateTime? initialDate,
+    String? initialTimeSlot,
+    Duration autoRefreshInterval = const Duration(seconds: 15),
+    bool enableAutoRefresh = true,
     VoidCallback? onBookingSuccess,
   }) {
     return showDialog<void>(
@@ -34,6 +48,10 @@ class BookVisitFlowDialog extends StatefulWidget {
         preselectedDoctor: preselectedDoctor,
         initialSpecialtyFilter: initialSpecialtyFilter,
         initialConsultationMode: initialConsultationMode,
+        initialDate: initialDate,
+        initialTimeSlot: initialTimeSlot,
+        autoRefreshInterval: autoRefreshInterval,
+        enableAutoRefresh: enableAutoRefresh,
         onBookingSuccess: onBookingSuccess,
       ),
     );
@@ -67,9 +85,20 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
   final TextEditingController _symptomsController = TextEditingController();
   String _selectedSeverity = 'Mild';
 
-  // Step 4 & 5: Submission & Status
+  // Step 4 & 5: Submission, Temporary Slot Lock & Earlier-Slot Preference Status
   bool _isSubmitting = false;
+  bool _isAcquiringLock = false;
   String? _errorMessage;
+  String? _slotRefreshNotice;
+  bool _appliedInitialSlot = false;
+  String? _selectedReleasedSlotId;
+  SlotLockModel? _activeSlotLock;
+  int _lockSecondsRemaining = 0;
+  Timer? _lockCountdownTimer;
+  bool _notifyEarlierSlots = false;
+  bool _isSavingNotifPref = false;
+  RealtimeChannel? _availabilityRealtimeChannel;
+  Timer? _availabilityRefreshTimer;
 
   List<String> get _specialtyFilters => [
         'All',
@@ -103,6 +132,9 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
     _selectedConsultationMode = widget.initialConsultationMode.toLowerCase().contains('online')
         ? 'Online'
         : 'In-Person';
+    if (widget.initialDate != null) {
+      _selectedDate = DateTime(widget.initialDate!.year, widget.initialDate!.month, widget.initialDate!.day);
+    }
     if (widget.initialSpecialtyFilter != null && widget.initialSpecialtyFilter!.trim().isNotEmpty) {
       _selectedSpecialtyFilter = widget.initialSpecialtyFilter!.trim();
     }
@@ -115,22 +147,100 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
       _errorMessage = 'Doctor is currently unavailable and not accepting new bookings.';
       _currentStep = 1;
     }
+    // Subscribe to Supabase Realtime updates with safe periodic refresh fallback
+    _setupLiveAvailabilitySync();
     // Refresh live doctors in background
     _patientService.syncDoctorsFromApi();
+  }
+
+  void _setupLiveAvailabilitySync() {
+    try {
+      final channelName = 'booking_avail_${DateTime.now().microsecondsSinceEpoch}';
+      _availabilityRealtimeChannel = Supabase.instance.client
+          .channel(channelName)
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'appointments',
+            callback: (_) {
+              if (mounted && _selectedDoctor != null && !_isSubmitting) {
+                unawaited(_loadDoctorAvailability(silent: true));
+              }
+            },
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'doctor_availability',
+            callback: (_) {
+              if (mounted && _selectedDoctor != null && !_isSubmitting) {
+                unawaited(_loadDoctorAvailability(silent: true));
+              }
+            },
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'released_slots',
+            callback: (_) {
+              if (mounted && _selectedDoctor != null && !_isSubmitting) {
+                unawaited(_loadDoctorAvailability(silent: true));
+              }
+            },
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'doctor_scheduling_settings',
+            callback: (_) {
+              if (mounted && _selectedDoctor != null && !_isSubmitting) {
+                unawaited(_loadDoctorAvailability(silent: true));
+              }
+            },
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'appointment_slot_locks',
+            callback: (_) {
+              if (mounted && _selectedDoctor != null && !_isSubmitting && _currentStep == 2) {
+                unawaited(_loadDoctorAvailability(silent: true));
+              }
+            },
+          )
+          .subscribe();
+    } catch (e) {
+      debugPrint('Booking Realtime fallback notice: $e');
+    }
+
+    if (widget.enableAutoRefresh && widget.autoRefreshInterval > Duration.zero) {
+      _availabilityRefreshTimer?.cancel();
+      _availabilityRefreshTimer = Timer.periodic(widget.autoRefreshInterval, (_) {
+        if (mounted && _currentStep == 2 && _selectedDoctor != null && !_isSubmitting && !_isLoadingSlots) {
+          unawaited(_loadDoctorAvailability(silent: true));
+        }
+      });
+    }
   }
 
   String _formatDateIsoLocal(DateTime dt) =>
       '${dt.year.toString().padLeft(4, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
 
-  Future<void> _loadDoctorAvailability() async {
+  Future<void> _loadDoctorAvailability({bool silent = false}) async {
     if (_selectedDoctor == null) return;
     final docId = _selectedDoctor!.id.isNotEmpty ? _selectedDoctor!.id : _selectedDoctor!.userId;
     if (docId.isEmpty) return;
 
-    setState(() {
-      _isLoadingSlots = true;
-      _selectedTimeSlot = null;
-    });
+    final previousSelectedSlot = _selectedTimeSlot;
+    if (!silent) {
+      unawaited(_loadDoctorNotificationPreference(docId));
+      setState(() {
+        _isLoadingSlots = true;
+        _selectedTimeSlot = null;
+        _selectedReleasedSlotId = null;
+        _slotRefreshNotice = null;
+      });
+    }
 
     try {
       final avail = await _patientService.getDoctorAvailability(
@@ -148,11 +258,50 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
               _configuredDateMap[b.date] = b;
             }
           }
+
+          // Handle deep-linked initialTimeSlot on first availability load
+          if (!_appliedInitialSlot &&
+              widget.initialTimeSlot != null &&
+              widget.initialTimeSlot!.trim().isNotEmpty) {
+            _appliedInitialSlot = true;
+            final targetSlot = widget.initialTimeSlot!.trim();
+            final matchedSlot = avail.allSlots
+                .where((s) => s.trim().toLowerCase() == targetSlot.toLowerCase())
+                .firstOrNull;
+            if (matchedSlot != null &&
+                !avail.isBlocked &&
+                !avail.bookedSlots.any((b) => b.trim().toLowerCase() == matchedSlot.trim().toLowerCase()) &&
+                !avail.lockedSlots.any((l) => l.trim().toLowerCase() == matchedSlot.trim().toLowerCase()) &&
+                !_isSlotBooked(matchedSlot)) {
+              _selectedTimeSlot = matchedSlot;
+              _selectedReleasedSlotId = _findReleasedSlotIdForTime(matchedSlot);
+              _slotRefreshNotice = null;
+            } else {
+              _selectedTimeSlot = null;
+              _selectedReleasedSlotId = null;
+              _slotRefreshNotice = 'This slot is no longer available. Please select another time.';
+            }
+          } else if (silent && previousSelectedSlot != null && previousSelectedSlot.trim().isNotEmpty) {
+            final stillInList = avail.allSlots.any(
+              (s) => s.trim().toLowerCase() == previousSelectedSlot.trim().toLowerCase(),
+            );
+            final nowBooked = avail.isBlocked ||
+                !stillInList ||
+                avail.bookedSlots.any((b) => b.trim().toLowerCase() == previousSelectedSlot.trim().toLowerCase()) ||
+                avail.lockedSlots.any((l) => l.trim().toLowerCase() == previousSelectedSlot.trim().toLowerCase()) ||
+                _isSlotBooked(previousSelectedSlot);
+            if (nowBooked) {
+              _selectedTimeSlot = null;
+              _selectedReleasedSlotId = null;
+              _slotRefreshNotice = 'This slot is no longer available. Please select another time.';
+            }
+          }
+
           _isLoadingSlots = false;
         });
       }
     } catch (_) {
-      if (mounted) {
+      if (mounted && !silent) {
         setState(() {
           _isLoadingSlots = false;
         });
@@ -160,8 +309,191 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
     }
   }
 
+  Future<void> _loadDoctorNotificationPreference(String docId) async {
+    try {
+      final pref = await _patientService.getPatientDoctorPreference(docId);
+      if (mounted && pref != null) {
+        setState(() => _notifyEarlierSlots = pref.notifyEarlierSlots);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _toggleEarlierSlotNotification(bool enabled) async {
+    if (_selectedDoctor == null || _isSavingNotifPref) return;
+    final docId = _selectedDoctor!.id.isNotEmpty ? _selectedDoctor!.id : _selectedDoctor!.userId;
+    if (docId.isEmpty) return;
+    final prev = _notifyEarlierSlots;
+    setState(() {
+      _notifyEarlierSlots = enabled;
+      _isSavingNotifPref = true;
+    });
+    final res = await _patientService.savePatientDoctorPreference(
+      dentistId: docId,
+      isFavorite: true,
+      notifyEarlierSlots: enabled,
+      preferredConsultationType: _selectedConsultationMode,
+      preferredDate: _formatDateIsoLocal(_selectedDate),
+    );
+    if (!mounted) return;
+    setState(() {
+      _isSavingNotifPref = false;
+      if (res['success'] != true) {
+        _notifyEarlierSlots = prev;
+      }
+    });
+  }
+
+  String? _findReleasedSlotIdForTime(String slotStr) {
+    final avail = _doctorAvailability;
+    if (avail == null) return null;
+    final norm = slotStr.trim().toLowerCase();
+    for (final rel in avail.releasedSlots) {
+      final t = (rel['startTime'] ?? rel['start_time'] ?? '').toString().trim().toLowerCase();
+      if (t == norm) {
+        final id = (rel['releasedSlotId'] ?? rel['id'] ?? '').toString().trim();
+        if (id.isNotEmpty) return id;
+      }
+    }
+    for (final item in avail.slotItems) {
+      final t = (item['startTime'] ?? item['start_time'] ?? '').toString().trim().toLowerCase();
+      if (t == norm && item['isReleasedSlot'] == true) {
+        final id = (item['releasedSlotId'] ?? item['id'] ?? '').toString().trim();
+        if (id.isNotEmpty) return id;
+      }
+    }
+    return null;
+  }
+
+  void _startLockCountdown(SlotLockModel lock) {
+    _lockCountdownTimer?.cancel();
+    _activeSlotLock = lock;
+    final secs = lock.remaining.inSeconds.clamp(0, 900);
+    _lockSecondsRemaining = secs;
+    _lockCountdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      final left = _activeSlotLock?.remaining.inSeconds ?? 0;
+      if (left <= 0) {
+        timer.cancel();
+        final expiredLockId = _activeSlotLock?.lockId;
+        if (expiredLockId != null && expiredLockId.isNotEmpty) {
+          unawaited(_patientService.releaseSlotLock(expiredLockId));
+        }
+        setState(() {
+          _activeSlotLock = null;
+          _lockSecondsRemaining = 0;
+          _selectedTimeSlot = null;
+          _selectedReleasedSlotId = null;
+          if (_currentStep == 3 || _currentStep == 4) {
+            _currentStep = 2;
+          }
+          _slotRefreshNotice = 'Your temporary slot reservation expired. Please select a time slot again.';
+          _errorMessage = null;
+        });
+        unawaited(_loadDoctorAvailability(silent: true));
+      } else {
+        setState(() => _lockSecondsRemaining = left);
+      }
+    });
+  }
+
+  Future<void> _releaseActiveLock({bool silent = true}) async {
+    _lockCountdownTimer?.cancel();
+    final lockId = _activeSlotLock?.lockId;
+    _activeSlotLock = null;
+    _lockSecondsRemaining = 0;
+    if (lockId != null && lockId.isNotEmpty) {
+      try {
+        await _patientService.releaseSlotLock(lockId);
+      } catch (_) {}
+    }
+    if (!silent && mounted) setState(() {});
+  }
+
+  String _formatCountdown(int totalSeconds) {
+    final m = (totalSeconds ~/ 60).toString().padLeft(2, '0');
+    final s = (totalSeconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  Future<void> _acquireLockAndProceedToStep3() async {
+    if (_selectedDoctor == null || _selectedTimeSlot == null || _isAcquiringLock) return;
+    final docId = _selectedDoctor!.id.isNotEmpty ? _selectedDoctor!.id : _selectedDoctor!.userId;
+    final releasedId = _selectedReleasedSlotId ?? _findReleasedSlotIdForTime(_selectedTimeSlot!);
+
+    setState(() {
+      _isAcquiringLock = true;
+      _slotRefreshNotice = null;
+      _errorMessage = null;
+    });
+
+    final lockRes = await _patientService.acquireSlotLock(
+      dentistId: docId,
+      date: _selectedDate,
+      timeSlot: _selectedTimeSlot!,
+      consultationType: _selectedConsultationMode,
+      releasedSlotId: releasedId,
+    );
+
+    if (!mounted) return;
+
+    if (lockRes['success'] == true && (lockRes['lockId'] ?? '').toString().isNotEmpty) {
+      final lockModel = SlotLockModel.fromJson(lockRes, fallbackDentistId: docId);
+      setState(() {
+        _isAcquiringLock = false;
+        _selectedReleasedSlotId = releasedId;
+        _currentStep = 3;
+      });
+      _startLockCountdown(lockModel);
+      return;
+    }
+
+    final reason = (lockRes['reason'] ?? '').toString().toUpperCase();
+    // Explicit conflict / lock / released-slot rejection -> keep on Step 2 and refresh live slots!
+    if (releasedId != null ||
+        reason == 'SLOT_LOCKED' ||
+        reason == 'APPOINTMENT_CONFLICT' ||
+        reason == 'RELEASED_SLOT_UNAVAILABLE' ||
+        reason == 'RELEASED_SLOT_LOCK_REQUIRED' ||
+        reason == 'DAILY_LIMIT_REACHED' ||
+        reason == 'DATE_BLOCKED' ||
+        reason == 'SLOT_BLOCKED' ||
+        reason == 'OVERLAPS_BREAK' ||
+        reason == 'OUTSIDE_WORKING_HOURS' ||
+        reason == 'NON_WORKING_DAY' ||
+        reason == 'CONSULTATION_TYPE_DISABLED') {
+      setState(() {
+        _isAcquiringLock = false;
+        _selectedTimeSlot = null;
+        _selectedReleasedSlotId = null;
+        _slotRefreshNotice = lockRes['message']?.toString() ??
+            'This slot is no longer available. Please select another time.';
+      });
+      unawaited(_loadDoctorAvailability(silent: true));
+      return;
+    }
+
+    // Offline/unauthenticated local unit-test fallback for regular slots only
+    setState(() {
+      _isAcquiringLock = false;
+      _currentStep = 3;
+    });
+  }
+
   @override
   void dispose() {
+    _lockCountdownTimer?.cancel();
+    if (_activeSlotLock != null && _currentStep < 5) {
+      unawaited(_patientService.releaseSlotLock(_activeSlotLock!.lockId));
+    }
+    _availabilityRefreshTimer?.cancel();
+    if (_availabilityRealtimeChannel != null) {
+      try {
+        Supabase.instance.client.removeChannel(_availabilityRealtimeChannel!);
+      } catch (_) {}
+    }
     _symptomsController.dispose();
     super.dispose();
   }
@@ -251,6 +583,9 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
                 ? IconButton(
                     icon: const Icon(Icons.arrow_back_rounded, color: AppTheme.textDark),
                     onPressed: () {
+                      if (_currentStep == 3) {
+                        unawaited(_releaseActiveLock());
+                      }
                       setState(() {
                         if (_currentStep == 2 && widget.preselectedDoctor != null) {
                           Navigator.of(context).pop();
@@ -752,7 +1087,18 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    '$_selectedConsultationMode duration: ${BookingRulesConfig.durationForMode(_selectedConsultationMode)} mins (+${BookingRulesConfig.bufferForMode(_selectedConsultationMode)}m buffer)',
+                    () {
+                      final avail = _doctorAvailability;
+                      final modeMatches = avail != null &&
+                          avail.consultationType.toLowerCase() == _selectedConsultationMode.toLowerCase();
+                      final dur = modeMatches
+                          ? avail.consultationDurationMinutes
+                          : BookingRulesConfig.durationForMode(_selectedConsultationMode);
+                      final buf = modeMatches
+                          ? avail.bufferMinutes
+                          : BookingRulesConfig.bufferForMode(_selectedConsultationMode);
+                      return '$_selectedConsultationMode duration: $dur mins (+${buf}m buffer)';
+                    }(),
                     style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -857,7 +1203,51 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
           const SizedBox(height: 20),
 
           // Time Slot Selection Section
-          const Text('2. Select Available Time Slot', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark)),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  '2. Select Available Time Slot',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              IconButton(
+                key: const Key('booking_refresh_slots_btn'),
+                tooltip: 'Refresh live slots',
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(),
+                padding: const EdgeInsets.all(4),
+                icon: const Icon(Icons.refresh_rounded, size: 18, color: AppTheme.primaryBlue),
+                onPressed: _isLoadingSlots ? null : () => _loadDoctorAvailability(silent: true),
+              ),
+            ],
+          ),
+          if (_slotRefreshNotice != null) ...[
+            const SizedBox(height: 6),
+            Container(
+              key: const Key('booking_slot_unavailable_notice'),
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF7ED),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFFED7AA)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline_rounded, size: 16, color: Color(0xFFC2410C)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _slotRefreshNotice!,
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF9A3412)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 10),
 
           if (_isLoadingSlots)
@@ -923,93 +1313,162 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
             Wrap(
               spacing: 10,
               runSpacing: 10,
-              children: BookingRulesConfig.filterBookableSlotsForDate(
-                _selectedDate,
-                _doctorAvailability!.allSlots,
-              ).map((slot) {
-                final isBooked = (_doctorAvailability?.bookedSlots.any((b) => b.trim().toLowerCase() == slot.trim().toLowerCase()) ?? false) || _isSlotBooked(slot);
-                final isSelected = _selectedTimeSlot == slot;
+              children: () {
+                final avail = _doctorAvailability!;
+                final releasedTimes = avail.releasedSlots
+                    .map((r) => (r['startTime'] ?? r['start_time'] ?? '').toString().trim())
+                    .where((s) => s.isNotEmpty)
+                    .toList();
+                final regularBookable = BookingRulesConfig.filterBookableSlotsForDate(
+                  _selectedDate,
+                  avail.allSlots,
+                );
+                final displaySlots = <String>[...regularBookable];
+                for (final rt in releasedTimes) {
+                  if (!displaySlots.any((s) => s.trim().toLowerCase() == rt.toLowerCase())) {
+                    displaySlots.insert(0, rt);
+                  }
+                }
+                return displaySlots.map((slot) {
+                  final releasedId = _findReleasedSlotIdForTime(slot);
+                  final isReleased = releasedId != null;
+                  final isLockedByOther = avail.lockedSlots.any((l) => l.trim().toLowerCase() == slot.trim().toLowerCase());
+                  final isBooked = isLockedByOther ||
+                      avail.bookedSlots.any((b) => b.trim().toLowerCase() == slot.trim().toLowerCase()) ||
+                      (!isReleased && _isSlotBooked(slot));
+                  final isSelected = _selectedTimeSlot == slot;
 
-                return SizedBox(
-                  width: 135,
-                  child: InkWell(
-                    onTap: isBooked
-                        ? null
-                        : () => setState(() => _selectedTimeSlot = slot),
-                    borderRadius: BorderRadius.circular(10),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-                      decoration: BoxDecoration(
-                        color: isBooked
-                            ? const Color(0xFFF1F5F9)
-                            : isSelected
-                                ? AppTheme.primaryBlue
-                                : Colors.white,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
+                  return SizedBox(
+                    width: 142,
+                    child: InkWell(
+                      key: isReleased ? Key('released_slot_chip_${slot.replaceAll(' ', '_')}') : null,
+                      onTap: isBooked
+                          ? null
+                          : () => setState(() {
+                                _selectedTimeSlot = slot;
+                                _selectedReleasedSlotId = releasedId;
+                              }),
+                      borderRadius: BorderRadius.circular(10),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                        decoration: BoxDecoration(
                           color: isBooked
-                              ? const Color(0xFFE2E8F0)
+                              ? const Color(0xFFF1F5F9)
                               : isSelected
                                   ? AppTheme.primaryBlue
-                                  : const Color(0xFFCBD5E1),
+                                  : (isReleased ? const Color(0xFFECFDF5) : Colors.white),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: isBooked
+                                ? const Color(0xFFE2E8F0)
+                                : isSelected
+                                    ? AppTheme.primaryBlue
+                                    : (isReleased ? const Color(0xFF10B981) : const Color(0xFFCBD5E1)),
+                            width: isReleased && !isBooked ? 1.5 : 1,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              isBooked
+                                  ? Icons.block_rounded
+                                  : isSelected
+                                      ? Icons.check_circle_rounded
+                                      : (isReleased ? Icons.bolt_rounded : Icons.access_time_rounded),
+                              size: 14,
+                              color: isBooked
+                                  ? const Color(0xFF94A3B8)
+                                  : isSelected
+                                      ? Colors.white
+                                      : (isReleased ? const Color(0xFF059669) : AppTheme.primaryBlue),
+                            ),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                isReleased && !isBooked ? '$slot • Early' : slot,
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: isBooked
+                                      ? const Color(0xFF94A3B8)
+                                      : isSelected
+                                          ? Colors.white
+                                          : (isReleased ? const Color(0xFF065F46) : AppTheme.textDark),
+                                  decoration: isBooked ? TextDecoration.lineThrough : null,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            isBooked
-                                ? Icons.block_rounded
-                                : isSelected
-                                    ? Icons.check_circle_rounded
-                                    : Icons.access_time_rounded,
-                            size: 14,
-                            color: isBooked
-                                ? const Color(0xFF94A3B8)
-                                : isSelected
-                                    ? Colors.white
-                                    : AppTheme.primaryBlue,
-                          ),
-                          const SizedBox(width: 6),
-                          Flexible(
-                            child: Text(
-                              slot,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: isBooked
-                                    ? const Color(0xFF94A3B8)
-                                    : isSelected
-                                        ? Colors.white
-                                        : AppTheme.textDark,
-                                decoration: isBooked ? TextDecoration.lineThrough : null,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
                     ),
-                  ),
-                );
-              }).toList(),
+                  );
+                }).toList();
+              }(),
             ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 18),
 
-          // Next button
+          // Next button (Acquires temporary slot lock before proceeding!)
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: (_selectedTimeSlot == null || (_doctorAvailability?.isBlocked ?? false))
+              key: const Key('booking_next_to_reason_btn'),
+              onPressed: (_selectedTimeSlot == null || (_doctorAvailability?.isBlocked ?? false) || _isAcquiringLock)
                   ? null
-                  : () => setState(() => _currentStep = 3),
+                  : _acquireLockAndProceedToStep3,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.primaryBlue,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 13),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
-              child: const Text('Next: Reason for Visit', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              child: Text(
+                _isAcquiringLock ? 'Reserving Slot...' : 'Next: Reason for Visit',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // Earlier-Slot Notification Opt-In Preference Card
+          Container(
+            key: const Key('booking_earlier_slot_pref_card'),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.notifications_active_outlined, size: 18, color: AppTheme.primaryBlue),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Notify me if an earlier slot opens',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        'Get instant alerts when the doctor finishes early',
+                        style: TextStyle(fontSize: 10.5, color: AppTheme.textMuted),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  key: const Key('booking_notify_earlier_slots_switch'),
+                  value: _notifyEarlierSlots,
+                  activeColor: AppTheme.primaryBlue,
+                  onChanged: _isSavingNotifPref ? null : _toggleEarlierSlotNotification,
+                ),
+              ],
             ),
           ),
         ],
@@ -1139,6 +1598,33 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
         children: [
           const Text('Review Appointment Details', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.textDark)),
           const SizedBox(height: 12),
+
+          if (_activeSlotLock != null && _lockSecondsRemaining > 0) ...[
+            Container(
+              key: const Key('booking_slot_lock_banner'),
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFECFDF5),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFA7F3D0)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.lock_clock_rounded, size: 16, color: Color(0xFF047857)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Slot reserved for ${_formatCountdown(_lockSecondsRemaining)} — confirm before timer expires',
+                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF065F46)),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
 
           if (_errorMessage != null) ...[
             Container(
@@ -1352,9 +1838,22 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
     );
   }
 
-  // Submission handler
+  // Submission handler (Atomic confirmation using active slot lock + releasedSlotId)
   Future<void> _submitBooking() async {
     if (_selectedDoctor == null || _selectedTimeSlot == null) return;
+    if (_activeSlotLock != null && _activeSlotLock!.isExpired) {
+      await _releaseActiveLock();
+      if (!mounted) return;
+      setState(() {
+        _currentStep = 2;
+        _selectedTimeSlot = null;
+        _selectedReleasedSlotId = null;
+        _slotRefreshNotice = 'Your temporary slot reservation expired. Please select a time slot again.';
+      });
+      unawaited(_loadDoctorAvailability(silent: true));
+      return;
+    }
+
     setState(() {
       _isSubmitting = true;
       _errorMessage = null;
@@ -1362,6 +1861,8 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
 
     final docId = _selectedDoctor!.id.isNotEmpty ? _selectedDoctor!.id : _selectedDoctor!.userId;
     final dateStr = _selectedDate.toIso8601String();
+    final lockId = _activeSlotLock?.lockId;
+    final releasedId = _selectedReleasedSlotId;
 
     try {
       final res = await _patientService.bookAppointment(
@@ -1372,20 +1873,47 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
         treatment: _selectedCategory,
         consultationMode: _selectedConsultationMode,
         symptoms: _symptomsController.text.trim(),
+        lockId: lockId,
+        releasedSlotId: releasedId,
+        requireLock: lockId != null || releasedId != null,
       );
 
       if (!mounted) return;
 
       if (res['success'] == true) {
+        _lockCountdownTimer?.cancel();
+        _activeSlotLock = null;
+        _lockSecondsRemaining = 0;
         setState(() {
           _isSubmitting = false;
           _currentStep = 5; // Move to Success Step
         });
       } else {
-        setState(() {
-          _isSubmitting = false;
-          _errorMessage = res['message']?.toString() ?? 'Unable to confirm booking. Please try another time slot.';
-        });
+        final reason = (res['reason'] ?? '').toString().toUpperCase();
+        final isLockOrSlotGone = reason == 'LOCK_REQUIRED' ||
+            reason == 'LOCK_MISMATCH_OR_EXPIRED' ||
+            reason == 'RELEASED_SLOT_UNAVAILABLE' ||
+            reason == 'RELEASED_SLOT_LOCK_MISMATCH' ||
+            reason == 'SLOT_LOCKED' ||
+            res['conflict'] == true;
+        if (isLockOrSlotGone) {
+          await _releaseActiveLock();
+          if (!mounted) return;
+          setState(() {
+            _isSubmitting = false;
+            _currentStep = 2;
+            _selectedTimeSlot = null;
+            _selectedReleasedSlotId = null;
+            _slotRefreshNotice = res['message']?.toString() ??
+                'This slot is no longer available. Please select another time.';
+          });
+          unawaited(_loadDoctorAvailability(silent: true));
+        } else {
+          setState(() {
+            _isSubmitting = false;
+            _errorMessage = res['message']?.toString() ?? 'Unable to confirm booking. Please try another time slot.';
+          });
+        }
       }
     } catch (e) {
       if (!mounted) return;

@@ -8,6 +8,7 @@ import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/services/session_service.dart';
+import '../../../../core/services/firebase_service.dart';
 import '../../../../core/utils/record_file_helper.dart';
 import '../../../../core/utils/prescription_pdf_generator.dart';
 import '../../../../core/models/specialty_clinical_config.dart';
@@ -26,7 +27,20 @@ import 'ai_triage_screen.dart';
 import 'patient_profile_completion_screen.dart';
 
 class PatientDashboardScreen extends StatefulWidget {
-  const PatientDashboardScreen({super.key});
+  final int initialTabIndex;
+  final String? openBookingDoctorId;
+  final String? initialBookingDate;
+  final String? initialBookingSlot;
+  final String? initialBookingMode;
+
+  const PatientDashboardScreen({
+    super.key,
+    this.initialTabIndex = 0,
+    this.openBookingDoctorId,
+    this.initialBookingDate,
+    this.initialBookingSlot,
+    this.initialBookingMode,
+  });
 
   @override
   State<PatientDashboardScreen> createState() => _PatientDashboardScreenState();
@@ -34,6 +48,7 @@ class PatientDashboardScreen extends StatefulWidget {
 
 class _PatientDashboardScreenState extends State<PatientDashboardScreen> with TickerProviderStateMixin {
   int _currentIndex = 0;
+  bool _handledBookingDeepLink = false;
   final PatientProblemService _patientService = PatientProblemService();
 
   late AnimationController _entryController;
@@ -45,12 +60,19 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   @override
   void initState() {
     super.initState();
+    _currentIndex = widget.initialTabIndex.clamp(0, 3);
     _patientService.addListener(_onServiceUpdate);
     _patientService.syncAllDataFromApi();
     _patientService.syncAppointmentsFromApi();
     _patientService.syncDoctorsFromApi(includeUnavailable: true);
     _patientService.syncReferralsFromApi();
     _patientService.syncNotificationsFromApi(role: 'Patient');
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (FirebaseService.consumePendingNotificationNavigation()) return;
+      _maybeOpenDeepLinkedBooking();
+    });
 
     _entryController = AnimationController(
       vsync: this,
@@ -91,7 +113,35 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   }
 
   void _onServiceUpdate() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+      _maybeOpenDeepLinkedBooking();
+    }
+  }
+
+  void _maybeOpenDeepLinkedBooking() {
+    if (_handledBookingDeepLink || !mounted) return;
+    final targetDocId = (widget.openBookingDoctorId ?? '').trim();
+    if (targetDocId.isEmpty) return;
+
+    final matchedDoc = _patientService.allDoctors
+        .where((d) => d.id == targetDocId || d.userId == targetDocId)
+        .firstOrNull;
+    if (matchedDoc == null) return;
+
+    _handledBookingDeepLink = true;
+    final parsedDate = (widget.initialBookingDate != null && widget.initialBookingDate!.trim().isNotEmpty)
+        ? DateTime.tryParse(widget.initialBookingDate!.trim())
+        : null;
+    BookVisitFlowDialog.show(
+      context,
+      preselectedDoctor: matchedDoc,
+      initialConsultationMode: (widget.initialBookingMode ?? 'In-Person').trim().isNotEmpty
+          ? widget.initialBookingMode!.trim()
+          : 'In-Person',
+      initialDate: parsedDate,
+      initialTimeSlot: widget.initialBookingSlot,
+    );
   }
 
   User? get _safeAuthUser {
@@ -1121,10 +1171,11 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 1. Hero Banner: Upcoming Visits
+              // 1. Compact Hero Summary: Next Upcoming Visit + Open Visits CTA
               _buildHeroUpcomingVisitsBanner(
                 hasUpcoming: hasUpcoming,
                 nextVisit: nextVisit,
+                totalVisitsCount: myRequests.length,
               ),
               const SizedBox(height: 16),
 
@@ -1151,18 +1202,12 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               // 6b. Patient Referrals (Received for Patient & Sent Referrals)
               _buildPatientReferralsSummarySection(),
 
-              // 7. Active Consultations / Next Visit Tracker (if scheduled)
-              if (hasUpcoming) ...[
-                _buildNextVisitCard(),
-                const SizedBox(height: 16),
-              ],
-
-              // 7b. Prescriptions, Diagnostics & Recent/Previous Visits Overview
+              // 7. Prescriptions, Diagnostics & Recent/Previous Visits Overview
               _buildPatientHealthOverviewSection(myRequests),
               const SizedBox(height: 16),
 
-              // 8. 24/7 Support Card
-              const NeedHelpCard(),
+              // 8. 24/7 Support Card (WhatsApp only — Call Us Now removed from Patient Dashboard)
+              const NeedHelpCard(showCallAction: false),
               const SizedBox(height: 36),
             ],
           ),
@@ -1174,14 +1219,23 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   Widget _buildHeroUpcomingVisitsBanner({
     required bool hasUpcoming,
     PatientConsultationRequest? nextVisit,
+    int totalVisitsCount = 0,
   }) {
     return InkWell(
       onTap: () {
-        if (hasUpcoming) {
+        if (hasUpcoming || totalVisitsCount > 0) {
           _guardServiceAccess(
             context,
             serviceTitle: 'My Visits',
-            onAllowed: () => setState(() => _currentIndex = 2),
+            onAllowed: () {
+              _patientService.syncAppointmentsFromApi();
+              setState(() {
+                _visitsSubTabIndex = 0;
+                _showAllVisits = false;
+                _expandedVisitsLimit = _visitsExpandedPageSize;
+                _currentIndex = 2;
+              });
+            },
           );
         } else {
           _openBookVisitFlow(context);
@@ -1315,6 +1369,63 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
+                    if (hasUpcoming || totalVisitsCount > 0) ...[
+                      const SizedBox(height: 12),
+                      InkWell(
+                        key: const Key('home_open_visits_button'),
+                        onTap: () => _guardServiceAccess(
+                          context,
+                          serviceTitle: 'My Visits',
+                          onAllowed: () {
+                            _patientService.syncAppointmentsFromApi();
+                            setState(() {
+                              _visitsSubTabIndex = 0;
+                              _showAllVisits = false;
+                              _expandedVisitsLimit = _visitsExpandedPageSize;
+                              _currentIndex = 2;
+                            });
+                          },
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.94),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.calendar_month_rounded,
+                                size: 14,
+                                color: AppTheme.gsNavy,
+                              ),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  totalVisitsCount > 1
+                                      ? 'Open Visits ($totalVisitsCount)'
+                                      : 'Open Visits',
+                                  style: const TextStyle(
+                                    color: AppTheme.gsNavy,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              const Icon(
+                                Icons.arrow_forward_rounded,
+                                size: 14,
+                                color: AppTheme.gsNavy,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1946,15 +2057,38 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
           ...combined.take(3).map((ref) {
             final key = ref.id.isNotEmpty ? ref.id : '${ref.referredPatientMobile}_${ref.doctorId}';
             final isReceivedForMe = receivedKeys.contains(key);
-            final status = ref.status.toString();
-            final isAccepted = status.toLowerCase() == 'accepted';
-            final isRejected = status.toLowerCase() == 'rejected';
-            final statusColor = isAccepted
-                ? const Color(0xFF012A58)
-                : (isRejected ? const Color(0xFFFE3434) : const Color(0xFFFE3434));
-            final statusBg = isAccepted
-                ? const Color(0x14012A58)
-                : (isRejected ? const Color(0x14FE3434) : const Color(0x14FE3434));
+            final rawStatus = ref.status.toString().trim();
+            final statusLower = rawStatus.toLowerCase();
+            final isAccepted = statusLower == 'accepted';
+            final isRejected = statusLower == 'rejected' || statusLower == 'declined';
+            final isCompleted = statusLower == 'completed';
+            final isContacted = statusLower == 'contacted';
+            final statusLabel = isAccepted
+                ? 'Accepted'
+                : (isRejected
+                    ? 'Rejected'
+                    : (isCompleted ? 'Completed' : (isContacted ? 'Contacted' : 'Pending')));
+            final statusHint = isAccepted
+                ? 'Doctor accepted the referral'
+                : (isRejected
+                    ? 'Doctor rejected the referral'
+                    : (isCompleted
+                        ? 'Referral process completed'
+                        : (isContacted
+                            ? 'Doctor contacted the patient'
+                            : 'Waiting for doctor response')));
+            final statusColor = isAccepted || isCompleted
+                ? const Color(0xFF047857)
+                : (isContacted
+                    ? const Color(0xFF0369A1)
+                    : (isRejected ? const Color(0xFFFE3434) : const Color(0xFFB45309)));
+            final statusBg = isAccepted || isCompleted
+                ? const Color(0x14047857)
+                : (isContacted
+                    ? const Color(0x140369A1)
+                    : (isRejected ? const Color(0x14FE3434) : const Color(0x1AF59E0B)));
+            final refDate = ref.referralDate;
+            final formattedDate = '${refDate.day}/${refDate.month}/${refDate.year}';
 
             return Container(
               key: Key('patient_referral_card_${ref.id}'),
@@ -1983,8 +2117,15 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                         Text(
                           isReceivedForMe
                               ? '${ref.requiredSpecialist} • Referred by ${ref.referrerPatientName}'
-                              : '${ref.requiredSpecialist} • ${ref.referredPatientMobile}',
+                              : '${ref.requiredSpecialist} • ${ref.referredPatientMobile} • $formattedDate',
                           style: const TextStyle(fontSize: 11.5, color: AppTheme.textMedium),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          statusHint,
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: statusColor),
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                         if (ref.clinicalComplaint.isNotEmpty) ...[
@@ -2001,13 +2142,14 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                   ),
                   const SizedBox(width: 8),
                   Container(
+                    key: Key('patient_referral_status_badge_${ref.id}'),
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
                       color: statusBg,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
-                      status,
+                      statusLabel,
                       style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: statusColor),
                     ),
                   ),
@@ -2015,413 +2157,6 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               ),
             );
           }),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNextVisitCard() {
-    final requests = _patientService.requests;
-    final patient = _patientService.currentPatient;
-    final authUser = _safeAuthUser;
-    final authId = authUser?.id ?? '';
-    final authEmail = authUser?.email?.trim().toLowerCase() ?? '';
-
-    final myRequests = requests.where((r) {
-      if (r.patientId != null && r.patientId!.isNotEmpty) {
-        if (r.patientId == authId || r.patientId == patient.id) return true;
-      }
-      if (patient.name.isNotEmpty && patient.name != 'Patient' && r.patientName.trim().toLowerCase() == patient.name.trim().toLowerCase()) return true;
-      if (patient.name.isNotEmpty && patient.name != 'Patient' && (r.patientName.toLowerCase().contains(patient.name.toLowerCase()) || patient.name.toLowerCase().contains(r.patientName.toLowerCase()))) return true;
-      if (patient.id.isNotEmpty && r.id.contains(patient.id)) return true;
-      if (authEmail.isNotEmpty && r.patientName.toLowerCase().contains(authEmail.split('@').first)) return true;
-      if (patient.name.isEmpty || patient.name == 'Patient' || requests.length <= 1) return true;
-      return false;
-    }).toList();
-
-    final upcomingRequests = myRequests.where((r) {
-      final s = r.status.toUpperCase();
-      if (s == 'COMPLETED' || s == 'CANCELLED' || s == 'REJECTED') return false;
-      final hasDocName = r.assignedDoctorName != null &&
-          r.assignedDoctorName!.isNotEmpty &&
-          r.assignedDoctorName != 'null' &&
-          r.assignedDoctorName != 'None';
-      final hasSlot = r.confirmedTimeSlot != null && r.confirmedTimeSlot!.isNotEmpty;
-      return hasDocName || hasSlot || s.contains('ASSIGN') || s.contains('CONFIRM') || s.contains('PENDING') || s.contains('RESCHEDULE') || s.contains('ACCEPT');
-    }).toList();
-
-    if (upcomingRequests.isEmpty) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFFE2E8F0)),
-        ),
-        child: const Column(
-          children: [
-            Icon(Icons.calendar_today_rounded, size: 32, color: AppTheme.primaryBlue),
-            SizedBox(height: 8),
-            Text('No Scheduled Visits', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark)),
-            SizedBox(height: 2),
-            Text('Submit a health concern or report symptoms to schedule a visit.', textAlign: TextAlign.center, style: TextStyle(fontSize: 11, color: AppTheme.textMuted)),
-          ],
-        ),
-      );
-    }
-
-    return Column(
-      children: [
-        for (int i = 0; i < upcomingRequests.length; i++) ...[
-          if (i > 0) const SizedBox(height: 12),
-          _buildSingleScheduledVisitCard(upcomingRequests[i], isFirst: i == 0),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildSingleScheduledVisitCard(PatientConsultationRequest assignedReq, {required bool isFirst}) {
-    final matchedDoc = assignedReq.resolvedDoctor;
-    final resolvedDocName = assignedReq.displayDoctorName;
-    final docName = resolvedDocName.isNotEmpty
-        ? (resolvedDocName.toLowerCase().startsWith('dr.') || resolvedDocName.toLowerCase().startsWith('dr ')
-            ? resolvedDocName
-            : 'Dr. $resolvedDocName')
-        : 'Attending Specialist';
-    final docSpecialty = assignedReq.displayDoctorSpecialty.trim().isNotEmpty
-        ? assignedReq.displayDoctorSpecialty.trim()
-        : assignedReq.problemCategory;
-    final clinicName = assignedReq.displayDoctorClinic;
-    final realFee = assignedReq.displayConsultationFee;
-    final consultationMode = assignedReq.displayConsultationMode;
-    final isOnlineMode = consultationMode == 'Online';
-    final statusUpper = assignedReq.status.toUpperCase();
-    final isConfirmed = statusUpper == 'CONFIRMED' ||
-        statusUpper == 'ACCEPTED' ||
-        statusUpper == 'DOCTOR SUGGESTED' ||
-        statusUpper == 'DOCTOR ASSIGNED' ||
-        statusUpper == 'IN_PROGRESS' ||
-        statusUpper == 'IN PROGRESS';
-    final isRescheduled = statusUpper == 'RESCHEDULED';
-
-    String formattedDateOnly = 'Date pending';
-    String datePrefix = '';
-    if (assignedReq.confirmedDate != null && assignedReq.confirmedDate!.isNotEmpty) {
-      final dt = DateTime.tryParse(assignedReq.confirmedDate!);
-      if (dt != null) {
-        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-        formattedDateOnly = '${weekdays[dt.weekday - 1]}, ${dt.day} ${months[dt.month - 1]} ${dt.year}';
-        datePrefix = '${weekdays[dt.weekday - 1]}, ${dt.day} ${months[dt.month - 1]} • ';
-      } else {
-        formattedDateOnly = assignedReq.confirmedDate!;
-      }
-    }
-
-    final hasTimeSlot = assignedReq.confirmedTimeSlot != null &&
-        assignedReq.confirmedTimeSlot!.trim().isNotEmpty;
-    final slotDisplay = hasTimeSlot
-        ? '$datePrefix${assignedReq.confirmedTimeSlot!.trim()}'
-        : 'Slot Pending Confirmation';
-
-    final cleanInitial = docName
-        .replaceAll(RegExp(r'^Dr\.?\s*', caseSensitive: false), '')
-        .trim();
-    final docInitial = cleanInitial.isNotEmpty ? cleanInitial[0].toUpperCase() : 'D';
-
-    return Container(
-      key: Key('upcoming_consultation_card_${assignedReq.id}'),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        isFirst ? 'Upcoming Consultation' : 'Scheduled Visit',
-                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: AppTheme.gsNavy.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            isOnlineMode ? Icons.videocam_outlined : Icons.local_hospital_outlined,
-                            size: 13,
-                            color: AppTheme.gsNavy,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            isOnlineMode ? 'Online' : 'In-Person',
-                            style: const TextStyle(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w700,
-                              color: AppTheme.gsNavy,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            slotDisplay,
-                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppTheme.textDark),
-                          ),
-                          if (hasTimeSlot && formattedDateOnly != 'Date pending') ...[
-                            const SizedBox(height: 2),
-                            Text(
-                              '$formattedDateOnly • ${assignedReq.confirmedTimeSlot!.trim()}',
-                              style: const TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                          const SizedBox(height: 4),
-                          Wrap(
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              Text(
-                                assignedReq.problemCategory,
-                                style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
-                              ),
-                              if (realFee.isNotEmpty) ...[
-                                const SizedBox(width: 4),
-                                Text(
-                                  '• Fee: $realFee',
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                    color: AppTheme.primaryBlue,
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: isConfirmed
-                            ? AppTheme.statusConfirmedBg
-                            : isRescheduled
-                                ? const Color(0x14012A58)
-                                : const Color(0x14FE3434),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        isConfirmed
-                            ? 'Confirmed'
-                            : isRescheduled
-                                ? 'Rescheduled'
-                                : 'Pending',
-                        style: TextStyle(
-                          color: isConfirmed
-                              ? AppTheme.statusConfirmedText
-                              : isRescheduled
-                                  ? const Color(0xFF012A58)
-                                  : const Color(0xFFFE3434),
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1, color: Color(0xFFF1F5F9)),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryBlue.withValues(alpha: 0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: matchedDoc?.photoBytes != null && matchedDoc!.photoBytes!.isNotEmpty
-                      ? ClipOval(
-                          child: Image.memory(
-                            matchedDoc.photoBytes!,
-                            width: 42,
-                            height: 42,
-                            fit: BoxFit.cover,
-                          ),
-                        )
-                      : Center(
-                          child: Text(
-                            docInitial,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w800,
-                              color: AppTheme.primaryBlue,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        docName,
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: AppTheme.textDark),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        clinicName.isNotEmpty ? '$docSpecialty • $clinicName' : docSpecialty,
-                        style: const TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1, color: Color(0xFFF1F5F9)),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  if (isConfirmed || isOnlineMode) ...[
-                    ElevatedButton.icon(
-                      key: Key('join_consultation_button_${assignedReq.id}'),
-                      onPressed: () => _guardServiceAccess(
-                        context,
-                        serviceTitle: 'Join Consultation',
-                        onAllowed: () => _showChatModal(context, request: assignedReq),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.gsNavy,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        minimumSize: const Size(0, 32),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                      icon: Icon(
-                        isOnlineMode ? Icons.videocam_rounded : Icons.chat_bubble_outline_rounded,
-                        size: 14,
-                      ),
-                      label: Text(
-                        isOnlineMode ? 'Join Consultation' : 'Consult Chat',
-                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                  ] else ...[
-                    TextButton.icon(
-                      onPressed: () => _guardServiceAccess(
-                        context,
-                        serviceTitle: 'Doctor Chat',
-                        onAllowed: () => _showChatModal(context, request: assignedReq),
-                      ),
-                      icon: const Icon(Icons.chat_bubble_outline_rounded, size: 15, color: Color(0xFF012A58)),
-                      label: const Text('Chat', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF012A58))),
-                    ),
-                    const SizedBox(width: 4),
-                  ],
-                  TextButton.icon(
-                    onPressed: () => _guardServiceAccess(
-                      context,
-                      serviceTitle: 'Visit Details',
-                      onAllowed: () {
-                        AppointmentManagementDialog.show(
-                          context,
-                          appointment: assignedReq,
-                          initialMode: AppointmentManagementMode.details,
-                          onUpdated: () => setState(() {}),
-                        );
-                      },
-                    ),
-                    icon: const Icon(Icons.info_outline_rounded, size: 15),
-                    label: const Text('Details', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                  ),
-                  const SizedBox(width: 4),
-                  TextButton.icon(
-                    onPressed: () => _guardServiceAccess(
-                      context,
-                      serviceTitle: 'Reschedule Visit',
-                      onAllowed: () {
-                        AppointmentManagementDialog.show(
-                          context,
-                          appointment: assignedReq,
-                          initialMode: AppointmentManagementMode.reschedule,
-                          onUpdated: () => setState(() {}),
-                        );
-                      },
-                    ),
-                    icon: const Icon(Icons.edit_calendar_rounded, size: 15),
-                    label: const Text('Reschedule', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                  ),
-                  const SizedBox(width: 4),
-                  TextButton.icon(
-                    onPressed: () => _guardServiceAccess(
-                      context,
-                      serviceTitle: 'Cancel Visit',
-                      onAllowed: () {
-                        AppointmentManagementDialog.show(
-                          context,
-                          appointment: assignedReq,
-                          initialMode: AppointmentManagementMode.cancel,
-                          onUpdated: () => setState(() {}),
-                        );
-                      },
-                    ),
-                    icon: const Icon(Icons.cancel_outlined, size: 15, color: Color(0xFFFE3434)),
-                    label: const Text('Cancel', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFFE3434))),
-                  ),
-                ],
-              ),
-            ),
-          ),
         ],
       ),
     );
@@ -2627,7 +2362,9 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
             onAllowed: () {
               _patientService.syncAppointmentsFromApi();
               setState(() {
-                _visitsSubTabIndex = 1;
+                _visitsSubTabIndex = 2; // Previous Visits tab
+                _showAllVisits = false;
+                _expandedVisitsLimit = _visitsExpandedPageSize;
                 _currentIndex = 2;
               });
             },
@@ -2702,7 +2439,11 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   // ==========================================
   // TAB 2: MY VISITS TAB (GS HEALTH REDESIGN)
   // ==========================================
-  int _visitsSubTabIndex = 0; // 0 = Upcoming Visits, 1 = Previous Visits, 2 = Cancelled Visits
+  static const int _defaultVisitsPreviewCount = 3;
+  static const int _visitsExpandedPageSize = 20;
+  int _visitsSubTabIndex = 0; // 0 = All Visits, 1 = Upcoming Visits, 2 = Previous Visits, 3 = Cancelled Visits
+  bool _showAllVisits = false;
+  int _expandedVisitsLimit = _visitsExpandedPageSize;
   final Set<String> _cancellingVisitIds = {};
 
   List<PatientConsultationRequest> _getPatientRequests() {
@@ -2718,57 +2459,130 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
       if (sessUserId.isNotEmpty) sessUserId,
     };
 
-    return requests.where((r) {
+    final seenIds = <String>{};
+    final result = <PatientConsultationRequest>[];
+
+    for (final r in requests) {
       final reqPatientId = (r.patientId ?? '').trim();
+      bool belongsToPatient = false;
       if (reqPatientId.isNotEmpty) {
-        if (myPatientIds.contains(reqPatientId)) return true;
-        if (myPatientIds.isNotEmpty) return false;
-      }
-      if (patient.name.isNotEmpty &&
+        if (myPatientIds.contains(reqPatientId)) {
+          belongsToPatient = true;
+        } else if (myPatientIds.isNotEmpty) {
+          belongsToPatient = false;
+        }
+      } else if (patient.name.isNotEmpty &&
           patient.name != 'Patient' &&
           r.patientName.trim().toLowerCase() == patient.name.trim().toLowerCase()) {
-        return true;
-      }
-      if (patient.name.isNotEmpty &&
+        belongsToPatient = true;
+      } else if (patient.name.isNotEmpty &&
           patient.name != 'Patient' &&
           (r.patientName.toLowerCase().contains(patient.name.toLowerCase()) ||
               patient.name.toLowerCase().contains(r.patientName.toLowerCase()))) {
-        return true;
-      }
-      if (patient.id.isNotEmpty && r.id.contains(patient.id)) return true;
-      if (authEmail.isNotEmpty &&
+        belongsToPatient = true;
+      } else if (patient.id.isNotEmpty && r.id.contains(patient.id)) {
+        belongsToPatient = true;
+      } else if (authEmail.isNotEmpty &&
           r.patientName.toLowerCase().contains(authEmail.split('@').first)) {
-        return true;
-      }
-      if (myPatientIds.isEmpty &&
+        belongsToPatient = true;
+      } else if (myPatientIds.isEmpty &&
           (patient.name.isEmpty || patient.name == 'Patient' || requests.length <= 1)) {
-        return true;
+        belongsToPatient = true;
       }
-      return false;
-    }).toList();
+
+      if (!belongsToPatient) continue;
+
+      final normalizedId = r.id.trim();
+      final dedupKey = normalizedId.isNotEmpty
+          ? 'id:$normalizedId'
+          : 'sig:${(r.assignedDoctorId ?? r.assignedDoctorName ?? '').trim().toLowerCase()}|${(r.confirmedDate ?? '').trim()}|${(r.confirmedTimeSlot ?? '').trim()}|${r.status.trim().toUpperCase()}';
+      if (seenIds.contains(dedupKey)) continue;
+      seenIds.add(dedupKey);
+      result.add(r);
+    }
+
+    return result;
+  }
+
+  List<PatientConsultationRequest> _sortVisitsByRelevance(
+    List<PatientConsultationRequest> visits,
+  ) {
+    final now = DateTime.now();
+    final todayStart = DateTime(now.year, now.month, now.day);
+    final sorted = List<PatientConsultationRequest>.from(visits);
+
+    int bucketOf(PatientConsultationRequest r) {
+      final s = r.status.trim().toUpperCase();
+      if (s == 'CANCELLED' || s == 'REJECTED') return 3;
+      if (s == 'COMPLETED') return 2;
+      final startDt = _resolveAppointmentStartDateTime(r);
+      final hasSlot = (r.confirmedTimeSlot ?? '').trim().isNotEmpty;
+      final isFutureOrToday = hasSlot
+          ? !startDt.isBefore(now)
+          : !DateTime(startDt.year, startDt.month, startDt.day).isBefore(todayStart);
+      return isFutureOrToday ? 0 : 1;
+    }
+
+    sorted.sort((a, b) {
+      final ba = bucketOf(a);
+      final bb = bucketOf(b);
+      if (ba != bb) return ba.compareTo(bb);
+
+      final da = _resolveAppointmentStartDateTime(a);
+      final db = _resolveAppointmentStartDateTime(b);
+      if (ba == 0) {
+        // Upcoming visits: soonest first
+        final cmp = da.compareTo(db);
+        if (cmp != 0) return cmp;
+        return b.submittedAt.compareTo(a.submittedAt);
+      }
+      // Recent active-past, completed, and cancelled history: most recent first
+      final cmp = db.compareTo(da);
+      if (cmp != 0) return cmp;
+      return b.submittedAt.compareTo(a.submittedAt);
+    });
+
+    return sorted;
   }
 
   Widget _buildAppointmentsTab() {
     final myRequests = _getPatientRequests();
 
     final upcomingVisits = myRequests.where((r) {
-      final s = r.status.toUpperCase();
+      final s = r.status.trim().toUpperCase();
       return s != 'COMPLETED' && s != 'CANCELLED' && s != 'REJECTED';
     }).toList();
 
     final previousVisits = myRequests.where((r) {
-      final s = r.status.toUpperCase();
+      final s = r.status.trim().toUpperCase();
       return s == 'COMPLETED';
     }).toList();
 
     final cancelledVisits = myRequests.where((r) {
-      final s = r.status.toUpperCase();
+      final s = r.status.trim().toUpperCase();
       return s == 'CANCELLED' || s == 'REJECTED';
     }).toList();
 
-    final displayedVisits = _visitsSubTabIndex == 0
-        ? upcomingVisits
-        : (_visitsSubTabIndex == 1 ? previousVisits : cancelledVisits);
+    final rawSelectedVisits = _visitsSubTabIndex == 0
+        ? myRequests
+        : (_visitsSubTabIndex == 1
+            ? upcomingVisits
+            : (_visitsSubTabIndex == 2 ? previousVisits : cancelledVisits));
+
+    final displayedVisits = _sortVisitsByRelevance(rawSelectedVisits);
+    final hasMoreThanDefault = displayedVisits.length > _defaultVisitsPreviewCount;
+    final visibleVisits = _showAllVisits
+        ? displayedVisits.take(_expandedVisitsLimit).toList()
+        : displayedVisits.take(_defaultVisitsPreviewCount).toList();
+    final remainingAfterPage = displayedVisits.length - visibleVisits.length;
+
+    void selectSubTab(int index) {
+      setState(() {
+        _visitsSubTabIndex = index;
+        _showAllVisits = false;
+        _expandedVisitsLimit = _visitsExpandedPageSize;
+      });
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2791,44 +2605,83 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'My visits',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.textDark,
-                  letterSpacing: -0.5,
-                  height: 1.15,
-                ),
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'My visits',
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.textDark,
+                        letterSpacing: -0.5,
+                        height: 1.15,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (hasMoreThanDefault)
+                    TextButton(
+                      key: Key(_showAllVisits
+                          ? 'visits_show_less_header_button'
+                          : 'visits_view_all_header_button'),
+                      onPressed: () {
+                        setState(() {
+                          _showAllVisits = !_showAllVisits;
+                          _expandedVisitsLimit = _visitsExpandedPageSize;
+                        });
+                      },
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.gsNavy,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        minimumSize: const Size(0, 32),
+                      ),
+                      child: Text(
+                        _showAllVisits ? 'Show Less' : 'View All',
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 14),
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 physics: const BouncingScrollPhysics(),
                 child: Row(
                   children: [
                     _buildGsPillTab(
+                      key: const Key('visits_tab_all'),
+                      label: 'All Visits',
+                      badgeText: myRequests.isNotEmpty ? '(${myRequests.length})' : null,
+                      isSelected: _visitsSubTabIndex == 0,
+                      onTap: () => selectSubTab(0),
+                    ),
+                    const SizedBox(width: 10),
+                    _buildGsPillTab(
                       key: const Key('visits_tab_upcoming'),
                       label: 'Upcoming Visits',
                       badgeText: upcomingVisits.isNotEmpty ? '(${upcomingVisits.length})' : null,
-                      isSelected: _visitsSubTabIndex == 0,
-                      onTap: () => setState(() => _visitsSubTabIndex = 0),
+                      isSelected: _visitsSubTabIndex == 1,
+                      onTap: () => selectSubTab(1),
                     ),
                     const SizedBox(width: 10),
                     _buildGsPillTab(
                       key: const Key('visits_tab_previous'),
                       label: 'Previous Visits',
                       badgeText: previousVisits.isNotEmpty ? '(${previousVisits.length})' : null,
-                      isSelected: _visitsSubTabIndex == 1,
-                      onTap: () => setState(() => _visitsSubTabIndex = 1),
+                      isSelected: _visitsSubTabIndex == 2,
+                      onTap: () => selectSubTab(2),
                     ),
                     const SizedBox(width: 10),
                     _buildGsPillTab(
                       key: const Key('visits_tab_cancelled'),
                       label: 'Cancelled Visits',
                       badgeText: cancelledVisits.isNotEmpty ? '(${cancelledVisits.length})' : null,
-                      isSelected: _visitsSubTabIndex == 2,
-                      onTap: () => setState(() => _visitsSubTabIndex = 2),
+                      isSelected: _visitsSubTabIndex == 3,
+                      onTap: () => selectSubTab(3),
                     ),
                   ],
                 ),
@@ -2837,29 +2690,164 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
           ),
         ),
 
-        // Scrollable Appointment Cards List
+        // Scrollable Appointment Cards List with Latest-3 Default, View All / Show Less & Pagination
         Expanded(
-          child: SingleChildScrollView(
-            physics: const BouncingScrollPhysics(),
-            padding: EdgeInsets.fromLTRB(
-              16,
-              18,
-              16,
-              36 + MediaQuery.of(context).padding.bottom,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (displayedVisits.isEmpty)
+          child: RefreshIndicator(
+            color: AppTheme.gsNavy,
+            onRefresh: () async {
+              await Future.wait([
+                _patientService.syncAppointmentsFromApi(),
+                _patientService.syncProblemRequestsFromApi(),
+              ]);
+              if (mounted) setState(() {});
+            },
+            child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(
+                parent: AlwaysScrollableScrollPhysics(),
+              ),
+              padding: EdgeInsets.fromLTRB(
+                16,
+                16,
+                16,
+                36 + MediaQuery.of(context).padding.bottom,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                if (displayedVisits.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _showAllVisits
+                                ? 'Showing ${visibleVisits.length} of ${displayedVisits.length} ${displayedVisits.length == 1 ? 'visit' : 'visits'}'
+                                : (hasMoreThanDefault
+                                    ? 'Showing latest ${visibleVisits.length} of ${displayedVisits.length} visits'
+                                    : 'Showing ${displayedVisits.length} ${displayedVisits.length == 1 ? 'visit' : 'visits'}'),
+                            key: const Key('visits_count_summary'),
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF64748B),
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                if (visibleVisits.isEmpty)
                   _buildVisitsEmptyState(tabIndex: _visitsSubTabIndex)
-                else
-                  ...displayedVisits.map(
+                else ...[
+                  ...visibleVisits.map(
                     (req) => Padding(
                       padding: const EdgeInsets.only(bottom: 14),
                       child: _buildGsVisitCard(req),
                     ),
                   ),
-              ],
+                  if (hasMoreThanDefault && !_showAllVisits)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4, bottom: 12),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          key: const Key('visits_view_all_button'),
+                          onPressed: () {
+                            setState(() {
+                              _showAllVisits = true;
+                              _expandedVisitsLimit = _visitsExpandedPageSize;
+                            });
+                          },
+                          icon: const Icon(Icons.unfold_more_rounded, size: 18),
+                          label: Text(
+                            'View All (${displayedVisits.length} Visits)',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.gsNavy,
+                            side: const BorderSide(color: AppTheme.gsNavy, width: 1.4),
+                            backgroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (_showAllVisits && remainingAfterPage > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4, bottom: 10),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          key: const Key('visits_load_more_button'),
+                          onPressed: () {
+                            setState(() {
+                              _expandedVisitsLimit += _visitsExpandedPageSize;
+                            });
+                          },
+                          icon: const Icon(Icons.expand_more_rounded, size: 18),
+                          label: Text(
+                            'Load More Visits ($remainingAfterPage remaining)',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.gsNavy,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (_showAllVisits && hasMoreThanDefault)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2, bottom: 12),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          key: const Key('visits_show_less_button'),
+                          onPressed: () {
+                            setState(() {
+                              _showAllVisits = false;
+                              _expandedVisitsLimit = _visitsExpandedPageSize;
+                            });
+                          },
+                          icon: const Icon(Icons.unfold_less_rounded, size: 18),
+                          label: const Text(
+                            'Show Less',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.gsNavy,
+                            side: const BorderSide(color: Color(0xFFCBD5E1), width: 1.3),
+                            backgroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+                ],
+              ),
             ),
           ),
         ),
@@ -2918,8 +2906,9 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   }
 
   Widget _buildVisitsEmptyState({required int tabIndex}) {
-    final isUpcoming = tabIndex == 0;
-    final isCancelled = tabIndex == 2;
+    final isAll = tabIndex == 0;
+    final isUpcoming = tabIndex == 1;
+    final isCancelled = tabIndex == 3;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
@@ -2938,7 +2927,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               shape: BoxShape.circle,
             ),
             child: Icon(
-              isUpcoming
+              (isAll || isUpcoming)
                   ? Icons.calendar_today_rounded
                   : (isCancelled ? Icons.cancel_outlined : Icons.history_rounded),
               color: AppTheme.gsNavy,
@@ -2947,9 +2936,11 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
           ),
           const SizedBox(height: 14),
           Text(
-            isUpcoming
-                ? 'No upcoming visits yet.'
-                : (isCancelled ? 'No cancelled visits.' : 'No previous visits yet.'),
+            isAll
+                ? 'No visits yet.'
+                : (isUpcoming
+                    ? 'No upcoming visits yet.'
+                    : (isCancelled ? 'No cancelled visits.' : 'No previous visits yet.')),
             style: const TextStyle(
               fontSize: 17,
               fontWeight: FontWeight.w700,
@@ -2959,7 +2950,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
           ),
           const SizedBox(height: 6),
           Text(
-            isUpcoming
+            (isAll || isUpcoming)
                 ? 'Book a verified doctor near you in under a minute.'
                 : (isCancelled
                     ? 'Any cancelled or declined consultations will appear here.'
@@ -2971,7 +2962,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
             ),
             textAlign: TextAlign.center,
           ),
-          if (isUpcoming) ...[
+          if (isAll || isUpcoming) ...[
             const SizedBox(height: 18),
             ElevatedButton.icon(
               key: const Key('book_visit_empty_button'),
@@ -3091,6 +3082,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
 
     final matchedDoctor = _resolveDoctorForRequest(req, doctorName);
     final Uint8List? doctorPhotoBytes = matchedDoctor?.photoBytes;
+    final String? doctorPhotoUrl = matchedDoctor?.profileImageUrl;
 
     final specialty = req.displayDoctorSpecialty.isNotEmpty
         ? req.displayDoctorSpecialty
@@ -3242,7 +3234,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                             shape: BoxShape.circle,
                             border: Border.all(color: const Color(0xFFE2E8F0)),
                           ),
-                          child: doctorPhotoBytes != null
+                          child: doctorPhotoBytes != null && doctorPhotoBytes.isNotEmpty
                               ? ClipOval(
                                   child: Image.memory(
                                     doctorPhotoBytes,
@@ -3256,18 +3248,39 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                                     ),
                                   ),
                                 )
-                              : Center(
-                                  child: Text(
-                                    doctorName.replaceAll(RegExp(r'^Dr\.?\s*', caseSensitive: false), '').trim().isNotEmpty
-                                        ? doctorName.replaceAll(RegExp(r'^Dr\.?\s*', caseSensitive: false), '').trim()[0].toUpperCase()
-                                        : 'D',
-                                    style: const TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w800,
-                                      color: AppTheme.gsNavy,
+                              : (doctorPhotoUrl != null && doctorPhotoUrl.trim().isNotEmpty)
+                                  ? ClipOval(
+                                      child: Image.network(
+                                        doctorPhotoUrl.trim(),
+                                        width: 40,
+                                        height: 40,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) => Center(
+                                          child: Text(
+                                            doctorName.replaceAll(RegExp(r'^Dr\.?\s*', caseSensitive: false), '').trim().isNotEmpty
+                                                ? doctorName.replaceAll(RegExp(r'^Dr\.?\s*', caseSensitive: false), '').trim()[0].toUpperCase()
+                                                : 'D',
+                                            style: const TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w800,
+                                              color: AppTheme.gsNavy,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    )
+                                  : Center(
+                                      child: Text(
+                                        doctorName.replaceAll(RegExp(r'^Dr\.?\s*', caseSensitive: false), '').trim().isNotEmpty
+                                            ? doctorName.replaceAll(RegExp(r'^Dr\.?\s*', caseSensitive: false), '').trim()[0].toUpperCase()
+                                            : 'D',
+                                        style: const TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w800,
+                                          color: AppTheme.gsNavy,
+                                        ),
+                                      ),
                                     ),
-                                  ),
-                                ),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -3484,13 +3497,65 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
             ],
           ),
 
-          // Reschedule & Cancel Visit Actions (Only for upcoming/cancellable appointments)
-          if (canCancel) ...[
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 10,
-              runSpacing: 8,
-              children: [
+          // Visit Card Actions: Chat, Details, Reschedule, Cancel (where applicable)
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (statusUpper != 'CANCELLED' && statusUpper != 'REJECTED')
+                OutlinedButton.icon(
+                  key: Key('chat_visit_button_${req.id}'),
+                  onPressed: () => _guardServiceAccess(
+                    context,
+                    serviceTitle: 'Doctor Chat',
+                    onAllowed: () => _showChatModal(context, request: req),
+                  ),
+                  icon: Icon(
+                    isOnline ? Icons.videocam_rounded : Icons.chat_bubble_outline_rounded,
+                    size: 15,
+                  ),
+                  label: Text(
+                    isOnline && canCancel ? 'Join / Chat' : 'Chat',
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.gsNavy,
+                    backgroundColor: AppTheme.gsNavy.withValues(alpha: 0.06),
+                    side: BorderSide(color: AppTheme.gsNavy.withValues(alpha: 0.25)),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              OutlinedButton.icon(
+                key: Key('details_visit_button_${req.id}'),
+                onPressed: () => _guardServiceAccess(
+                  context,
+                  serviceTitle: 'Visit Details',
+                  onAllowed: () => AppointmentManagementDialog.show(
+                    context,
+                    appointment: req,
+                    initialMode: AppointmentManagementMode.details,
+                    onUpdated: () => setState(() {}),
+                  ),
+                ),
+                icon: const Icon(Icons.info_outline_rounded, size: 15),
+                label: const Text(
+                  'Details',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.textDark,
+                  side: const BorderSide(color: Color(0xFFCBD5E1)),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+              if (canCancel) ...[
                 OutlinedButton.icon(
                   key: Key('reschedule_visit_button_${req.id}'),
                   onPressed: () => _guardServiceAccess(
@@ -3499,19 +3564,21 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                     onAllowed: () => AppointmentManagementDialog.show(
                       context,
                       appointment: req,
+                      initialMode: AppointmentManagementMode.reschedule,
+                      onUpdated: () => setState(() {}),
                     ),
                   ),
-                  icon: const Icon(Icons.edit_calendar_outlined, size: 16),
+                  icon: const Icon(Icons.edit_calendar_outlined, size: 15),
                   label: const Text(
                     'Reschedule',
-                    style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
                   ),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppTheme.gsNavy,
                     side: const BorderSide(color: AppTheme.gsNavy),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                   ),
                 ),
@@ -3524,15 +3591,15 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                             serviceTitle: 'Cancel Visit',
                             onAllowed: () => _confirmAndCancelVisit(context, req, doctorName),
                           ),
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(12),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 11,
+                      horizontal: 16,
+                      vertical: 10,
                     ),
                     decoration: BoxDecoration(
                       color: AppTheme.gsRed.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -3550,7 +3617,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                           const Text(
                             'Cancelling...',
                             style: TextStyle(
-                              fontSize: 14,
+                              fontSize: 13,
                               fontWeight: FontWeight.w700,
                               color: Color(0xFFFE3434),
                             ),
@@ -3559,7 +3626,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                           const Text(
                             'Cancel visit',
                             style: TextStyle(
-                              fontSize: 14,
+                              fontSize: 13,
                               fontWeight: FontWeight.w700,
                               color: Color(0xFFFE3434),
                             ),
@@ -3569,8 +3636,8 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                   ),
                 ),
               ],
-            ),
-          ],
+            ],
+          ),
         ],
       ),
     );

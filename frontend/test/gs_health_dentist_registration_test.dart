@@ -364,7 +364,7 @@ void main() {
       expect(find.byKey(const Key('reg_role_admin')), findsNothing);
       expect(find.byKey(const ValueKey('dentist_form_section')), findsOneWidget);
 
-      // Exact labels from the reference
+      // Exact labels from the reference + Phase 2 clinic & consultation mode fields
       for (final label in [
         'FULL NAME',
         'CITY',
@@ -372,14 +372,21 @@ void main() {
         'SPECIALITY',
         'QUALIFICATION',
         'YEARS OF PRACTICE',
+        'CONSULTATION TYPE',
         'CLINIC (OPTIONAL)',
+        'CLINIC / HOSPITAL NAME',
+        'CLINIC ADDRESS',
+        'STATE',
+        'PINCODE',
+        'CLINIC MAP LOCATION (OPTIONAL)',
       ]) {
         expect(find.text(label), findsOneWidget, reason: label);
       }
 
       // Removed legacy fields are no longer shown on the Dentist form
       expect(find.text('MEDICAL SPECIALTY'), findsNothing);
-      expect(find.byKey(const Key('reg_pincode_field')), findsNothing);
+      expect(find.byKey(const Key('reg_dentist_pincode_field')), findsOneWidget);
+      expect(find.byKey(const Key('reg_open_map_picker_button')), findsOneWidget);
 
       // Placeholders
       expect(find.text('e.g. Riya Sharma'), findsOneWidget);
@@ -492,12 +499,16 @@ void main() {
 
       // Years of practice range validation
       await tester.enterText(find.byKey(const Key('reg_experience_field')), '99');
+      await tester.drag(find.byKey(const Key('registration_scroll_view')), const Offset(0, -1800));
+      await tester.pumpAndSettle();
       await tester.ensureVisible(continueFinder);
       await tester.pumpAndSettle();
       await tester.tap(continueFinder);
       await tester.pumpAndSettle();
       expect(find.text('Enter valid years of practice (0-70)'), findsOneWidget);
       expect(_dentistRegisterCalls, 0);
+      await tester.ensureVisible(find.byKey(const Key('reg_experience_field')));
+      await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const Key('reg_experience_field')), '6');
 
       // Clinic association: select clinic, then Independent clears, then reselect
@@ -511,6 +522,8 @@ void main() {
       await tester.tap(clinicChip);
       await tester.pumpAndSettle();
 
+      await tester.drag(find.byKey(const Key('registration_scroll_view')), const Offset(0, -1800));
+      await tester.pumpAndSettle();
       await tester.ensureVisible(continueFinder);
       await tester.pumpAndSettle();
       await tester.tap(continueFinder);
@@ -532,7 +545,7 @@ void main() {
   );
 
   testWidgets(
-    'D3. Independent dentist submits without clinic association',
+    'D3. Online-Only dentist submits without clinic association, address, or coordinates',
     (WidgetTester tester) async {
       _installGoogleFontsAssetHandler(tester);
       tester.view.physicalSize = const Size(390, 844);
@@ -542,10 +555,21 @@ void main() {
 
       await _pumpDentistRegistration(tester);
 
-      // Independent is selected by default; General Dentist is the default specialty
-      expect(find.byKey(const Key('reg_clinic_chip_independent')), findsOneWidget);
+      // Default mode is BOTH (clinic fields visible); switching to ONLINE_ONLY hides clinic fields
+      expect(find.byKey(const Key('reg_dentist_clinic_name_field')), findsOneWidget);
       await tester.enterText(find.byKey(const Key('reg_full_name_field')), 'Dr. Amit Verma');
       await tester.enterText(find.byKey(const Key('reg_city_field')), 'Mumbai');
+
+      final onlineOnlyChip = find.byKey(const Key('reg_consultation_mode_ONLINE_ONLY'));
+      await tester.ensureVisible(onlineOnlyChip);
+      await tester.pumpAndSettle();
+      await tester.tap(onlineOnlyChip);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('reg_online_only_notice')), findsOneWidget);
+      expect(find.byKey(const Key('reg_dentist_clinic_name_field')), findsNothing);
+      expect(find.byKey(const Key('reg_dentist_clinic_address_field')), findsNothing);
+      expect(find.byKey(const Key('reg_open_map_picker_button')), findsNothing);
 
       final continueFinder = find.byKey(const Key('reg_continue_button'));
       await tester.ensureVisible(continueFinder);
@@ -557,6 +581,9 @@ void main() {
       expect(_firstDentistPayload?['specialty'], 'General Medicine');
       expect(_firstDentistPayload?['clinicName'], isNull);
       expect(_firstDentistPayload?['clinicAddress'], isNull);
+      expect(ApiService.debugLastRegisterPayload?['consultationMode'], 'ONLINE_ONLY');
+      expect(ApiService.debugLastRegisterPayload?['latitude'], isNull);
+      expect(ApiService.debugLastRegisterPayload?['longitude'], isNull);
       expect(find.text('DENTIST_ROUTE'), findsOneWidget);
     },
   );

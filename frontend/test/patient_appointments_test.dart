@@ -69,7 +69,11 @@ void main() {
       expect(find.text('Previous Visits'), findsOneWidget);
       expect(find.text('Cancelled Visits'), findsOneWidget);
 
-      // Verify empty state when no visits exist
+      // Verify empty state on default All Visits view and Upcoming Visits filter tab
+      expect(find.text('No visits yet.'), findsOneWidget);
+      await tester.tap(find.text('Upcoming Visits'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
       expect(find.text('No upcoming visits yet.'), findsOneWidget);
     });
 

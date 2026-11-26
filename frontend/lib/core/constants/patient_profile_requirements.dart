@@ -9,8 +9,8 @@ class PatientProfileRequirementsConfig {
 
   // Core mandatory fields currently active across staging & automated suites:
   static bool requireProfileImage = false;
-  static bool requirePincode = true;
-  static bool requireAge = true;
+  static bool requirePincode = false;
+  static bool requireAge = false;
   static bool requireGender = true;
 
   // Flexible fields awaiting final client mandatory/optional sign-off:
@@ -51,8 +51,8 @@ class PatientProfileRequirementsConfig {
 
   static void resetDefaults() {
     requireProfileImage = false;
-    requirePincode = true;
-    requireAge = true;
+    requirePincode = false;
+    requireAge = false;
     requireGender = true;
     requireFullName = false;
     requireAddress = false;

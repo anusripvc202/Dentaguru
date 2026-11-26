@@ -4,6 +4,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/models/medical_specialty_model.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/services/patient_problem_service.dart';
+import '../../../../core/utils/clinic_directions_helper.dart';
 import '../../../auth/presentation/widgets/gs_health_registration_view.dart' show kGsHealthLanguages;
 import '../widgets/book_consultation_fab.dart';
 import '../widgets/book_visit_flow_dialog.dart';
@@ -1686,7 +1687,10 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
     final qualText = doc.qualification.trim().isNotEmpty
         ? doc.qualification.trim()
         : MedicalSpecialtyModel.getDefaultQualificationForSpecialty(specialtyText);
-    final clinicText = doc.clinicName.trim().isNotEmpty ? doc.clinicName.trim() : 'Independent Practice';
+    final clinicText = doc.isOnlineOnly
+        ? 'Online Consultation Only'
+        : (doc.clinicName.trim().isNotEmpty ? doc.clinicName.trim() : 'Independent Practice');
+    final clinicAddrText = doc.isOnlineOnly ? '' : doc.clinicAddress.trim();
     final cityText = doc.city.trim();
     final isDocAvailable = doc.isAvailable;
     final isDocOnline = doc.isOnline;
@@ -1736,25 +1740,53 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
                         height: 48,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          gradient: doc.photoBytes == null ? _primaryGradient : null,
-                          image: doc.photoBytes != null
-                              ? DecorationImage(
-                                  image: MemoryImage(doc.photoBytes!),
-                                  fit: BoxFit.cover,
-                                )
-                              : null,
+                          gradient: !doc.hasProfileImage ? _primaryGradient : null,
+                          color: doc.hasProfileImage ? AppTheme.gsNavy.withValues(alpha: 0.08) : null,
                         ),
                         alignment: Alignment.center,
-                        child: doc.photoBytes == null
-                            ? Text(
-                                initial,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              )
-                            : null,
+                        child: ClipOval(
+                          child: (doc.photoBytes != null && doc.photoBytes!.isNotEmpty)
+                              ? Image.memory(
+                                  doc.photoBytes!,
+                                  key: Key('doctor_avatar_memory_${doc.id}'),
+                                  width: 48,
+                                  height: 48,
+                                  fit: BoxFit.cover,
+                                )
+                              : (doc.profileImageUrl != null && doc.profileImageUrl!.trim().isNotEmpty)
+                                  ? Image.network(
+                                      doc.profileImageUrl!.trim(),
+                                      key: Key('doctor_avatar_network_${doc.id}'),
+                                      width: 48,
+                                      height: 48,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) => Container(
+                                        width: 48,
+                                        height: 48,
+                                        decoration: const BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          gradient: _primaryGradient,
+                                        ),
+                                        alignment: Alignment.center,
+                                        child: Text(
+                                          initial,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 17,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                      ),
+                                    )
+                                  : Text(
+                                      initial,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                        ),
                       ),
                       if (isDocOnline)
                         Positioned(
@@ -1845,14 +1877,122 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
                         const SizedBox(height: 2),
                         Text(
                           cityText.isNotEmpty ? '$clinicText • $cityText' : clinicText,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
-                            color: Color(0xFF64748B),
-                            fontWeight: FontWeight.w500,
+                            color: doc.isOnlineOnly ? const Color(0xFF047857) : const Color(0xFF64748B),
+                            fontWeight: doc.isOnlineOnly ? FontWeight.w600 : FontWeight.w500,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
+                        if (clinicAddrText.isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              const Icon(Icons.place_outlined, size: 12, color: Color(0xFF64748B)),
+                              const SizedBox(width: 3),
+                              Expanded(
+                                child: Text(
+                                  clinicAddrText,
+                                  key: Key('doctor_address_${doc.id}'),
+                                  style: const TextStyle(
+                                    fontSize: 11.5,
+                                    color: Color(0xFF64748B),
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                        if (doc.hasPhysicalClinicLocation || doc.isOnlineOnly) ...[
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              if (doc.isOnlineOnly)
+                                Container(
+                                  key: Key('doctor_online_only_badge_${doc.id}'),
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFECFDF5),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: const Color(0xFFA7F3D0)),
+                                  ),
+                                  child: const Text(
+                                    'Online Only',
+                                    style: TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF047857),
+                                    ),
+                                  ),
+                                )
+                              else ...[
+                                Container(
+                                  key: Key('doctor_location_status_${doc.id}'),
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: doc.hasCoordinates
+                                        ? const Color(0xFFEFF6FF)
+                                        : const Color(0xFFF1F5F9),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    doc.hasCoordinates ? 'Map Pin Available' : 'Clinic Address',
+                                    style: TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: doc.hasCoordinates ? AppTheme.gsNavy : const Color(0xFF475569),
+                                    ),
+                                  ),
+                                ),
+                                InkWell(
+                                  key: Key('doctor_card_directions_${doc.id}'),
+                                  borderRadius: BorderRadius.circular(8),
+                                  onTap: () => ClinicDirectionsHelper.launchDirections(
+                                    context: context,
+                                    consultationMode: doc.consultationMode,
+                                    latitude: doc.latitude,
+                                    longitude: doc.longitude,
+                                    clinicName: doc.clinicName,
+                                    clinicAddress: doc.clinicAddress,
+                                    city: doc.city,
+                                    state: doc.state,
+                                    pincode: doc.pincode,
+                                  ),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.gsNavy.withValues(alpha: 0.08),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: AppTheme.gsNavy.withValues(alpha: 0.2)),
+                                    ),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.directions_rounded, size: 12, color: AppTheme.gsNavy),
+                                        SizedBox(width: 4),
+                                        Text(
+                                          'Directions',
+                                          style: TextStyle(
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.w700,
+                                            color: AppTheme.gsNavy,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ],
                         if (doc.languages.isNotEmpty) ...[
                           const SizedBox(height: 3),
                           Row(

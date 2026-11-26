@@ -7,6 +7,7 @@ const { sendOtpEmail } = require('../services/emailService');
 const { sendRealSmsOtp, normalizePhoneNumber } = require('../services/smsService');
 const { isCloudEnv, getJwtSecret, getRefreshSecret, isAuthorizedStagingOtpRequest } = require('../config/secrets');
 const { normalizeRealtimeAppRole, mintSupabaseRealtimeTokenForUser, tryMintSupabaseRealtimeTokenForUser } = require('../services/realtimeTokenService');
+const supabaseStorageService = require('../services/supabaseStorageService');
 
 // Helper: Generate JWT tokens
 const generateTokens = (user) => {
@@ -27,17 +28,101 @@ const generateTokens = (user) => {
 const normalizeAdminPhone = (phone) => canonicalPhone10(phone);
 
 // Flexible Patient Profile Completion Mandatory Field Configuration
-// (Pending final client confirmation on optional vs mandatory subset)
+// Profile Image, Pincode, and Age are optional by default; Gender remains required.
 const PATIENT_PROFILE_REQUIREMENTS = {
     requireProfileImage: process.env.PATIENT_REQ_PROFILE_IMAGE === 'true',
-    requirePincode: process.env.PATIENT_REQ_PINCODE !== 'false',
-    requireAge: process.env.PATIENT_REQ_AGE !== 'false',
+    requirePincode: process.env.PATIENT_REQ_PINCODE === 'true',
+    requireAge: process.env.PATIENT_REQ_AGE === 'true',
     requireGender: process.env.PATIENT_REQ_GENDER !== 'false',
     requireFullName: process.env.PATIENT_REQ_FULL_NAME === 'true',
     requireAddress: process.env.PATIENT_REQ_ADDRESS === 'true',
     requirePreferredLanguage: process.env.PATIENT_REQ_PREFERRED_LANGUAGE === 'true',
     requireBloodGroup: process.env.PATIENT_REQ_BLOOD_GROUP === 'true',
 };
+
+const MAX_PROFILE_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
+
+/**
+ * Validates and uploads a base64 data-URI profile image to the existing Supabase Storage bucket
+ * (`dentaguru-storage`), returning the public URL. Accepts null/empty values and existing http(s) URLs.
+ */
+async function resolveAndUploadProfilePhoto(rawPhoto, { roleFolder = 'doctors', storageService = supabaseStorageService } = {}) {
+    if (rawPhoto === undefined || rawPhoto === null) {
+        return { ok: true, photoUrl: null };
+    }
+    const trimmed = String(rawPhoto).trim();
+    if (!trimmed || trimmed.toLowerCase() === 'null') {
+        return { ok: true, photoUrl: null };
+    }
+    if (/^https?:\/\/.+/i.test(trimmed)) {
+        return { ok: true, photoUrl: trimmed };
+    }
+
+    const dataUriMatch = trimmed.match(/^data:(image\/(?:jpeg|jpg|png|webp));base64,([A-Za-z0-9+/=\s]+)$/i);
+    if (!dataUriMatch) {
+        if (trimmed.toLowerCase().startsWith('data:')) {
+            return {
+                ok: false,
+                status: 400,
+                code: 'INVALID_PROFILE_IMAGE_TYPE',
+                message: 'Unsupported profile image format. Please select a JPG, PNG, or WEBP image.'
+            };
+        }
+        return { ok: true, photoUrl: trimmed };
+    }
+
+    const rawMime = dataUriMatch[1].toLowerCase();
+    const mimeType = rawMime === 'image/jpg' ? 'image/jpeg' : rawMime;
+    const ext = mimeType === 'image/png' ? 'png' : (mimeType === 'image/webp' ? 'webp' : 'jpg');
+    const cleanB64 = dataUriMatch[2].replace(/\s+/g, '');
+    const buffer = Buffer.from(cleanB64, 'base64');
+
+    if (!buffer || buffer.length === 0) {
+        return {
+            ok: false,
+            status: 400,
+            code: 'EMPTY_PROFILE_IMAGE',
+            message: 'Selected profile image is empty. Please choose another image.'
+        };
+    }
+    if (buffer.length > MAX_PROFILE_IMAGE_BYTES) {
+        return {
+            ok: false,
+            status: 400,
+            code: 'PROFILE_IMAGE_TOO_LARGE',
+            message: 'Profile image exceeds the 5 MB size limit. Please choose a smaller image.'
+        };
+    }
+
+    const canUploadToSupabase = Boolean(
+        process.env.SUPABASE_URL &&
+        !process.env.SUPABASE_URL.includes('placeholder') &&
+        storageService &&
+        typeof storageService.uploadFile === 'function'
+    );
+
+    if (!canUploadToSupabase) {
+        return { ok: true, photoUrl: trimmed };
+    }
+
+    const safeFolder = String(roleFolder || 'doctors').replace(/[^a-zA-Z0-9_-]/g, '') || 'doctors';
+    const filePath = `avatars/${safeFolder}/${Date.now()}_${crypto.randomBytes(4).toString('hex')}.${ext}`;
+    try {
+        const uploaded = await storageService.uploadFile(buffer, filePath, mimeType);
+        if (!uploaded || !uploaded.publicUrl) {
+            throw new Error('Storage did not return a public image URL.');
+        }
+        return { ok: true, photoUrl: uploaded.publicUrl, storagePath: uploaded.path || filePath };
+    } catch (uploadErr) {
+        console.error('Profile Image Storage Upload Error:', uploadErr.message);
+        return {
+            ok: false,
+            status: 502,
+            code: 'PROFILE_IMAGE_UPLOAD_FAILED',
+            message: 'Failed to upload profile image to storage. Please try again or remove the image.'
+        };
+    }
+}
 
 const isPatientProfileComplete = (user = {}, tokenMeta = {}, reqs = PATIENT_PROFILE_REQUIREMENTS) => {
     const rawPhoto = String(user.biometric_token || tokenMeta.profilePhoto || '').trim();
@@ -130,8 +215,9 @@ const getAuthorizedAdminPhone = async () => {
 
 // 1. REGISTER
 exports.register = async (req, res) => {
-    const { name, email, password, phone, role, fcmToken, specialty, licenseNumber, clinicName, clinicAddress, location, state, city, pincode, latitude, longitude, qualification, experienceYears, profilePhoto, age, gender, bloodGroup, emergencyContact, languages, languagesKnown, referralCode, ref } = req.body;
+    const { name, email, password, phone, role, fcmToken, specialty, licenseNumber, clinicName, clinicAddress, location, state, city, pincode, latitude, longitude, consultationMode, consultation_mode, qualification, experienceYears, profilePhoto, age, gender, bloodGroup, emergencyContact, languages, languagesKnown, referralCode, ref } = req.body;
     try {
+        const { normalizeConsultationMode, validateCoordinates } = require('../utils/doctorClinicLocationHelper');
         const normalizedRole = (role || 'Patient').toString().trim();
         const rawPhone = (phone || '').toString().trim();
         const canonical10 = canonicalPhone10(rawPhone);
@@ -183,10 +269,40 @@ exports.register = async (req, res) => {
             });
         }
 
-        // 2. Mandatory Field Validation: City (Pincode is optional in redesigned GS HEALTH registration)
+        // 2. Mandatory Field Validation: City (Pincode, Age, and Profile Image are optional)
         const normalizedCity = (city || '').toString().trim();
-        const normalizedPincode = (pincode || '').toString().trim();
-        const normalizedLocation = (location || clinicAddress || state || '').toString().trim();
+        const normalizedState = (state || '').toString().trim();
+        const normalizedPincode = (pincode !== undefined && pincode !== null) ? String(pincode).trim() : '';
+        const normalizedAge = (age !== undefined && age !== null) ? String(age).trim() : '';
+        const normalizedClinicAddress = (clinicAddress || location || '').toString().trim();
+        const normalizedLocation = (normalizedClinicAddress || normalizedState || '').toString().trim();
+
+        const isDoctorReg = normalizedRole.toLowerCase() === 'dentist' || normalizedRole.toLowerCase() === 'doctor';
+        const resolvedConsultationMode = isDoctorReg
+            ? normalizeConsultationMode(consultationMode ?? consultation_mode, 'BOTH')
+            : null;
+        const isOnlineOnlyDoctor = isDoctorReg && resolvedConsultationMode === 'ONLINE_ONLY';
+
+        const coordValidation = isOnlineOnlyDoctor
+            ? { ok: true, hasUpdate: false, latitude: null, longitude: null }
+            : validateCoordinates(latitude, longitude, false);
+        if (!coordValidation.ok) {
+            return res.status(400).json({ success: false, message: coordValidation.message });
+        }
+        const effectiveLatitude = (!isOnlineOnlyDoctor && coordValidation.hasUpdate) ? coordValidation.latitude : null;
+        const effectiveLongitude = (!isOnlineOnlyDoctor && coordValidation.hasUpdate) ? coordValidation.longitude : null;
+        const effectiveClinicName = isOnlineOnlyDoctor ? '' : (clinicName || '').toString().trim();
+        const effectiveClinicAddress = isOnlineOnlyDoctor ? '' : normalizedClinicAddress;
+
+        if (!isOnlineOnlyDoctor && normalizedPincode.length > 0 && !/^\d{6}$/.test(normalizedPincode)) {
+            return res.status(400).json({ success: false, message: 'Please enter a valid 6-digit pincode.' });
+        }
+        if (normalizedAge.length > 0) {
+            const parsedAge = parseInt(normalizedAge, 10);
+            if (!/^\d+$/.test(normalizedAge) || Number.isNaN(parsedAge) || parsedAge < 1 || parsedAge > 120) {
+                return res.status(400).json({ success: false, message: 'Please enter a valid age between 1 and 120.' });
+            }
+        }
         const rawLanguages = languages || languagesKnown;
         let cleanLanguages = [];
         if (Array.isArray(rawLanguages)) {
@@ -195,9 +311,8 @@ exports.register = async (req, res) => {
             cleanLanguages = rawLanguages.split(',').map(s => s.trim()).filter(Boolean);
         }
 
-        const isDoctorReg = normalizedRole.toLowerCase() === 'dentist' || normalizedRole.toLowerCase() === 'doctor';
-        const requestedClinicId = (req.body.clinicId || req.body.clinic_id || '').toString().trim();
-        const hasClinicContext = Boolean(requestedClinicId || (clinicName && String(clinicName).trim().length > 0));
+        const requestedClinicId = isOnlineOnlyDoctor ? '' : (req.body.clinicId || req.body.clinic_id || '').toString().trim();
+        const hasClinicContext = Boolean(requestedClinicId || effectiveClinicName.length > 0);
         if (!normalizedCity && !(isDoctorReg && hasClinicContext)) {
             return res.status(400).json({ success: false, message: 'City is mandatory for registration.' });
         }
@@ -224,18 +339,34 @@ exports.register = async (req, res) => {
         const resolvedDocQualification = qualification || req.body.qualifications || getDefaultQualificationForSpecialty(resolvedDocSpecialty);
         const resolvedDocExp = experienceYears ? parseInt(experienceYears, 10) : 5;
 
+        const photoResolution = await resolveAndUploadProfilePhoto(profilePhoto, {
+            roleFolder: isDoctorReg ? 'doctors' : 'patients'
+        });
+        if (!photoResolution.ok) {
+            return res.status(photoResolution.status || 400).json({
+                success: false,
+                code: photoResolution.code || 'PROFILE_IMAGE_ERROR',
+                message: photoResolution.message || 'Failed to process profile image.'
+            });
+        }
+        const resolvedProfilePhotoUrl = photoResolution.photoUrl || null;
+
         let user;
+        const effectiveState = isOnlineOnlyDoctor ? '' : (normalizedState || (isDoctorReg ? '' : normalizedLocation));
+        const effectivePincode = isOnlineOnlyDoctor ? '' : normalizedPincode;
         const profileMetaObj = {
-            age: age || '',
+            age: normalizedAge,
             gender: gender || '',
             bloodGroup: bloodGroup || '',
             emergencyContact: emergencyContact || '',
             city: normalizedCity,
-            pincode: normalizedPincode,
-            location: normalizedLocation,
-            address: normalizedLocation,
+            state: effectiveState,
+            pincode: effectivePincode,
+            location: isOnlineOnlyDoctor ? '' : normalizedLocation,
+            address: isOnlineOnlyDoctor ? '' : normalizedLocation,
             languages: finalLanguages,
             referral_code: userReferralCode,
+            ...(resolvedProfilePhotoUrl ? { profilePhoto: resolvedProfilePhotoUrl } : {}),
             ...(isDoctorReg ? {
                 specialty: resolvedDocSpecialty,
                 specialtyId: specResolution.specialty_id || null,
@@ -243,11 +374,17 @@ exports.register = async (req, res) => {
                 qualification: resolvedDocQualification,
                 experienceYears: resolvedDocExp,
                 clinicId: requestedClinicId || null,
-                clinicName: clinicName || '',
+                clinicName: effectiveClinicName,
+                clinicAddress: effectiveClinicAddress,
+                consultationMode: resolvedConsultationMode,
+                latitude: effectiveLatitude,
+                longitude: effectiveLongitude,
                 licenseNumber: licenseNumber || ''
             } : {})
         };
-        const metaDeviceToken = fcmToken || JSON.stringify(profileMetaObj);
+        const metaDeviceToken = fcmToken
+            ? JSON.stringify({ ...profileMetaObj, fcmToken })
+            : JSON.stringify(profileMetaObj);
 
         try {
             user = await User.create({
@@ -256,19 +393,19 @@ exports.register = async (req, res) => {
                 password: effectivePassword,
                 phone: normalizedPhone,
                 role: effectiveAssignedRole,
-                state: normalizedLocation,
+                state: effectiveState,
                 city: normalizedCity,
-                pincode: normalizedPincode,
-                age: age || '',
+                pincode: effectivePincode,
+                age: normalizedAge,
                 gender: gender || '',
                 blood_group: bloodGroup || '',
                 emergency_contact: emergencyContact || '',
                 languages: finalLanguages,
                 referral_code: userReferralCode,
-                latitude: latitude || null,
-                longitude: longitude || null,
+                latitude: effectiveLatitude,
+                longitude: effectiveLongitude,
                 device_token: metaDeviceToken,
-                biometric_token: profilePhoto || null
+                biometric_token: resolvedProfilePhotoUrl
             });
         } catch (createErr) {
             // Schema fallback: if DB table lacks age/gender/blood_group/languages columns
@@ -278,13 +415,13 @@ exports.register = async (req, res) => {
                 password: effectivePassword,
                 phone: normalizedPhone,
                 role: effectiveAssignedRole,
-                state: state || '',
-                city: city || '',
-                pincode: pincode || '',
-                latitude: latitude || null,
-                longitude: longitude || null,
+                state: effectiveState,
+                city: normalizedCity,
+                pincode: effectivePincode,
+                latitude: effectiveLatitude,
+                longitude: effectiveLongitude,
                 device_token: metaDeviceToken,
-                biometric_token: profilePhoto || null
+                biometric_token: resolvedProfilePhotoUrl
             });
         }
 
@@ -341,7 +478,7 @@ exports.register = async (req, res) => {
 
         // If registering as a Dentist / Doctor, automatically insert row into 'dentists' and 'clinics' tables
         let createdDentistRecord = null;
-        let linkedClinicName = (clinicName && clinicName.trim()) ? clinicName.trim() : '';
+        let linkedClinicName = effectiveClinicName;
         if (isDoctorReg) {
             let licNum = (licenseNumber && licenseNumber.trim()) ? licenseNumber.trim() : '';
             const licLower = licNum.toLowerCase();
@@ -356,21 +493,25 @@ exports.register = async (req, res) => {
 
             let clinicId = null;
             const cName = linkedClinicName;
-            if (requestedClinicId || cName.length > 0) {
+            if (!isOnlineOnlyDoctor && (requestedClinicId || cName.length > 0)) {
                 try {
                     let clinic = requestedClinicId ? await Clinic.findById(requestedClinicId).catch(() => null) : null;
                     if (!clinic && cName.length > 0) {
                         clinic = await Clinic.findOne({ clinic_name: cName });
                     }
-                    const cAddr = (clinicAddress && clinicAddress.trim()) ? clinicAddress.trim() : (location && location.trim() ? location.trim() : '');
-                    const cPin = pincode && pincode.trim() ? pincode.trim() : '';
-                    const fullLoc = cPin ? `${cAddr} - ${cPin}` : cAddr;
+                    const cAddr = effectiveClinicAddress;
+                    const cPin = effectivePincode;
+                    const fullLoc = cAddr
+                        ? (cPin && !cAddr.includes(cPin) ? `${cAddr} - ${cPin}` : cAddr)
+                        : (normalizedCity ? `${normalizedCity}${cPin ? ' - ' + cPin : ''}` : '');
                     if (!clinic && cName.length > 0) {
                         const defaultPricing = Array.isArray(req.body.pricing) ? req.body.pricing : [];
                         clinic = await Clinic.create({
                             user_id: user.id,
                             clinic_name: cName,
                             location: fullLoc,
+                            latitude: effectiveLatitude,
+                            longitude: effectiveLongitude,
                             verified: true,
                             rating: 0,
                             reviews_count: 0,
@@ -387,9 +528,15 @@ exports.register = async (req, res) => {
                         }).catch(() => null);
                     } else if (clinic) {
                         const currentServices = Array.isArray(clinic.services) ? [...clinic.services] : [];
+                        const clinicUpdates = {};
                         if (resolvedDocSpecialty && !currentServices.includes(resolvedDocSpecialty)) {
                             currentServices.push(resolvedDocSpecialty);
-                            await Clinic.findByIdAndUpdate(clinic.id, { services: currentServices });
+                            clinicUpdates.services = currentServices;
+                        }
+                        if (clinic.latitude == null && effectiveLatitude != null) clinicUpdates.latitude = effectiveLatitude;
+                        if (clinic.longitude == null && effectiveLongitude != null) clinicUpdates.longitude = effectiveLongitude;
+                        if (Object.keys(clinicUpdates).length > 0) {
+                            await Clinic.findByIdAndUpdate(clinic.id, clinicUpdates);
                         }
                         if (!linkedClinicName && clinic.clinic_name) linkedClinicName = clinic.clinic_name;
                         console.log(`ℹ️ Existing Clinic record linked: ${clinic.clinic_name || cName}`);
@@ -399,13 +546,16 @@ exports.register = async (req, res) => {
                     console.error('⚠️ Clinic Table Creation Warning:', cErr.message);
                 }
             } else {
-                console.log(`ℹ️ No clinic name provided for doctor ${user.name}. Leaving clinic_id as NULL.`);
+                console.log(`ℹ️ No clinic linkage needed for doctor ${user.name} (${resolvedConsultationMode}). Leaving clinic_id as NULL.`);
             }
 
             try {
                 createdDentistRecord = await Dentist.create({
                     user_id: user.id,
-                    clinic_id: clinicId,
+                    clinic_id: isOnlineOnlyDoctor ? null : clinicId,
+                    clinic_name: isOnlineOnlyDoctor ? null : linkedClinicName,
+                    clinic_address: isOnlineOnlyDoctor ? null : effectiveClinicAddress,
+                    consultation_mode: resolvedConsultationMode,
                     speciality: resolvedDocSpecialty,
                     specialty_id: specResolution.specialty_id || null,
                     department: specResolution.department || '',
@@ -415,12 +565,12 @@ exports.register = async (req, res) => {
                     availability_status: 'Available',
                     consultation_fee: (req.body.consultationFee || req.body.consultation_fee || '').toString(),
                     bio: (req.body.bio || '').toString(),
-                    state: normalizedLocation,
+                    state: effectiveState,
                     city: normalizedCity,
-                    pincode: normalizedPincode,
+                    pincode: effectivePincode,
                     languages: finalLanguages,
-                    latitude: latitude || null,
-                    longitude: longitude || null,
+                    latitude: effectiveLatitude,
+                    longitude: effectiveLongitude,
                     rating: 5.0,
                     reviews_count: 0
                 });
@@ -551,13 +701,20 @@ exports.register = async (req, res) => {
                 ...(isDoctorReg ? {
                     dentistId: createdDentistRecord?.id || user.id,
                     userId: user.id,
-                    clinicId: createdDentistRecord?.clinic_id || requestedClinicId || null,
+                    clinicId: isOnlineOnlyDoctor ? null : (createdDentistRecord?.clinic_id || requestedClinicId || null),
                     specialty: createdDentistRecord?.speciality || resolvedDocSpecialty,
                     specialtyId: createdDentistRecord?.specialty_id || specResolution.specialty_id || null,
                     department: createdDentistRecord?.department || specResolution.department || '',
                     qualification: createdDentistRecord?.qualifications || resolvedDocQualification,
                     experienceYears: createdDentistRecord?.experience_years || resolvedDocExp,
-                    clinicName: linkedClinicName || clinicName || '',
+                    clinicName: isOnlineOnlyDoctor ? '' : (linkedClinicName || effectiveClinicName),
+                    clinicAddress: isOnlineOnlyDoctor ? '' : effectiveClinicAddress,
+                    state: effectiveState,
+                    pincode: effectivePincode,
+                    latitude: effectiveLatitude,
+                    longitude: effectiveLongitude,
+                    consultationMode: resolvedConsultationMode,
+                    consultation_mode: resolvedConsultationMode,
                     licenseNumber: createdDentistRecord?.license_number || licenseNumber || '',
                     availability_status: 'Available',
                     isAvailable: true
@@ -716,7 +873,7 @@ exports.login = async (req, res) => {
         }
 
         if (fcmToken) {
-            User.findByIdAndUpdate(user.id, { device_token: fcmToken }).catch(() => { });
+            User.updateFcmToken(user.id, fcmToken).catch(() => { });
         }
 
         const userAge = user.age || user.patient_age || tokenMeta.age || '';
@@ -2041,11 +2198,11 @@ exports.updatePatientProfile = async (req, res) => {
             if (PATIENT_PROFILE_REQUIREMENTS.requireAddress && (!nextAddress || nextAddress.toLowerCase() === 'null')) {
                 return res.status(400).json({ success: false, message: 'Address is required.' });
             }
-            if (PATIENT_PROFILE_REQUIREMENTS.requirePincode && !/^\d{6}$/.test(nextPincode)) {
+            if ((PATIENT_PROFILE_REQUIREMENTS.requirePincode || nextPincode.length > 0) && !/^\d{6}$/.test(nextPincode)) {
                 return res.status(400).json({ success: false, message: 'Please enter a valid 6-digit pincode.' });
             }
             const ageInt = parseInt(nextAge, 10);
-            if (PATIENT_PROFILE_REQUIREMENTS.requireAge && (!/^\d+$/.test(nextAge) || Number.isNaN(ageInt) || ageInt < 1 || ageInt > 120)) {
+            if ((PATIENT_PROFILE_REQUIREMENTS.requireAge || nextAge.length > 0) && (!/^\d+$/.test(nextAge) || Number.isNaN(ageInt) || ageInt < 1 || ageInt > 120)) {
                 return res.status(400).json({ success: false, message: 'Please enter a valid age between 1 and 120.' });
             }
             if (PATIENT_PROFILE_REQUIREMENTS.requireGender && (!nextGender || nextGender.toLowerCase() === 'null')) {
@@ -2256,14 +2413,14 @@ exports.saveBiometric = async (req, res) => {
     }
 };
 
-// 6. UPDATE FCM DEVICE TOKEN (Firebase Push Notifications)
+// 6. UPDATE FCM DEVICE TOKEN (Firebase Push Notifications — non-destructive merge)
 exports.updateFcmToken = async (req, res) => {
     const { fcmToken } = req.body;
-    if (!fcmToken) {
+    if (!fcmToken || typeof fcmToken !== 'string' || !fcmToken.trim()) {
         return res.status(400).json({ success: false, message: 'fcmToken is required.' });
     }
     try {
-        await User.findByIdAndUpdate(req.user.id, { device_token: fcmToken });
+        await User.updateFcmToken(req.user.id, fcmToken.trim());
         res.json({ success: true, message: 'FCM device token updated successfully.' });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to update FCM token.' });
@@ -2320,4 +2477,7 @@ exports.supabaseAuthSync = async (req, res) => {
         res.status(500).json({ success: false, message: 'Failed to sync Supabase Auth identity.' });
     }
 };
+
+exports._resolveAndUploadProfilePhoto = resolveAndUploadProfilePhoto;
+exports._PATIENT_PROFILE_REQUIREMENTS = PATIENT_PROFILE_REQUIREMENTS;
 

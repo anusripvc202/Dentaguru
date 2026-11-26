@@ -19,6 +19,7 @@ class DoctorVisitsCalendarSection extends StatefulWidget {
   final bool canViewPatientContact;
   final bool canAccessConsultationDetails;
   final bool canAccessPrescription;
+  final bool embeddedInScreen;
 
   const DoctorVisitsCalendarSection({
     super.key,
@@ -34,6 +35,7 @@ class DoctorVisitsCalendarSection extends StatefulWidget {
     this.canViewPatientContact = true,
     this.canAccessConsultationDetails = true,
     this.canAccessPrescription = true,
+    this.embeddedInScreen = false,
   });
 
   @override
@@ -43,8 +45,10 @@ class DoctorVisitsCalendarSection extends StatefulWidget {
 class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSection> {
   late DateTime _selectedDate;
   late DateTime _displayedMonth;
-  String _selectedTypeFilter = 'All'; // 'All' | 'In-Person' | 'Online'
-  String _selectedStatusFilter = 'All'; // 'All' | 'Completed' | 'Pending' | 'Cancelled' | 'No-Show'
+  String _calendarViewMode = 'Monthly'; // 'Monthly' | 'Weekly'
+  String _selectedTypeFilter = 'All'; // 'All' | 'Online' | 'In-Person'
+  String _selectedStatusFilter = 'All'; // 'All' | 'Pending' | 'Accepted' | 'Completed' | 'Rejected' | 'Rescheduled'
+  bool _referredOnlyFilter = false;
 
   Map<String, dynamic>? _remoteCalendarData;
   bool _isLoadingRemote = false;
@@ -105,8 +109,9 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
       doctorId: widget.doctorId,
       date: _formatYmd(_selectedDate),
       month: _formatYm(_displayedMonth),
-      consultationType: _selectedTypeFilter,
+      consultationType: _selectedTypeFilter == 'All' ? null : _selectedTypeFilter,
       status: _selectedStatusFilter == 'All' ? null : _selectedStatusFilter.toUpperCase().replaceAll('-', '_'),
+      referredOnly: _referredOnlyFilter ? true : null,
     );
     if (!mounted) return;
     setState(() {
@@ -154,14 +159,30 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
     }
   }
 
-  /// Classifies a local [PatientConsultationRequest] consistently with backend `_classifyCalendarAppointment`.
+  void _resetAllFilters() {
+    setState(() {
+      _selectedTypeFilter = 'All';
+      _selectedStatusFilter = 'All';
+      _referredOnlyFilter = false;
+    });
+    _fetchCalendarFromBackend();
+  }
+
+  bool get _hasActiveFilters =>
+      _selectedTypeFilter != 'All' || _selectedStatusFilter != 'All' || _referredOnlyFilter;
+
+  /// Classifies a local [PatientConsultationRequest] with strictly mutually exclusive status and consultation type flags.
   ({
     String rawStatus,
     bool isCompleted,
+    bool isAccepted,
+    bool isAwaitingPending,
+    bool isRejected,
+    bool isCancelledOnly,
     bool isCancelled,
     bool isNoShow,
+    bool isRescheduled,
     bool isInProgress,
-    bool isPending,
     bool actuallyVisited,
     String consultType,
     bool isOnline,
@@ -169,32 +190,63 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
   }) _classifyLocalRequest(PatientConsultationRequest req) {
     final rawStatus = req.status.trim().toUpperCase();
     final isCompleted = rawStatus == 'COMPLETED';
-    final isCancelled = rawStatus == 'CANCELLED' || rawStatus == 'CANCELED' || rawStatus == 'REJECTED';
+    final isRejected = rawStatus == 'REJECTED' || rawStatus == 'DECLINED';
+    final isCancelledOnly = rawStatus == 'CANCELLED' || rawStatus == 'CANCELED';
+    final isCancelled = isCancelledOnly || isRejected;
     final isNoShow = rawStatus == 'NO_SHOW' || rawStatus == 'NOSHOW' || rawStatus == 'NO-SHOW';
+    final isRescheduled = rawStatus == 'RESCHEDULED';
     final isInProgress = rawStatus == 'IN_PROGRESS' || rawStatus == 'IN PROGRESS' || rawStatus == 'STARTED';
-    final isPending = !isCompleted && !isCancelled && !isNoShow;
+    final isAccepted = rawStatus == 'ACCEPTED' ||
+        rawStatus == 'CONFIRMED' ||
+        rawStatus == 'APPROVED' ||
+        rawStatus == 'DENTIST_ACCEPTED' ||
+        isInProgress ||
+        rawStatus == 'DELAYED';
+    final isAwaitingPending = !isCompleted && !isCancelled && !isNoShow && !isRescheduled && !isAccepted;
     final actuallyVisited = !isCancelled &&
         !isNoShow &&
         (isCompleted ||
             isInProgress ||
             (req.actualStartAt != null && req.actualStartAt!.trim().isNotEmpty) ||
             (req.actualEndAt != null && req.actualEndAt!.trim().isNotEmpty));
-    final consultType = BookingRulesConfig.normalizeConsultationMode(
-      req.consultationMode ?? req.problemCategory,
-    );
+
+    // Never assume consultation type — inspect explicit consultationMode first, then problemCategory
+    final rawModeSource = (req.consultationMode != null && req.consultationMode!.trim().isNotEmpty)
+        ? req.consultationMode!.trim()
+        : req.problemCategory;
+    final consultType = BookingRulesConfig.normalizeConsultationMode(rawModeSource);
     final isOnline = consultType == 'Online';
     return (
       rawStatus: rawStatus,
       isCompleted: isCompleted,
+      isAccepted: isAccepted,
+      isAwaitingPending: isAwaitingPending,
+      isRejected: isRejected,
+      isCancelledOnly: isCancelledOnly,
       isCancelled: isCancelled,
       isNoShow: isNoShow,
+      isRescheduled: isRescheduled,
       isInProgress: isInProgress,
-      isPending: isPending,
       actuallyVisited: actuallyVisited,
       consultType: consultType,
       isOnline: isOnline,
       isInPerson: !isOnline,
     );
+  }
+
+  String _formatCalendarStatusDisplay(String rawStatus) {
+    final s = rawStatus.trim().toUpperCase();
+    if (s == 'ACCEPTED' || s == 'CONFIRMED' || s == 'APPROVED' || s == 'DENTIST_ACCEPTED') {
+      return 'Accepted';
+    }
+    if (s == 'COMPLETED') return 'Completed';
+    if (s == 'REJECTED' || s == 'DECLINED') return 'Rejected';
+    if (s == 'RESCHEDULED') return 'Rescheduled';
+    if (s == 'CANCELLED' || s == 'CANCELED') return 'Cancelled';
+    if (s == 'NO_SHOW' || s == 'NOSHOW' || s == 'NO-SHOW') return 'No-Show';
+    if (s == 'IN_PROGRESS' || s == 'IN PROGRESS' || s == 'STARTED') return 'In Progress';
+    if (s == 'DELAYED') return 'Delayed';
+    return 'Pending';
   }
 
   String _requestYmd(PatientConsultationRequest req) {
@@ -212,6 +264,29 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
     return 'appt:${req.id}';
   }
 
+  dynamic _lookupPatientProfileImage(PatientConsultationRequest req) {
+    final allPatients = PatientProblemService().allPatients;
+    if (allPatients.isEmpty) return null;
+    final pid = (req.patientId ?? '').trim();
+    final digits = req.patientPhone.replaceAll(RegExp(r'\D'), '');
+    final ph10 = digits.length >= 10 ? digits.substring(digits.length - 10) : digits;
+
+    for (final p in allPatients) {
+      final pDigits = p.phone.replaceAll(RegExp(r'\D'), '');
+      final pPh10 = pDigits.length >= 10 ? pDigits.substring(pDigits.length - 10) : pDigits;
+      final matches = (pid.isNotEmpty && p.id == pid) || (ph10.length == 10 && pPh10 == ph10);
+      if (matches) {
+        if (p.photoBytes != null && p.photoBytes!.isNotEmpty) {
+          return base64Encode(p.photoBytes!);
+        }
+        if (p.profileImageUrl != null && p.profileImageUrl!.trim().isNotEmpty) {
+          return p.profileImageUrl!.trim();
+        }
+      }
+    }
+    return null;
+  }
+
   Map<String, dynamic> _computeEffectiveAggregation() {
     if (_remoteCalendarData != null && _remoteCalendarData!['success'] == true) {
       return _remoteCalendarData!;
@@ -220,7 +295,7 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
     final targetYmd = _formatYmd(_selectedDate);
     final targetYm = _formatYm(_displayedMonth);
 
-    // Filter strictly to appointments assigned to this doctor
+    // Filter strictly to appointments assigned to this doctor (fail closed)
     final docIdClean = widget.doctorId.trim();
     final docNameClean = widget.doctorName
         .replaceAll(RegExp(r'^dr\.?\s*', caseSensitive: false), '')
@@ -242,24 +317,29 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
             .toLowerCase();
         return rDoc == docNameClean;
       }
-      return true;
+      return false;
     }).toList();
 
+    // Filter strictly to referrals assigned to this doctor and deduplicate by referral ID
+    final seenRefIds = <String>{};
     final ownReferrals = widget.receivedReferrals.where((ref) {
+      bool isMine = false;
       if (docIdClean.isNotEmpty && ref.doctorId.trim().isNotEmpty) {
-        return ref.doctorId.trim() == docIdClean;
-      }
-      if (docNameClean.isNotEmpty && ref.doctorName.trim().isNotEmpty) {
+        isMine = ref.doctorId.trim() == docIdClean;
+      } else if (docNameClean.isNotEmpty && ref.doctorName.trim().isNotEmpty) {
         final rDoc = ref.doctorName
             .replaceAll(RegExp(r'^dr\.?\s*', caseSensitive: false), '')
             .trim()
             .toLowerCase();
-        return rDoc == docNameClean;
+        isMine = rDoc == docNameClean;
       }
+      if (!isMine) return false;
+      final rid = ref.id.trim();
+      if (rid.isNotEmpty && !seenRefIds.add(rid)) return false;
       return true;
     }).toList();
 
-    // Build referral tracking entries (strictly separate from completed visits unless an appointment confirms it)
+    // Build referral tracking entries (strictly separate from appointments; never double-counted)
     final referralByPatientId = <String, Map<String, dynamic>>{};
     final referralByPhone10 = <String, Map<String, dynamic>>{};
     final allReferralEntries = <Map<String, dynamic>>[];
@@ -280,10 +360,7 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
         return false;
       }).toList();
 
-      final nonCancelled = matchedAppts.where((a) {
-        final cls = _classifyLocalRequest(a);
-        return !cls.isCancelled;
-      }).toList();
+      final nonCancelled = matchedAppts.where((a) => !_classifyLocalRequest(a).isCancelled).toList();
       final completedAppt = nonCancelled.where((a) => _classifyLocalRequest(a).isCompleted).firstOrNull;
       final activeAppt = completedAppt ?? nonCancelled.firstOrNull;
 
@@ -299,6 +376,7 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
         'referredDoctorId': ref.doctorId,
         'referredDoctorName': ref.doctorName,
         'specialty': ref.requiredSpecialist.isNotEmpty ? ref.requiredSpecialist : ref.doctorSpecialty,
+        'clinicalComplaint': ref.clinicalComplaint,
         'referralDate': refYmd,
         'referralStatus': ref.status,
         'hasBookedAppointment': nonCancelled.isNotEmpty,
@@ -321,15 +399,21 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
           'date': ymd,
           'totalAppointments': 0,
           'actualPatientVisits': 0,
+          'acceptedAppointments': 0,
+          'pendingAppointments': 0,
           'completedConsultations': 0,
-          'pendingConsultations': 0,
+          'rejectedAppointments': 0,
+          'rescheduledAppointments': 0,
           'cancelledAppointments': 0,
           'noShowAppointments': 0,
           'onlineConsultations': 0,
           'inPersonConsultations': 0,
           'patientReferralsReceived': 0,
           'hasCompleted': false,
+          'hasAccepted': false,
           'hasPending': false,
+          'hasRejected': false,
+          'hasRescheduled': false,
           'hasCancelled': false,
           'hasNoShow': false,
           'hasReferrals': false,
@@ -350,14 +434,26 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
       if (cls.isCompleted) {
         bucket['completedConsultations'] = (bucket['completedConsultations'] as int) + 1;
         bucket['hasCompleted'] = true;
-      } else if (cls.isCancelled) {
+      } else if (cls.isRejected) {
+        bucket['rejectedAppointments'] = (bucket['rejectedAppointments'] as int) + 1;
+        bucket['hasRejected'] = true;
+        bucket['hasCancelled'] = true;
+      } else if (cls.isCancelledOnly) {
         bucket['cancelledAppointments'] = (bucket['cancelledAppointments'] as int) + 1;
         bucket['hasCancelled'] = true;
       } else if (cls.isNoShow) {
         bucket['noShowAppointments'] = (bucket['noShowAppointments'] as int) + 1;
         bucket['hasNoShow'] = true;
-      } else if (cls.isPending) {
-        bucket['pendingConsultations'] = (bucket['pendingConsultations'] as int) + 1;
+      } else if (cls.isRescheduled) {
+        bucket['rescheduledAppointments'] = (bucket['rescheduledAppointments'] as int) + 1;
+        bucket['hasRescheduled'] = true;
+        bucket['hasPending'] = true;
+      } else if (cls.isAccepted) {
+        bucket['acceptedAppointments'] = (bucket['acceptedAppointments'] as int) + 1;
+        bucket['hasAccepted'] = true;
+        bucket['hasPending'] = true;
+      } else if (cls.isAwaitingPending) {
+        bucket['pendingAppointments'] = (bucket['pendingAppointments'] as int) + 1;
         bucket['hasPending'] = true;
       }
       if (cls.isOnline) {
@@ -380,45 +476,49 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
       bucket.remove('_visitedSet');
     }
 
-    // Selected Date visits & stats
-    final apptsOnSelectedDate = ownAppointments.where((req) {
-      if (_requestYmd(req) != targetYmd) return false;
-      final cls = _classifyLocalRequest(req);
-      if (_selectedTypeFilter != 'All' && cls.consultType != _selectedTypeFilter) {
-        return false;
-      }
-      if (_selectedStatusFilter != 'All') {
-        if (_selectedStatusFilter == 'Completed' && !cls.isCompleted) return false;
-        if (_selectedStatusFilter == 'Pending' && !cls.isPending) return false;
-        if (_selectedStatusFilter == 'Cancelled' && !cls.isCancelled) return false;
-        if (_selectedStatusFilter == 'No-Show' && !cls.isNoShow) return false;
-      }
-      return true;
-    }).toList();
+    // All appointments on selected date (used for accurate daily summary stats)
+    final allApptsOnSelectedDate = ownAppointments.where((req) => _requestYmd(req) == targetYmd).toList();
+    allApptsOnSelectedDate.sort((a, b) {
+      final ma = BookingRulesConfig.parseClockSlotMinutes(a.confirmedTimeSlot ?? '') ?? 9999;
+      final mb = BookingRulesConfig.parseClockSlotMinutes(b.confirmedTimeSlot ?? '') ?? 9999;
+      return ma.compareTo(mb);
+    });
 
     final visitedOnDate = <String>{};
     int completedCount = 0;
+    int acceptedCount = 0;
     int pendingCount = 0;
+    int rejectedCount = 0;
+    int rescheduledCount = 0;
     int cancelledCount = 0;
     int noShowCount = 0;
     int onlineCount = 0;
     int inPersonCount = 0;
+    int referredApptsCount = 0;
 
     final visitsList = <Map<String, dynamic>>[];
-    for (final req in apptsOnSelectedDate) {
+
+    for (final req in allApptsOnSelectedDate) {
       final cls = _classifyLocalRequest(req);
       if (cls.actuallyVisited) {
         visitedOnDate.add(_uniquePatientKey(req));
       }
       if (cls.isCompleted) {
         completedCount++;
-      } else if (cls.isCancelled) {
+      } else if (cls.isRejected) {
+        rejectedCount++;
+      } else if (cls.isCancelledOnly) {
         cancelledCount++;
       } else if (cls.isNoShow) {
         noShowCount++;
-      } else if (cls.isPending) {
+      } else if (cls.isRescheduled) {
+        rescheduledCount++;
+      } else if (cls.isAccepted) {
+        acceptedCount++;
+      } else if (cls.isAwaitingPending) {
         pendingCount++;
       }
+
       if (cls.isOnline) {
         onlineCount++;
       } else {
@@ -430,25 +530,53 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
       final ph10 = digits.length >= 10 ? digits.substring(digits.length - 10) : digits;
       final matchedRef = (pid.isNotEmpty ? referralByPatientId[pid] : null) ??
           (ph10.length == 10 ? referralByPhone10[ph10] : null);
+      if (matchedRef != null) {
+        referredApptsCount++;
+      }
+
+      // Apply UI filters to displayed visit cards
+      if (_selectedTypeFilter != 'All' && cls.consultType != _selectedTypeFilter) {
+        continue;
+      }
+      if (_selectedStatusFilter != 'All') {
+        if (_selectedStatusFilter == 'Completed' && !cls.isCompleted) continue;
+        if (_selectedStatusFilter == 'Accepted' && !cls.isAccepted) continue;
+        if (_selectedStatusFilter == 'Pending' && !cls.isAwaitingPending) continue;
+        if (_selectedStatusFilter == 'Rejected' && !cls.isRejected) continue;
+        if (_selectedStatusFilter == 'Rescheduled' && !cls.isRescheduled) continue;
+        if (_selectedStatusFilter == 'Cancelled' && !cls.isCancelledOnly) continue;
+        if (_selectedStatusFilter == 'No-Show' && !cls.isNoShow) continue;
+      }
+      if (_referredOnlyFilter && matchedRef == null) {
+        continue;
+      }
 
       visitsList.add({
         'appointmentId': req.id,
         'id': req.id,
         'patientId': req.patientId,
         'patientName': req.patientName,
-        'patientProfileImage': null,
+        'patientProfileImage': _lookupPatientProfileImage(req),
         'patientPhone': widget.canViewPatientContact ? req.patientPhone : null,
         'patientCity': req.city,
         'consultationDate': targetYmd,
-        'consultationTime': req.confirmedTimeSlot ?? '10:00 AM',
+        'consultationTime': (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.trim().isNotEmpty)
+            ? req.confirmedTimeSlot!.trim()
+            : 'Time TBD',
         'scheduledEndTime': req.scheduledEndTime,
         'consultationType': cls.consultType,
         'specialty': (req.assignedDoctorSpecialty != null && req.assignedDoctorSpecialty!.trim().isNotEmpty)
             ? req.assignedDoctorSpecialty!
             : widget.doctorSpecialty,
+        'clinicName': req.assignedDoctorClinic ?? '',
         'treatment': req.problemCategory,
+        'problemDescription': req.problemDescription.trim().isNotEmpty
+            ? req.problemDescription.trim()
+            : req.problemCategory,
+        'symptoms': req.symptoms.trim(),
         'status': cls.rawStatus,
         'actuallyVisited': cls.actuallyVisited,
+        'isReferred': matchedRef != null,
         'referralSource': matchedRef != null
             ? {
                 'referralId': matchedRef['referralId'],
@@ -456,6 +584,7 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
                 'referringPatientPhone': widget.canViewPatientContact ? matchedRef['referringPatientPhone'] : null,
                 'referralDate': matchedRef['referralDate'],
                 'referralStatus': matchedRef['referralStatus'],
+                'clinicalComplaint': matchedRef['clinicalComplaint'],
               }
             : null,
         'canViewPatientContact': widget.canViewPatientContact,
@@ -465,7 +594,25 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
       });
     }
 
+    // Referrals strictly associated with the selected date (deduplicated)
     final referralsOnDate = allReferralEntries.where((r) => r['referralDate'] == targetYmd).toList();
+    int acceptedRefs = 0;
+    int pendingRefs = 0;
+    int rejectedRefs = 0;
+    int completedRefVisits = 0;
+    for (final r in referralsOnDate) {
+      final st = (r['referralStatus'] ?? 'Pending').toString().trim().toUpperCase();
+      if (st == 'ACCEPTED' || st == 'CONFIRMED' || st == 'APPROVED') {
+        acceptedRefs++;
+      } else if (st == 'REJECTED' || st == 'DECLINED' || st == 'CANCELLED') {
+        rejectedRefs++;
+      } else if (st != 'COMPLETED') {
+        pendingRefs++;
+      }
+      if (r['hasCompletedConsultation'] == true || st == 'COMPLETED') {
+        completedRefVisits++;
+      }
+    }
 
     return {
       'success': true,
@@ -474,15 +621,23 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
       'monthlyCalendar': monthlyCalendar,
       'selectedDateStats': {
         'date': targetYmd,
-        'totalAppointments': apptsOnSelectedDate.length,
+        'totalAppointments': allApptsOnSelectedDate.length,
         'actualPatientVisits': visitedOnDate.length,
+        'acceptedAppointments': acceptedCount,
+        'pendingAppointments': pendingCount,
         'completedConsultations': completedCount,
-        'pendingConsultations': pendingCount,
+        'rejectedAppointments': rejectedCount,
+        'rescheduledAppointments': rescheduledCount,
         'cancelledAppointments': cancelledCount,
         'noShowAppointments': noShowCount,
         'onlineConsultations': onlineCount,
         'inPersonConsultations': inPersonCount,
+        'referredAppointments': referredApptsCount,
         'patientReferralsReceived': referralsOnDate.length,
+        'acceptedReferrals': acceptedRefs,
+        'pendingReferrals': pendingRefs,
+        'rejectedReferrals': rejectedRefs,
+        'completedReferredVisits': completedRefVisits,
         'patientsReferredByOtherPatients':
             referralsOnDate.where((r) => r['isReferredByPatient'] == true).length,
         'totalReferralsAllTime': allReferralEntries.length,
@@ -506,25 +661,21 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
         .whereType<Map>()
         .map((e) => Map<String, dynamic>.from(e))
         .toList();
-    final allReferrals = ((agg['allReferrals'] as List?) ?? const [])
-        .whereType<Map>()
-        .map((e) => Map<String, dynamic>.from(e))
-        .toList();
-    final displayedReferrals = referralsOnDate.isNotEmpty ? referralsOnDate : allReferrals;
 
     final selectedDateYmd = _formatYmd(_selectedDate);
+    final totalOnDate = int.tryParse('${stats['totalAppointments'] ?? 0}') ?? 0;
 
     return Container(
       key: const Key('doctor_visits_calendar_section'),
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(widget.embeddedInScreen ? 14 : 16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: const Color(0xFFE2E8F0)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
+            color: Colors.black.withValues(alpha: 0.025),
             blurRadius: 8,
             offset: const Offset(0, 3),
           ),
@@ -550,7 +701,7 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Doctor Visits & Referrals Calendar',
+                      'Appointments Calendar',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w800,
@@ -560,6 +711,7 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
                     ),
                     Text(
                       'Selected Date: $selectedDateYmd (IST)',
+                      key: const Key('doctor_calendar_selected_date_label'),
                       style: const TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -574,7 +726,7 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
                 onPressed: _jumpToToday,
-                child: const Text('Go to Today', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                child: const Text('Today', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
               ),
               IconButton(
                 key: const Key('doctor_calendar_date_picker_btn'),
@@ -603,6 +755,7 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
                 IconButton(
                   key: const Key('doctor_calendar_prev_month_btn'),
                   visualDensity: VisualDensity.compact,
+                  tooltip: 'Previous Month',
                   icon: const Icon(Icons.chevron_left_rounded, color: AppTheme.gsNavy),
                   onPressed: () => _changeMonth(-1),
                 ),
@@ -621,6 +774,7 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
                 IconButton(
                   key: const Key('doctor_calendar_next_month_btn'),
                   visualDensity: VisualDensity.compact,
+                  tooltip: 'Next Month',
                   icon: const Icon(Icons.chevron_right_rounded, color: AppTheme.gsNavy),
                   onPressed: () => _changeMonth(1),
                 ),
@@ -629,94 +783,75 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
           ),
           const SizedBox(height: 10),
 
-          // Monthly Calendar Grid
-          _buildMonthGrid(monthlyCal),
+          // Calendar View Switcher (Monthly / Weekly)
+          Row(
+            children: [
+              Expanded(
+                child: ChoiceChip(
+                  key: const Key('doctor_calendar_mode_monthly'),
+                  label: const Text('Monthly View', overflow: TextOverflow.ellipsis),
+                  selected: _calendarViewMode == 'Monthly',
+                  onSelected: (_) => setState(() => _calendarViewMode = 'Monthly'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: ChoiceChip(
+                  key: const Key('doctor_calendar_mode_weekly'),
+                  label: const Text('Weekly View', overflow: TextOverflow.ellipsis),
+                  selected: _calendarViewMode == 'Weekly',
+                  onSelected: (_) => setState(() => _calendarViewMode = 'Weekly'),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 8),
 
-          // Legend for Calendar Activity Indicators
+          // Monthly or Weekly Calendar Grid with Appointment Counts & Today Highlight
+          if (_calendarViewMode == 'Weekly')
+            _buildWeeklyStrip(monthlyCal)
+          else
+            _buildMonthGrid(monthlyCal),
+          const SizedBox(height: 8),
+
+          // Doctor Schedule Overview for Selected Date (Working Hours, Breaks, Blocked Times & Released Slots)
+          _buildSelectedDateScheduleOverview(agg, selectedDateYmd),
+          const SizedBox(height: 8),
+
+          // Calendar Legend
           Wrap(
             spacing: 12,
             runSpacing: 4,
             children: [
               _buildLegendDot(const Color(0xFF16A34A), 'Completed'),
-              _buildLegendDot(const Color(0xFF2563EB), 'Pending / Confirmed'),
-              _buildLegendDot(const Color(0xFFDC2626), 'Cancelled / No-Show'),
+              _buildLegendDot(const Color(0xFF2563EB), 'Accepted / Pending'),
+              _buildLegendDot(const Color(0xFFDC2626), 'Rejected / Cancelled'),
               _buildLegendDot(const Color(0xFF7C3AED), 'Referral'),
             ],
           ),
           const Divider(height: 22, color: Color(0xFFE2E8F0)),
 
-          // Filters (Consultation Type & Status)
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                const Text(
-                  'Mode:',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF475569)),
-                ),
-                const SizedBox(width: 6),
-                ...['All', 'In-Person', 'Online'].map((mode) {
-                  final selected = _selectedTypeFilter == mode;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: ChoiceChip(
-                      key: Key('doctor_calendar_mode_filter_$mode'),
-                      label: Text(mode, style: const TextStyle(fontSize: 11.5)),
-                      selected: selected,
-                      selectedColor: AppTheme.gsNavy,
-                      labelStyle: TextStyle(
-                        color: selected ? Colors.white : const Color(0xFF334155),
-                        fontWeight: FontWeight.w600,
-                      ),
-                      onSelected: (_) {
-                        setState(() => _selectedTypeFilter = mode);
-                        _fetchCalendarFromBackend();
-                      },
-                    ),
-                  );
-                }),
-                const SizedBox(width: 8),
-                const Text(
-                  'Status:',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF475569)),
-                ),
-                const SizedBox(width: 6),
-                ...['All', 'Completed', 'Pending', 'Cancelled', 'No-Show'].map((st) {
-                  final selected = _selectedStatusFilter == st;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: ChoiceChip(
-                      key: Key('doctor_calendar_status_filter_$st'),
-                      label: Text(st, style: const TextStyle(fontSize: 11.5)),
-                      selected: selected,
-                      selectedColor: AppTheme.primaryBlue,
-                      labelStyle: TextStyle(
-                        color: selected ? Colors.white : const Color(0xFF334155),
-                        fontWeight: FontWeight.w600,
-                      ),
-                      onSelected: (_) {
-                        setState(() => _selectedStatusFilter = st);
-                        _fetchCalendarFromBackend();
-                      },
-                    ),
-                  );
-                }),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-
           if (_isLoadingRemote)
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 6),
+              padding: EdgeInsets.only(bottom: 8),
               child: LinearProgressIndicator(minHeight: 2),
             ),
 
-          // Selected Date Doctor Metrics Grid (All 10 Phase 1 Metrics)
-          const Text(
-            'Daily Visit & Referral Summary',
-            style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
+          // Selected Date Daily Appointment Summary
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Daily Appointment Summary',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Text(
+                selectedDateYmd,
+                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF64748B)),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           Wrap(
@@ -725,17 +860,24 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
             children: [
               _buildStatTile(
                 key: const Key('doctor_cal_stat_total_appointments'),
-                label: 'Total Appts',
+                label: 'Total Visits',
                 value: '${stats['totalAppointments'] ?? 0}',
                 color: AppTheme.gsNavy,
                 icon: Icons.event_note_rounded,
               ),
               _buildStatTile(
-                key: const Key('doctor_cal_stat_actual_visits'),
-                label: 'Actual Visits',
-                value: '${stats['actualPatientVisits'] ?? 0}',
-                color: const Color(0xFF0F766E),
-                icon: Icons.how_to_reg_rounded,
+                key: const Key('doctor_cal_stat_accepted'),
+                label: 'Accepted',
+                value: '${stats['acceptedAppointments'] ?? 0}',
+                color: const Color(0xFF0284C7),
+                icon: Icons.thumb_up_alt_outlined,
+              ),
+              _buildStatTile(
+                key: const Key('doctor_cal_stat_pending'),
+                label: 'Pending',
+                value: '${stats['pendingAppointments'] ?? 0}',
+                color: const Color(0xFFD97706),
+                icon: Icons.schedule_rounded,
               ),
               _buildStatTile(
                 key: const Key('doctor_cal_stat_completed'),
@@ -745,57 +887,125 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
                 icon: Icons.check_circle_outline_rounded,
               ),
               _buildStatTile(
-                key: const Key('doctor_cal_stat_pending'),
-                label: 'Pending',
-                value: '${stats['pendingConsultations'] ?? 0}',
-                color: const Color(0xFF2563EB),
-                icon: Icons.schedule_rounded,
-              ),
-              _buildStatTile(
-                key: const Key('doctor_cal_stat_cancelled'),
-                label: 'Cancelled',
-                value: '${stats['cancelledAppointments'] ?? 0}',
+                key: const Key('doctor_cal_stat_rejected'),
+                label: 'Rejected',
+                value: '${stats['rejectedAppointments'] ?? 0}',
                 color: const Color(0xFFDC2626),
-                icon: Icons.cancel_outlined,
+                icon: Icons.block_rounded,
               ),
               _buildStatTile(
-                key: const Key('doctor_cal_stat_no_show'),
-                label: 'No-Show',
-                value: '${stats['noShowAppointments'] ?? 0}',
-                color: const Color(0xFFD97706),
-                icon: Icons.person_off_outlined,
+                key: const Key('doctor_cal_stat_rescheduled'),
+                label: 'Rescheduled',
+                value: '${stats['rescheduledAppointments'] ?? 0}',
+                color: const Color(0xFF7C3AED),
+                icon: Icons.update_rounded,
               ),
               _buildStatTile(
                 key: const Key('doctor_cal_stat_online'),
                 label: 'Online',
                 value: '${stats['onlineConsultations'] ?? 0}',
-                color: const Color(0xFF0284C7),
-                icon: Icons.videocam_outlined,
+                color: const Color(0xFF0369A1),
+                icon: Icons.videocam_rounded,
               ),
               _buildStatTile(
                 key: const Key('doctor_cal_stat_in_person'),
                 label: 'In-Person',
                 value: '${stats['inPersonConsultations'] ?? 0}',
                 color: const Color(0xFF4F46E5),
-                icon: Icons.local_hospital_outlined,
+                icon: Icons.local_hospital_rounded,
               ),
               _buildStatTile(
-                key: const Key('doctor_cal_stat_referrals_received'),
-                label: 'Referrals Received',
-                value: '${stats['patientReferralsReceived'] ?? 0}',
-                color: const Color(0xFF7C3AED),
-                icon: Icons.share_outlined,
+                key: const Key('doctor_cal_stat_actual_visits'),
+                label: 'Unique Visited',
+                value: '${stats['actualPatientVisits'] ?? 0}',
+                color: const Color(0xFF0F766E),
+                icon: Icons.how_to_reg_rounded,
               ),
               _buildStatTile(
-                key: const Key('doctor_cal_stat_patient_to_patient_referrals'),
-                label: 'Referred by Patients',
-                value: '${stats['patientsReferredByOtherPatients'] ?? 0}',
-                color: const Color(0xFF9333EA),
-                icon: Icons.group_add_outlined,
+                key: const Key('doctor_cal_stat_cancelled'),
+                label: 'Cancelled',
+                value: '${stats['cancelledAppointments'] ?? 0}',
+                color: const Color(0xFFB91C1C),
+                icon: Icons.cancel_outlined,
+              ),
+              _buildStatTile(
+                key: const Key('doctor_cal_stat_no_show'),
+                label: 'No-Show',
+                value: '${stats['noShowAppointments'] ?? 0}',
+                color: const Color(0xFFB45309),
+                icon: Icons.person_off_outlined,
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
+
+          // Filters Bar: All, Pending, Accepted, Completed, Rejected, Rescheduled, Online, In-Person, Referred
+          const Text(
+            'Filter Appointments',
+            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Color(0xFF475569)),
+          ),
+          const SizedBox(height: 6),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _buildFilterChip(
+                  key: const Key('doctor_calendar_filter_All'),
+                  label: 'All',
+                  selected: !_hasActiveFilters,
+                  selectedColor: AppTheme.gsNavy,
+                  onTap: _resetAllFilters,
+                ),
+                ...['Pending', 'Accepted', 'Completed', 'Rejected', 'Rescheduled'].map((st) {
+                  final selected = _selectedStatusFilter == st;
+                  return _buildFilterChip(
+                    key: Key('doctor_calendar_status_filter_$st'),
+                    label: st,
+                    selected: selected,
+                    selectedColor: AppTheme.gsNavy,
+                    onTap: () {
+                      setState(() => _selectedStatusFilter = selected ? 'All' : st);
+                      _fetchCalendarFromBackend();
+                    },
+                  );
+                }),
+                _buildFilterChip(
+                  key: const Key('doctor_calendar_mode_filter_Online'),
+                  label: 'Online',
+                  icon: Icons.videocam_rounded,
+                  selected: _selectedTypeFilter == 'Online',
+                  selectedColor: const Color(0xFF0369A1),
+                  onTap: () {
+                    setState(() => _selectedTypeFilter = _selectedTypeFilter == 'Online' ? 'All' : 'Online');
+                    _fetchCalendarFromBackend();
+                  },
+                ),
+                _buildFilterChip(
+                  key: const Key('doctor_calendar_mode_filter_In-Person'),
+                  label: 'In-Person',
+                  icon: Icons.local_hospital_rounded,
+                  selected: _selectedTypeFilter == 'In-Person',
+                  selectedColor: const Color(0xFF4F46E5),
+                  onTap: () {
+                    setState(() => _selectedTypeFilter = _selectedTypeFilter == 'In-Person' ? 'All' : 'In-Person');
+                    _fetchCalendarFromBackend();
+                  },
+                ),
+                _buildFilterChip(
+                  key: const Key('doctor_calendar_filter_Referred'),
+                  label: 'Referred',
+                  icon: Icons.swap_calls_rounded,
+                  selected: _referredOnlyFilter,
+                  selectedColor: const Color(0xFF7C3AED),
+                  onTap: () {
+                    setState(() => _referredOnlyFilter = !_referredOnlyFilter);
+                    _fetchCalendarFromBackend();
+                  },
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
 
           // Detailed Patient Visit List for Selected Date
           Row(
@@ -811,6 +1021,16 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (_hasActiveFilters)
+                TextButton(
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onPressed: _resetAllFilters,
+                  child: const Text('Clear Filters', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                ),
             ],
           ),
           const SizedBox(height: 8),
@@ -818,7 +1038,7 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
             Container(
               key: const Key('doctor_calendar_empty_visits_state'),
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+              padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 16),
               decoration: BoxDecoration(
                 color: const Color(0xFFF8FAFC),
                 borderRadius: BorderRadius.circular(14),
@@ -829,14 +1049,25 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
                   const Icon(Icons.event_busy_outlined, size: 28, color: Color(0xFF94A3B8)),
                   const SizedBox(height: 6),
                   Text(
-                    'No patient visits scheduled on $selectedDateYmd.',
+                    totalOnDate == 0
+                        ? 'No appointments scheduled for this date.'
+                        : 'No appointments match the selected filter on $selectedDateYmd.',
                     style: const TextStyle(
-                      fontSize: 13,
+                      fontSize: 13.5,
                       fontWeight: FontWeight.w700,
                       color: Color(0xFF475569),
                     ),
                     textAlign: TextAlign.center,
                   ),
+                  if (totalOnDate == 0)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 4),
+                      child: Text(
+                        'Select another highlighted date on the calendar to review patient visits.',
+                        style: TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
                 ],
               ),
             )
@@ -845,7 +1076,7 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
               children: visits.map(_buildVisitCard).toList(),
             ),
 
-          // Phase 4: Separate Referral Tracking Section
+          // Dedicated Referral Tracking Section (Strictly Separated from Regular Appointments)
           const SizedBox(height: 16),
           Container(
             key: const Key('doctor_calendar_referrals_section'),
@@ -865,9 +1096,7 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        referralsOnDate.isNotEmpty
-                            ? 'Patient Referrals on $selectedDateYmd (${referralsOnDate.length})'
-                            : 'Assigned Patient Referrals (${displayedReferrals.length})',
+                        'Referral Tracking • $selectedDateYmd (${referralsOnDate.length})',
                         style: const TextStyle(
                           fontSize: 13.5,
                           fontWeight: FontWeight.w800,
@@ -880,19 +1109,116 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
                 ),
                 const SizedBox(height: 4),
                 const Text(
-                  'Tracked separately from actual patient visits until a booked consultation is completed.',
+                  'Tracked separately from regular appointments. Each referral is counted once.',
                   style: TextStyle(fontSize: 11, color: Color(0xFF6B21A8)),
                 ),
-                const SizedBox(height: 8),
-                if (displayedReferrals.isEmpty)
-                  const Text(
-                    'No patient referrals recorded for this doctor.',
-                    style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    _buildMiniRefMetric(
+                      key: const Key('doctor_cal_stat_referrals_received'),
+                      label: 'Received',
+                      value: '${stats['patientReferralsReceived'] ?? referralsOnDate.length}',
+                      color: const Color(0xFF7C3AED),
+                    ),
+                    _buildMiniRefMetric(
+                      key: const Key('doctor_cal_ref_stat_accepted'),
+                      label: 'Accepted',
+                      value: '${stats['acceptedReferrals'] ?? 0}',
+                      color: const Color(0xFF0284C7),
+                    ),
+                    _buildMiniRefMetric(
+                      key: const Key('doctor_cal_ref_stat_pending'),
+                      label: 'Pending',
+                      value: '${stats['pendingReferrals'] ?? 0}',
+                      color: const Color(0xFFD97706),
+                    ),
+                    _buildMiniRefMetric(
+                      key: const Key('doctor_cal_ref_stat_rejected'),
+                      label: 'Rejected',
+                      value: '${stats['rejectedReferrals'] ?? 0}',
+                      color: const Color(0xFFDC2626),
+                    ),
+                    _buildMiniRefMetric(
+                      key: const Key('doctor_cal_ref_stat_completed'),
+                      label: 'Completed Visits',
+                      value: '${stats['completedReferredVisits'] ?? 0}',
+                      color: const Color(0xFF16A34A),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                if (referralsOnDate.isEmpty)
+                  Text(
+                    'No referrals recorded for $selectedDateYmd.',
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
                   )
                 else
-                  ...displayedReferrals.map(_buildReferralTrackingCard),
+                  ...referralsOnDate.map(_buildReferralTrackingCard),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterChip({
+    required Key key,
+    required String label,
+    IconData? icon,
+    required bool selected,
+    required Color selectedColor,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: ChoiceChip(
+        key: key,
+        avatar: icon != null
+            ? Icon(icon, size: 14, color: selected ? Colors.white : selectedColor)
+            : null,
+        label: Text(label, style: const TextStyle(fontSize: 11.5)),
+        selected: selected,
+        selectedColor: selectedColor,
+        backgroundColor: const Color(0xFFF8FAFC),
+        side: BorderSide(color: selected ? selectedColor : const Color(0xFFCBD5E1)),
+        labelStyle: TextStyle(
+          color: selected ? Colors.white : const Color(0xFF334155),
+          fontWeight: FontWeight.w700,
+        ),
+        onSelected: (_) => onTap(),
+      ),
+    );
+  }
+
+  Widget _buildMiniRefMetric({
+    required Key key,
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    return Container(
+      key: key,
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            value,
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: color),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
           ),
         ],
       ),
@@ -936,7 +1262,7 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
             crossAxisCount: 7,
             mainAxisSpacing: 4,
             crossAxisSpacing: 4,
-            childAspectRatio: 1.05,
+            childAspectRatio: 0.88,
           ),
           itemBuilder: (context, index) {
             if (index < leadingEmpty) {
@@ -954,9 +1280,14 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
             final hasCompleted = dayInfo?['hasCompleted'] == true ||
                 (int.tryParse('${dayInfo?['completedConsultations'] ?? 0}') ?? 0) > 0;
             final hasPending = dayInfo?['hasPending'] == true ||
+                dayInfo?['hasAccepted'] == true ||
+                (int.tryParse('${dayInfo?['pendingAppointments'] ?? 0}') ?? 0) > 0 ||
+                (int.tryParse('${dayInfo?['acceptedAppointments'] ?? 0}') ?? 0) > 0 ||
                 (int.tryParse('${dayInfo?['pendingConsultations'] ?? 0}') ?? 0) > 0;
             final hasCancelled = dayInfo?['hasCancelled'] == true ||
+                dayInfo?['hasRejected'] == true ||
                 dayInfo?['hasNoShow'] == true ||
+                (int.tryParse('${dayInfo?['rejectedAppointments'] ?? 0}') ?? 0) > 0 ||
                 (int.tryParse('${dayInfo?['cancelledAppointments'] ?? 0}') ?? 0) > 0 ||
                 (int.tryParse('${dayInfo?['noShowAppointments'] ?? 0}') ?? 0) > 0;
             final hasReferrals = dayInfo?['hasReferrals'] == true ||
@@ -967,22 +1298,25 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
               onTap: () => _selectDate(cellDate),
               borderRadius: BorderRadius.circular(10),
               child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 2),
                 decoration: BoxDecoration(
                   color: isSelected
                       ? AppTheme.gsNavy
-                      : totalAppts > 0
-                          ? const Color(0xFFEFF6FF)
-                          : Colors.white,
+                      : isToday
+                          ? const Color(0xFFFEF2F2)
+                          : totalAppts > 0
+                              ? const Color(0xFFEFF6FF)
+                              : Colors.white,
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                     color: isSelected
                         ? AppTheme.gsNavy
                         : isToday
-                            ? AppTheme.primaryBlue
+                            ? AppTheme.gsRed
                             : totalAppts > 0
-                                ? const Color(0xFFBFDBFE)
+                                ? const Color(0xFF93C5FD)
                                 : const Color(0xFFE2E8F0),
-                    width: isToday || isSelected ? 1.4 : 1.0,
+                    width: isToday || isSelected ? 1.6 : 1.0,
                   ),
                 ),
                 child: Column(
@@ -991,12 +1325,35 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
                     Text(
                       '$dayNum',
                       style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: isSelected || totalAppts > 0 ? FontWeight.w800 : FontWeight.w600,
-                        color: isSelected ? Colors.white : const Color(0xFF0F172A),
+                        fontSize: 11.5,
+                        fontWeight: isSelected || isToday || totalAppts > 0 ? FontWeight.w800 : FontWeight.w600,
+                        color: isSelected
+                            ? Colors.white
+                            : isToday
+                                ? AppTheme.gsRed
+                                : const Color(0xFF0F172A),
                       ),
                     ),
-                    if (hasCompleted || hasPending || hasCancelled || hasReferrals)
+                    if (totalAppts > 0)
+                      Container(
+                        key: Key('doctor_calendar_day_count_$cellYmd'),
+                        margin: const EdgeInsets.only(top: 1),
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0.5),
+                        decoration: BoxDecoration(
+                          color: isSelected ? Colors.white.withValues(alpha: 0.22) : AppTheme.gsNavy,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          '$totalAppts',
+                          style: const TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            height: 1.1,
+                          ),
+                        ),
+                      )
+                    else if (hasCompleted || hasPending || hasCancelled || hasReferrals)
                       Padding(
                         padding: const EdgeInsets.only(top: 2),
                         child: Row(
@@ -1008,6 +1365,11 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
                             if (hasReferrals) _dot(isSelected ? Colors.purpleAccent : const Color(0xFF7C3AED)),
                           ],
                         ),
+                      ),
+                    if (totalAppts > 0 && hasReferrals)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1),
+                        child: _dot(isSelected ? Colors.purpleAccent : const Color(0xFF7C3AED)),
                       ),
                   ],
                 ),
@@ -1052,8 +1414,8 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
   }) {
     return Container(
       key: key,
-      width: 138,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      width: 102,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(12),
@@ -1061,20 +1423,21 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
       ),
       child: Row(
         children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 6),
+          Icon(icon, size: 15, color: color),
+          const SizedBox(width: 5),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   value,
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: color),
+                  style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: color, height: 1.1),
                   overflow: TextOverflow.ellipsis,
                 ),
                 Text(
                   label,
-                  style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
+                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
+                  maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
@@ -1087,21 +1450,29 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
 
   Widget _buildVisitCard(Map<String, dynamic> visit) {
     final apptId = (visit['appointmentId'] ?? visit['id'] ?? '').toString();
+    final patientId = (visit['patientId'] ?? '').toString().trim();
     final patientName = (visit['patientName'] ?? 'Patient').toString();
     final consultDate = (visit['consultationDate'] ?? '').toString();
     final consultTime = (visit['consultationTime'] ?? '').toString();
+    final endTime = (visit['scheduledEndTime'] ?? '').toString().trim();
     final consultType = (visit['consultationType'] ?? 'In-Person').toString();
+    final isOnline = consultType.toLowerCase() == 'online';
     final specialty = (visit['specialty'] ?? widget.doctorSpecialty).toString();
+    final clinicName = (visit['clinicName'] ?? '').toString().trim();
     final statusRaw = (visit['status'] ?? 'PENDING').toString();
-    final statusLabel = BookingRulesConfig.formatAppointmentStatusLabel(statusRaw);
+    final statusLabel = _formatCalendarStatusDisplay(statusRaw);
     final actuallyVisited = visit['actuallyVisited'] == true;
     final phone = (visit['patientPhone'] ?? '').toString().trim();
+    final problemText = (visit['problemDescription'] ?? visit['treatment'] ?? '').toString().trim();
+    final symptomsText = (visit['symptoms'] ?? '').toString().trim();
     final refSource = visit['referralSource'] is Map
         ? Map<String, dynamic>.from(visit['referralSource'] as Map)
         : null;
     final rawReq = visit['_rawRequest'] is PatientConsultationRequest
         ? visit['_rawRequest'] as PatientConsultationRequest
         : null;
+
+    final timeDisplay = endTime.isNotEmpty ? '$consultDate • $consultTime – $endTime' : '$consultDate • $consultTime';
 
     return Container(
       key: Key('doctor_calendar_visit_card_$apptId'),
@@ -1110,12 +1481,15 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
       decoration: BoxDecoration(
         color: const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(
+          color: refSource != null ? const Color(0xFFD8B4FE) : const Color(0xFFE2E8F0),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildPatientAvatar(patientName, visit['patientProfileImage']),
               const SizedBox(width: 10),
@@ -1123,71 +1497,184 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            patientName,
+                            style: const TextStyle(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF0F172A),
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (refSource != null) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF3E8FF),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: const Color(0xFFD8B4FE)),
+                            ),
+                            child: const Text(
+                              'Referred',
+                              style: TextStyle(
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF7C3AED),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
                     Text(
-                      '$patientName • #$apptId',
+                      patientId.isNotEmpty ? 'Patient ID: $patientId' : 'Appointment #$apptId',
                       style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
-                        color: Color(0xFF0F172A),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF475569),
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
+                    const SizedBox(height: 1),
                     Text(
-                      '$consultDate at $consultTime',
+                      timeDisplay,
                       style: const TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
               ),
+              const SizedBox(width: 6),
               _statusBadge(statusLabel, actuallyVisited),
             ],
           ),
           const SizedBox(height: 8),
+
+          // Consultation Type (Online vs In-Person with distinct icons) + Details Pills
           Wrap(
             spacing: 6,
             runSpacing: 6,
             children: [
               _infoPill(
-                consultType == 'Online' ? Icons.videocam_outlined : Icons.local_hospital_outlined,
-                consultType,
-                consultType == 'Online' ? const Color(0xFF0284C7) : const Color(0xFF4F46E5),
+                isOnline ? Icons.videocam_rounded : Icons.local_hospital_rounded,
+                isOnline ? 'Online Consultation' : 'In-Person Consultation',
+                isOnline ? const Color(0xFF0369A1) : const Color(0xFF4F46E5),
               ),
               _infoPill(Icons.medical_services_outlined, specialty, AppTheme.gsNavy),
+              if (clinicName.isNotEmpty && !isOnline)
+                _infoPill(Icons.location_on_outlined, clinicName, const Color(0xFF334155)),
               if (actuallyVisited)
                 _infoPill(Icons.verified_user_outlined, 'Visited', const Color(0xFF0F766E)),
               if (widget.canViewPatientContact && phone.isNotEmpty)
                 _infoPill(Icons.phone_outlined, phone, const Color(0xFF334155)),
             ],
           ),
-          if (refSource != null) ...[
-            const SizedBox(height: 6),
+
+          // Patient Problem / Reason for Consultation
+          if (problemText.isNotEmpty || symptomsText.isNotEmpty) ...[
+            const SizedBox(height: 8),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
               decoration: BoxDecoration(
-                color: const Color(0xFFF3E8FF),
-                borderRadius: BorderRadius.circular(8),
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
               ),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.person_pin_circle_outlined, size: 14, color: Color(0xFF7C3AED)),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      'Referred by: ${refSource['referringPatientName'] ?? 'Patient'}'
-                      '${(refSource['referringPatientPhone'] ?? '').toString().isNotEmpty ? ' (${refSource['referringPatientPhone']})' : ''}',
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF6B21A8),
-                      ),
-                      overflow: TextOverflow.ellipsis,
+                  if (problemText.isNotEmpty)
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.assignment_outlined, size: 13.5, color: Color(0xFF475569)),
+                        const SizedBox(width: 5),
+                        Expanded(
+                          child: Text(
+                            'Reason: $problemText',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF1E293B),
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
+                  if (symptomsText.isNotEmpty &&
+                      symptomsText.toLowerCase() != 'none' &&
+                      symptomsText.toLowerCase() != problemText.toLowerCase())
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Text(
+                        'Symptoms: $symptomsText',
+                        style: const TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                 ],
               ),
             ),
           ],
+
+          // Referral Info Banner (only when genuinely referred)
+          if (refSource != null) ...[
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF3E8FF),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFE9D5FF)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.person_pin_circle_outlined, size: 14, color: Color(0xFF7C3AED)),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: Text(
+                          'Referred by: ${refSource['referringPatientName'] ?? 'Patient'}'
+                          '${(refSource['referringPatientPhone'] ?? '').toString().isNotEmpty ? ' (${refSource['referringPatientPhone']})' : ''}',
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF6B21A8),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      _referralStatusPill((refSource['referralStatus'] ?? 'Pending').toString()),
+                    ],
+                  ),
+                  if ((refSource['referralDate'] ?? '').toString().isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        'Referral Status: ${refSource['referralStatus'] ?? 'Pending'} • Date: ${refSource['referralDate']}',
+                        style: const TextStyle(fontSize: 10.5, color: Color(0xFF7E22CE)),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+
           if (rawReq != null &&
               ((widget.canAccessConsultationDetails && widget.onOpenConsultationDetails != null) ||
                   (widget.canAccessPrescription && widget.onOpenPrescription != null))) ...[
@@ -1214,6 +1701,30 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _referralStatusPill(String status) {
+    final upper = status.trim().toUpperCase();
+    Color bg = const Color(0xFFFEF3C7);
+    Color fg = const Color(0xFF92400E);
+    if (upper == 'ACCEPTED' || upper == 'CONFIRMED' || upper == 'APPROVED') {
+      bg = const Color(0xFFDBEAFE);
+      fg = const Color(0xFF1E40AF);
+    } else if (upper == 'COMPLETED') {
+      bg = const Color(0xFFDCFCE7);
+      fg = const Color(0xFF166534);
+    } else if (upper == 'REJECTED' || upper == 'DECLINED') {
+      bg = const Color(0xFFFEE2E2);
+      fg = const Color(0xFF991B1B);
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(999)),
+      child: Text(
+        status,
+        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: fg),
       ),
     );
   }
@@ -1254,17 +1765,8 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF3E8FF),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  refStatus,
-                  style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Color(0xFF6B21A8)),
-                ),
-              ),
+              const SizedBox(width: 6),
+              _referralStatusPill(refStatus),
             ],
           ),
           const SizedBox(height: 4),
@@ -1296,42 +1798,59 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
   }
 
   Widget _buildPatientAvatar(String name, dynamic rawImage) {
+    final initial = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : 'P';
+    Widget fallbackAvatar() => CircleAvatar(
+          radius: 20,
+          backgroundColor: AppTheme.gsNavy.withValues(alpha: 0.12),
+          child: Text(
+            initial,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppTheme.gsNavy),
+          ),
+        );
+
     final str = (rawImage ?? '').toString().trim();
-    if (str.isNotEmpty && str != 'null') {
+    if (str.isNotEmpty && str.toLowerCase() != 'null') {
+      if (str.startsWith('http://') || str.startsWith('https://')) {
+        return ClipOval(
+          child: Image.network(
+            str,
+            width: 40,
+            height: 40,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => fallbackAvatar(),
+          ),
+        );
+      }
       try {
-        if (!str.startsWith('http')) {
-          final clean = str.contains(',') ? str.split(',').last.trim() : str;
-          final bytes = base64Decode(clean);
-          if (bytes.isNotEmpty) {
-            return CircleAvatar(radius: 18, backgroundImage: MemoryImage(bytes));
-          }
+        final clean = str.contains(',') ? str.split(',').last.trim() : str;
+        final bytes = base64Decode(clean);
+        if (bytes.isNotEmpty) {
+          return CircleAvatar(radius: 20, backgroundImage: MemoryImage(bytes));
         }
       } catch (_) {}
     }
-    final initial = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : 'P';
-    return CircleAvatar(
-      radius: 18,
-      backgroundColor: AppTheme.gsNavy.withValues(alpha: 0.12),
-      child: Text(
-        initial,
-        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppTheme.gsNavy),
-      ),
-    );
+    return fallbackAvatar();
   }
 
   Widget _statusBadge(String label, bool actuallyVisited) {
     final upper = label.toUpperCase();
-    Color bg = const Color(0xFFDBEAFE);
-    Color fg = const Color(0xFF1E40AF);
+    Color bg = const Color(0xFFFEF3C7);
+    Color fg = const Color(0xFF92400E);
     if (upper.contains('COMPLETED')) {
       bg = const Color(0xFFDCFCE7);
       fg = const Color(0xFF166534);
+    } else if (upper.contains('ACCEPTED') || upper.contains('CONFIRMED') || upper.contains('PROGRESS')) {
+      bg = const Color(0xFFDBEAFE);
+      fg = const Color(0xFF1E40AF);
+    } else if (upper.contains('RESCHEDUL')) {
+      bg = const Color(0xFFF3E8FF);
+      fg = const Color(0xFF6B21A8);
     } else if (upper.contains('CANCEL') || upper.contains('REJECT')) {
       bg = const Color(0xFFFEE2E2);
       fg = const Color(0xFF991B1B);
     } else if (upper.contains('NO-SHOW') || upper.contains('NO_SHOW')) {
-      bg = const Color(0xFFFEF3C7);
-      fg = const Color(0xFF92400E);
+      bg = const Color(0xFFFFEDD5);
+      fg = const Color(0xFF9A3412);
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -1343,9 +1862,187 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
     );
   }
 
+  Widget _buildWeeklyStrip(Map<String, dynamic> monthlyCal) {
+    final nowRef = BookingRulesConfig.debugNowOverride ?? DateTime.now();
+    final todayYmd = _formatYmd(DateTime(nowRef.year, nowRef.month, nowRef.day));
+    final selectedYmd = _formatYmd(_selectedDate);
+    final weekStart = _selectedDate.subtract(Duration(days: _selectedDate.weekday - 1));
+
+    return Container(
+      key: const Key('doctor_calendar_weekly_view'),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        children: List.generate(7, (idx) {
+          final day = weekStart.add(Duration(days: idx));
+          final ymd = _formatYmd(day);
+          final isSelected = ymd == selectedYmd;
+          final isToday = ymd == todayYmd;
+          final bucket = monthlyCal[ymd] is Map ? Map<String, dynamic>.from(monthlyCal[ymd] as Map) : null;
+          final count = int.tryParse('${bucket?['totalAppointments'] ?? 0}') ?? 0;
+
+          return Expanded(
+            child: InkWell(
+              key: Key('doctor_weekly_cell_$ymd'),
+              onTap: () => _selectDate(day),
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 2),
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? AppTheme.gsNavy
+                      : (isToday ? const Color(0xFFEFF6FF) : Colors.white),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isSelected
+                        ? AppTheme.gsNavy
+                        : (isToday ? const Color(0xFF2563EB) : const Color(0xFFE2E8F0)),
+                  ),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _weekdayHeaders[idx],
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: isSelected ? Colors.white70 : const Color(0xFF64748B),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${day.day}',
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w800,
+                        color: isSelected ? Colors.white : const Color(0xFF0F172A),
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: count > 0
+                            ? (isSelected ? Colors.white.withValues(alpha: 0.2) : const Color(0xFFDBEAFE))
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        count > 0 ? '$count' : '·',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: isSelected
+                              ? Colors.white
+                              : (count > 0 ? const Color(0xFF1D4ED8) : const Color(0xFF94A3B8)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
+  Widget _buildSelectedDateScheduleOverview(Map<String, dynamic> agg, String selectedDateYmd) {
+    final schedMap = agg['schedule'] is Map ? Map<String, dynamic>.from(agg['schedule'] as Map) : null;
+    final releasedList = agg['releasedSlots'] is List
+        ? (agg['releasedSlots'] as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+        : const <Map<String, dynamic>>[];
+
+    final startStr = (schedMap?['startTime'] ?? '09:00 AM').toString();
+    final endStr = (schedMap?['endTime'] ?? '05:00 PM').toString();
+    final inPersonDur = int.tryParse('${schedMap?['inPersonDurationMinutes'] ?? schedMap?['slotDurationMinutes'] ?? 30}') ?? 30;
+    final onlineDur = int.tryParse('${schedMap?['onlineDurationMinutes'] ?? 20}') ?? 20;
+    final breaks = schedMap?['breaks'] is List
+        ? (schedMap!['breaks'] as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+        : const <Map<String, dynamic>>[];
+    final blockedRanges = schedMap?['selectedDateBlockedSlots'] is List
+        ? (schedMap!['selectedDateBlockedSlots'] as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+        : const <Map<String, dynamic>>[];
+    final isDateBlocked = schedMap?['selectedDateBlocked'] == true;
+
+    return Container(
+      key: const Key('doctor_calendar_schedule_overview'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: isDateBlocked ? const Color(0xFFFEF2F2) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isDateBlocked ? const Color(0xFFFECACA) : const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isDateBlocked ? Icons.event_busy_rounded : Icons.schedule_rounded,
+                size: 15,
+                color: isDateBlocked ? const Color(0xFFDC2626) : AppTheme.gsNavy,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  isDateBlocked
+                      ? 'Date Blocked ($selectedDateYmd): ${schedMap?['selectedDateBlockedReason'] ?? 'On Leave'}'
+                      : 'Schedule ($selectedDateYmd • IST): $startStr – $endStr',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w800,
+                    color: isDateBlocked ? const Color(0xFF991B1B) : const Color(0xFF0F172A),
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              _infoPill(Icons.local_hospital_outlined, 'In-Person ${inPersonDur}m', AppTheme.gsNavy),
+              _infoPill(Icons.videocam_outlined, 'Online ${onlineDur}m', const Color(0xFF0284C7)),
+              for (final b in breaks)
+                _infoPill(
+                  Icons.coffee_rounded,
+                  'Break ${b['startTime'] ?? ''}–${b['endTime'] ?? ''}',
+                  const Color(0xFFD97706),
+                ),
+              for (final bl in blockedRanges)
+                _infoPill(
+                  Icons.block_rounded,
+                  'Blocked ${bl['startTime'] ?? ''}–${bl['endTime'] ?? ''}',
+                  const Color(0xFFDC2626),
+                ),
+              if (releasedList.isNotEmpty)
+                _infoPill(
+                  Icons.bolt_rounded,
+                  '${releasedList.length} Released Slot(s)',
+                  const Color(0xFF16A34A),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _infoPill(IconData icon, String text, Color color) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(8),
@@ -1353,7 +2050,7 @@ class _DoctorVisitsCalendarSectionState extends State<DoctorVisitsCalendarSectio
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: color),
+          Icon(icon, size: 12.5, color: color),
           const SizedBox(width: 4),
           Flexible(
             child: Text(

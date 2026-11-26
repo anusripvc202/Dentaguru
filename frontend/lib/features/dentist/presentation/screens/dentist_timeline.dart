@@ -15,7 +15,7 @@ import '../../../../core/models/specialty_clinical_config.dart';
 import '../../../../core/models/doctor_availability.dart';
 import '../../../../core/models/referral_model.dart';
 import '../../../../core/utils/prescription_pdf_generator.dart';
-import '../widgets/doctor_visits_calendar.dart';
+import 'doctor_appointments_calendar_screen.dart';
 import '../widgets/specialty_prescription_modal.dart';
 import '../../../admin/presentation/widgets/doctor_slot_management_dialog.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -853,10 +853,6 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     if (match != null) {
       currentDoc = match;
       _patientService.currentDoctor = currentDoc;
-    } else if ((currentDoc == null || currentDoc.id.toUpperCase().startsWith('DOC-')) &&
-        _patientService.allDoctors.length == 1) {
-      currentDoc = _patientService.allDoctors.first;
-      _patientService.currentDoctor = currentDoc;
     }
     return currentDoc;
   }
@@ -864,17 +860,20 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   List<PatientConsultationRequest> _getDentistAssignedAndScheduledRequests() {
     final currentDoc = _resolveCurrentDoctor();
     final authUser = _safeAuthUser;
+    final sess = SessionService().currentSession;
 
-    final currentDocName = (currentDoc?.name ?? '').replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().toLowerCase();
+    final currentDocName = (currentDoc?.name ?? sess?.name ?? '').replaceAll(RegExp(r'^dr\.?\s*', caseSensitive: false), '').trim().toLowerCase();
     final currentDocId = (currentDoc?.id ?? '').trim();
     final currentDocUserId = (currentDoc?.userId ?? '').trim();
-    final currentDocEmail = (currentDoc?.email ?? '').trim().toLowerCase();
+    final currentDocEmail = (currentDoc?.email ?? sess?.email ?? '').trim().toLowerCase();
     final authUserId = (authUser?.id ?? '').trim();
     final authEmail = (authUser?.email ?? '').trim().toLowerCase();
+    final sessUserId = (sess?.userId ?? '').trim();
 
     final myDoctorIds = <String>{
       if (currentDocId.isNotEmpty) currentDocId,
       if (currentDocUserId.isNotEmpty) currentDocUserId,
+      if (sessUserId.isNotEmpty) sessUserId,
       if (authUserId.isNotEmpty) authUserId,
       if (currentDocEmail.isNotEmpty) currentDocEmail,
       if (authEmail.isNotEmpty) authEmail,
@@ -890,6 +889,10 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
       }
     }
 
+    if (myDoctorIds.isEmpty && currentDocName.isEmpty) {
+      return [];
+    }
+
     bool isAssignedToMe(PatientConsultationRequest r) {
       final aId = r.assignedDoctorId?.trim();
       if (aId != null && aId.isNotEmpty) {
@@ -901,7 +904,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
 
     final Map<String, PatientConsultationRequest> uniqueMap = {};
     for (final r in _patientService.dentistAssignedRequests) {
-      if (r.id.isNotEmpty) {
+      if (isAssignedToMe(r) && r.id.isNotEmpty) {
         final key = (r.id.startsWith('PR-'))
             ? '${r.patientName.trim().toLowerCase()}_${r.problemCategory.trim().toLowerCase()}'
             : r.id;
@@ -947,6 +950,29 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     final selectedDate = _baseCalendarDate.add(Duration(days: _selectedDateIndex));
     final appointmentsForSelectedDate = _getAppointmentsForDate(allMyRequests, selectedDate, _selectedDateIndex);
     final allBookedAppointments = allMyRequests.where((req) => _isBookedOrConfirmedAppointment(req)).toList();
+
+    final upcomingVisitsCount = allMyRequests.where((r) {
+      final st = r.status.trim().toUpperCase();
+      return st != 'COMPLETED' && st != 'CANCELLED' && st != 'REJECTED' && st != 'NO_SHOW';
+    }).length;
+    final completedVisitsCount = allMyRequests.where((r) {
+      return r.status.trim().toUpperCase() == 'COMPLETED';
+    }).length;
+    final uniquePatientKeys = <String>{};
+    for (final r in allMyRequests) {
+      final pid = (r.patientId ?? '').trim();
+      final digits = r.patientPhone.replaceAll(RegExp(r'\D'), '');
+      final ph10 = digits.length >= 10 ? digits.substring(digits.length - 10) : digits;
+      final nameKey = r.patientName.trim().toLowerCase();
+      if (pid.isNotEmpty) {
+        uniquePatientKeys.add('id:$pid');
+      } else if (ph10.length == 10) {
+        uniquePatientKeys.add('ph:$ph10');
+      } else if (nameKey.isNotEmpty && nameKey != 'patient') {
+        uniquePatientKeys.add('nm:$nameKey');
+      }
+    }
+    final totalPatientsCount = uniquePatientKeys.length;
 
     return SingleChildScrollView(
       key: const Key('dentist_today_scroll_view'),
@@ -1318,7 +1344,155 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
 
                 // 4. Sponsored Banner
                 _buildDentistSponsoredCourseBanner(context),
-                const SizedBox(height: 28),
+                const SizedBox(height: 18),
+
+                // 4b. Doctor Real-Time Visit Summary KPIs (0 / 0 / 0 for newly registered doctors)
+                Row(
+                  key: const Key('doctor_dashboard_summary_stats'),
+                  children: [
+                    Expanded(
+                      child: _buildDoctorOverviewKpiCard(
+                        valueKey: const Key('doctor_stat_upcoming_visits'),
+                        label: 'Upcoming Visits',
+                        value: '$upcomingVisitsCount',
+                        icon: Icons.schedule_rounded,
+                        color: AppTheme.gsNavy,
+                        onTap: () => _openDoctorAppointmentsCalendar(
+                          context,
+                          currentDoc: currentDoc,
+                          docName: docName,
+                          initialDate: selectedDate,
+                          appointments: allMyRequests,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _buildDoctorOverviewKpiCard(
+                        valueKey: const Key('doctor_stat_completed_visits'),
+                        label: 'Completed Visits',
+                        value: '$completedVisitsCount',
+                        icon: Icons.check_circle_outline_rounded,
+                        color: const Color(0xFF047857),
+                        onTap: () => _openDoctorAppointmentsCalendar(
+                          context,
+                          currentDoc: currentDoc,
+                          docName: docName,
+                          initialDate: selectedDate,
+                          appointments: allMyRequests,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _buildDoctorOverviewKpiCard(
+                        valueKey: const Key('doctor_stat_total_patients'),
+                        label: 'Total Patients',
+                        value: '$totalPatientsCount',
+                        icon: Icons.people_outline_rounded,
+                        color: AppTheme.gsRed,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                // 4c. Compact Tappable Appointments Calendar Entry Card (Opens full monthly calendar screen)
+                InkWell(
+                  key: const Key('dentist_open_calendar_card'),
+                  onTap: () => _openDoctorAppointmentsCalendar(
+                    context,
+                    currentDoc: currentDoc,
+                    docName: docName,
+                    initialDate: selectedDate,
+                    appointments: allMyRequests,
+                  ),
+                  borderRadius: BorderRadius.circular(18),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: AppTheme.gsNavy.withValues(alpha: 0.2)),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.025),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: AppTheme.gsNavy.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(
+                            Icons.calendar_month_rounded,
+                            color: AppTheme.gsNavy,
+                            size: 23,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Appointments Calendar',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFF0F172A),
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '${appointmentsForSelectedDate.length} on selected day • ${allMyRequests.length} total visits',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  color: Color(0xFF64748B),
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: AppTheme.gsNavy,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'View',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              SizedBox(width: 2),
+                              Icon(Icons.chevron_right_rounded, size: 16, color: Colors.white),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
 
                 // 5. Appointments for Selected Date OR All Upcoming Booked Appointments OR Empty State
                 if (appointmentsForSelectedDate.isEmpty &&
@@ -1327,6 +1501,11 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                     key: const Key('dentist_no_appointments_empty_state'),
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -1339,7 +1518,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                           ),
                           child: const Center(
                             child: Icon(
-                              Icons.wb_sunny_outlined,
+                              Icons.calendar_today_outlined,
                               color: AppTheme.gsNavy,
                               size: 30,
                             ),
@@ -1347,16 +1526,17 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                         ),
                         const SizedBox(height: 18),
                         const Text(
-                          'No appointments',
+                          'No patient visits yet.',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
                             color: Color(0xFF0F172A),
                           ),
+                          textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 6),
                         const Text(
-                          'Nothing booked for this day. Enjoy your free time.',
+                          'Your patient appointments will appear here once patients book a consultation.',
                           style: TextStyle(
                             fontSize: 14,
                             color: Color(0xFF64748B),
@@ -1433,14 +1613,45 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            appointmentsForSelectedDate.isNotEmpty
-                                ? 'Appointments (${filtered.length})'
-                                : 'Scheduled Appointments (${filtered.length})',
-                            style: const TextStyle(
-                              fontSize: 16.5,
-                              fontWeight: FontWeight.w800,
-                              color: Color(0xFF0F172A),
+                          InkWell(
+                            key: const Key('dentist_appointments_section_header'),
+                            onTap: () => _openDoctorAppointmentsCalendar(
+                              context,
+                              currentDoc: currentDoc,
+                              docName: docName,
+                              initialDate: selectedDate,
+                              appointments: allMyRequests,
+                            ),
+                            borderRadius: BorderRadius.circular(10),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 2),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      appointmentsForSelectedDate.isNotEmpty
+                                          ? 'Appointments (${filtered.length})'
+                                          : 'Scheduled Appointments (${filtered.length})',
+                                      style: const TextStyle(
+                                        fontSize: 16.5,
+                                        fontWeight: FontWeight.w800,
+                                        color: Color(0xFF0F172A),
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  const Text(
+                                    'Calendar',
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppTheme.gsNavy,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 2),
+                                  const Icon(Icons.chevron_right_rounded, size: 18, color: AppTheme.gsNavy),
+                                ],
+                              ),
                             ),
                           ),
                           const SizedBox(height: 12),
@@ -1467,47 +1678,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                   ),
                 ],
 
-                const SizedBox(height: 28),
-
-                // 5b. Monthly Doctor Visits & Referrals Calendar
-                DoctorVisitsCalendarSection(
-                  doctorId: currentDoc?.id ?? (authUser?.id ?? ''),
-                  doctorName: docName,
-                  doctorSpecialty: (currentDoc?.specialty.trim().isNotEmpty == true)
-                      ? currentDoc!.specialty
-                      : 'General Medicine',
-                  assignedAppointments: allMyRequests,
-                  receivedReferrals: _patientService.doctorReceivedPatientReferrals,
-                  initialSelectedDate: selectedDate,
-                  onOpenConsultationDetails: (req) {
-                    final targetProfile = PatientProfile(
-                      id: (req.patientId != null && req.patientId!.trim().isNotEmpty)
-                          ? req.patientId!
-                          : req.id,
-                      name: req.patientName,
-                      phone: req.patientPhone,
-                      email: '',
-                      city: req.city,
-                      pincode: req.pincode,
-                      state: req.state,
-                      age: '',
-                      gender: '',
-                      bloodGroup: '',
-                      languages: const ['English'],
-                    );
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => DoctorPatientRecordScreen(
-                          patient: targetProfile,
-                          onWriteRx: () => _showPrescriptionModal(context, req),
-                        ),
-                      ),
-                    );
-                  },
-                  onOpenPrescription: (req) => _showPrescriptionModal(context, req),
-                ),
-
-                const SizedBox(height: 28),
+                const SizedBox(height: 24),
 
                 // 6. Manage Availability & Consultation Slots Section (Preserved for Slot Configuration)
                 _buildManageAvailabilitySection(),
@@ -1515,6 +1686,113 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  void _openDoctorAppointmentsCalendar(
+    BuildContext context, {
+    required DoctorModel? currentDoc,
+    required String docName,
+    required DateTime initialDate,
+    required List<PatientConsultationRequest> appointments,
+  }) {
+    final authUser = _safeAuthUser;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => DoctorAppointmentsCalendarScreen(
+          doctorId: currentDoc?.id ?? (authUser?.id ?? ''),
+          doctorName: docName,
+          doctorSpecialty: (currentDoc?.specialty.trim().isNotEmpty == true)
+              ? currentDoc!.specialty
+              : 'General Medicine',
+          initialSelectedDate: initialDate,
+          initialAppointments: appointments,
+          onOpenConsultationDetails: (req) {
+            final targetProfile = PatientProfile(
+              id: (req.patientId != null && req.patientId!.trim().isNotEmpty)
+                  ? req.patientId!
+                  : req.id,
+              name: req.patientName,
+              phone: req.patientPhone,
+              email: '',
+              city: req.city,
+              pincode: req.pincode,
+              state: req.state,
+              age: '',
+              gender: '',
+              bloodGroup: '',
+              languages: const ['English'],
+            );
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => DoctorPatientRecordScreen(
+                  patient: targetProfile,
+                  onWriteRx: () => _showPrescriptionModal(context, req),
+                ),
+              ),
+            );
+          },
+          onOpenPrescription: (req) => _showPrescriptionModal(context, req),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDoctorOverviewKpiCard({
+    required Key valueKey,
+    required String label,
+    required String value,
+    required IconData icon,
+    required Color color,
+    VoidCallback? onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Icon(icon, size: 16, color: color),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              value,
+              key: valueKey,
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF0F172A),
+                height: 1.1,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF64748B),
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2846,18 +3124,13 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
         'patientId': p.id,
       });
     }
+    // Build lookup map of known patient profiles strictly for enriching metadata of THIS doctor's patients
+    // (NEVER inject unrelated platform patients into uniquePatientMap).
     for (final p in _patientService.allPatients) {
       final k = p.name.trim().toLowerCase();
-      patientProfileMap.putIfAbsent(k, () => p);
-      uniquePatientMap.putIfAbsent(k, () => {
-        'name': p.name,
-        'phone': p.phone,
-        'age': p.age.isNotEmpty ? '${p.age} Yrs' : '',
-        'blood': p.bloodGroup,
-        'issue': 'General Healthcare',
-        'patientId': p.id,
-        'city': p.city,
-      });
+      if (k.isNotEmpty) {
+        patientProfileMap.putIfAbsent(k, () => p);
+      }
     }
 
     final effectiveDocId = currentDocId.isNotEmpty
@@ -3067,7 +3340,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                         int visitsCount = 0;
                         DateTime? lastVisitDate;
 
-                        for (final req in _patientService.requests) {
+                        for (final req in allPool) {
                           final rPid = (req.patientId ?? '').trim();
                           final rPhone = req.patientPhone.replaceAll(RegExp(r'\D'), '');
                           final rName = req.patientName.trim().toLowerCase();
@@ -4863,18 +5136,35 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 clipBehavior: Clip.antiAlias,
                 child: doc.photoBytes != null && doc.photoBytes!.isNotEmpty
                     ? Image.memory(doc.photoBytes!, fit: BoxFit.cover)
-                    : Center(
-                        child: Text(
-                          doc.name.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().isNotEmpty
-                              ? doc.name.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim()[0].toUpperCase()
-                              : 'D',
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFF012A58),
+                    : (doc.profileImageUrl != null && doc.profileImageUrl!.trim().isNotEmpty)
+                        ? Image.network(
+                            doc.profileImageUrl!.trim(),
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Center(
+                              child: Text(
+                                doc.name.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().isNotEmpty
+                                    ? doc.name.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim()[0].toUpperCase()
+                                    : 'D',
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFF012A58),
+                                ),
+                              ),
+                            ),
+                          )
+                        : Center(
+                            child: Text(
+                              doc.name.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim().isNotEmpty
+                                  ? doc.name.replaceAll('Dr.', '').replaceAll('Dr. ', '').trim()[0].toUpperCase()
+                                  : 'D',
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF012A58),
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
               ),
               const SizedBox(width: 12),
               Expanded(

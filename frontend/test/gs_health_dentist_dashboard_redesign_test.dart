@@ -359,9 +359,9 @@ void main() {
           find.byKey(const Key('dentist_no_appointments_empty_state')),
           findsOneWidget,
         );
-        expect(find.text('No appointments'), findsOneWidget);
+        expect(find.text('No patient visits yet.'), findsOneWidget);
         expect(
-          find.text('Nothing booked for this day. Enjoy your free time.'),
+          find.text('Your patient appointments will appear here once patients book a consultation.'),
           findsOneWidget,
         );
 
@@ -561,7 +561,7 @@ void main() {
         await tester.tap(find.byKey(const Key('dentist_date_card_1')));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 300));
-        expect(find.text('No appointments'), findsOneWidget);
+        expect(find.text('No patient visits yet.'), findsOneWidget);
 
         // 3. Go to Requests tab and tap "Accept case"
         await tester.tap(find.text('Requests'));

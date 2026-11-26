@@ -13,6 +13,7 @@ import '../constants/api_constants.dart';
 import 'analytics_service.dart';
 import 'crashlytics_service.dart';
 import 'session_service.dart';
+import '../routes/app_router.dart';
 
 // ─────────────────────────────────────────────────────────────
 // Background message handler (must be a top-level function)
@@ -46,6 +47,19 @@ class FirebaseService {
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
   );
   static String? _verificationId;
+  static Map<String, dynamic>? _pendingNotificationData;
+
+  /// Optional test hook to intercept resolved navigation routes deterministically.
+  @visibleForTesting
+  static void Function(String route)? debugNavigateOverride;
+
+  @visibleForTesting
+  static Map<String, dynamic>? get pendingNotificationDataForTesting => _pendingNotificationData;
+
+  @visibleForTesting
+  static void clearPendingNotificationForTesting() {
+    _pendingNotificationData = null;
+  }
 
   @visibleForTesting
   static FlutterSecureStorage get secureStorageForTesting => _secureStorage;
@@ -261,14 +275,24 @@ class FirebaseService {
       _showLocalNotification(message);
     });
 
-    // 7. Handle notification tap when app is in background/terminated
+    // 7. Handle notification tap when app is in background
     FirebaseMessaging.onMessageOpenedApp.listen((message) {
       AnalyticsService.logNotificationReceived(
-        notificationType: message.data['type'] ?? 'general',
+        notificationType: message.data['type'] ?? message.data['notificationType'] ?? 'general',
         action: 'tapped_open',
       );
       _handleMessageNavigation(message);
     });
+
+    // 7b. Handle notification tap when app was launched from terminated state
+    final initialMessage = await _messaging.getInitialMessage();
+    if (initialMessage != null) {
+      AnalyticsService.logNotificationReceived(
+        notificationType: initialMessage.data['type'] ?? initialMessage.data['notificationType'] ?? 'general',
+        action: 'terminated_open',
+      );
+      handleNotificationPayload(initialMessage.data, source: 'terminated_launch');
+    }
 
     // 8. Get & sync FCM token with backend without blocking app cold start
     unawaited(_syncFcmToken());
@@ -344,6 +368,8 @@ class FirebaseService {
     final android = message.notification?.android;
     if (notification == null) return;
 
+    final payloadJson = message.data.isNotEmpty ? jsonEncode(message.data) : null;
+
     _localNotificationsPlugin.show(
       notification.hashCode,
       notification.title,
@@ -367,19 +393,139 @@ class FirebaseService {
           presentSound: true,
         ),
       ),
+      payload: payloadJson,
     );
   }
 
-  /// Handle navigation when user taps a notification
-  static void _handleMessageNavigation(RemoteMessage message) {
-    final type = message.data['type'] ?? '';
-    final appointmentId = message.data['appointmentId'] ?? '';
-    debugPrint('📲 Notification tapped — type: $type, id: $appointmentId');
-    // TODO: Use go_router to navigate to the relevant screen
-    // e.g., appRouter.push('/appointments/$appointmentId');
+  /// Resolves the target GoRouter path from an FCM/local notification data payload.
+  static String resolveRouteFromNotificationData(
+    Map<String, dynamic> data, {
+    String? userRole,
+  }) {
+    final rawType = (data['notificationType'] ?? data['type'] ?? '').toString().trim().toLowerCase();
+    final roleLower = (userRole ?? SessionService().currentSession?.role ?? 'Patient').trim().toLowerCase();
+    final isDoctor = roleLower == 'dentist' || roleLower == 'doctor';
+    final isClinic = roleLower == 'clinic' || roleLower == 'clinic_admin';
+    final isAdmin = roleLower.contains('admin');
+
+    // Early slot release / direct booking deep-link -> open Patient booking dialog with preselected doctor/date/slot
+    if (rawType == 'early_slot_released' ||
+        rawType == 'earlier_slot_available' ||
+        rawType == 'slot_released' ||
+        rawType == 'booking') {
+      final qp = <String, String>{
+        'tab': '0',
+        if ((data['doctorId'] ?? data['dentistId'] ?? '').toString().trim().isNotEmpty)
+          'openBookingDoctorId': (data['doctorId'] ?? data['dentistId']).toString().trim(),
+        if ((data['appointmentDate'] ?? data['date'] ?? '').toString().trim().isNotEmpty)
+          'bookingDate': (data['appointmentDate'] ?? data['date']).toString().trim(),
+        if ((data['startTime'] ?? data['timeSlot'] ?? '').toString().trim().isNotEmpty)
+          'bookingSlot': (data['startTime'] ?? data['timeSlot']).toString().trim(),
+        if ((data['consultationType'] ?? data['consultationMode'] ?? '').toString().trim().isNotEmpty)
+          'bookingMode': (data['consultationType'] ?? data['consultationMode']).toString().trim(),
+      };
+      return Uri(path: '/patient', queryParameters: qp).toString();
+    }
+
+    if (rawType.contains('prescription') || rawType == 'consultation_completed') {
+      if (isDoctor) return '/dentist?tab=4';
+      return '/patient?tab=3';
+    }
+
+    if (rawType.contains('referral')) {
+      if (isDoctor) return '/dentist?tab=2';
+      if (isAdmin) return '/admin/referrals';
+      if (isClinic) return '/clinic';
+      return '/patient?tab=0';
+    }
+
+    if (rawType.contains('appointment') || rawType.contains('doctor_ready') || rawType.contains('delay')) {
+      if (isDoctor) return '/dentist?tab=0';
+      if (isClinic) return '/clinic';
+      if (isAdmin) return '/admin';
+      return '/patient?tab=2';
+    }
+
+    if (isDoctor) return '/dentist';
+    if (isClinic) return '/clinic';
+    if (isAdmin) return roleLower.contains('sub') ? '/sub-admin' : '/admin';
+    return '/patient';
   }
 
+  /// Handles any notification tap (foreground local banner, background resume, or terminated app launch).
+  static void handleNotificationPayload(
+    Map<String, dynamic> data, {
+    String source = 'unknown',
+    String? userRoleOverride,
+  }) {
+    debugPrint('📲 Notification tapped ($source) — payload: $data');
+    final session = SessionService().currentSession;
+    final hasSession = session != null && !session.isExpired && session.token.trim().isNotEmpty;
+
+    if (!hasSession && debugNavigateOverride == null) {
+      // App launched from terminated state before session restore finished; defer until dashboard mounts
+      _pendingNotificationData = Map<String, dynamic>.from(data);
+      return;
+    }
+
+    final targetRoute = resolveRouteFromNotificationData(
+      data,
+      userRole: userRoleOverride ?? session?.role,
+    );
+    _pendingNotificationData = null;
+
+    if (debugNavigateOverride != null) {
+      debugNavigateOverride!(targetRoute);
+      return;
+    }
+
+    try {
+      appRouter.go(targetRoute);
+    } catch (e) {
+      debugPrint('⚠️ Notification navigation deferred: $e');
+      _pendingNotificationData = Map<String, dynamic>.from(data);
+    }
+  }
+
+  /// Replays any notification tap that arrived during terminated-app startup once the user session is active.
+  static bool consumePendingNotificationNavigation() {
+    if (_pendingNotificationData == null) return false;
+    final session = SessionService().currentSession;
+    final hasSession = session != null && !session.isExpired && session.token.trim().isNotEmpty;
+    if (!hasSession && debugNavigateOverride == null) return false;
+
+    final pending = Map<String, dynamic>.from(_pendingNotificationData!);
+    _pendingNotificationData = null;
+    handleNotificationPayload(pending, source: 'deferred_terminated_open');
+    return true;
+  }
+
+  /// Handle navigation when user taps a background FCM notification
+  static void _handleMessageNavigation(RemoteMessage message) {
+    handleNotificationPayload(message.data, source: 'background_tap');
+  }
+
+  /// Handle navigation when user taps a foreground local notification banner
   static void _onNotificationTap(NotificationResponse response) {
-    debugPrint('📲 Local notification tapped: ${response.payload}');
+    handleLocalNotificationPayloadString(response.payload);
+  }
+
+  /// Parses raw local notification payload JSON string and routes cleanly.
+  static void handleLocalNotificationPayloadString(String? rawPayload) {
+    if (rawPayload == null || rawPayload.trim().isEmpty) {
+      handleNotificationPayload(const <String, dynamic>{}, source: 'foreground_tap');
+      return;
+    }
+    try {
+      final decoded = jsonDecode(rawPayload);
+      if (decoded is Map) {
+        handleNotificationPayload(
+          Map<String, dynamic>.from(decoded),
+          source: 'foreground_tap',
+        );
+        return;
+      }
+    } catch (_) {}
+    handleNotificationPayload(const <String, dynamic>{}, source: 'foreground_tap');
   }
 }

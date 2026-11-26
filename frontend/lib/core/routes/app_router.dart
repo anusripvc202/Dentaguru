@@ -124,7 +124,20 @@ final GoRouter appRouter = GoRouter(
     ),
     GoRoute(
       path: '/patient',
-      builder: (context, state) => const PatientDashboardScreen(),
+      builder: (context, state) {
+        final tab = int.tryParse(state.uri.queryParameters['tab'] ?? '0') ?? 0;
+        final openBookingDoctorId = state.uri.queryParameters['openBookingDoctorId'];
+        final bookingDate = state.uri.queryParameters['bookingDate'];
+        final bookingSlot = state.uri.queryParameters['bookingSlot'];
+        final bookingMode = state.uri.queryParameters['bookingMode'];
+        return PatientDashboardScreen(
+          initialTabIndex: tab,
+          openBookingDoctorId: openBookingDoctorId,
+          initialBookingDate: bookingDate,
+          initialBookingSlot: bookingSlot,
+          initialBookingMode: bookingMode,
+        );
+      },
     ),
     GoRoute(
       path: '/patient/complete-profile',
@@ -160,7 +173,10 @@ final GoRouter appRouter = GoRouter(
     ),
     GoRoute(
       path: '/dentist',
-      builder: (context, state) => const DentistTimelineScreen(),
+      builder: (context, state) {
+        final tab = int.tryParse(state.uri.queryParameters['tab'] ?? '0') ?? 0;
+        return DentistTimelineScreen(initialTabIndex: tab);
+      },
     ),
     GoRoute(
       path: '/dentist/patient-record',

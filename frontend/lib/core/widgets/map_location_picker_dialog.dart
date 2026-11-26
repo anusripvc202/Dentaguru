@@ -1,81 +1,102 @@
-import 'package:flutter/material.dart';
-import '../theme/app_theme.dart';
-import '../services/patient_problem_service.dart';
+import 'dart:convert';
 
-class MapLocationItem {
-  final String name;
-  final String locality;
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:http/http.dart' as http;
+import 'package:latlong2/latlong.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../theme/app_theme.dart';
+import '../utils/clinic_directions_helper.dart';
+
+/// Result returned when a doctor/clinic confirms a location pin on OpenStreetMap.
+class MapLocationSelectionResult {
+  final String address;
   final String city;
+  final String state;
   final String pincode;
   final double latitude;
   final double longitude;
+  final String locationName;
 
-  const MapLocationItem({
-    required this.name,
-    required this.locality,
+  const MapLocationSelectionResult({
+    required this.address,
     required this.city,
+    required this.state,
     required this.pincode,
     required this.latitude,
     required this.longitude,
+    required this.locationName,
   });
-}
-
-List<MapLocationItem> _realClinicLocations() {
-  return PatientProblemService().allClinics
-      .where((c) => c.clinicName.trim().isNotEmpty)
-      .map(
-        (c) => MapLocationItem(
-          name: c.clinicName.trim(),
-          locality: c.location.trim(),
-          city: '',
-          pincode: '',
-          latitude: 17.3850,
-          longitude: 78.4867,
-        ),
-      )
-      .toList();
 }
 
 class MapLocationPickerDialog extends StatefulWidget {
   final String initialAddress;
   final String initialCity;
+  final String initialState;
   final String initialPincode;
   final double? initialLat;
   final double? initialLng;
   final bool isDentist;
-  final Function(String address, String city, String pincode, double lat, double lng, String locationName) onLocationSelected;
+  final Function(
+    String address,
+    String city,
+    String pincode,
+    double lat,
+    double lng,
+    String locationName,
+  )? onLocationSelected;
+  final Function(MapLocationSelectionResult result)? onSelectionConfirmed;
+
+  /// Optional test hook to mock OpenStreetMap Nominatim place search in tests.
+  @visibleForTesting
+  static Future<List<Map<String, dynamic>>> Function(String query)? debugSearchOverride;
 
   const MapLocationPickerDialog({
     super.key,
     required this.initialAddress,
     required this.initialCity,
+    this.initialState = '',
     required this.initialPincode,
     this.initialLat,
     this.initialLng,
     this.isDentist = true,
-    required this.onLocationSelected,
+    this.onLocationSelected,
+    this.onSelectionConfirmed,
   });
 
-  static Future<void> show({
+  static Future<MapLocationSelectionResult?> show({
     required BuildContext context,
     required String initialAddress,
     required String initialCity,
+    String initialState = '',
     required String initialPincode,
     double? initialLat,
     double? initialLng,
     bool isDentist = true,
-    required Function(String address, String city, String pincode, double lat, double lng, String locationName) onLocationSelected,
+    Function(
+      String address,
+      String city,
+      String pincode,
+      double lat,
+      double lng,
+      String locationName,
+    )? onLocationSelected,
+    Function(MapLocationSelectionResult result)? onSelectionConfirmed,
   }) {
-    return showDialog(
+    return showDialog<MapLocationSelectionResult>(
       context: context,
       builder: (ctx) => MapLocationPickerDialog(
         initialAddress: initialAddress,
         initialCity: initialCity,
+        initialState: initialState,
         initialPincode: initialPincode,
         initialLat: initialLat,
         initialLng: initialLng,
         isDentist: isDentist,
         onLocationSelected: onLocationSelected,
+        onSelectionConfirmed: onSelectionConfirmed,
       ),
     );
   }
@@ -85,65 +106,197 @@ class MapLocationPickerDialog extends StatefulWidget {
 }
 
 class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
+  final MapController _mapController = MapController();
   final _searchController = TextEditingController();
   final _customAddressController = TextEditingController();
   final _customCityController = TextEditingController();
+  final _customStateController = TextEditingController();
   final _customPincodeController = TextEditingController();
 
-  late double _currentLat;
-  late double _currentLng;
-  String _selectedName = 'Selected Pin';
-  double _zoomLevel = 1.0;
-  Offset _panOffset = Offset.zero;
+  late LatLng _selectedPoint;
+  late double _currentZoom;
+  String _selectedName = 'Pinned Clinic Location';
+  bool _isSearching = false;
+  String? _searchStatus;
+  List<Map<String, dynamic>> _searchResults = const [];
 
   @override
   void initState() {
     super.initState();
-    _currentLat = widget.initialLat ?? 17.3850;
-    _currentLng = widget.initialLng ?? 78.4867;
+    final hasValidInit = ClinicDirectionsHelper.hasValidCoordinates(
+      widget.initialLat,
+      widget.initialLng,
+    );
+    _selectedPoint = hasValidInit
+        ? LatLng(widget.initialLat!, widget.initialLng!)
+        : OsmMapConfig.defaultIndiaCenter;
+    _currentZoom = hasValidInit
+        ? OsmMapConfig.selectedPinZoom
+        : OsmMapConfig.defaultIndiaZoom;
+
     _customAddressController.text = widget.initialAddress;
     _customCityController.text = widget.initialCity;
+    _customStateController.text = widget.initialState;
     _customPincodeController.text = widget.initialPincode;
   }
 
-  void _selectLocationItem(MapLocationItem item) {
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _customAddressController.dispose();
+    _customCityController.dispose();
+    _customStateController.dispose();
+    _customPincodeController.dispose();
+    super.dispose();
+  }
+
+  void _movePinTo(LatLng point, {double? zoom, String? label}) {
+    final targetZoom = (zoom ?? _currentZoom).clamp(3.0, 18.0);
     setState(() {
-      _currentLat = item.latitude;
-      _currentLng = item.longitude;
-      _selectedName = item.name;
-      _customAddressController.text = item.locality;
-      _customCityController.text = item.city;
-      _customPincodeController.text = item.pincode;
-      _panOffset = Offset.zero;
+      _selectedPoint = LatLng(
+        double.parse(point.latitude.toStringAsFixed(6)),
+        double.parse(point.longitude.toStringAsFixed(6)),
+      );
+      _currentZoom = targetZoom;
+      if (label != null && label.trim().isNotEmpty) {
+        _selectedName = label.trim();
+      }
     });
+    try {
+      _mapController.move(_selectedPoint, _currentZoom);
+    } catch (_) {}
+  }
+
+  Future<void> _searchPlace() async {
+    final query = _searchController.text.trim();
+    if (query.isEmpty) {
+      setState(() {
+        _searchResults = const [];
+        _searchStatus = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _isSearching = true;
+      _searchStatus = null;
+    });
+
+    try {
+      List<Map<String, dynamic>> results = [];
+      final override = MapLocationPickerDialog.debugSearchOverride;
+      if (override != null) {
+        results = await override(query);
+      } else {
+        final uri = Uri.parse(
+          'https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=5&q=${Uri.encodeComponent(query)}',
+        );
+        final res = await http.get(
+          uri,
+          headers: const {
+            'User-Agent': 'GSHealthApp/1.0 (in.gshealth.app)',
+            'Accept': 'application/json',
+          },
+        ).timeout(const Duration(seconds: 12));
+        if (res.statusCode == 200) {
+          final decoded = jsonDecode(res.body);
+          if (decoded is List) {
+            results = decoded
+                .whereType<Map>()
+                .map((e) => Map<String, dynamic>.from(e))
+                .toList();
+          }
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _isSearching = false;
+        _searchResults = results;
+        _searchStatus = results.isEmpty
+            ? 'No places found. Tap or pan the map to place the pin manually.'
+            : null;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isSearching = false;
+        _searchResults = const [];
+        _searchStatus = 'Search unavailable right now. Tap or pan the map to place the pin.';
+      });
+    }
+  }
+
+  void _applySearchResult(Map<String, dynamic> item) {
+    final lat = double.tryParse((item['lat'] ?? '').toString());
+    final lng = double.tryParse((item['lon'] ?? item['lng'] ?? '').toString());
+    if (!ClinicDirectionsHelper.hasValidCoordinates(lat, lng)) return;
+
+    final displayName = (item['display_name'] ?? 'Selected Map Location').toString().trim();
+    final addr = item['address'] is Map ? Map<String, dynamic>.from(item['address'] as Map) : const <String, dynamic>{};
+
+    final foundCity = (addr['city'] ?? addr['town'] ?? addr['village'] ?? addr['county'] ?? '').toString().trim();
+    final foundState = (addr['state'] ?? '').toString().trim();
+    final foundPin = (addr['postcode'] ?? '').toString().replaceAll(RegExp(r'[^0-9]'), '');
+
+    _movePinTo(LatLng(lat!, lng!), zoom: OsmMapConfig.selectedPinZoom, label: displayName.split(',').first);
+    setState(() {
+      _searchResults = const [];
+      _searchStatus = null;
+      if (_customAddressController.text.trim().isEmpty && displayName.isNotEmpty) {
+        _customAddressController.text = displayName;
+      }
+      if (_customCityController.text.trim().isEmpty && foundCity.isNotEmpty) {
+        _customCityController.text = foundCity;
+      }
+      if (_customStateController.text.trim().isEmpty && foundState.isNotEmpty) {
+        _customStateController.text = foundState;
+      }
+      if (_customPincodeController.text.trim().isEmpty && foundPin.length == 6) {
+        _customPincodeController.text = foundPin;
+      }
+    });
+  }
+
+  void _confirmSelection() {
+    final result = MapLocationSelectionResult(
+      address: _customAddressController.text.trim(),
+      city: _customCityController.text.trim(),
+      state: _customStateController.text.trim(),
+      pincode: _customPincodeController.text.trim(),
+      latitude: double.parse(_selectedPoint.latitude.toStringAsFixed(6)),
+      longitude: double.parse(_selectedPoint.longitude.toStringAsFixed(6)),
+      locationName: _selectedName,
+    );
+
+    widget.onSelectionConfirmed?.call(result);
+    widget.onLocationSelected?.call(
+      result.address,
+      result.city,
+      result.pincode,
+      result.latitude,
+      result.longitude,
+      result.locationName,
+    );
+    Navigator.of(context).pop(result);
   }
 
   @override
   Widget build(BuildContext context) {
-    final clinicLocations = _realClinicLocations();
-    final query = _searchController.text.trim().toLowerCase();
-    final filteredLocations = query.isEmpty
-        ? clinicLocations
-        : clinicLocations.where((loc) {
-            return loc.name.toLowerCase().contains(query) ||
-                loc.locality.toLowerCase().contains(query) ||
-                loc.city.toLowerCase().contains(query) ||
-                loc.pincode.contains(query);
-          }).toList();
-
     final screenWidth = MediaQuery.of(context).size.width;
     final screenHeight = MediaQuery.of(context).size.height;
 
     return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+      key: const Key('osm_location_picker_dialog'),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
       backgroundColor: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
       child: Container(
         constraints: BoxConstraints(
-          maxWidth: 600,
-          maxHeight: screenHeight * 0.88,
+          maxWidth: 620,
+          maxHeight: screenHeight * 0.90,
         ),
-        padding: EdgeInsets.all(screenWidth < 400 ? 14 : 20),
+        padding: EdgeInsets.all(screenWidth < 380 ? 12 : 18),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -154,10 +307,10 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF012A58).withValues(alpha: 0.1),
+                    color: AppTheme.gsNavy.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.map_rounded, color: Color(0xFF012A58), size: 22),
+                  child: const Icon(Icons.map_rounded, color: AppTheme.gsNavy, size: 20),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -165,19 +318,26 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        widget.isDentist ? 'Pick Clinic Location on Map' : 'Select Location on Map',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.textDark),
+                        widget.isDentist ? 'Select Clinic Location on Map' : 'Select Location on Map',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15.5,
+                          color: AppTheme.textDark,
+                        ),
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                       const Text(
-                        'Pan map or search locality to auto-fill address, city & pincode',
-                        style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                        'Tap or drag map to position the pin accurately',
+                        style: TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
                 ),
                 IconButton(
+                  key: const Key('osm_picker_close_btn'),
                   icon: const Icon(Icons.close_rounded, color: AppTheme.textMuted, size: 20),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
@@ -185,192 +345,157 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            const Divider(height: 1, color: Color(0xFFE2E8F0)),
             const SizedBox(height: 10),
 
-            // Search Bar & GPS Action
+            // Optional Place Search Bar
             Row(
               children: [
                 Expanded(
                   child: TextField(
+                    key: const Key('osm_picker_search_field'),
                     controller: _searchController,
-                    style: const TextStyle(fontSize: 13, color: Color(0xFF0F172A), fontWeight: FontWeight.w500),
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: (_) => _searchPlace(),
+                    style: const TextStyle(fontSize: 13, color: Color(0xFF0F172A)),
                     decoration: InputDecoration(
-                      hintText: 'Search locality, area, city or pin...',
+                      hintText: 'Search area, clinic landmark, or city...',
                       hintStyle: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
-                      prefixIcon: const Icon(Icons.search_rounded, size: 18, color: Color(0xFF012A58)),
+                      prefixIcon: const Icon(Icons.search_rounded, size: 18, color: AppTheme.gsNavy),
                       prefixIconConstraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                      suffixIcon: _searchController.text.isNotEmpty
-                          ? IconButton(
-                              icon: const Icon(Icons.clear_rounded, size: 16),
-                              onPressed: () => setState(() => _searchController.clear()),
-                            )
-                          : null,
                       filled: true,
                       fillColor: const Color(0xFFF8FAFC),
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
-                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
-                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF012A58), width: 1.8)),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                      ),
                     ),
-                    onChanged: (_) => setState(() {}),
                   ),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton(
+                  key: const Key('osm_picker_search_btn'),
+                  onPressed: _isSearching ? null : _searchPlace,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.gsNavy,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: _isSearching
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Text('Find', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-
-            // Quick Locality Chips (strictly from real registered clinics)
-            if (filteredLocations.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 4),
-                child: Text(
-                  'No clinic locations registered yet. Enter an address or pincode manually.',
-                  style: TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
-                ),
-              )
-            else
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                physics: const BouncingScrollPhysics(),
-                child: Row(
-                  children: filteredLocations.take(10).map((loc) {
-                  final isSelected = (_currentLat - loc.latitude).abs() < 0.005 && (_currentLng - loc.longitude).abs() < 0.005;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: InkWell(
-                      onTap: () => _selectLocationItem(loc),
-                      borderRadius: BorderRadius.circular(8),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: isSelected ? const Color(0xFF012A58) : const Color(0xFFF1F5F9),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: isSelected ? const Color(0xFF012A58) : const Color(0xFFCBD5E1)),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.location_on_rounded, size: 11, color: isSelected ? Colors.white : const Color(0xFF64748B)),
-                            const SizedBox(width: 4),
-                            Text(
-                              loc.name.split(' ').take(2).join(' '),
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                                color: isSelected ? Colors.white : const Color(0xFF334155),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
+            if (_searchStatus != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                _searchStatus!,
+                style: const TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
               ),
-            ),
+            ],
+            if (_searchResults.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 110),
+                child: Material(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(10),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: _searchResults.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (ctx, i) {
+                      final item = _searchResults[i];
+                      final name = (item['display_name'] ?? 'Place').toString();
+                      return ListTile(
+                        key: Key('osm_search_result_$i'),
+                        dense: true,
+                        visualDensity: VisualDensity.compact,
+                        leading: const Icon(Icons.location_on_outlined, size: 16, color: AppTheme.gsRed),
+                        title: Text(
+                          name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12, color: Color(0xFF0F172A)),
+                        ),
+                        onTap: () => _applySearchResult(item),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 10),
 
-            // Interactive Simulated Map Canvas
+            // Interactive OpenStreetMap Canvas
             Expanded(
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(16),
                 child: Stack(
                   children: [
-                    // Gesture Detector for Map Pan
-                    GestureDetector(
-                      onPanUpdate: (details) {
-                        setState(() {
-                          _panOffset += details.delta;
-                          _currentLat -= details.delta.dy * 0.0001;
-                          _currentLng += details.delta.dx * 0.0001;
-                        });
-                      },
-                      child: CustomPaint(
-                        painter: InteractiveMapGridPainter(
-                          panOffset: _panOffset,
-                          zoomLevel: _zoomLevel,
-                          centerLat: _currentLat,
-                          centerLng: _currentLng,
+                    FlutterMap(
+                      key: const Key('osm_flutter_map'),
+                      mapController: _mapController,
+                      options: MapOptions(
+                        initialCenter: _selectedPoint,
+                        initialZoom: _currentZoom,
+                        minZoom: 3,
+                        maxZoom: 18,
+                        onTap: (_, latLng) => _movePinTo(
+                          latLng,
+                          zoom: _currentZoom < 13 ? 14 : _currentZoom,
+                          label: 'Selected Pin',
                         ),
-                        size: Size.infinite,
+                        onPositionChanged: (camera, hasGesture) {
+                          if (hasGesture) {
+                            setState(() {
+                              _selectedPoint = LatLng(
+                                double.parse(camera.center.latitude.toStringAsFixed(6)),
+                                double.parse(camera.center.longitude.toStringAsFixed(6)),
+                              );
+                              _currentZoom = camera.zoom;
+                            });
+                          }
+                        },
                       ),
-                    ),
-
-                    // Map Center Target Pin
-                    Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF0F172A),
-                              borderRadius: BorderRadius.circular(8),
-                              boxShadow: [
-                                BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 6, offset: const Offset(0, 2)),
-                              ],
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.local_hospital_rounded, color: Color(0xFFFE3434), size: 12),
-                                const SizedBox(width: 4),
-                                Text(
-                                  _selectedName,
-                                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          const Icon(
-                            Icons.location_pin,
-                            color: Color(0xFFFE3434),
-                            size: 38,
-                            shadows: [
-                              Shadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 3)),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // Map Controls (Zoom In, Zoom Out)
-                    Positioned(
-                      right: 10,
-                      bottom: 10,
-                      child: Column(
-                        children: [
-                          InkWell(
-                            onTap: () => setState(() => _zoomLevel = (_zoomLevel * 1.2).clamp(0.5, 3.0)),
-                            child: Container(
-                              padding: const EdgeInsets.all(6),
-                              decoration: const BoxDecoration(
-                                color: Colors.white,
-                                shape: BoxShape.circle,
-                                boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                      children: [
+                        TileLayer(
+                          urlTemplate: OsmMapConfig.tileUrlTemplate,
+                          userAgentPackageName: OsmMapConfig.userAgentPackageName,
+                          tileProvider: OsmMapConfig.resolveTileProvider(),
+                        ),
+                        MarkerLayer(
+                          markers: [
+                            Marker(
+                              key: const Key('osm_selected_marker'),
+                              point: _selectedPoint,
+                              width: 48,
+                              height: 48,
+                              alignment: Alignment.topCenter,
+                              child: const Icon(
+                                Icons.location_pin,
+                                color: AppTheme.gsRed,
+                                size: 42,
+                                shadows: [
+                                  Shadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 3)),
+                                ],
                               ),
-                              child: const Icon(Icons.add_rounded, size: 18, color: Color(0xFF0F172A)),
                             ),
-                          ),
-                          const SizedBox(height: 6),
-                          InkWell(
-                            onTap: () => setState(() => _zoomLevel = (_zoomLevel / 1.2).clamp(0.5, 3.0)),
-                            child: Container(
-                              padding: const EdgeInsets.all(6),
-                              decoration: const BoxDecoration(
-                                color: Colors.white,
-                                shape: BoxShape.circle,
-                                boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4)],
-                              ),
-                              child: const Icon(Icons.remove_rounded, size: 18, color: Color(0xFF0F172A)),
-                            ),
-                          ),
-                        ],
-                      ),
+                          ],
+                        ),
+                      ],
                     ),
 
                     // Live Coordinates Pill
@@ -378,15 +503,72 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                       left: 10,
                       top: 10,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        key: const Key('osm_live_coords_pill'),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.9),
-                          borderRadius: BorderRadius.circular(8),
+                          color: Colors.white.withValues(alpha: 0.94),
+                          borderRadius: BorderRadius.circular(10),
                           border: Border.all(color: const Color(0xFFCBD5E1)),
                         ),
                         child: Text(
-                          'GPS: ${_currentLat.toStringAsFixed(4)}° N, ${_currentLng.toStringAsFixed(4)}° E',
-                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
+                          'Lat: ${_selectedPoint.latitude.toStringAsFixed(5)}, Lng: ${_selectedPoint.longitude.toStringAsFixed(5)}',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF0F172A),
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // Zoom Controls
+                    Positioned(
+                      right: 10,
+                      top: 10,
+                      child: Column(
+                        children: [
+                          _buildMapControlButton(
+                            key: const Key('osm_zoom_in_btn'),
+                            icon: Icons.add_rounded,
+                            onTap: () => _movePinTo(_selectedPoint, zoom: (_currentZoom + 1).clamp(3.0, 18.0)),
+                          ),
+                          const SizedBox(height: 6),
+                          _buildMapControlButton(
+                            key: const Key('osm_zoom_out_btn'),
+                            icon: Icons.remove_rounded,
+                            onTap: () => _movePinTo(_selectedPoint, zoom: (_currentZoom - 1).clamp(3.0, 18.0)),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Mandatory OpenStreetMap Attribution
+                    Positioned(
+                      right: 8,
+                      bottom: 8,
+                      child: InkWell(
+                        key: const Key('osm_attribution_link'),
+                        onTap: () async {
+                          final uri = Uri.parse('https://www.openstreetmap.org/copyright');
+                          try {
+                            await launchUrl(uri, mode: LaunchMode.externalApplication);
+                          } catch (_) {}
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.92),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                          ),
+                          child: const Text(
+                            '© OpenStreetMap contributors',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF334155),
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -396,7 +578,7 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
             ),
             const SizedBox(height: 10),
 
-            // Editable Address Form Section
+            // Optional Address Details (Manual Editing Always Available)
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
@@ -407,44 +589,65 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Selected Clinic Address Details:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF475569))),
-                  const SizedBox(height: 6),
                   TextField(
+                    key: const Key('osm_picker_address_field'),
                     controller: _customAddressController,
                     style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
                     decoration: const InputDecoration(
-                      labelText: 'Location / Clinic Address',
+                      labelText: 'Clinic Address (optional override)',
                       labelStyle: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
                       isDense: true,
-                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                       border: OutlineInputBorder(),
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 8),
                   Row(
                     children: [
                       Expanded(
                         child: TextField(
+                          key: const Key('osm_picker_city_field'),
                           controller: _customCityController,
-                          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
                           decoration: const InputDecoration(
                             labelText: 'City',
-                            labelStyle: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                            labelStyle: TextStyle(fontSize: 11),
                             isDense: true,
                             contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                             border: OutlineInputBorder(),
                           ),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 6),
                       Expanded(
                         child: TextField(
+                          key: const Key('osm_picker_state_field'),
+                          controller: _customStateController,
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                          decoration: const InputDecoration(
+                            labelText: 'State',
+                            labelStyle: TextStyle(fontSize: 11),
+                            isDense: true,
+                            contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      SizedBox(
+                        width: 92,
+                        child: TextField(
+                          key: const Key('osm_picker_pincode_field'),
                           controller: _customPincodeController,
                           keyboardType: TextInputType.number,
-                          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            LengthLimitingTextInputFormatter(6),
+                          ],
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
                           decoration: const InputDecoration(
                             labelText: 'Pincode',
-                            labelStyle: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                            labelStyle: TextStyle(fontSize: 11),
                             isDense: true,
                             contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                             border: OutlineInputBorder(),
@@ -463,50 +666,32 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
               children: [
                 Expanded(
                   child: OutlinedButton(
+                    key: const Key('osm_picker_cancel_btn'),
                     onPressed: () => Navigator.of(context).pop(),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 11),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
-                    child: const Text('Cancel', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    child: const Text('Cancel', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   flex: 2,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF012A58), Color(0xFF012A58)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
+                  child: ElevatedButton.icon(
+                    key: const Key('osm_picker_confirm_btn'),
+                    onPressed: _confirmSelection,
+                    icon: const Icon(Icons.check_circle_rounded, size: 16),
+                    label: const Text(
+                      'Confirm Location',
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
                     ),
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        final addr = _customAddressController.text.trim();
-                        final city = _customCityController.text.trim();
-                        final pin = _customPincodeController.text.trim();
-                        widget.onLocationSelected(
-                          addr.isNotEmpty ? addr : 'Selected Map Location',
-                          city,
-                          pin,
-                          _currentLat,
-                          _currentLng,
-                          _selectedName,
-                        );
-                        Navigator.of(context).pop();
-                      },
-                      icon: const Icon(Icons.check_circle_rounded, size: 16),
-                      label: const Text('Confirm Location', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.transparent,
-                        foregroundColor: Colors.white,
-                        shadowColor: Colors.transparent,
-                        padding: const EdgeInsets.symmetric(vertical: 11),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.gsNavy,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 11),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                   ),
                 ),
@@ -517,91 +702,25 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
       ),
     );
   }
-}
 
-class InteractiveMapGridPainter extends CustomPainter {
-  final Offset panOffset;
-  final double zoomLevel;
-  final double centerLat;
-  final double centerLng;
-
-  InteractiveMapGridPainter({
-    required this.panOffset,
-    required this.zoomLevel,
-    required this.centerLat,
-    required this.centerLng,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    // 1. Background Map Land Color
-    final bgPaint = Paint()..color = const Color(0xFFE2E8F0);
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), bgPaint);
-
-    // 2. Water body / Park patches
-    final waterPaint = Paint()..color = const Color(0x40FE3434);
-    final parkPaint = Paint()..color = const Color(0x14012A58);
-
-    final waterRect = Rect.fromLTWH(
-      (panOffset.dx * 0.5) % size.width - 60,
-      (panOffset.dy * 0.5) % size.height + 40,
-      140 * zoomLevel,
-      80 * zoomLevel,
+  Widget _buildMapControlButton({
+    required Key key,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.white,
+      shape: const CircleBorder(),
+      elevation: 2,
+      child: InkWell(
+        key: key,
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(7),
+          child: Icon(icon, size: 18, color: const Color(0xFF0F172A)),
+        ),
+      ),
     );
-    canvas.drawRRect(RRect.fromRectAndRadius(waterRect, const Radius.circular(20)), waterPaint);
-
-    final parkRect = Rect.fromLTWH(
-      (panOffset.dx * 0.3) % size.width + size.width * 0.6,
-      (panOffset.dy * 0.3) % size.height + size.height * 0.5,
-      120 * zoomLevel,
-      100 * zoomLevel,
-    );
-    canvas.drawRRect(RRect.fromRectAndRadius(parkRect, const Radius.circular(16)), parkPaint);
-
-    // 3. Grid roads & avenues
-    final roadPaint = Paint()
-      ..color = Colors.white
-      ..strokeWidth = 6.0 * zoomLevel
-      ..style = PaintingStyle.stroke;
-
-    final roadBorderPaint = Paint()
-      ..color = const Color(0xFFCBD5E1)
-      ..strokeWidth = (6.0 * zoomLevel) + 2
-      ..style = PaintingStyle.stroke;
-
-    final gridSpacing = 60.0 * zoomLevel;
-    final startX = panOffset.dx % gridSpacing;
-    final startY = panOffset.dy % gridSpacing;
-
-    // Draw vertical road lines
-    for (double x = startX - gridSpacing; x <= size.width + gridSpacing; x += gridSpacing) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), roadBorderPaint);
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), roadPaint);
-    }
-
-    // Draw horizontal road lines
-    for (double y = startY - gridSpacing; y <= size.height + gridSpacing; y += gridSpacing) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), roadBorderPaint);
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), roadPaint);
-    }
-
-    // 4. Highway diagonal artery
-    final highwayPaint = Paint()
-      ..color = const Color(0x14FE3434)
-      ..strokeWidth = 10.0 * zoomLevel
-      ..style = PaintingStyle.stroke;
-    canvas.drawLine(
-      Offset(panOffset.dx % size.width - 50, 0),
-      Offset(size.width, (panOffset.dy % size.height) + size.height + 50),
-      highwayPaint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant InteractiveMapGridPainter oldDelegate) {
-    return oldDelegate.panOffset != panOffset ||
-        oldDelegate.zoomLevel != zoomLevel ||
-        oldDelegate.centerLat != centerLat ||
-        oldDelegate.centerLng != centerLng;
   }
 }

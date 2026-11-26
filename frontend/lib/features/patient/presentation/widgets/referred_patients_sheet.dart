@@ -31,7 +31,34 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
 
   bool get _isDoctorSession {
     final role = (SessionService().currentSession?.role ?? '').trim().toLowerCase();
+    if (role == 'patient') return false;
     return _patientService.currentDoctor != null || role == 'dentist' || role == 'doctor';
+  }
+
+  bool _canDoctorActOnReferral(PatientReferral ref) {
+    if (!_isDoctorSession) return false;
+    final doc = _patientService.currentDoctor;
+    final sessUserId = (SessionService().currentSession?.userId ?? '').trim();
+    final myDocIds = <String>{
+      if (doc != null && doc.id.trim().isNotEmpty) doc.id.trim(),
+      if (doc != null && doc.userId.trim().isNotEmpty) doc.userId.trim(),
+      if (sessUserId.isNotEmpty) sessUserId,
+    };
+    final targetDocId = ref.doctorId.trim();
+    if (targetDocId.isNotEmpty && myDocIds.contains(targetDocId)) {
+      return true;
+    }
+    return _patientService.doctorReceivedPatientReferrals.any(
+      (r) => r.id.isNotEmpty && r.id == ref.id,
+    );
+  }
+
+  Future<void> _refreshReferrals() async {
+    await _patientService.syncReferralsFromApi();
+    if (_isDoctorSession) {
+      await _patientService.syncDoctorReferralsFromApi();
+    }
+    if (mounted) setState(() {});
   }
 
   @override
@@ -401,6 +428,12 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
                       ),
                     ),
                     IconButton(
+                      key: const Key('referred_sheet_refresh_btn'),
+                      tooltip: 'Refresh referrals',
+                      icon: Icon(Icons.refresh_rounded, color: isDark ? Colors.white70 : AppTheme.gsNavy),
+                      onPressed: _refreshReferrals,
+                    ),
+                    IconButton(
                       icon: Icon(Icons.close_rounded, color: isDark ? Colors.white60 : Colors.black54),
                       onPressed: () => Navigator.pop(context),
                     ),
@@ -493,7 +526,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
                         'Pending',
                         combinedList.where((r) => r.status == 'Pending').length,
                         isDark,
-                        label: 'Doctor Reviewing',
+                        label: 'Pending',
                       ),
                       const SizedBox(width: 6),
                       _buildFilterChip(
@@ -504,10 +537,10 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
                       ),
                       const SizedBox(width: 6),
                       _buildFilterChip(
-                        'Contacted',
-                        combinedList.where((r) => r.status == 'Contacted').length,
+                        'Rejected',
+                        combinedList.where((r) => r.status == 'Rejected').length,
                         isDark,
-                        label: 'Contacted',
+                        label: 'Rejected',
                       ),
                       const SizedBox(width: 6),
                       _buildFilterChip(
@@ -518,10 +551,10 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
                       ),
                       const SizedBox(width: 6),
                       _buildFilterChip(
-                        'Rejected',
-                        combinedList.where((r) => r.status == 'Rejected').length,
+                        'Contacted',
+                        combinedList.where((r) => r.status == 'Contacted').length,
                         isDark,
-                        label: 'Declined',
+                        label: 'Contacted',
                       ),
                     ],
                   ),
@@ -594,14 +627,20 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
                           ),
                         ),
                       )
-                    : ListView.builder(
-                        physics: const BouncingScrollPhysics(),
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                        itemCount: filteredList.length,
-                        itemBuilder: (context, index) {
-                          final ref = filteredList[index];
-                          return _buildReferralCard(ref, isDark);
-                        },
+                    : RefreshIndicator(
+                        color: AppTheme.gsNavy,
+                        onRefresh: _refreshReferrals,
+                        child: ListView.builder(
+                          physics: const BouncingScrollPhysics(
+                            parent: AlwaysScrollableScrollPhysics(),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          itemCount: filteredList.length,
+                          itemBuilder: (context, index) {
+                            final ref = filteredList[index];
+                            return _buildReferralCard(ref, isDark);
+                          },
+                        ),
                       ),
               ),
             ],
@@ -666,30 +705,42 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
   }
 
   Widget _buildReferralCard(PatientReferral ref, bool isDark) {
-    final isAccepted = ref.status == 'Accepted';
-    final isRejected = ref.status == 'Rejected';
-    final isContacted = ref.status == 'Contacted';
-    final isCompleted = ref.status == 'Completed';
+    final normalizedStatus = ref.status.trim().toLowerCase();
+    final isAccepted = normalizedStatus == 'accepted';
+    final isRejected = normalizedStatus == 'rejected' || normalizedStatus == 'declined';
+    final isContacted = normalizedStatus == 'contacted';
+    final isCompleted = normalizedStatus == 'completed';
+    final canDoctorAct = _canDoctorActOnReferral(ref);
 
     final statusColor = isAccepted || isCompleted
-        ? const Color(0xFF012A58)
+        ? const Color(0xFF047857)
         : (isContacted
             ? const Color(0xFF0369A1)
-            : const Color(0xFFFE3434));
+            : (isRejected ? const Color(0xFFFE3434) : const Color(0xFFB45309)));
     final statusBg = isAccepted || isCompleted
-        ? const Color(0x14012A58)
+        ? const Color(0x14047857)
         : (isContacted
             ? const Color(0x140369A1)
-            : const Color(0x14FE3434));
-    final statusText = isAccepted
-        ? '🟢 Accepted by Doctor'
+            : (isRejected ? const Color(0x14FE3434) : const Color(0x1AF59E0B)));
+    final statusLabel = isAccepted
+        ? 'Accepted'
         : (isContacted
-            ? '🔵 Contacted'
+            ? 'Contacted'
             : (isCompleted
-                ? '✅ Completed'
-                : (isRejected ? '🔴 Referral Declined' : '🟡 Doctor Reviewing')));
+                ? 'Completed'
+                : (isRejected ? 'Rejected' : 'Pending')));
+    final statusDescription = isAccepted
+        ? 'Doctor accepted the referral'
+        : (isContacted
+            ? 'Doctor contacted the patient'
+            : (isCompleted
+                ? 'Referral process completed'
+                : (isRejected
+                    ? 'Doctor rejected the referral'
+                    : 'Waiting for doctor response')));
 
     return Container(
+      key: Key('referred_sheet_card_${ref.id}'),
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -799,16 +850,17 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
                   children: [
                     Flexible(
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        key: Key('referral_status_badge_${ref.id}'),
+                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                         decoration: BoxDecoration(
                           color: statusBg,
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text(
-                          statusText,
+                          statusLabel,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: statusColor),
+                          style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: statusColor),
                         ),
                       ),
                     ),
@@ -886,6 +938,44 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
             ),
           ],
 
+          // Read-only status indicator banner for clear referral tracking
+          const SizedBox(height: 8),
+          Container(
+            key: Key('referral_status_banner_${ref.id}'),
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: statusBg,
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  isAccepted || isCompleted
+                      ? Icons.check_circle_outline_rounded
+                      : (isRejected
+                          ? Icons.cancel_outlined
+                          : (isContacted ? Icons.phone_in_talk_outlined : Icons.hourglass_top_rounded)),
+                  size: 14,
+                  color: statusColor,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '$statusLabel – $statusDescription',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: statusColor,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
           if (isRejected && ref.rejectionReason != null && ref.rejectionReason!.isNotEmpty) ...[
             const SizedBox(height: 6),
             Container(
@@ -901,7 +991,8 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
             ),
           ],
 
-          if (!isAccepted && !isRejected && !isContacted && !isCompleted) ...[
+          // Accept / Decline / Status transition actions are strictly restricted to the assigned Doctor
+          if (canDoctorAct && !isAccepted && !isRejected && !isContacted && !isCompleted) ...[
             const SizedBox(height: 10),
             Row(
               children: [
@@ -959,7 +1050,7 @@ class _ReferredPatientsSheetState extends State<ReferredPatientsSheet> {
             ),
           ],
 
-          if (isAccepted || isContacted) ...[
+          if (canDoctorAct && (isAccepted || isContacted)) ...[
             const SizedBox(height: 8),
             Row(
               children: [

@@ -42,6 +42,10 @@ dependencies:
   image_picker: ^1.1.2
   url_launcher: ^6.2.5
 
+  # OpenStreetMap Interactive Maps (Zero Paid API Keys)
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+
   # Dynamic Visual Assets
   flutter_spinkit: ^5.2.0
   google_fonts: ^6.1.0

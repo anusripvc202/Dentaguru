@@ -1,6 +1,7 @@
 import 'package:dentaguru/core/models/referral_model.dart';
 import 'package:dentaguru/core/services/api_service.dart';
 import 'package:dentaguru/core/services/patient_problem_service.dart';
+import 'package:dentaguru/core/services/session_service.dart';
 import 'package:dentaguru/features/patient/presentation/screens/refer_a_friend_screen.dart';
 import 'package:dentaguru/features/patient/presentation/widgets/referred_patients_sheet.dart';
 import 'package:flutter/material.dart';
@@ -19,6 +20,7 @@ void main() {
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     FlutterSecureStorage.setMockInitialValues({});
+    await SessionService().clearSession();
     createdReferrals.clear();
     statusUpdates.clear();
     service = PatientProblemService();
@@ -168,6 +170,27 @@ void main() {
         tester.view.resetDevicePixelRatio();
       });
 
+      await SessionService().saveSession(
+        userId: 'doc-neuro-user-1',
+        role: 'Dentist',
+        name: 'Dr. Neuro Specialist',
+        email: 'neuro@gshealth.test',
+        phone: '9988776611',
+        token: 'doc-neuro-jwt',
+      );
+      service.registerDoctor(
+        id: 'doc-neuro-1',
+        userId: 'doc-neuro-user-1',
+        name: 'Dr. Neuro Specialist',
+        specialty: 'Neurology',
+        qualification: 'MBBS, DM',
+        experienceYears: 8,
+        clinicName: 'Neuro Care',
+        phone: '9988776611',
+        email: 'neuro@gshealth.test',
+        licenseNumber: 'MED-NEURO-1',
+      );
+
       service.addTestPatientReferral(
         PatientReferral(
           id: 'ref-status-1',
@@ -176,8 +199,8 @@ void main() {
           referredPatientMobile: '9876543219',
           requiredSpecialist: 'Neurology',
           clinicalComplaint: 'Migraine follow-up',
-          doctorId: '',
-          doctorName: 'Any available specialist',
+          doctorId: 'doc-neuro-1',
+          doctorName: 'Dr. Neuro Specialist',
           status: 'Accepted',
         ),
         asReceived: false,
@@ -208,13 +231,13 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(statusUpdates.any((u) => u.$1 == 'ref-status-1' && u.$2 == 'Contacted'), isTrue);
-      expect(find.text('🔵 Contacted'), findsOneWidget);
+      expect(find.text('Contacted – Doctor contacted the patient'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('referred_sheet_completed_btn_ref-status-1')));
       await tester.pumpAndSettle();
 
       expect(statusUpdates.any((u) => u.$1 == 'ref-status-1' && u.$2 == 'Completed'), isTrue);
-      expect(find.text('✅ Completed'), findsOneWidget);
+      expect(find.text('Completed – Referral process completed'), findsOneWidget);
     },
   );
 }

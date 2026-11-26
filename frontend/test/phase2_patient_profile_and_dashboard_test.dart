@@ -278,19 +278,36 @@ void main() {
         await tester.pump(const Duration(milliseconds: 400));
         await tester.pump(const Duration(milliseconds: 400));
 
-        // Scroll down to upcoming consultation & health overview cards
+        // Home shows compact hero summary + Open Visits CTA, NOT full Upcoming Consultation cards
+        expect(find.byKey(const Key('hero_appointment_title')), findsOneWidget);
+        expect(find.byKey(const Key('home_open_visits_button')), findsOneWidget);
+        expect(find.byKey(const Key('upcoming_consultation_card_req-online-1')), findsNothing);
+
+        // Scroll down to health overview cards on compact Home
         await tester.drag(find.byType(SingleChildScrollView).first, const Offset(0, -700));
         await tester.pump(const Duration(milliseconds: 300));
-
-        expect(find.byKey(const Key('upcoming_consultation_card_req-online-1')), findsOneWidget);
-        expect(find.text('Online'), findsWidgets);
-        expect(find.textContaining('Fee: ₹800'), findsOneWidget);
-        expect(find.textContaining('Fee: ₹500'), findsNothing);
-        expect(find.byKey(const Key('join_consultation_button_req-online-1')), findsOneWidget);
 
         expect(find.byKey(const Key('dashboard_prescriptions_quick_card')), findsOneWidget);
         expect(find.byKey(const Key('dashboard_diagnostics_quick_card')), findsOneWidget);
         expect(find.byKey(const Key('dashboard_previous_visits_card')), findsOneWidget);
+
+        // Open Visits tab to inspect full consultation card, real fee, and Join/Chat action
+        await tester.tap(
+          find.descendant(
+            of: find.byType(BottomNavigationBar),
+            matching: find.text('Visits'),
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
+        expect(find.byKey(const Key('visit_card_req-online-1')), findsOneWidget);
+        expect(find.text('ONLINE'), findsOneWidget);
+        expect(find.textContaining('Fee: ₹800'), findsOneWidget);
+        expect(find.textContaining('Fee: ₹500'), findsNothing);
+        expect(find.byKey(const Key('chat_visit_button_req-online-1')), findsOneWidget);
+        expect(find.byKey(const Key('details_visit_button_req-online-1')), findsOneWidget);
+        expect(find.byKey(const Key('reschedule_visit_button_req-online-1')), findsOneWidget);
       },
     );
   });

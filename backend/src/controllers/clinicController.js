@@ -74,11 +74,23 @@ function formatDentistRecord(d) {
         ? (normStatusLower === 'offline' ? 'Offline' : 'Unavailable')
         : (explicitOnline || (normStatusLower.includes('busy') || normStatusLower === 'delayed' ? availabilityStatus : (isOnline ? 'Online' : 'Offline')));
 
+    const { normalizeConsultationMode, parseUserDeviceMeta } = require('../utils/doctorClinicLocationHelper');
+    const uMeta = parseUserDeviceMeta(uObj.device_token);
+    const resolvedConsultationMode = normalizeConsultationMode(
+        d.consultation_mode ?? d.consultationMode ?? uMeta.consultationMode ?? uMeta.consultation_mode,
+        'BOTH'
+    );
+    const isOnlineOnly = resolvedConsultationMode === 'ONLINE_ONLY';
+    const rawLat = d.latitude ?? cObj.latitude ?? uObj.latitude ?? uMeta.latitude ?? null;
+    const rawLng = d.longitude ?? cObj.longitude ?? uObj.longitude ?? uMeta.longitude ?? null;
+    const resolvedLat = !isOnlineOnly && rawLat !== null && rawLat !== '' && Number.isFinite(Number(rawLat)) ? Number(rawLat) : null;
+    const resolvedLng = !isOnlineOnly && rawLng !== null && rawLng !== '' && Number.isFinite(Number(rawLng)) ? Number(rawLng) : null;
+
     return {
         id: d.id,
         user_id: d.user_id || uObj.id,
-        clinic_id: d.clinic_id || cObj.id || null,
-        clinicId: d.clinic_id || cObj.id || null,
+        clinic_id: isOnlineOnly ? null : (d.clinic_id || cObj.id || null),
+        clinicId: isOnlineOnly ? null : (d.clinic_id || cObj.id || null),
         name: formattedName,
         email: d.email || uObj.email || '',
         phone: d.phone || uObj.phone || '',
@@ -97,14 +109,16 @@ function formatDentistRecord(d) {
         bio: d.bio || '',
         rating: reviewCountVal > 0 ? (Number(d.rating) || 0) : 0,
         reviews_count: reviewCountVal,
-        clinicName: cObj.clinic_name || d.clinicName || '',
-        clinicAddress: cObj.location || d.clinicAddress || d.location || '',
-        state: d.state || uObj.state || '',
-        city: d.city || uObj.city || '',
-        pincode: d.pincode || uObj.pincode || '',
+        consultation_mode: resolvedConsultationMode,
+        consultationMode: resolvedConsultationMode,
+        clinicName: isOnlineOnly ? '' : (d.clinic_name || cObj.clinic_name || d.clinicName || uMeta.clinicName || ''),
+        clinicAddress: isOnlineOnly ? '' : (d.clinic_address || cObj.location || d.clinicAddress || d.location || uMeta.clinicAddress || ''),
+        state: isOnlineOnly ? '' : (d.state || uObj.state || uMeta.state || ''),
+        city: d.city || uObj.city || uMeta.city || '',
+        pincode: isOnlineOnly ? '' : (d.pincode || uObj.pincode || uMeta.pincode || ''),
         languages: doctorLangs,
-        latitude: d.latitude || uObj.latitude || null,
-        longitude: d.longitude || uObj.longitude || null,
+        latitude: resolvedLat,
+        longitude: resolvedLng,
         availability_status: availabilityStatus,
         status: availabilityStatus,
         onlineStatus: resolvedOnlineStatus,
@@ -814,7 +828,7 @@ exports.deleteDentist = async (req, res) => {
     }
 };
 
-// 9. UPDATE DOCTOR PROFESSIONAL PROFILE (Specialty, Qualification, Experience, Clinic, Availability)
+// 9. UPDATE DOCTOR PROFESSIONAL PROFILE (Specialty, Qualification, Experience, Clinic, Location, Availability)
 exports.updateDoctorProfile = async (req, res) => {
     if (!ensureClinicOrDoctorMutationAuth(req, res)) return;
     const { id } = req.params;
@@ -834,13 +848,27 @@ exports.updateDoctorProfile = async (req, res) => {
         licenseNumber,
         license_number,
         clinicName,
+        clinic_name,
+        clinicAddress,
+        clinic_address,
+        consultationFee,
+        consultation_fee,
+        consultationMode,
+        consultation_mode,
+        bio,
         city,
         pincode,
         state,
+        latitude,
+        longitude,
+        clearLocation,
         status,
         availability_status,
         languages,
-        languagesKnown
+        languagesKnown,
+        phone,
+        profilePhoto,
+        removeProfilePhoto
     } = req.body;
     try {
         if (!id) {
@@ -848,58 +876,186 @@ exports.updateDoctorProfile = async (req, res) => {
         }
 
         const { User } = require('../models/Schemas');
+        const { _resolveAndUploadProfilePhoto } = require('./authController');
+        const { normalizeConsultationMode, validateCoordinates } = require('../utils/doctorClinicLocationHelper');
+
+        const hasModeInput = consultationMode !== undefined || consultation_mode !== undefined;
+        const normalizedMode = hasModeInput
+            ? normalizeConsultationMode(consultationMode ?? consultation_mode, 'BOTH')
+            : undefined;
+        const switchingToOnlineOnly = normalizedMode === 'ONLINE_ONLY';
+
+        const cleanPincode = pincode !== undefined && pincode !== null ? String(pincode).trim() : undefined;
+        if (!switchingToOnlineOnly && cleanPincode !== undefined && cleanPincode.length > 0 && !/^\d{6}$/.test(cleanPincode)) {
+            return res.status(400).json({ success: false, message: 'Please enter a valid 6-digit pincode.' });
+        }
+
+        const coordValidation = switchingToOnlineOnly
+            ? { ok: true, hasUpdate: true, latitude: null, longitude: null }
+            : validateCoordinates(latitude, longitude, clearLocation === true);
+        if (!coordValidation.ok) {
+            return res.status(400).json({ success: false, message: coordValidation.message });
+        }
+
+        const hasExplicitPhotoField = Object.prototype.hasOwnProperty.call(req.body || {}, 'profilePhoto');
+        const shouldRemovePhoto = removeProfilePhoto === true ||
+            (hasExplicitPhotoField && (profilePhoto === null || String(profilePhoto).trim() === '' || String(profilePhoto).trim().toLowerCase() === 'null'));
+
+        let uploadedPhotoUrl;
+        if (shouldRemovePhoto) {
+            uploadedPhotoUrl = null;
+        } else if (hasExplicitPhotoField && profilePhoto) {
+            const photoResolution = await _resolveAndUploadProfilePhoto(profilePhoto, { roleFolder: 'doctors' });
+            if (!photoResolution.ok) {
+                return res.status(photoResolution.status || 400).json({
+                    success: false,
+                    code: photoResolution.code || 'PROFILE_IMAGE_UPLOAD_FAILED',
+                    message: photoResolution.message || 'Failed to upload profile image.'
+                });
+            }
+            uploadedPhotoUrl = photoResolution.photoUrl;
+        }
+
         const normalizedLanguages = (languages !== undefined || languagesKnown !== undefined)
             ? normalizeLanguagesList(languages ?? languagesKnown)
             : null;
         const requestedSpec = (specialty || speciality || specialtyName || medicalSpecialty || '').toString().trim();
         const requestedSpecId = (specialtyId || specialty_id || '').toString().trim() || undefined;
+        const incomingClinicName = clinicName !== undefined ? clinicName : clinic_name;
+        const incomingClinicAddress = clinicAddress !== undefined ? clinicAddress : clinic_address;
+        const cleanClinicName = incomingClinicName !== undefined && incomingClinicName !== null
+            ? String(incomingClinicName).trim()
+            : undefined;
+        const cleanClinicAddress = incomingClinicAddress !== undefined && incomingClinicAddress !== null
+            ? String(incomingClinicAddress).trim()
+            : undefined;
+        const cleanState = state !== undefined && state !== null ? String(state).trim() : undefined;
+        const cleanCity = city !== undefined && city !== null ? String(city).trim() : undefined;
+
         let clinicId = undefined;
-        if (clinicName && String(clinicName).trim()) {
-            const cName = String(clinicName).trim();
-            let clinic = await Clinic.findOne({ clinic_name: cName });
+        if (switchingToOnlineOnly) {
+            clinicId = null;
+        } else if (cleanClinicName && cleanClinicName.length > 0) {
+            let clinic = await Clinic.findOne({ clinic_name: cleanClinicName });
+            const composedLoc = cleanClinicAddress && cleanClinicAddress.length > 0
+                ? cleanClinicAddress
+                : (cleanCity ? `${cleanCity}${cleanPincode ? ' - ' + cleanPincode : ''}` : 'GS HEALTH Medical Center');
             if (!clinic) {
                 clinic = await Clinic.create({
-                    clinic_name: cName,
-                    location: city ? `${city}${pincode ? ' - ' + pincode : ''}` : 'GS HEALTH Medical Center',
+                    clinic_name: cleanClinicName,
+                    location: composedLoc,
+                    latitude: coordValidation.hasUpdate ? coordValidation.latitude : null,
+                    longitude: coordValidation.hasUpdate ? coordValidation.longitude : null,
                     verified: true,
                     services: [requestedSpec || 'General Medicine']
                 });
+            } else {
+                const clinicPatch = {};
+                if (cleanClinicAddress && cleanClinicAddress.length > 0 && (!clinic.location || clinic.location === 'GS HEALTH Medical Center')) {
+                    clinicPatch.location = cleanClinicAddress;
+                }
+                if (coordValidation.hasUpdate && coordValidation.latitude !== null && coordValidation.longitude !== null) {
+                    if (clinic.latitude == null) clinicPatch.latitude = coordValidation.latitude;
+                    if (clinic.longitude == null) clinicPatch.longitude = coordValidation.longitude;
+                }
+                if (Object.keys(clinicPatch).length > 0) {
+                    await Clinic.findByIdAndUpdate(clinic.id, clinicPatch);
+                }
             }
             if (clinic && clinic.id) clinicId = clinic.id;
         }
 
-        const updatedDentist = await Dentist.findByIdAndUpdate(id, {
+        const dentistUpdatePayload = {
             ...(requestedSpec ? { speciality: requestedSpec } : {}),
             ...(requestedSpecId ? { specialty_id: requestedSpecId } : {}),
             ...(department ? { department } : {}),
-            qualifications: qualification || qualifications,
-            experience_years: experienceYears ?? experience_years,
-            license_number: licenseNumber || license_number,
-            availability_status: status || availability_status,
+            ...(qualification || qualifications ? { qualifications: qualification || qualifications } : {}),
+            ...(experienceYears !== undefined || experience_years !== undefined ? { experience_years: experienceYears ?? experience_years } : {}),
+            ...(licenseNumber || license_number ? { license_number: licenseNumber || license_number } : {}),
+            ...(consultationFee !== undefined || consultation_fee !== undefined ? { consultation_fee: consultationFee ?? consultation_fee } : {}),
+            ...(bio !== undefined ? { bio } : {}),
+            ...(status || availability_status ? { availability_status: status || availability_status } : {}),
             ...(clinicId !== undefined ? { clinic_id: clinicId } : {}),
-            ...(city !== undefined ? { city } : {}),
-            ...(pincode !== undefined ? { pincode } : {}),
-            ...(state !== undefined ? { state } : {}),
+            ...(normalizedMode !== undefined ? { consultation_mode: normalizedMode } : {}),
+            ...(switchingToOnlineOnly
+                ? { clinic_name: null, clinic_address: null, state: '', pincode: '', latitude: null, longitude: null }
+                : {
+                    ...(cleanClinicName !== undefined ? { clinic_name: cleanClinicName } : {}),
+                    ...(cleanClinicAddress !== undefined ? { clinic_address: cleanClinicAddress } : {}),
+                    ...(cleanState !== undefined ? { state: cleanState } : {}),
+                    ...(cleanPincode !== undefined ? { pincode: cleanPincode } : {}),
+                    ...(coordValidation.hasUpdate ? { latitude: coordValidation.latitude, longitude: coordValidation.longitude } : {})
+                }),
+            ...(cleanCity !== undefined ? { city: cleanCity } : {}),
             ...(normalizedLanguages && normalizedLanguages.length > 0 ? { languages: normalizedLanguages } : {})
-        });
+        };
+
+        const updatedDentist = await Dentist.findByIdAndUpdate(id, dentistUpdatePayload);
 
         const targetUserId = updatedDentist?.user_id || id;
-        if (name || city || pincode || (normalizedLanguages && normalizedLanguages.length > 0)) {
+        const metaPatch = {};
+        if (normalizedMode !== undefined) metaPatch.consultationMode = normalizedMode;
+        if (switchingToOnlineOnly) {
+            metaPatch.clinicName = '';
+            metaPatch.clinicAddress = '';
+            metaPatch.state = '';
+            metaPatch.pincode = '';
+            metaPatch.latitude = null;
+            metaPatch.longitude = null;
+        } else {
+            if (cleanClinicName !== undefined) metaPatch.clinicName = cleanClinicName;
+            if (cleanClinicAddress !== undefined) metaPatch.clinicAddress = cleanClinicAddress;
+            if (cleanState !== undefined) metaPatch.state = cleanState;
+            if (cleanPincode !== undefined) metaPatch.pincode = cleanPincode;
+            if (coordValidation.hasUpdate) {
+                metaPatch.latitude = coordValidation.latitude;
+                metaPatch.longitude = coordValidation.longitude;
+            }
+        }
+        const userUpdates = {
+            ...(name ? { name } : {}),
+            ...(phone ? { phone } : {}),
+            ...(cleanCity !== undefined ? { city: cleanCity } : {}),
+            ...(switchingToOnlineOnly
+                ? { state: '', pincode: '', latitude: null, longitude: null }
+                : {
+                    ...(cleanPincode !== undefined ? { pincode: cleanPincode } : {}),
+                    ...(cleanState !== undefined ? { state: cleanState } : {}),
+                    ...(coordValidation.hasUpdate ? { latitude: coordValidation.latitude, longitude: coordValidation.longitude } : {})
+                }),
+            ...(normalizedLanguages && normalizedLanguages.length > 0 ? { languages: normalizedLanguages } : {}),
+            ...(uploadedPhotoUrl !== undefined ? { biometric_token: uploadedPhotoUrl } : {}),
+            ...(Object.keys(metaPatch).length > 0 ? { device_token: JSON.stringify(metaPatch) } : {})
+        };
+        if (Object.keys(userUpdates).length > 0) {
             try {
-                await User.findByIdAndUpdate(targetUserId, {
-                    ...(name ? { name } : {}),
-                    ...(city ? { city } : {}),
-                    ...(pincode ? { pincode } : {}),
-                    ...(normalizedLanguages && normalizedLanguages.length > 0 ? { languages: normalizedLanguages } : {})
-                });
+                await User.findByIdAndUpdate(targetUserId, userUpdates);
             } catch (_) { }
         }
 
         const refreshed = await Dentist.findById(updatedDentist?.id || id) || updatedDentist;
+        const formattedDoctor = refreshed ? formatDentistRecord(refreshed) : updatedDentist;
+        if (formattedDoctor) {
+            if (uploadedPhotoUrl !== undefined) formattedDoctor.profilePhoto = uploadedPhotoUrl;
+            if (normalizedMode !== undefined) {
+                formattedDoctor.consultationMode = normalizedMode;
+                formattedDoctor.consultation_mode = normalizedMode;
+            }
+            if (!switchingToOnlineOnly) {
+                if (cleanClinicName !== undefined) formattedDoctor.clinicName = cleanClinicName;
+                if (cleanClinicAddress !== undefined) formattedDoctor.clinicAddress = cleanClinicAddress;
+                if (cleanState !== undefined) formattedDoctor.state = cleanState;
+                if (cleanPincode !== undefined) formattedDoctor.pincode = cleanPincode;
+                if (coordValidation.hasUpdate) {
+                    formattedDoctor.latitude = coordValidation.latitude;
+                    formattedDoctor.longitude = coordValidation.longitude;
+                }
+            }
+        }
         res.json({
             success: true,
             message: 'Doctor professional profile updated successfully.',
-            doctor: refreshed ? formatDentistRecord(refreshed) : updatedDentist
+            doctor: formattedDoctor
         });
     } catch (err) {
         console.error('Update Doctor Profile Error:', err.message);

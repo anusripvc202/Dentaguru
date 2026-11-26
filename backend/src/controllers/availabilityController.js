@@ -1,4 +1,14 @@
-const { DoctorAvailability, Appointment, Dentist, Clinic, isDoctorRecordAvailable } = require('../models/Schemas');
+const {
+    DoctorAvailability,
+    DoctorSchedulingSettings,
+    Appointment,
+    AppointmentSlotLock,
+    ReleasedSlot,
+    PatientDoctorPreference,
+    Dentist,
+    Clinic,
+    isDoctorRecordAvailable,
+} = require('../models/Schemas');
 const {
     getBookingRulesConfig,
     setBookingRulesConfig,
@@ -8,8 +18,17 @@ const {
     minutesToClockSlot,
     normalizeConsultationType,
     getConsultationTimingForType,
+    checkSlotBookableForDateYmd,
     formatLocalYmd,
 } = require('../config/bookingRulesConfig');
+const {
+    ALLOWED_DURATIONS,
+    sanitizeSmartSchedule,
+    getModeScheduleWindow,
+    generateBaseSlotsWithBreaks,
+    generateDynamicSlots,
+    validateSlotAgainstSchedule,
+} = require('../services/smartSchedulingEngine');
 
 /**
  * Utility: Convert "hh:mm AM/PM" to minutes from midnight
@@ -230,115 +249,86 @@ exports.getDoctorAvailability = async (req, res) => {
             });
         }
 
-        const schedule = await DoctorAvailability.getSchedule(dentistId);
+        const schedule = sanitizeSmartSchedule(await DoctorAvailability.getSchedule(dentistId));
 
         if (date) {
             const cleanDate = DoctorAvailability.extractDateYmd(date);
-            const weekdayName = DoctorAvailability.getWeekdayNameFromYmd(cleanDate);
             const availRecord = await DoctorAvailability.findOne({ dentist_id: dentistId, date: cleanDate });
-
             const activeAppts = await countActiveAppointmentsForDate(dentistId, cleanDate);
-            const bookedSlots = activeAppts
-                .map(a => (a.time_slot || a.timeSlot || '').trim())
-                .filter(Boolean);
-
-            const isBlocked = availRecord ? Boolean(availRecord.is_blocked) : false;
-            const blockedReason = availRecord && isBlocked
-                ? (availRecord.blocked_reason || 'Doctor on Leave / Clinic Closed')
-                : null;
-
-            const workingDays = Array.isArray(schedule.workingDays) && schedule.workingDays.length > 0
-                ? schedule.workingDays
-                : ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-            const hasExplicitRecordSlots = Boolean(
-                availRecord && !isBlocked && Array.isArray(availRecord.slots) && availRecord.slots.length > 0
-            );
-            const isWorkingDay = !schedule.isConfigured ||
-                workingDays.includes(weekdayName) ||
-                hasExplicitRecordSlots;
+            const blockedSlots = await DoctorAvailability.getBlockedSlotsForDate(dentistId, cleanDate);
+            const activeLocks = await AppointmentSlotLock.findActiveForDoctorAndDate(dentistId, cleanDate).catch(() => []);
+            const releasedSlots = await ReleasedSlot.findForDoctorAndDate(dentistId, cleanDate, { onlyAvailable: true }).catch(() => []);
 
             const rules = getBookingRulesConfig();
             const requestedConsultationType = normalizeConsultationType(
                 req.query.consultationType || req.query.consultationMode || 'In-Person'
             );
-            const timingForMode = getConsultationTimingForType(requestedConsultationType, rules);
-            const slotInterval = availRecord?.slot_duration_minutes || schedule.slotIntervalMinutes || schedule.slotDurationMinutes || rules.defaultSlotIntervalMinutes || 30;
-            const workingEndTime = availRecord?.end_time || schedule.endTime || '05:00 PM';
-            const breakStartTime = schedule.hasBreak ? schedule.breakStartTime : null;
-            const breakEndTime = schedule.hasBreak ? schedule.breakEndTime : null;
+            const callerPatientId = (req.user && String(req.user.role || '').toLowerCase() === 'patient')
+                ? req.user.id
+                : (req.query.patientId || null);
 
-            let allSlots = [];
-            if (!isBlocked && isWorkingDay) {
-                if (hasExplicitRecordSlots) {
-                    allSlots = availRecord.slots;
-                } else {
-                    allSlots = generateTimeSlots(
-                        availRecord?.start_time || schedule.startTime || '09:00 AM',
-                        workingEndTime,
-                        slotInterval,
-                        breakStartTime,
-                        breakEndTime
-                    );
-                }
-            }
-
-            const blockedSlots = await DoctorAvailability.getBlockedSlotsForDate(dentistId, cleanDate);
-            const occupiedIntervals = activeAppts
-                .map(a => getAppointmentOccupiedInterval(a, rules))
-                .filter(Boolean);
-            const activeDelayMinutes = occupiedIntervals.reduce(
-                (maxDelay, item) => Math.max(maxDelay, Number(item.delayMinutes || 0)),
-                0
-            );
-
-            const availableSlots = (isBlocked || !isWorkingDay)
-                ? []
-                : computeUnifiedAvailableSlots({
-                    dateYmd: cleanDate,
-                    baseSlots: allSlots,
-                    workingEndTime: hasExplicitRecordSlots ? null : workingEndTime,
-                    breakStartTime,
-                    breakEndTime,
-                    activeAppointments: activeAppts,
-                    blockedSlots,
-                    consultationType: requestedConsultationType,
-                    rulesOverride: rules,
-                });
+            const dynamic = generateDynamicSlots({
+                schedule,
+                dateYmd: cleanDate,
+                consultationType: requestedConsultationType,
+                activeAppointments: activeAppts,
+                activeLocks,
+                releasedSlots,
+                blockedSlots,
+                explicitDateRecord: availRecord,
+                callerPatientId,
+                rulesOverride: rules,
+            });
 
             const liveDoctorStatus = targetDoctor?.availability_status || 'Available';
+            const timingForMode = {
+                consultationType: dynamic.consultationType,
+                durationMinutes: dynamic.consultationDurationMinutes,
+                bufferMinutes: dynamic.bufferMinutes,
+                totalBlockedMinutes: dynamic.consultationDurationMinutes + dynamic.bufferMinutes,
+            };
 
             return res.status(200).json({
                 success: true,
                 bookingRules: rules,
-                consultationType: requestedConsultationType,
+                consultationType: dynamic.consultationType,
                 consultationTiming: timingForMode,
                 availability: {
                     dentistId: targetDoctor?.id || dentistId,
                     date: cleanDate,
-                    dayOfWeek: availRecord?.day_of_week || weekdayName,
-                    startTime: availRecord?.start_time || schedule.startTime || '09:00 AM',
-                    endTime: workingEndTime,
-                    slotDurationMinutes: slotInterval,
-                    slotIntervalMinutes: slotInterval,
-                    consultationType: requestedConsultationType,
-                    consultationDurationMinutes: timingForMode.durationMinutes,
-                    bufferMinutes: timingForMode.bufferMinutes,
+                    dayOfWeek: dynamic.dayOfWeek,
+                    startTime: dynamic.startTime,
+                    endTime: dynamic.endTime,
+                    slotDurationMinutes: dynamic.slotDurationMinutes,
+                    slotIntervalMinutes: dynamic.slotIntervalMinutes,
+                    consultationType: dynamic.consultationType,
+                    consultationDurationMinutes: dynamic.consultationDurationMinutes,
+                    bufferMinutes: dynamic.bufferMinutes,
                     liveDoctorStatus,
-                    activeDelayMinutes,
-                    hasBreak: Boolean(schedule.hasBreak),
-                    breakStartTime,
-                    breakEndTime,
-                    workingDays,
-                    isWorkingDay,
+                    activeDelayMinutes: dynamic.activeDelayMinutes,
+                    breaks: dynamic.breaks,
+                    hasBreak: dynamic.hasBreak,
+                    breakStartTime: dynamic.breakStartTime,
+                    breakEndTime: dynamic.breakEndTime,
+                    workingDays: dynamic.workingDays,
+                    isWorkingDay: dynamic.isWorkingDay,
+                    modeEnabled: dynamic.modeEnabled,
+                    maxAppointmentsPerDay: dynamic.maxAppointmentsPerDay,
+                    dailyLimitReached: dynamic.dailyLimitReached,
+                    allowSimultaneousOnlineAndInPerson: dynamic.allowSimultaneousOnlineAndInPerson,
                     hasCustomRecord: Boolean(availRecord),
-                    allSlots,
-                    bookedSlots,
-                    blockedSlots,
-                    occupiedIntervals,
-                    availableSlots,
-                    isBlocked,
-                    blockedReason,
-                    existingAppointmentsCount: activeAppts.length
+                    allSlots: dynamic.allSlots,
+                    bookedSlots: dynamic.bookedSlots,
+                    lockedSlots: dynamic.lockedSlots,
+                    blockedSlots: dynamic.blockedSlots,
+                    occupiedIntervals: dynamic.occupiedIntervals,
+                    availableSlots: dynamic.availableSlots,
+                    slotItems: dynamic.slotItems,
+                    releasedSlots: dynamic.releasedSlots,
+                    isBlocked: dynamic.isBlocked,
+                    blockedReason: dynamic.blockedReason,
+                    existingAppointmentsCount: dynamic.existingAppointmentsCount,
+                    timezone: 'Asia/Kolkata',
                 },
                 schedule
             });
@@ -387,7 +377,7 @@ exports.getDoctorSchedule = async (req, res) => {
     }
 };
 
-// 1C. UPDATE PERSISTED WEEKLY SCHEDULE (Working Days, Hours, Lunch Break, Slot Duration)
+// 1C. UPDATE PERSISTED WEEKLY & SMART SCHEDULE (Working Days, Hours, Multiple Breaks, Online/In-Person Schedules, Durations, Buffers, Daily Limits, Blocked Time Ranges)
 exports.updateDoctorSchedule = async (req, res) => {
     try {
         const {
@@ -396,9 +386,24 @@ exports.updateDoctorSchedule = async (req, res) => {
             startTime,
             endTime,
             slotDurationMinutes,
+            defaultDurationMinutes,
+            breaks,
             hasBreak,
             breakStartTime,
             breakEndTime,
+            inPersonEnabled,
+            inPersonDurationMinutes,
+            onlineEnabled,
+            onlineDurationMinutes,
+            onlineWorkingDays,
+            onlineStartTime,
+            onlineEndTime,
+            bufferMinutes,
+            onlineBufferMinutes,
+            inPersonBufferMinutes,
+            maxAppointmentsPerDay,
+            allowSimultaneousOnlineAndInPerson,
+            blockedTimeRanges,
             slots,
             applyToUpcomingDays = true
         } = req.body;
@@ -431,26 +436,83 @@ exports.updateDoctorSchedule = async (req, res) => {
             });
         }
 
+        if (onlineStartTime && onlineEndTime) {
+            const onStart = parseClockSlotMinutes(onlineStartTime);
+            const onEnd = parseClockSlotMinutes(onlineEndTime);
+            if (onStart === null || onEnd === null || onStart >= onEnd) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Online end time must be after Online start time.'
+                });
+            }
+        }
+
+        // Validate durations strictly against allowed values (15, 20, 30, 45, 60)
+        for (const [label, rawDur] of [
+            ['slotDurationMinutes', slotDurationMinutes],
+            ['defaultDurationMinutes', defaultDurationMinutes],
+            ['inPersonDurationMinutes', inPersonDurationMinutes],
+            ['onlineDurationMinutes', onlineDurationMinutes],
+        ]) {
+            if (rawDur !== undefined && rawDur !== null && rawDur !== '') {
+                const parsed = parseInt(String(rawDur), 10);
+                if (!ALLOWED_DURATIONS.includes(parsed)) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `${label} must be one of ${ALLOWED_DURATIONS.join(', ')} minutes.`
+                    });
+                }
+            }
+        }
+
+        // Validate breaks if provided
+        if (Array.isArray(breaks)) {
+            for (const b of breaks) {
+                const bS = parseClockSlotMinutes(b?.startTime || b?.start_time);
+                const bE = parseClockSlotMinutes(b?.endTime || b?.end_time);
+                if (bS === null || bE === null || bE <= bS) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Every break period must have a valid startTime and endTime with endTime after startTime.'
+                    });
+                }
+            }
+        }
+
         const savedSchedule = await DoctorAvailability.saveSchedule(dentistId, {
             workingDays,
             startTime: startTime || '09:00 AM',
             endTime: endTime || '05:00 PM',
-            slotDurationMinutes: slotDurationMinutes || 30,
-            hasBreak: hasBreak !== undefined ? Boolean(hasBreak) : Boolean(breakStartTime && breakEndTime),
+            slotDurationMinutes: slotDurationMinutes ?? inPersonDurationMinutes ?? defaultDurationMinutes ?? 30,
+            defaultDurationMinutes: defaultDurationMinutes ?? slotDurationMinutes ?? inPersonDurationMinutes ?? 30,
+            breaks,
+            hasBreak: breaks !== undefined ? (Array.isArray(breaks) && breaks.length > 0) : (hasBreak !== undefined ? Boolean(hasBreak) : Boolean(breakStartTime && breakEndTime)),
             breakStartTime: breakStartTime || null,
             breakEndTime: breakEndTime || null,
+            inPersonEnabled,
+            inPersonDurationMinutes: inPersonDurationMinutes ?? slotDurationMinutes,
+            onlineEnabled,
+            onlineDurationMinutes,
+            onlineWorkingDays,
+            onlineStartTime,
+            onlineEndTime,
+            bufferMinutes,
+            onlineBufferMinutes,
+            inPersonBufferMinutes,
+            maxAppointmentsPerDay,
+            allowSimultaneousOnlineAndInPerson,
+            blockedTimeRanges,
             isConfigured: true
         });
 
         const generatedSlots = (Array.isArray(slots) && slots.length > 0)
             ? [...new Set(slots.map(s => String(s).trim()).filter(Boolean))]
-            : generateTimeSlots(
-                savedSchedule.startTime,
-                savedSchedule.endTime,
-                savedSchedule.slotDurationMinutes,
-                savedSchedule.hasBreak ? savedSchedule.breakStartTime : null,
-                savedSchedule.hasBreak ? savedSchedule.breakEndTime : null
-            );
+            : generateBaseSlotsWithBreaks({
+                startTime: savedSchedule.startTime,
+                endTime: savedSchedule.endTime,
+                durationMinutes: savedSchedule.inPersonDurationMinutes || savedSchedule.slotDurationMinutes,
+                breaks: savedSchedule.breaks,
+            });
 
         // Update existing unblocked future records (keep blocked dates intact)
         const todayStr = DoctorAvailability.extractDateYmd(new Date());
@@ -658,14 +720,16 @@ exports.saveDoctorAvailability = async (req, res) => {
 // 3. GENERATE NON-OVERLAPPING TIME SLOTS HELPER ENDPOINT
 exports.generateSlots = async (req, res) => {
     try {
-        const { startTime, endTime, durationMinutes, breakStartTime, breakEndTime } = req.body;
-        const slots = generateTimeSlots(
-            startTime || '09:00 AM',
-            endTime || '05:00 PM',
-            durationMinutes || 30,
-            breakStartTime || null,
-            breakEndTime || null
-        );
+        const { startTime, endTime, durationMinutes, breakStartTime, breakEndTime, breaks } = req.body;
+        const effectiveBreaks = Array.isArray(breaks)
+            ? breaks
+            : (breakStartTime && breakEndTime ? [{ startTime: breakStartTime, endTime: breakEndTime }] : []);
+        const slots = generateBaseSlotsWithBreaks({
+            startTime: startTime || '09:00 AM',
+            endTime: endTime || '05:00 PM',
+            durationMinutes: durationMinutes || 30,
+            breaks: effectiveBreaks,
+        });
         res.status(200).json({ success: true, slots });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to generate slots.' });
@@ -986,4 +1050,239 @@ exports.updateSchedulingRules = async (req, res) => {
         res.status(500).json({ success: false, message: 'Failed to update scheduling rules.' });
     }
 };
+
+// 8. TEMPORARY SLOT LOCKS (Acquire & Release)
+exports.acquireSlotLock = async (req, res) => {
+    try {
+        const {
+            dentistId,
+            patientId: bodyPatientId,
+            date,
+            timeSlot,
+            startTime,
+            consultationType,
+            consultationMode,
+            releasedSlotId = null,
+            ttlSeconds = 300,
+        } = req.body || {};
+
+        const targetPatientId = (req.user && String(req.user.role || '').toLowerCase() === 'patient')
+            ? req.user.id
+            : (bodyPatientId || req.user?.id || null);
+
+        const cleanDate = DoctorAvailability.extractDateYmd(date);
+        const normalizedSlot = String(startTime || timeSlot || '').trim();
+        if (!dentistId || !targetPatientId || !cleanDate || !normalizedSlot) {
+            return res.status(400).json({
+                success: false,
+                reason: 'INVALID_PARAMETERS',
+                message: 'dentistId, patientId, date, and timeSlot are required to acquire a slot lock.',
+            });
+        }
+
+        const targetDoctor = await Dentist.findById(dentistId).catch(() => null);
+        if (targetDoctor && !isDoctorRecordAvailable(targetDoctor)) {
+            return res.status(409).json({
+                success: false,
+                reason: 'DOCTOR_UNAVAILABLE',
+                message: 'Doctor is currently unavailable and not accepting new bookings.',
+            });
+        }
+
+        const mode = normalizeConsultationType(consultationType || consultationMode || 'In-Person');
+        const schedule = sanitizeSmartSchedule(await DoctorAvailability.getSchedule(dentistId));
+        const availRecord = await DoctorAvailability.findOne({ dentist_id: dentistId, date: cleanDate });
+        const blockedSlots = await DoctorAvailability.getBlockedSlotsForDate(dentistId, cleanDate);
+        const activeAppts = await countActiveAppointmentsForDate(dentistId, cleanDate);
+
+        let releasedSlot = null;
+        if (releasedSlotId) {
+            releasedSlot = await ReleasedSlot.findById(releasedSlotId);
+            if (!releasedSlot) {
+                return res.status(409).json({
+                    success: false,
+                    reason: 'RELEASED_SLOT_UNAVAILABLE',
+                    message: 'This slot is no longer available. Please select another time.',
+                });
+            }
+        } else {
+            // Regular slots must satisfy advance booking lead time
+            const advanceCheck = checkSlotBookableForDateYmd(cleanDate, normalizedSlot);
+            if (!advanceCheck.bookable) {
+                return res.status(400).json({
+                    success: false,
+                    reason: advanceCheck.reason,
+                    message: advanceCheck.message,
+                });
+            }
+        }
+
+        const schedCheck = validateSlotAgainstSchedule({
+            schedule,
+            dateYmd: cleanDate,
+            timeSlot: normalizedSlot,
+            consultationType: mode,
+            activeAppointments: activeAppts,
+            blockedSlots,
+            explicitDateRecord: availRecord,
+            releasedSlot,
+        });
+        if (!schedCheck.valid) {
+            return res.status(schedCheck.status || 409).json({
+                success: false,
+                reason: schedCheck.reason,
+                isBlocked: Boolean(schedCheck.isBlocked),
+                conflict: Boolean(schedCheck.conflict),
+                message: schedCheck.message,
+            });
+        }
+
+        const lockRes = await AppointmentSlotLock.acquire({
+            dentistId: targetDoctor?.id || dentistId,
+            patientId: targetPatientId,
+            date: cleanDate,
+            startTime: normalizedSlot,
+            endTime: minutesToClockSlot(schedCheck.timing.occupiedEndMin),
+            startMin: schedCheck.timing.startMin,
+            endMin: schedCheck.timing.occupiedEndMin,
+            consultationType: schedCheck.timing.consultationType,
+            releasedSlotId: releasedSlotId || null,
+            ttlSeconds,
+        });
+
+        if (!lockRes.success) {
+            const statusCode = lockRes.reason === 'INVALID_INTERVAL' ? 400 : 409;
+            return res.status(statusCode).json(lockRes);
+        }
+
+        return res.status(200).json({
+            success: true,
+            lockId: lockRes.lockId,
+            expiresAt: lockRes.expiresAt,
+            date: cleanDate,
+            timeSlot: normalizedSlot,
+            consultationType: schedCheck.timing.consultationType,
+            durationMinutes: schedCheck.timing.durationMinutes,
+            bufferMinutes: schedCheck.timing.bufferMinutes,
+            releasedSlotId: releasedSlotId || null,
+        });
+    } catch (err) {
+        console.error('acquireSlotLock error:', err.message);
+        return res.status(500).json({ success: false, message: 'Failed to reserve time slot.' });
+    }
+};
+
+exports.releaseSlotLock = async (req, res) => {
+    try {
+        const { lockId } = req.params;
+        const patientId = req.user?.id || req.query.patientId || req.body?.patientId || null;
+        if (!lockId) {
+            return res.status(400).json({ success: false, message: 'lockId is required.' });
+        }
+        const result = await AppointmentSlotLock.release(lockId, patientId);
+        if (!result.success) {
+            const code = result.reason === 'FORBIDDEN' ? 403 : 404;
+            return res.status(code).json(result);
+        }
+        return res.status(200).json(result);
+    } catch (err) {
+        console.error('releaseSlotLock error:', err.message);
+        return res.status(500).json({ success: false, message: 'Failed to release slot lock.' });
+    }
+};
+
+// 9. GET RELEASED EARLY-COMPLETION SLOTS FOR A DOCTOR & DATE
+exports.getReleasedSlots = async (req, res) => {
+    try {
+        const dentistId = req.query.dentistId || req.params.dentistId;
+        const cleanDate = DoctorAvailability.extractDateYmd(req.query.date || formatLocalYmd(new Date()));
+        if (!dentistId) {
+            return res.status(400).json({ success: false, message: 'dentistId query parameter is required.' });
+        }
+        const slots = await ReleasedSlot.findForDoctorAndDate(dentistId, cleanDate, { onlyAvailable: true });
+        return res.status(200).json({
+            success: true,
+            dentistId,
+            date: cleanDate,
+            count: slots.length,
+            releasedSlots: slots,
+        });
+    } catch (err) {
+        console.error('getReleasedSlots error:', err.message);
+        return res.status(500).json({ success: false, message: 'Failed to fetch released slots.' });
+    }
+};
+
+// 10. PATIENT-DOCTOR EARLIER-SLOT NOTIFICATION & FAVORITE PREFERENCES
+exports.getPatientDoctorPreferences = async (req, res) => {
+    try {
+        const patientId = (req.user && String(req.user.role || '').toLowerCase() === 'patient')
+            ? req.user.id
+            : (req.query.patientId || req.user?.id || null);
+        if (!patientId) {
+            return res.status(400).json({ success: false, message: 'patientId is required.' });
+        }
+        const dentistId = req.query.dentistId || null;
+        const preferences = await PatientDoctorPreference.findForPatient(patientId, dentistId);
+        return res.status(200).json({
+            success: true,
+            count: preferences.length,
+            preferences,
+        });
+    } catch (err) {
+        console.error('getPatientDoctorPreferences error:', err.message);
+        return res.status(500).json({ success: false, message: 'Failed to load notification preferences.' });
+    }
+};
+
+exports.upsertPatientDoctorPreference = async (req, res) => {
+    try {
+        const patientId = (req.user && String(req.user.role || '').toLowerCase() === 'patient')
+            ? req.user.id
+            : (req.body?.patientId || req.user?.id || null);
+        const {
+            dentistId,
+            isFavorite = false,
+            notifyEarlierSlots = false,
+            preferredConsultationType = 'Any',
+            preferredDate = null,
+            earliestTime,
+            latestTime,
+            earliestTimeMin,
+            latestTimeMin,
+        } = req.body || {};
+
+        if (!patientId || !dentistId) {
+            return res.status(400).json({ success: false, message: 'patientId and dentistId are required.' });
+        }
+
+        const resolvedEarliest = earliestTimeMin !== undefined
+            ? earliestTimeMin
+            : (earliestTime ? parseClockSlotMinutes(earliestTime) : null);
+        const resolvedLatest = latestTimeMin !== undefined
+            ? latestTimeMin
+            : (latestTime ? parseClockSlotMinutes(latestTime) : null);
+
+        const saved = await PatientDoctorPreference.upsert({
+            patientId,
+            dentistId,
+            isFavorite: Boolean(isFavorite),
+            notifyEarlierSlots: Boolean(notifyEarlierSlots),
+            preferredConsultationType,
+            preferredDate,
+            earliestTimeMin: resolvedEarliest,
+            latestTimeMin: resolvedLatest,
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Earlier slot notification preference saved.',
+            preference: saved,
+        });
+    } catch (err) {
+        console.error('upsertPatientDoctorPreference error:', err.message);
+        return res.status(500).json({ success: false, message: 'Failed to save notification preference.' });
+    }
+};
+
 

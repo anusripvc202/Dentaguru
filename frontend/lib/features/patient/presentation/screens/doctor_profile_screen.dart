@@ -5,6 +5,7 @@ import '../../../../core/models/doctor_availability.dart';
 import '../../../../core/models/medical_specialty_model.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/services/patient_problem_service.dart';
+import '../../../../core/utils/clinic_directions_helper.dart';
 import '../../../admin/presentation/widgets/doctor_slot_management_dialog.dart';
 
 class DoctorProfileScreen extends StatefulWidget {
@@ -709,13 +710,8 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                     height: 84,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      gradient: doc.photoBytes == null ? _primaryGradient : null,
-                      image: doc.photoBytes != null
-                          ? DecorationImage(
-                              image: MemoryImage(doc.photoBytes!),
-                              fit: BoxFit.cover,
-                            )
-                          : null,
+                      gradient: !doc.hasProfileImage ? _primaryGradient : null,
+                      color: doc.hasProfileImage ? AppTheme.gsNavy.withValues(alpha: 0.08) : null,
                       boxShadow: [
                         BoxShadow(
                           color: AppTheme.primaryBlue.withValues(alpha: 0.16),
@@ -725,16 +721,49 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                       ],
                     ),
                     alignment: Alignment.center,
-                    child: doc.photoBytes == null
-                        ? Text(
-                            initial,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 32,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          )
-                        : null,
+                    child: ClipOval(
+                      child: (doc.photoBytes != null && doc.photoBytes!.isNotEmpty)
+                          ? Image.memory(
+                              doc.photoBytes!,
+                              key: Key('doctor_profile_avatar_memory_${doc.id}'),
+                              width: 84,
+                              height: 84,
+                              fit: BoxFit.cover,
+                            )
+                          : (doc.profileImageUrl != null && doc.profileImageUrl!.trim().isNotEmpty)
+                              ? Image.network(
+                                  doc.profileImageUrl!.trim(),
+                                  key: Key('doctor_profile_avatar_network_${doc.id}'),
+                                  width: 84,
+                                  height: 84,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => Container(
+                                    width: 84,
+                                    height: 84,
+                                    decoration: const BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      gradient: _primaryGradient,
+                                    ),
+                                    alignment: Alignment.center,
+                                    child: Text(
+                                      initial,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 32,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              : Text(
+                                  initial,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 32,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                    ),
                   ),
                   Positioned(
                     bottom: 0,
@@ -1075,6 +1104,20 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
     ];
     final cityLine = locationParts.join(', ');
 
+    void openDirections() {
+      ClinicDirectionsHelper.launchDirections(
+        context: context,
+        consultationMode: doc.consultationMode,
+        latitude: doc.latitude,
+        longitude: doc.longitude,
+        clinicName: doc.clinicName,
+        clinicAddress: doc.clinicAddress,
+        city: doc.city,
+        state: doc.state,
+        pincode: doc.pincode,
+      );
+    }
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -1086,11 +1129,11 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              Icon(Icons.local_hospital_outlined, size: 18, color: AppTheme.primaryBlue),
-              SizedBox(width: 8),
-              Expanded(
+              const Icon(Icons.local_hospital_outlined, size: 18, color: AppTheme.primaryBlue),
+              const SizedBox(width: 8),
+              const Expanded(
                 child: Text(
                   'Clinic & Contact Information',
                   style: TextStyle(
@@ -1101,29 +1144,123 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              const SizedBox(width: 6),
+              Container(
+                key: const Key('patient_doctor_consultation_mode_badge'),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: doc.isOnlineOnly ? const Color(0xFFECFDF5) : const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: doc.isOnlineOnly ? const Color(0xFFA7F3D0) : const Color(0xFFBFDBFE),
+                  ),
+                ),
+                child: Text(
+                  DoctorConsultationMode.displayLabel(doc.consultationMode),
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    color: doc.isOnlineOnly ? const Color(0xFF047857) : AppTheme.gsNavy,
+                  ),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 14),
-          _buildContactRow(
-            icon: Icons.business_rounded,
-            label: 'Clinic Name',
-            value: doc.clinicName.trim().isNotEmpty ? doc.clinicName.trim() : 'Independent Healthcare Practice',
-          ),
-          if (doc.clinicAddress.trim().isNotEmpty) ...[
-            const SizedBox(height: 10),
-            _buildContactRow(
-              icon: Icons.place_outlined,
-              label: 'Clinic Address',
-              value: doc.clinicAddress.trim(),
+          if (doc.isOnlineOnly) ...[
+            Container(
+              key: const Key('patient_doctor_online_only_card'),
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFECFDF5),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFA7F3D0)),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.videocam_outlined, size: 18, color: Color(0xFF047857)),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'This doctor offers online consultations only. No in-person clinic visit is required.',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF065F46),
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ],
-          if (cityLine.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            _buildContactRow(
-              icon: Icons.location_city_rounded,
-              label: 'City / Location',
-              value: cityLine,
-            ),
+            if (doc.city.trim().isNotEmpty) ...[
+              const SizedBox(height: 10),
+              _buildContactRow(
+                icon: Icons.location_city_rounded,
+                label: 'City',
+                value: doc.city.trim(),
+              ),
+            ],
+          ] else ...[
+            if (doc.clinicName.trim().isNotEmpty)
+              _buildContactRow(
+                icon: Icons.business_rounded,
+                label: 'Clinic Name',
+                value: doc.clinicName.trim(),
+              ),
+            if (doc.clinicAddress.trim().isNotEmpty) ...[
+              const SizedBox(height: 10),
+              _buildContactRow(
+                icon: Icons.place_outlined,
+                label: 'Clinic Address',
+                value: doc.clinicAddress.trim(),
+              ),
+            ],
+            if (cityLine.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              _buildContactRow(
+                icon: Icons.location_city_rounded,
+                label: 'City / Location',
+                value: cityLine,
+              ),
+            ],
+            if (doc.hasCoordinates) ...[
+              const SizedBox(height: 12),
+              OsmLocationPreviewCard(
+                key: const Key('patient_doctor_osm_preview'),
+                latitude: doc.latitude!,
+                longitude: doc.longitude!,
+                title: doc.clinicName.trim().isNotEmpty ? doc.clinicName.trim() : 'Clinic Location',
+                subtitle: doc.clinicAddress.trim().isNotEmpty ? doc.clinicAddress.trim() : cityLine,
+                mapHeight: 130,
+              ),
+            ],
+            if (doc.hasPhysicalClinicLocation) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  key: const Key('patient_doctor_directions_button'),
+                  onPressed: openDirections,
+                  icon: const Icon(Icons.directions_rounded, size: 18),
+                  label: Text(
+                    doc.hasCoordinates ? 'Get Directions (Map Pin)' : 'Get Directions (Address)',
+                    style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.gsNavy,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ),
+            ],
           ],
           if (doc.phone.trim().isNotEmpty) ...[
             const SizedBox(height: 10),
@@ -2019,6 +2156,7 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
             ),
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(
+              isExpanded: true,
               initialValue: _selectedTreatment,
               decoration: InputDecoration(
                 filled: true,
