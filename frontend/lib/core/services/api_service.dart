@@ -900,7 +900,7 @@ class ApiService {
       'success': false,
       'message': !kReleaseMode && ApiConstants.isUsingLocalhostBackend
           ? 'Unable to reach local OTP backend (${ApiConstants.baseUrl}). Ensure "cd backend && npm start" is running.'
-          : (!kReleaseMode && ApiConstants.isUsingNonProductionBackend()
+          : (ApiConstants.isUsingNonProductionBackend()
               ? 'Unable to reach testing OTP backend (${ApiConstants.baseUrl}). Please verify the staging server is running.'
               : 'Unable to connect to SMS verification server. Please try again.'),
     };

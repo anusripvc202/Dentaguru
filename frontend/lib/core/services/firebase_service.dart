@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -5,7 +7,6 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' show Color;
 import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../constants/api_constants.dart';
 
@@ -269,8 +270,8 @@ class FirebaseService {
       _handleMessageNavigation(message);
     });
 
-    // 8. Get & sync FCM token with backend
-    await _syncFcmToken();
+    // 8. Get & sync FCM token with backend without blocking app cold start
+    unawaited(_syncFcmToken());
 
     // 9. Listen for token refresh
     _messaging.onTokenRefresh.listen((newToken) async {

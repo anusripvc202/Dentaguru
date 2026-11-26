@@ -12,11 +12,21 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
-    await FirebaseService.initialize();
     await SupabaseService.initialize();
+  } catch (e) {
+    debugPrint('⚠️ Supabase initialization warning: $e');
+  }
+
+  try {
+    await FirebaseService.initialize();
+  } catch (e) {
+    debugPrint('⚠️ Firebase initialization warning: $e');
+  }
+
+  try {
     await AnalyticsService.logAppOpen();
   } catch (e) {
-    debugPrint('⚠️ Core Services initialization warning: $e');
+    debugPrint('⚠️ Analytics initialization warning: $e');
   }
 
   runApp(
