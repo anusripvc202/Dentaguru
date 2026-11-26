@@ -10,7 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import '../utils/clinic_directions_helper.dart';
 
-/// Result returned when a doctor/clinic confirms a location pin on OpenStreetMap.
+/// Result returned when a doctor/clinic selects a clinic location on OpenStreetMap.
 class MapLocationSelectionResult {
   final String address;
   final String city;
@@ -106,6 +106,7 @@ class MapLocationPickerDialog extends StatefulWidget {
 }
 
 class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
+  final GlobalKey _mapContainerKey = GlobalKey();
   final MapController _mapController = MapController();
   final _searchController = TextEditingController();
   final _customAddressController = TextEditingController();
@@ -113,11 +114,16 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
   final _customStateController = TextEditingController();
   final _customPincodeController = TextEditingController();
 
-  late LatLng _selectedPoint;
+  LatLng? _selectedPoint;
+  late LatLng _viewportCenter;
   late double _currentZoom;
-  String _selectedName = 'Pinned Clinic Location';
+  String _selectedName = 'Selected Clinic Location';
   bool _isSearching = false;
+  bool _isDraggingMarker = false;
+  bool _hasMapTileError = false;
+  int _tileReloadKey = 0;
   String? _searchStatus;
+  String? _selectionError;
   List<Map<String, dynamic>> _searchResults = const [];
 
   @override
@@ -127,13 +133,19 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
       widget.initialLat,
       widget.initialLng,
     );
-    _selectedPoint = hasValidInit
-        ? LatLng(widget.initialLat!, widget.initialLng!)
-        : OsmMapConfig.defaultIndiaCenter;
-    _currentZoom = hasValidInit
-        ? OsmMapConfig.selectedPinZoom
-        : OsmMapConfig.defaultIndiaZoom;
+    if (hasValidInit) {
+      _selectedPoint = LatLng(widget.initialLat!, widget.initialLng!);
+      _viewportCenter = _selectedPoint!;
+      _currentZoom = OsmMapConfig.selectedPinZoom;
+      _selectedName = 'Saved Clinic Location';
+    } else {
+      // Never pre-populate hardcoded city coordinates as a selected clinic pin.
+      _selectedPoint = null;
+      _viewportCenter = OsmMapConfig.defaultViewportCenter;
+      _currentZoom = OsmMapConfig.defaultViewportZoom;
+    }
 
+    _hasMapTileError = OsmMapConfig.shouldSimulateNetworkError;
     _customAddressController.text = widget.initialAddress;
     _customCityController.text = widget.initialCity;
     _customStateController.text = widget.initialState;
@@ -150,20 +162,45 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
     super.dispose();
   }
 
-  void _movePinTo(LatLng point, {double? zoom, String? label}) {
+  void _setPin(LatLng point, {double? zoom, String? label, bool moveCamera = true}) {
+    final clampedLat = double.parse(point.latitude.clamp(-85.0, 85.0).toStringAsFixed(6));
+    final clampedLng = double.parse(point.longitude.clamp(-180.0, 180.0).toStringAsFixed(6));
+    final updatedPoint = LatLng(clampedLat, clampedLng);
     final targetZoom = (zoom ?? _currentZoom).clamp(3.0, 18.0);
+
     setState(() {
-      _selectedPoint = LatLng(
-        double.parse(point.latitude.toStringAsFixed(6)),
-        double.parse(point.longitude.toStringAsFixed(6)),
-      );
+      _selectedPoint = updatedPoint;
+      _viewportCenter = updatedPoint;
       _currentZoom = targetZoom;
+      _selectionError = null;
       if (label != null && label.trim().isNotEmpty) {
         _selectedName = label.trim();
       }
     });
+
+    if (moveCamera) {
+      try {
+        _mapController.move(updatedPoint, _currentZoom);
+      } catch (_) {}
+    }
+  }
+
+  void _handleMarkerPointerMove(Offset globalPosition) {
+    final renderBox = _mapContainerKey.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
     try {
-      _mapController.move(_selectedPoint, _currentZoom);
+      final localOffset = renderBox.globalToLocal(globalPosition);
+      final draggedLatLng = _mapController.camera.offsetToCrs(localOffset);
+      _setPin(draggedLatLng, label: 'Adjusted Clinic Pin', moveCamera: false);
+    } catch (_) {}
+  }
+
+  void _zoomBy(double delta) {
+    final nextZoom = (_currentZoom + delta).clamp(3.0, 18.0);
+    final targetCenter = _selectedPoint ?? _viewportCenter;
+    setState(() => _currentZoom = nextZoom);
+    try {
+      _mapController.move(targetCenter, nextZoom);
     } catch (_) {}
   }
 
@@ -214,7 +251,7 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
         _isSearching = false;
         _searchResults = results;
         _searchStatus = results.isEmpty
-            ? 'No places found. Tap or pan the map to place the pin manually.'
+            ? 'No matching places found. Tap the map or drag the pin to select your clinic location.'
             : null;
       });
     } catch (_) {
@@ -222,7 +259,7 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
       setState(() {
         _isSearching = false;
         _searchResults = const [];
-        _searchStatus = 'Search unavailable right now. Tap or pan the map to place the pin.';
+        _searchStatus = 'Location search unavailable right now. Tap the map to place your pin or enter your address manually.';
       });
     }
   }
@@ -232,14 +269,20 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
     final lng = double.tryParse((item['lon'] ?? item['lng'] ?? '').toString());
     if (!ClinicDirectionsHelper.hasValidCoordinates(lat, lng)) return;
 
-    final displayName = (item['display_name'] ?? 'Selected Map Location').toString().trim();
-    final addr = item['address'] is Map ? Map<String, dynamic>.from(item['address'] as Map) : const <String, dynamic>{};
+    final displayName = (item['display_name'] ?? 'Selected Clinic Location').toString().trim();
+    final addr = item['address'] is Map
+        ? Map<String, dynamic>.from(item['address'] as Map)
+        : const <String, dynamic>{};
 
     final foundCity = (addr['city'] ?? addr['town'] ?? addr['village'] ?? addr['county'] ?? '').toString().trim();
     final foundState = (addr['state'] ?? '').toString().trim();
     final foundPin = (addr['postcode'] ?? '').toString().replaceAll(RegExp(r'[^0-9]'), '');
 
-    _movePinTo(LatLng(lat!, lng!), zoom: OsmMapConfig.selectedPinZoom, label: displayName.split(',').first);
+    _setPin(
+      LatLng(lat!, lng!),
+      zoom: OsmMapConfig.selectedPinZoom,
+      label: displayName.split(',').first,
+    );
     setState(() {
       _searchResults = const [];
       _searchStatus = null;
@@ -259,13 +302,21 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
   }
 
   void _confirmSelection() {
+    final point = _selectedPoint;
+    if (point == null || !ClinicDirectionsHelper.hasValidCoordinates(point.latitude, point.longitude)) {
+      setState(() {
+        _selectionError = 'Please tap on the map to place your clinic marker before confirming.';
+      });
+      return;
+    }
+
     final result = MapLocationSelectionResult(
       address: _customAddressController.text.trim(),
       city: _customCityController.text.trim(),
       state: _customStateController.text.trim(),
       pincode: _customPincodeController.text.trim(),
-      latitude: double.parse(_selectedPoint.latitude.toStringAsFixed(6)),
-      longitude: double.parse(_selectedPoint.longitude.toStringAsFixed(6)),
+      latitude: double.parse(point.latitude.toStringAsFixed(6)),
+      longitude: double.parse(point.longitude.toStringAsFixed(6)),
       locationName: _selectedName,
     );
 
@@ -318,7 +369,7 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        widget.isDentist ? 'Select Clinic Location on Map' : 'Select Location on Map',
+                        widget.isDentist ? 'Select Clinic Location' : 'Select Location on Map',
                         style: const TextStyle(
                           fontWeight: FontWeight.w800,
                           fontSize: 15.5,
@@ -328,7 +379,7 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                         overflow: TextOverflow.ellipsis,
                       ),
                       const Text(
-                        'Tap or drag map to position the pin accurately',
+                        'Tap map to place marker or drag marker to fine-tune',
                         style: TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -402,13 +453,14 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
               const SizedBox(height: 6),
               Text(
                 _searchStatus!,
+                key: const Key('osm_picker_search_status'),
                 style: const TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
               ),
             ],
             if (_searchResults.isNotEmpty) ...[
               const SizedBox(height: 6),
               ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 110),
+                constraints: const BoxConstraints(maxHeight: 105),
                 child: Material(
                   color: const Color(0xFFF8FAFC),
                   borderRadius: BorderRadius.circular(10),
@@ -437,6 +489,46 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                 ),
               ),
             ],
+            if (_hasMapTileError) ...[
+              const SizedBox(height: 8),
+              Container(
+                key: const Key('osm_map_error_banner'),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFFBEB),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFFDE68A)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.wifi_off_rounded, size: 16, color: Color(0xFFB45309)),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Map tiles could not load. Check your connection — manual address entry remains available.',
+                        style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF92400E)),
+                      ),
+                    ),
+                    TextButton(
+                      key: const Key('osm_map_retry_btn'),
+                      onPressed: () {
+                        setState(() {
+                          _hasMapTileError = false;
+                          _tileReloadKey++;
+                        });
+                      },
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.gsNavy,
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        minimumSize: const Size(0, 26),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text('Retry', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 10),
 
             // Interactive OpenStreetMap Canvas
@@ -444,57 +536,90 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(16),
                 child: Stack(
+                  key: _mapContainerKey,
                   children: [
                     FlutterMap(
                       key: const Key('osm_flutter_map'),
                       mapController: _mapController,
                       options: MapOptions(
-                        initialCenter: _selectedPoint,
+                        initialCenter: _viewportCenter,
                         initialZoom: _currentZoom,
                         minZoom: 3,
                         maxZoom: 18,
-                        onTap: (_, latLng) => _movePinTo(
+                        interactionOptions: InteractionOptions(
+                          flags: _isDraggingMarker
+                              ? InteractiveFlag.none
+                              : (InteractiveFlag.drag |
+                                  InteractiveFlag.pinchZoom |
+                                  InteractiveFlag.scrollWheelZoom),
+                        ),
+                        onTap: (_, latLng) => _setPin(
                           latLng,
-                          zoom: _currentZoom < 13 ? 14 : _currentZoom,
-                          label: 'Selected Pin',
+                          zoom: _currentZoom < 12 ? 14 : _currentZoom,
+                          label: 'Selected Clinic Pin',
                         ),
                         onPositionChanged: (camera, hasGesture) {
                           if (hasGesture) {
-                            setState(() {
-                              _selectedPoint = LatLng(
-                                double.parse(camera.center.latitude.toStringAsFixed(6)),
-                                double.parse(camera.center.longitude.toStringAsFixed(6)),
-                              );
-                              _currentZoom = camera.zoom;
-                            });
+                            _viewportCenter = camera.center;
+                            _currentZoom = camera.zoom;
                           }
                         },
                       ),
                       children: [
                         TileLayer(
+                          key: ValueKey('osm_tile_layer_$_tileReloadKey'),
                           urlTemplate: OsmMapConfig.tileUrlTemplate,
                           userAgentPackageName: OsmMapConfig.userAgentPackageName,
                           tileProvider: OsmMapConfig.resolveTileProvider(),
+                          errorTileCallback: (_, __, ___) {
+                            if (mounted && !_hasMapTileError) {
+                              setState(() => _hasMapTileError = true);
+                            }
+                          },
                         ),
-                        MarkerLayer(
-                          markers: [
-                            Marker(
-                              key: const Key('osm_selected_marker'),
-                              point: _selectedPoint,
-                              width: 48,
-                              height: 48,
-                              alignment: Alignment.topCenter,
-                              child: const Icon(
-                                Icons.location_pin,
-                                color: AppTheme.gsRed,
-                                size: 42,
-                                shadows: [
-                                  Shadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 3)),
-                                ],
+                        if (_selectedPoint != null)
+                          MarkerLayer(
+                            markers: [
+                              Marker(
+                                key: const Key('osm_selected_marker'),
+                                point: _selectedPoint!,
+                                width: 56,
+                                height: 56,
+                                alignment: Alignment.topCenter,
+                                child: Listener(
+                                  key: const Key('osm_draggable_marker'),
+                                  behavior: HitTestBehavior.opaque,
+                                  onPointerDown: (_) {
+                                    if (!_isDraggingMarker) {
+                                      setState(() => _isDraggingMarker = true);
+                                    }
+                                  },
+                                  onPointerMove: (event) => _handleMarkerPointerMove(event.position),
+                                  onPointerUp: (_) {
+                                    if (_isDraggingMarker) {
+                                      setState(() => _isDraggingMarker = false);
+                                    }
+                                  },
+                                  onPointerCancel: (_) {
+                                    if (_isDraggingMarker) {
+                                      setState(() => _isDraggingMarker = false);
+                                    }
+                                  },
+                                  child: const Tooltip(
+                                    message: 'Drag marker to adjust clinic location',
+                                    child: Icon(
+                                      Icons.location_pin,
+                                      color: AppTheme.gsRed,
+                                      size: 46,
+                                      shadows: [
+                                        Shadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 3)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
+                            ],
+                          ),
                       ],
                     ),
 
@@ -502,20 +627,28 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                     Positioned(
                       left: 10,
                       top: 10,
-                      child: Container(
-                        key: const Key('osm_live_coords_pill'),
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.94),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: const Color(0xFFCBD5E1)),
-                        ),
-                        child: Text(
-                          'Lat: ${_selectedPoint.latitude.toStringAsFixed(5)}, Lng: ${_selectedPoint.longitude.toStringAsFixed(5)}',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF0F172A),
+                      right: 54,
+                      child: Align(
+                        alignment: Alignment.topLeft,
+                        child: Container(
+                          key: const Key('osm_live_coords_pill'),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.94),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFCBD5E1)),
+                          ),
+                          child: Text(
+                            _selectedPoint != null
+                                ? 'Lat: ${_selectedPoint!.latitude.toStringAsFixed(5)}, Lng: ${_selectedPoint!.longitude.toStringAsFixed(5)}'
+                                : 'Tap on the map to place clinic marker',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: _selectedPoint != null ? const Color(0xFF0F172A) : AppTheme.gsNavy,
+                            ),
                           ),
                         ),
                       ),
@@ -530,13 +663,13 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                           _buildMapControlButton(
                             key: const Key('osm_zoom_in_btn'),
                             icon: Icons.add_rounded,
-                            onTap: () => _movePinTo(_selectedPoint, zoom: (_currentZoom + 1).clamp(3.0, 18.0)),
+                            onTap: () => _zoomBy(1.0),
                           ),
                           const SizedBox(height: 6),
                           _buildMapControlButton(
                             key: const Key('osm_zoom_out_btn'),
                             icon: Icons.remove_rounded,
-                            onTap: () => _movePinTo(_selectedPoint, zoom: (_currentZoom - 1).clamp(3.0, 18.0)),
+                            onTap: () => _zoomBy(-1.0),
                           ),
                         ],
                       ),
@@ -576,9 +709,22 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                 ),
               ),
             ),
+
+            if (_selectionError != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _selectionError!,
+                key: const Key('osm_picker_selection_error'),
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.gsRed,
+                ),
+              ),
+            ],
             const SizedBox(height: 10),
 
-            // Optional Address Details (Manual Editing Always Available)
+            // Manual Address Fields (Always Available)
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
@@ -594,7 +740,7 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                     controller: _customAddressController,
                     style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
                     decoration: const InputDecoration(
-                      labelText: 'Clinic Address (optional override)',
+                      labelText: 'Clinic Address',
                       labelStyle: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
                       isDense: true,
                       contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -683,14 +829,15 @@ class _MapLocationPickerDialogState extends State<MapLocationPickerDialog> {
                     onPressed: _confirmSelection,
                     icon: const Icon(Icons.check_circle_rounded, size: 16),
                     label: const Text(
-                      'Confirm Location',
+                      'Select Clinic Location',
                       style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                      overflow: TextOverflow.ellipsis,
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.gsNavy,
                       foregroundColor: Colors.white,
                       elevation: 0,
-                      padding: const EdgeInsets.symmetric(vertical: 11),
+                      padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 10),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                   ),

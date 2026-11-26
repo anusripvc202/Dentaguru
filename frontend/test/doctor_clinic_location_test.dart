@@ -35,6 +35,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     FlutterSecureStorage.setMockInitialValues({});
     OsmMapConfig.debugTileProviderOverride = OfflinePlaceholderTileProvider();
+    OsmMapConfig.debugSimulateNetworkError = false;
     ClinicDirectionsHelper.debugLaunchUriOverride = null;
     MapLocationPickerDialog.debugSearchOverride = null;
     ApiService.debugRegisterOverride = null;
@@ -46,6 +47,7 @@ void main() {
 
   tearDown(() async {
     OsmMapConfig.debugTileProviderOverride = null;
+    OsmMapConfig.debugSimulateNetworkError = false;
     ClinicDirectionsHelper.debugLaunchUriOverride = null;
     MapLocationPickerDialog.debugSearchOverride = null;
     ApiService.debugRegisterOverride = null;
@@ -53,10 +55,16 @@ void main() {
     ApiService.debugUpdateDoctorProfileOverride = null;
   });
 
-  group('GS HEALTH – Doctor Clinic Registration, OSM Map & Directions Tests', () {
-    test('1. ClinicDirectionsHelper builds coordinate URI, address fallback URI, and hides for ONLINE_ONLY', () {
+  group('GS HEALTH – Doctor Clinic Registration, OSM Map & Get Directions Tests', () {
+    test('1. ClinicDirectionsHelper builds Google Maps coordinate URI, address fallback URI, and validates bounds', () {
+      expect(ClinicDirectionsHelper.hasValidCoordinates(19.076090, 72.877426), isTrue);
+      expect(ClinicDirectionsHelper.hasValidCoordinates(95.0, 72.0), isFalse);
+      expect(ClinicDirectionsHelper.hasValidCoordinates(19.0, 190.0), isFalse);
+      expect(ClinicDirectionsHelper.hasValidCoordinates(null, 72.0), isFalse);
+      expect(ClinicDirectionsHelper.isValidPincode('400050'), isTrue);
+      expect(ClinicDirectionsHelper.isValidPincode('4000'), isFalse);
+
       final coordUri = ClinicDirectionsHelper.buildDirectionsUri(
-        consultationMode: DoctorConsultationMode.both,
         latitude: 19.076090,
         longitude: 72.877426,
         clinicName: 'Bandra Dental Studio',
@@ -64,11 +72,11 @@ void main() {
         city: 'Mumbai',
       );
       expect(coordUri, isNotNull);
+      expect(coordUri.toString(), contains('google.com/maps/dir'));
       expect(coordUri.toString(), contains('19.076090'));
       expect(coordUri.toString(), contains('72.877426'));
 
       final addressFallbackUri = ClinicDirectionsHelper.buildDirectionsUri(
-        consultationMode: DoctorConsultationMode.inPerson,
         latitude: null,
         longitude: null,
         clinicName: 'Pearl Care Clinic',
@@ -80,24 +88,14 @@ void main() {
       expect(addressFallbackUri, isNotNull);
       expect(Uri.decodeFull(addressFallbackUri.toString()), contains('Pearl Care Clinic'));
       expect(Uri.decodeFull(addressFallbackUri.toString()), contains('12 MG Road'));
+      expect(Uri.decodeFull(addressFallbackUri.toString()), contains('Karnataka'));
       expect(Uri.decodeFull(addressFallbackUri.toString()), contains('560001'));
 
-      final onlineOnlyUri = ClinicDirectionsHelper.buildDirectionsUri(
-        consultationMode: DoctorConsultationMode.onlineOnly,
-        latitude: 19.076090,
-        longitude: 72.877426,
-        clinicName: 'Should Be Ignored',
-        clinicAddress: 'Some Street',
-      );
-      expect(onlineOnlyUri, isNull);
-
-      final emptyUri = ClinicDirectionsHelper.buildDirectionsUri(
-        consultationMode: DoctorConsultationMode.both,
-      );
+      final emptyUri = ClinicDirectionsHelper.buildDirectionsUri();
       expect(emptyUri, isNull);
     });
 
-    testWidgets('2. Doctor Registration defaults to BOTH, validates manual clinic details, supports OSM map picker & Remove Pin', (tester) async {
+    testWidgets('2. Doctor Registration validates clinic fields, pincode & mandatory map pin, supports tap/drag/zoom OSM picker', (tester) async {
       tester.view.physicalSize = const Size(412, 900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -146,19 +144,6 @@ void main() {
         };
       };
 
-      MapLocationPickerDialog.debugSearchOverride = (query) async => [
-            {
-              'display_name': 'Hill Road, Bandra West, Mumbai, Maharashtra, 400050',
-              'lat': '19.054440',
-              'lon': '72.830020',
-              'address': {
-                'city': 'Mumbai',
-                'state': 'Maharashtra',
-                'postcode': '400050',
-              },
-            },
-          ];
-
       final router = _buildTestRouter(
         const AuthScreen(
           initialTab: 0,
@@ -177,16 +162,26 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Default is BOTH -> clinic fields & map picker button visible
+      // Must NOT render Consultation Type or Online/In-Person options
+      expect(find.text('CONSULTATION TYPE'), findsNothing);
+      expect(find.text('Online Only'), findsNothing);
+      expect(find.byKey(const Key('reg_consultation_mode_selector')), findsNothing);
+
+      // All 6 clinic registration elements present
       expect(find.byKey(const Key('reg_dentist_clinic_name_field')), findsOneWidget);
       expect(find.byKey(const Key('reg_dentist_clinic_address_field')), findsOneWidget);
+      expect(find.byKey(const Key('reg_city_field')), findsOneWidget);
       expect(find.byKey(const Key('reg_dentist_state_field')), findsOneWidget);
       expect(find.byKey(const Key('reg_dentist_pincode_field')), findsOneWidget);
       expect(find.byKey(const Key('reg_open_map_picker_button')), findsOneWidget);
+      expect(find.text('Select Clinic Location'), findsOneWidget);
 
-      // Attempting submit with Name + City but missing Clinic Name & Address triggers validation
+      // Attempt submit with missing fields + invalid pincode + missing map pin
       await tester.enterText(find.byKey(const Key('reg_full_name_field')), 'Dr. Kavita Mehta');
       await tester.enterText(find.byKey(const Key('reg_city_field')), 'Mumbai');
+      await tester.ensureVisible(find.byKey(const Key('reg_dentist_pincode_field')));
+      await tester.enterText(find.byKey(const Key('reg_dentist_pincode_field')), '4000');
+
       final continueBtn = find.byKey(const Key('reg_continue_button'));
       await tester.drag(find.byKey(const Key('registration_scroll_view')), const Offset(0, -1800));
       await tester.pumpAndSettle();
@@ -197,41 +192,69 @@ void main() {
 
       expect(find.text('Please enter clinic name'), findsOneWidget);
       expect(find.text('Please enter clinic address'), findsOneWidget);
+      expect(find.text('Please enter state'), findsOneWidget);
+      expect(find.text('Enter 6-digit pincode'), findsOneWidget);
+      expect(find.byKey(const Key('reg_dentist_map_error')), findsOneWidget);
       expect(registerCalls, 0);
 
-      // Enter clinic name manually and pick location via OpenStreetMap dialog
+      // Fill required clinic details
       await tester.ensureVisible(find.byKey(const Key('reg_dentist_clinic_name_field')));
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const Key('reg_dentist_clinic_name_field')), 'Bandra Smile Clinic');
+      await tester.enterText(find.byKey(const Key('reg_dentist_clinic_address_field')), 'Hill Road, Bandra West');
+      await tester.enterText(find.byKey(const Key('reg_dentist_state_field')), 'Maharashtra');
+      await tester.enterText(find.byKey(const Key('reg_dentist_pincode_field')), '400050');
 
+      // Open OpenStreetMap picker
       final openMapBtn = find.byKey(const Key('reg_open_map_picker_button'));
       await tester.ensureVisible(openMapBtn);
       await tester.pumpAndSettle();
       await tester.tap(openMapBtn);
       await tester.pumpAndSettle();
 
-      // OSM dialog renders FlutterMap and mandatory attribution
+      // Verify NO hardcoded Hyderabad coords pre-selected; real FlutterMap + OSM attribution shown
       expect(find.byKey(const Key('osm_location_picker_dialog')), findsOneWidget);
       expect(find.byKey(const Key('osm_flutter_map')), findsOneWidget);
       expect(find.text('© OpenStreetMap contributors'), findsOneWidget);
+      expect(find.text('Tap on the map to place clinic marker'), findsOneWidget);
+      expect(find.textContaining('17.3850'), findsNothing);
 
-      // Search & select mocked OSM place
-      await tester.enterText(find.byKey(const Key('osm_picker_search_field')), 'Bandra West');
-      await tester.tap(find.byKey(const Key('osm_picker_search_btn')));
+      // Tapping Select Clinic Location before dropping a pin shows inline error
+      await tester.tap(find.byKey(const Key('osm_picker_confirm_btn')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('osm_search_result_0')), findsOneWidget);
-      await tester.tap(find.byKey(const Key('osm_search_result_0')));
+      expect(find.byKey(const Key('osm_picker_selection_error')), findsOneWidget);
+
+      // Tap map to drop marker, test zoom controls, and drag marker to fine-tune
+      await tester.tap(find.byKey(const Key('osm_flutter_map')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('osm_draggable_marker')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('osm_zoom_in_btn')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('osm_zoom_out_btn')));
       await tester.pumpAndSettle();
 
-      // Confirm location
+      final coordsBeforeDrag = tester.widget<Text>(
+        find.descendant(of: find.byKey(const Key('osm_live_coords_pill')), matching: find.byType(Text)),
+      ).data;
+      await tester.drag(find.byKey(const Key('osm_draggable_marker')), const Offset(28, -22));
+      await tester.pumpAndSettle();
+      final coordsAfterDrag = tester.widget<Text>(
+        find.descendant(of: find.byKey(const Key('osm_live_coords_pill')), matching: find.byType(Text)),
+      ).data;
+      expect(coordsAfterDrag, isNotNull);
+      expect(coordsAfterDrag, isNot(equals(coordsBeforeDrag)));
+
+      // Confirm clinic location
       await tester.tap(find.byKey(const Key('osm_picker_confirm_btn')));
       await tester.pumpAndSettle();
 
-      // Preview card with Change Location & Remove Pin appears
+      // Preview card appears with coordinates & Change Location
       expect(find.byKey(const Key('osm_preview_change_location_btn')), findsOneWidget);
-      expect(find.byKey(const Key('osm_preview_remove_location_btn')), findsOneWidget);
+      expect(find.byKey(const Key('reg_dentist_map_error')), findsNothing);
 
-      // Submit registration
+      // Submit registration (clear any validation SnackBar so Continue button is unobstructed)
+      ScaffoldMessenger.of(tester.element(continueBtn)).clearSnackBars();
+      await tester.pumpAndSettle();
       await tester.drag(find.byKey(const Key('registration_scroll_view')), const Offset(0, -1800));
       await tester.pumpAndSettle();
       await tester.ensureVisible(continueBtn);
@@ -240,17 +263,52 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(registerCalls, 1);
-      expect(ApiService.debugLastRegisterPayload?['consultationMode'], 'BOTH');
       expect(ApiService.debugLastRegisterPayload?['clinicName'], 'Bandra Smile Clinic');
-      expect(ApiService.debugLastRegisterPayload?['clinicAddress'], contains('Hill Road'));
+      expect(ApiService.debugLastRegisterPayload?['clinicAddress'], 'Hill Road, Bandra West');
+      expect(ApiService.debugLastRegisterPayload?['city'], 'Mumbai');
       expect(ApiService.debugLastRegisterPayload?['state'], 'Maharashtra');
       expect(ApiService.debugLastRegisterPayload?['pincode'], '400050');
-      expect(ApiService.debugLastRegisterPayload?['latitude'], closeTo(19.05444, 0.001));
-      expect(ApiService.debugLastRegisterPayload?['longitude'], closeTo(72.83002, 0.001));
+      expect(ApiService.debugLastRegisterPayload?['latitude'], isNotNull);
+      expect(ApiService.debugLastRegisterPayload?['longitude'], isNotNull);
       expect(find.text('DENTIST_HOME'), findsOneWidget);
     });
 
-    testWidgets('3. Doctor Profile displays clinic address/OSM pin and persists Edit Clinic Details updates', (tester) async {
+    testWidgets('3. Map network failure shows graceful banner while keeping manual address editable', (tester) async {
+      OsmMapConfig.debugSimulateNetworkError = true;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (ctx) => ElevatedButton(
+                onPressed: () {
+                  MapLocationPickerDialog.show(
+                    context: ctx,
+                    initialAddress: '10 Park Street',
+                    initialCity: 'Kolkata',
+                    initialState: 'West Bengal',
+                    initialPincode: '700016',
+                  );
+                },
+                child: const Text('Open Map'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open Map'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('osm_map_error_banner')), findsOneWidget);
+      expect(find.byKey(const Key('osm_map_retry_btn')), findsOneWidget);
+      // Manual address fields remain fully editable despite tile network failure
+      await tester.enterText(find.byKey(const Key('osm_picker_address_field')), '22 Park Street, Kolkata');
+      expect(find.text('22 Park Street, Kolkata'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('4. Doctor Profile displays saved clinic details, reopens map at saved marker, and saves edits', (tester) async {
       tester.view.physicalSize = const Size(412, 892);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -278,7 +336,6 @@ void main() {
         pincode: '411004',
         latitude: 18.52043,
         longitude: 73.85674,
-        consultationMode: DoctorConsultationMode.both,
         phone: '+919822001122',
         email: 'rohan@gshealth.in',
         status: 'Available',
@@ -295,12 +352,13 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Displays clinic name, address, city/state/pincode, and OSM preview
+      // Displays clinic name, address, city/state/pincode, OSM preview, and NO consultation type badge
       expect(find.byKey(const Key('doctor_profile_clinic_name_text')), findsOneWidget);
       expect(find.text('Deccan Dental Care'), findsAtLeastNWidgets(1));
       expect(find.text('FC Road, Shivajinagar'), findsOneWidget);
       expect(find.text('Pune, Maharashtra, 411004'), findsOneWidget);
       expect(find.byKey(const Key('doctor_profile_osm_preview')), findsOneWidget);
+      expect(find.byKey(const Key('doctor_profile_consultation_mode_badge')), findsNothing);
 
       // Tap Edit clinic details
       final editClinicBtn = find.byKey(const Key('doctor_profile_edit_clinic_button'));
@@ -308,11 +366,37 @@ void main() {
       await tester.tap(editClinicBtn);
       await tester.pumpAndSettle();
 
+      // Reopen map picker from Edit sheet -> previously saved marker & coordinates are shown immediately
+      final changeLocBtn = find.descendant(
+        of: find.byKey(const Key('edit_doctor_osm_preview')),
+        matching: find.byKey(const Key('osm_preview_change_location_btn')),
+      );
+      await tester.ensureVisible(changeLocBtn);
+      await tester.tap(changeLocBtn);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('osm_draggable_marker')), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('osm_live_coords_pill')),
+          matching: find.textContaining('18.52043'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('osm_live_coords_pill')),
+          matching: find.textContaining('73.85674'),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const Key('osm_picker_confirm_btn')));
+      await tester.pumpAndSettle();
+
       await tester.enterText(find.byKey(const Key('edit_doctor_clinic_address_field')), 'JM Road, Deccan Gymkhana');
       await tester.enterText(find.byKey(const Key('edit_doctor_pincode_field')), '411005');
 
       final saveBtn = find.byKey(const Key('save_doctor_profile_button'));
-      await tester.ensureVisible(saveBtn);
       await tester.tap(saveBtn);
       await tester.pumpAndSettle();
 
@@ -324,7 +408,7 @@ void main() {
       expect(service.currentDoctor?.pincode, '411005');
     });
 
-    testWidgets('4. Patient Find Doctors & Doctor Details show Directions (coords & address fallback) and hide for ONLINE_ONLY', (tester) async {
+    testWidgets('5. Patient Find Doctors & Doctor Details display full clinic address, Get Directions, and handle legacy doctors without coordinates', (tester) async {
       tester.view.physicalSize = const Size(412, 892);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -351,15 +435,15 @@ void main() {
         pincode: '560038',
         latitude: 12.978369,
         longitude: 77.640836,
-        consultationMode: DoctorConsultationMode.both,
         phone: '+919900112233',
         email: 'meera@gshealth.in',
         status: 'Available',
         nextAvailableSlots: const ['Today, 3:00 PM'],
         consultationFee: '₹600',
       );
-      final docManualOnly = DoctorModel(
-        id: 'doc-manual',
+      // Existing legacy doctor with address only (no lat/lng saved yet)
+      final docLegacyManual = DoctorModel(
+        id: 'doc-legacy-manual',
         name: 'Dr. Arjun Singh',
         specialty: 'Orthodontics',
         qualification: 'BDS, MDS',
@@ -371,15 +455,15 @@ void main() {
         city: 'New Delhi',
         state: 'Delhi',
         pincode: '110001',
-        consultationMode: DoctorConsultationMode.inPerson,
         phone: '+919900112244',
         email: 'arjun@gshealth.in',
         status: 'Available',
         nextAvailableSlots: const ['Tomorrow, 11:00 AM'],
         consultationFee: '₹800',
       );
-      final docOnlineOnly = DoctorModel(
-        id: 'doc-online',
+      // Legacy doctor with neither coordinates nor address
+      final docLegacyEmpty = DoctorModel(
+        id: 'doc-legacy-empty',
         name: 'Dr. Sneha Kapoor',
         specialty: 'General Medicine',
         qualification: 'MBBS, MD',
@@ -388,8 +472,7 @@ void main() {
         reviewCount: 20,
         clinicName: '',
         clinicAddress: '',
-        city: 'Mumbai',
-        consultationMode: DoctorConsultationMode.onlineOnly,
+        city: '',
         phone: '+919900112255',
         email: 'sneha@gshealth.in',
         status: 'Available',
@@ -398,8 +481,8 @@ void main() {
       );
 
       service.addTestDoctor(docWithPin);
-      service.addTestDoctor(docManualOnly);
-      service.addTestDoctor(docOnlineOnly);
+      service.addTestDoctor(docLegacyManual);
+      service.addTestDoctor(docLegacyEmpty);
 
       // A. Find Doctors listing
       await tester.pumpWidget(
@@ -409,23 +492,28 @@ void main() {
       );
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
+      expect(tester.takeException(), isNull);
 
       expect(find.byKey(const Key('doctor_card_directions_doc-pin')), findsOneWidget);
-      expect(find.byKey(const Key('doctor_card_directions_doc-manual')), findsOneWidget);
-      expect(find.byKey(const Key('doctor_card_directions_doc-online')), findsNothing);
-      expect(find.byKey(const Key('doctor_online_only_badge_doc-online')), findsOneWidget);
+      expect(find.byKey(const Key('doctor_card_directions_doc-legacy-manual')), findsOneWidget);
+      expect(find.byKey(const Key('doctor_card_directions_doc-legacy-empty')), findsNothing);
+      expect(find.text('Get Directions'), findsNWidgets(2));
+      expect(find.textContaining('Bengaluru, Karnataka, 560038'), findsOneWidget);
+      expect(find.text('100 Feet Road, Indiranagar'), findsOneWidget);
 
       await tester.ensureVisible(find.byKey(const Key('doctor_card_directions_doc-pin')));
       await tester.tap(find.byKey(const Key('doctor_card_directions_doc-pin')));
       await tester.pump();
       expect(launchedUris.length, 1);
+      expect(launchedUris.last.toString(), contains('google.com/maps/dir'));
       expect(launchedUris.last.toString(), contains('12.978369'));
 
-      await tester.ensureVisible(find.byKey(const Key('doctor_card_directions_doc-manual')));
-      await tester.tap(find.byKey(const Key('doctor_card_directions_doc-manual')));
+      await tester.ensureVisible(find.byKey(const Key('doctor_card_directions_doc-legacy-manual')));
+      await tester.tap(find.byKey(const Key('doctor_card_directions_doc-legacy-manual')));
       await tester.pump();
       expect(launchedUris.length, 2);
       expect(Uri.decodeFull(launchedUris.last.toString()), contains('Connaught Dental Clinic'));
+      expect(Uri.decodeFull(launchedUris.last.toString()), contains('110001'));
 
       // B. Patient Doctor Details for doctor WITH coordinates
       await tester.pumpWidget(
@@ -438,21 +526,68 @@ void main() {
 
       expect(find.byKey(const Key('patient_doctor_osm_preview')), findsOneWidget);
       expect(find.byKey(const Key('patient_doctor_directions_button')), findsOneWidget);
-      expect(find.text('Get Directions (Map Pin)'), findsOneWidget);
+      expect(find.text('Get Directions'), findsOneWidget);
+      expect(find.text('Map Pin Verified'), findsOneWidget);
+      expect(find.text('Bengaluru, Karnataka, 560038'), findsOneWidget);
 
-      // C. Patient Doctor Details for ONLINE_ONLY doctor (no fake clinic, no Directions)
+      // C. Patient Doctor Details for legacy doctor WITHOUT coordinates (no fake map preview; address-based directions work)
       await tester.pumpWidget(
         ProviderScope(
-          child: MaterialApp(home: patient_ui.DoctorProfileScreen(doctor: docOnlineOnly)),
+          child: MaterialApp(home: patient_ui.DoctorProfileScreen(doctor: docLegacyManual)),
         ),
       );
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
-      expect(find.byKey(const Key('patient_doctor_online_only_card')), findsOneWidget);
-      expect(find.byKey(const Key('patient_doctor_directions_button')), findsNothing);
       expect(find.byKey(const Key('patient_doctor_osm_preview')), findsNothing);
+      expect(find.byKey(const Key('patient_doctor_directions_button')), findsOneWidget);
+      expect(find.text('Address Only'), findsOneWidget);
+      expect(find.text('New Delhi, Delhi, 110001'), findsOneWidget);
       expect(tester.takeException(), isNull);
+    });
+
+    test('6. DoctorModel.fromJson preserves all 7 clinic fields & coordinates and handles legacy doctors with null coords', () {
+      final fullDoc = DoctorModel.fromJson({
+        'id': 'doc-full-1',
+        'user_id': 'usr-full-1',
+        'name': 'Dr. Anjali Menon',
+        'speciality': 'Periodontics',
+        'qualifications': 'BDS, MDS',
+        'experience_years': 8,
+        'clinicName': 'Marine Drive Dental Care',
+        'clinicAddress': '45 Netaji Subhash Road, Marine Drive',
+        'city': 'Mumbai',
+        'state': 'Maharashtra',
+        'pincode': '400020',
+        'latitude': 18.94321,
+        'longitude': 72.82356,
+        'phone': '9820112233',
+        'email': 'anjali@gshealth.in',
+      });
+      expect(fullDoc.clinicName, 'Marine Drive Dental Care');
+      expect(fullDoc.clinicAddress, '45 Netaji Subhash Road, Marine Drive');
+      expect(fullDoc.city, 'Mumbai');
+      expect(fullDoc.state, 'Maharashtra');
+      expect(fullDoc.pincode, '400020');
+      expect(fullDoc.latitude, 18.94321);
+      expect(fullDoc.longitude, 72.82356);
+      expect(fullDoc.hasCoordinates, isTrue);
+
+      final legacyDoc = DoctorModel.fromJson({
+        'id': 'doc-legacy-1',
+        'name': 'Dr. Suresh Kumar',
+        'speciality': 'General Dentistry',
+        'clinics': {'clinic_name': 'Old Town Dental', 'location': '15 Civil Lines'},
+        'city': 'Jaipur',
+        'state': 'Rajasthan',
+        'pincode': '302006',
+      });
+      expect(legacyDoc.clinicName, 'Old Town Dental');
+      expect(legacyDoc.clinicAddress, '15 Civil Lines');
+      expect(legacyDoc.latitude, isNull);
+      expect(legacyDoc.longitude, isNull);
+      expect(legacyDoc.hasCoordinates, isFalse);
+      expect(legacyDoc.hasPhysicalClinicLocation, isTrue);
     });
   });
 }

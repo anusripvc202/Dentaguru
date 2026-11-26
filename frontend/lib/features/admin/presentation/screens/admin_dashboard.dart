@@ -15,6 +15,8 @@ import '../../../../core/models/referral_model.dart';
 import '../../../../core/models/medical_specialty_model.dart';
 import 'patient_details_screen.dart';
 import '../widgets/admin_global_visits_calendar.dart';
+import '../widgets/admin_doctor_activity_calendar.dart';
+import '../widgets/admin_clinic_management_panel.dart';
 import '../widgets/doctor_slot_management_dialog.dart';
 import '../widgets/gs_health_admin_overview.dart';
 import '../widgets/gs_health_district_management_panel.dart';
@@ -1776,6 +1778,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
         _buildMobileNavPill(1, 'Clinics', Icons.local_hospital_outlined),
         _buildMobileNavPill(12, 'Specialties', Icons.category_outlined),
         _buildMobileNavPill(2, 'Doctors', Icons.medical_services_outlined),
+        _buildMobileNavPill(16, 'Doctor Calendar', Icons.calendar_month_rounded),
         _buildMobileNavPill(4, 'Appointments', Icons.calendar_month_outlined),
         _buildMobileNavPill(10, 'Chats', Icons.forum_outlined),
         _buildMobileNavPill(6, 'Reports', Icons.bar_chart_rounded),
@@ -1851,6 +1854,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
         return 'District Management';
       case 15:
         return 'Patient Assignment Audit';
+      case 16:
+        return 'Doctor Calendar';
       default:
         return 'Admin Dashboard';
     }
@@ -1900,6 +1905,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   _buildSubNavItem(12, Icons.category_rounded, 'Medical Specialties', badgeCount: _problemService.activeSpecialties.length),
                   _buildSubNavItem(1, Icons.domain_rounded, 'Clinics Directory'),
                   _buildSubNavItem(2, Icons.medical_services_rounded, 'Doctors & Specialists'),
+                  _buildSubNavItem(16, Icons.calendar_month_rounded, 'Doctor Calendar'),
                 ],
               ),
               const SizedBox(height: 8),
@@ -3419,6 +3425,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
         return GsHealthDistrictManagementPanel(problemService: _problemService, onRefresh: _refreshOverviewData);
       case 15:
         return GsHealthPatientAssignmentPanel(problemService: _problemService, onRefresh: _refreshOverviewData);
+      case 16:
+        return AdminDoctorActivityCalendarSection(problemService: _problemService);
       default:
         return _buildAdminOverviewPanel();
     }
@@ -5878,6 +5886,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   // PANEL 1 (NAV INDEX 1): CLINICS DIRECTORY
   // ==========================================
   Widget _buildClinicsPanel() {
+    return AdminClinicManagementPanel(
+      problemService: _problemService,
+      onRegisterNewClinic: () => _showRegisterClinicModal(context),
+    );
+  }
+
+  // ignore: unused_element
+  Widget _buildLegacyClinicsPanelUnused() {
     final clinics = _uniqueClinics;
 
     return SingleChildScrollView(

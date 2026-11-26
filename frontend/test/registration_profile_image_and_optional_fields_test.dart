@@ -12,6 +12,7 @@ import 'package:dentaguru/core/services/api_service.dart';
 import 'package:dentaguru/core/services/patient_problem_service.dart';
 import 'package:dentaguru/core/services/session_service.dart';
 import 'package:dentaguru/core/theme/app_theme.dart';
+import 'package:dentaguru/core/utils/clinic_directions_helper.dart';
 import 'package:dentaguru/features/auth/presentation/screens/auth_screen.dart';
 import 'package:dentaguru/features/dentist/presentation/screens/doctor_profile_screen.dart' as dentist_profile;
 import 'package:dentaguru/features/patient/presentation/screens/doctor_profile_screen.dart';
@@ -36,6 +37,8 @@ void main() {
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     FlutterSecureStorage.setMockInitialValues({});
+    OsmMapConfig.debugTileProviderOverride = OfflinePlaceholderTileProvider();
+    OsmMapConfig.debugSimulateNetworkError = false;
     PatientProfileRequirementsConfig.resetDefaults();
     ApiService.debugRegisterOverride = null;
     ApiService.debugUpdatePatientProfileOverride = null;
@@ -58,6 +61,8 @@ void main() {
     AuthScreen.debugPickRegistrationImageOverride = null;
     dentist_profile.DoctorProfileScreen.debugPickProfileImageOverride = null;
     PatientProfileCompletionScreen.debugPickImageOverride = null;
+    OsmMapConfig.debugTileProviderOverride = null;
+    OsmMapConfig.debugSimulateNetworkError = false;
     PatientProfileRequirementsConfig.resetDefaults();
     await SessionService().clearSession();
   });
@@ -368,13 +373,34 @@ void main() {
       expect(find.text('Upload your profile photo'), findsOneWidget);
       expect(find.byKey(const Key('reg_doctor_remove_photo_button')), findsNothing);
 
-      // Re-pick image, fill fields, and verify upload failure shows clear inline error
+      // Re-pick image, fill required clinic & location fields, and verify upload failure shows clear inline error
       await tester.tap(find.byKey(const Key('reg_doctor_pick_gallery_button')));
       await tester.pump();
       await tester.enterText(find.byKey(const Key('reg_full_name_field')), 'Dr. Meera Nair');
-      await tester.enterText(find.byKey(const Key('reg_city_field')), 'Hyderabad');
+      await tester.enterText(find.byKey(const Key('reg_city_field')), 'Kochi');
+      await tester.ensureVisible(find.byKey(const Key('reg_dentist_clinic_name_field')));
+      await tester.enterText(find.byKey(const Key('reg_dentist_clinic_name_field')), 'Kochi Heart & Dental Clinic');
+      await tester.enterText(find.byKey(const Key('reg_dentist_clinic_address_field')), 'MG Road, Ernakulam');
+      await tester.enterText(find.byKey(const Key('reg_dentist_state_field')), 'Kerala');
+      await tester.enterText(find.byKey(const Key('reg_dentist_pincode_field')), '682016');
+
+      await tester.drag(find.byKey(const Key('registration_scroll_view')), const Offset(0, -1400));
+      await tester.pumpAndSettle();
+      final mapBtn1 = find.byKey(const Key('reg_open_map_picker_button'));
+      await tester.ensureVisible(mapBtn1);
+      await tester.pumpAndSettle();
+      await tester.tap(mapBtn1);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('osm_flutter_map')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('osm_picker_confirm_btn')));
+      await tester.pumpAndSettle();
 
       final continueBtn = find.byKey(const Key('reg_continue_button'));
+      ScaffoldMessenger.of(tester.element(continueBtn)).clearSnackBars();
+      await tester.pumpAndSettle();
+      await tester.drag(find.byKey(const Key('registration_scroll_view')), const Offset(0, -1800));
+      await tester.pumpAndSettle();
       await tester.ensureVisible(continueBtn);
       await tester.tap(continueBtn);
       await tester.pump(const Duration(milliseconds: 250));
@@ -384,6 +410,10 @@ void main() {
 
       // Retry with successful storage upload -> persists uploaded Storage URL in DoctorModel
       simulateUploadFailure = false;
+      ScaffoldMessenger.of(tester.element(continueBtn)).clearSnackBars();
+      await tester.pumpAndSettle();
+      await tester.drag(find.byKey(const Key('registration_scroll_view')), const Offset(0, -1800));
+      await tester.pumpAndSettle();
       await tester.ensureVisible(continueBtn);
       await tester.tap(continueBtn);
       await tester.pump(const Duration(milliseconds: 250));
@@ -414,7 +444,29 @@ void main() {
 
       await tester.enterText(find.byKey(const Key('reg_full_name_field')), 'Dr. Arjun Verma');
       await tester.enterText(find.byKey(const Key('reg_city_field')), 'Bengaluru');
+      await tester.ensureVisible(find.byKey(const Key('reg_dentist_clinic_name_field')));
+      await tester.enterText(find.byKey(const Key('reg_dentist_clinic_name_field')), 'Verma Dental Clinic');
+      await tester.enterText(find.byKey(const Key('reg_dentist_clinic_address_field')), '12th Main, Indiranagar');
+      await tester.enterText(find.byKey(const Key('reg_dentist_state_field')), 'Karnataka');
+      await tester.enterText(find.byKey(const Key('reg_dentist_pincode_field')), '560038');
+
+      await tester.drag(find.byKey(const Key('registration_scroll_view')), const Offset(0, -1400));
+      await tester.pumpAndSettle();
+      final mapBtn2 = find.byKey(const Key('reg_open_map_picker_button'));
+      await tester.ensureVisible(mapBtn2);
+      await tester.pumpAndSettle();
+      await tester.tap(mapBtn2);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('osm_flutter_map')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('osm_picker_confirm_btn')));
+      await tester.pumpAndSettle();
+
       final continueBtn2 = find.byKey(const Key('reg_continue_button'));
+      ScaffoldMessenger.of(tester.element(continueBtn2)).clearSnackBars();
+      await tester.pumpAndSettle();
+      await tester.drag(find.byKey(const Key('registration_scroll_view')), const Offset(0, -1800));
+      await tester.pumpAndSettle();
       await tester.ensureVisible(continueBtn2);
       await tester.tap(continueBtn2);
       await tester.pump(const Duration(milliseconds: 250));

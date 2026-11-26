@@ -15,6 +15,7 @@ const availability = require('../controllers/availabilityController');
 const specialties = require('../controllers/specialtyController');
 const districts = require('../controllers/districtController');
 const assignments = require('../controllers/assignmentController');
+const doctorActivityCalendar = require('../controllers/doctorActivityCalendarController');
 
 // Middlewares
 const { authenticateJWT, optionalAuth, requireRole, requireMainAdmin, requirePermission, requireChatAccess, enforceDistrictAccess } = require('../middleware/auth');
@@ -144,6 +145,8 @@ router.get('/visits-calendar/doctor', optionalAuth, appointments.getDoctorVisits
 router.get('/doctor/visits-calendar', optionalAuth, appointments.getDoctorVisitsCalendar);
 router.get('/visits-calendar/admin', optionalAuth, appointments.getAdminGlobalVisitsCalendar);
 router.get('/admin/visits-calendar', optionalAuth, appointments.getAdminGlobalVisitsCalendar);
+router.get('/admin/doctor-activity-calendar', optionalAuth, doctorActivityCalendar.getDoctorActivityCalendar);
+router.get('/doctor-activity-calendar/admin', optionalAuth, doctorActivityCalendar.getDoctorActivityCalendar);
 
 router.get('/notifications', optionalAuth, appointments.getNotifications);
 router.put('/notifications/read-all', optionalAuth, appointments.markAllNotificationsRead);

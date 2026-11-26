@@ -201,7 +201,6 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
     String? pickedPhotoName;
     bool hasNewPickedPhoto = false;
     bool removeExistingPhoto = false;
-    String selectedConsultationMode = doc.consultationMode;
     double? selectedLat = doc.latitude;
     double? selectedLng = doc.longitude;
     bool clearLocationFlag = false;
@@ -544,240 +543,165 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                         ),
                         validator: (v) => (v == null || v.trim().isEmpty) ? 'Please enter qualification' : null,
                       ),
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 12),
 
-                      // Consultation Mode Selector
-                      const Text(
-                        'CONSULTATION TYPE',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.5,
-                          color: Color(0xFF64748B),
+                      TextFormField(
+                        key: const Key('edit_doctor_clinic_name_field'),
+                        controller: clinicCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Clinic Name',
+                          prefixIcon: const Icon(Icons.apartment_rounded),
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Please enter clinic name' : null,
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        key: const Key('edit_doctor_clinic_address_field'),
+                        controller: clinicAddressCtrl,
+                        minLines: 2,
+                        maxLines: 3,
+                        decoration: InputDecoration(
+                          labelText: 'Clinic Address',
+                          hintText: 'Building, street, area, landmark',
+                          prefixIcon: const Icon(Icons.place_outlined),
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: const [
-                          (code: DoctorConsultationMode.both, label: 'In-Person & Online'),
-                          (code: DoctorConsultationMode.inPerson, label: 'In-Person Clinic'),
-                          (code: DoctorConsultationMode.onlineOnly, label: 'Online Only'),
-                        ].map((mode) {
-                          final isSelected = DoctorConsultationMode.normalize(selectedConsultationMode) == mode.code;
-                          return ChoiceChip(
-                            key: Key('edit_doctor_mode_${mode.code}'),
-                            label: Text(
-                              mode.label,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                color: isSelected ? Colors.white : const Color(0xFF1E293B),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              key: const Key('edit_doctor_state_field'),
+                              controller: stateCtrl,
+                              decoration: InputDecoration(
+                                labelText: 'State',
+                                prefixIcon: const Icon(Icons.map_outlined),
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                               ),
                             ),
-                            selected: isSelected,
-                            selectedColor: AppTheme.gsNavy,
-                            backgroundColor: const Color(0xFFF8FAFC),
-                            onSelected: isSaving
-                                ? null
-                                : (_) {
-                                    setSheetState(() {
-                                      selectedConsultationMode = mode.code;
-                                      if (DoctorConsultationMode.isOnlineOnly(mode.code)) {
-                                        selectedLat = null;
-                                        selectedLng = null;
-                                        clearLocationFlag = true;
-                                      }
-                                    });
-                                  },
-                          );
-                        }).toList(),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: TextFormField(
+                              key: const Key('edit_doctor_pincode_field'),
+                              controller: pincodeCtrl,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly,
+                                LengthLimitingTextInputFormatter(6),
+                              ],
+                              decoration: InputDecoration(
+                                labelText: 'Pincode',
+                                prefixIcon: const Icon(Icons.pin_drop_outlined),
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                              validator: (v) {
+                                if (v == null || v.trim().isEmpty) return null;
+                                if (!ClinicDirectionsHelper.isValidPincode(v)) return '6-digit PIN';
+                                return null;
+                              },
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 12),
 
-                      if (DoctorConsultationMode.isOnlineOnly(selectedConsultationMode)) ...[
-                        Container(
-                          key: const Key('edit_doctor_online_only_banner'),
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFECFDF5),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFFA7F3D0)),
-                          ),
-                          child: const Row(
-                            children: [
-                              Icon(Icons.videocam_outlined, size: 18, color: Color(0xFF047857)),
-                              SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  'Online Only mode active — clinic address and map location are not required.',
-                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF065F46)),
-                                ),
-                              ),
-                            ],
-                          ),
+                      // OpenStreetMap Clinic Location Picker / Preview
+                      if (ClinicDirectionsHelper.hasValidCoordinates(selectedLat, selectedLng)) ...[
+                        OsmLocationPreviewCard(
+                          key: const Key('edit_doctor_osm_preview'),
+                          latitude: selectedLat!,
+                          longitude: selectedLng!,
+                          title: clinicCtrl.text.trim().isNotEmpty
+                              ? clinicCtrl.text.trim()
+                              : 'Selected Clinic Location',
+                          subtitle: clinicAddressCtrl.text.trim(),
+                          mapHeight: 120,
+                          onChangeLocation: isSaving
+                              ? null
+                              : () async {
+                                  final picked = await MapLocationPickerDialog.show(
+                                    context: sheetCtx,
+                                    initialAddress: clinicAddressCtrl.text,
+                                    initialCity: cityCtrl.text,
+                                    initialState: stateCtrl.text,
+                                    initialPincode: pincodeCtrl.text,
+                                    initialLat: selectedLat,
+                                    initialLng: selectedLng,
+                                  );
+                                  if (picked != null) {
+                                    setSheetState(() {
+                                      selectedLat = picked.latitude;
+                                      selectedLng = picked.longitude;
+                                      clearLocationFlag = false;
+                                      if (picked.address.isNotEmpty) clinicAddressCtrl.text = picked.address;
+                                      if (picked.city.isNotEmpty) cityCtrl.text = picked.city;
+                                      if (picked.state.isNotEmpty) stateCtrl.text = picked.state;
+                                      if (picked.pincode.isNotEmpty) pincodeCtrl.text = picked.pincode;
+                                    });
+                                  }
+                                },
+                          onRemoveLocation: isSaving
+                              ? null
+                              : () {
+                                  setSheetState(() {
+                                    selectedLat = null;
+                                    selectedLng = null;
+                                    clearLocationFlag = true;
+                                  });
+                                },
                         ),
                         const SizedBox(height: 12),
                       ] else ...[
-                        TextFormField(
-                          key: const Key('edit_doctor_clinic_name_field'),
-                          controller: clinicCtrl,
-                          decoration: InputDecoration(
-                            labelText: 'Clinic / Hospital Name',
-                            prefixIcon: const Icon(Icons.apartment_rounded),
-                            filled: true,
-                            fillColor: const Color(0xFFF8FAFC),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                          validator: (v) => (v == null || v.trim().isEmpty) ? 'Please enter clinic name' : null,
-                        ),
-                        const SizedBox(height: 12),
-                        TextFormField(
-                          key: const Key('edit_doctor_clinic_address_field'),
-                          controller: clinicAddressCtrl,
-                          minLines: 2,
-                          maxLines: 3,
-                          decoration: InputDecoration(
-                            labelText: 'Clinic Address',
-                            hintText: 'Building, street, area, landmark',
-                            prefixIcon: const Icon(Icons.place_outlined),
-                            filled: true,
-                            fillColor: const Color(0xFFF8FAFC),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextFormField(
-                                key: const Key('edit_doctor_state_field'),
-                                controller: stateCtrl,
-                                decoration: InputDecoration(
-                                  labelText: 'State',
-                                  prefixIcon: const Icon(Icons.map_outlined),
-                                  filled: true,
-                                  fillColor: const Color(0xFFF8FAFC),
-                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: TextFormField(
-                                key: const Key('edit_doctor_pincode_field'),
-                                controller: pincodeCtrl,
-                                keyboardType: TextInputType.number,
-                                inputFormatters: [
-                                  FilteringTextInputFormatter.digitsOnly,
-                                  LengthLimitingTextInputFormatter(6),
-                                ],
-                                decoration: InputDecoration(
-                                  labelText: 'Pincode',
-                                  prefixIcon: const Icon(Icons.pin_drop_outlined),
-                                  filled: true,
-                                  fillColor: const Color(0xFFF8FAFC),
-                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                                ),
-                                validator: (v) {
-                                  if (v == null || v.trim().isEmpty) return null;
-                                  if (!RegExp(r'^\d{6}$').hasMatch(v.trim())) return '6-digit PIN';
-                                  return null;
-                                },
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-
-                        // OpenStreetMap Pin Selector / Preview
-                        if (ClinicDirectionsHelper.hasValidCoordinates(selectedLat, selectedLng)) ...[
-                          OsmLocationPreviewCard(
-                            key: const Key('edit_doctor_osm_preview'),
-                            latitude: selectedLat!,
-                            longitude: selectedLng!,
-                            title: clinicCtrl.text.trim().isNotEmpty
-                                ? clinicCtrl.text.trim()
-                                : 'Pinned Clinic Location',
-                            subtitle: clinicAddressCtrl.text.trim(),
-                            mapHeight: 120,
-                            onChangeLocation: isSaving
-                                ? null
-                                : () async {
-                                    final picked = await MapLocationPickerDialog.show(
-                                      context: sheetCtx,
-                                      initialAddress: clinicAddressCtrl.text,
-                                      initialCity: cityCtrl.text,
-                                      initialState: stateCtrl.text,
-                                      initialPincode: pincodeCtrl.text,
-                                      initialLat: selectedLat,
-                                      initialLng: selectedLng,
-                                    );
-                                    if (picked != null) {
-                                      setSheetState(() {
-                                        selectedLat = picked.latitude;
-                                        selectedLng = picked.longitude;
-                                        clearLocationFlag = false;
-                                        if (picked.address.isNotEmpty) clinicAddressCtrl.text = picked.address;
-                                        if (picked.city.isNotEmpty) cityCtrl.text = picked.city;
-                                        if (picked.state.isNotEmpty) stateCtrl.text = picked.state;
-                                        if (picked.pincode.isNotEmpty) pincodeCtrl.text = picked.pincode;
-                                      });
-                                    }
-                                  },
-                            onRemoveLocation: isSaving
-                                ? null
-                                : () {
+                        OutlinedButton.icon(
+                          key: const Key('edit_doctor_open_map_button'),
+                          onPressed: isSaving
+                              ? null
+                              : () async {
+                                  final picked = await MapLocationPickerDialog.show(
+                                    context: sheetCtx,
+                                    initialAddress: clinicAddressCtrl.text,
+                                    initialCity: cityCtrl.text,
+                                    initialState: stateCtrl.text,
+                                    initialPincode: pincodeCtrl.text,
+                                    initialLat: selectedLat,
+                                    initialLng: selectedLng,
+                                  );
+                                  if (picked != null) {
                                     setSheetState(() {
-                                      selectedLat = null;
-                                      selectedLng = null;
-                                      clearLocationFlag = true;
+                                      selectedLat = picked.latitude;
+                                      selectedLng = picked.longitude;
+                                      clearLocationFlag = false;
+                                      if (picked.address.isNotEmpty) clinicAddressCtrl.text = picked.address;
+                                      if (picked.city.isNotEmpty) cityCtrl.text = picked.city;
+                                      if (picked.state.isNotEmpty) stateCtrl.text = picked.state;
+                                      if (picked.pincode.isNotEmpty) pincodeCtrl.text = picked.pincode;
                                     });
-                                  },
+                                  }
+                                },
+                          icon: const Icon(Icons.add_location_alt_outlined, size: 17),
+                          label: const Text(
+                            'Select Clinic Location',
+                            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
                           ),
-                          const SizedBox(height: 12),
-                        ] else ...[
-                          OutlinedButton.icon(
-                            key: const Key('edit_doctor_open_map_button'),
-                            onPressed: isSaving
-                                ? null
-                                : () async {
-                                    final picked = await MapLocationPickerDialog.show(
-                                      context: sheetCtx,
-                                      initialAddress: clinicAddressCtrl.text,
-                                      initialCity: cityCtrl.text,
-                                      initialState: stateCtrl.text,
-                                      initialPincode: pincodeCtrl.text,
-                                      initialLat: selectedLat,
-                                      initialLng: selectedLng,
-                                    );
-                                    if (picked != null) {
-                                      setSheetState(() {
-                                        selectedLat = picked.latitude;
-                                        selectedLng = picked.longitude;
-                                        clearLocationFlag = false;
-                                        if (picked.address.isNotEmpty) clinicAddressCtrl.text = picked.address;
-                                        if (picked.city.isNotEmpty) cityCtrl.text = picked.city;
-                                        if (picked.state.isNotEmpty) stateCtrl.text = picked.state;
-                                        if (picked.pincode.isNotEmpty) pincodeCtrl.text = picked.pincode;
-                                      });
-                                    }
-                                  },
-                            icon: const Icon(Icons.add_location_alt_outlined, size: 17),
-                            label: const Text(
-                              'Select Clinic Location on Map (Optional)',
-                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: AppTheme.gsNavy,
-                              side: const BorderSide(color: AppTheme.gsNavy),
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.gsNavy,
+                            side: const BorderSide(color: AppTheme.gsNavy),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           ),
-                          const SizedBox(height: 12),
-                        ],
+                        ),
+                        const SizedBox(height: 12),
                       ],
 
                       Row(
@@ -833,21 +757,19 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                                           ? _encodeDoctorPhotoDataUri(pickedPhotoBytes!, pickedPhotoName)
                                           : null;
 
-                                  final bool isOnlineOnly = DoctorConsultationMode.isOnlineOnly(selectedConsultationMode);
                                   final result = await _patientService.updateDoctorProfessionalProfile(
                                     doctorId: doc.id,
                                     name: nameCtrl.text.trim(),
                                     phone: phoneCtrl.text.trim(),
                                     specialty: specialtyCtrl.text.trim(),
                                     qualification: qualCtrl.text.trim(),
-                                    consultationMode: selectedConsultationMode,
-                                    clinicName: isOnlineOnly ? '' : clinicCtrl.text.trim(),
-                                    clinicAddress: isOnlineOnly ? '' : clinicAddressCtrl.text.trim(),
-                                    state: isOnlineOnly ? '' : stateCtrl.text.trim(),
-                                    pincode: isOnlineOnly ? '' : pincodeCtrl.text.trim(),
-                                    latitude: isOnlineOnly ? null : selectedLat,
-                                    longitude: isOnlineOnly ? null : selectedLng,
-                                    clearLocation: isOnlineOnly || clearLocationFlag,
+                                    clinicName: clinicCtrl.text.trim(),
+                                    clinicAddress: clinicAddressCtrl.text.trim(),
+                                    state: stateCtrl.text.trim(),
+                                    pincode: pincodeCtrl.text.trim(),
+                                    latitude: selectedLat,
+                                    longitude: selectedLng,
+                                    clearLocation: clearLocationFlag,
                                     consultationFee: feeCtrl.text.trim(),
                                     city: cityCtrl.text.trim(),
                                     photoBytes: removeExistingPhoto ? null : pickedPhotoBytes,
@@ -1620,40 +1542,14 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                     ),
                     const SizedBox(height: 8),
 
-                    // Specialization & Consultation Type
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        Text(
-                          doc.specialty.isNotEmpty ? doc.specialty : 'General Dentistry',
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFF0F172A),
-                          ),
-                        ),
-                        Container(
-                          key: const Key('doctor_profile_consultation_mode_badge'),
-                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: doc.isOnlineOnly ? const Color(0xFFECFDF5) : const Color(0xFFEFF6FF),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: doc.isOnlineOnly ? const Color(0xFFA7F3D0) : const Color(0xFFBFDBFE),
-                            ),
-                          ),
-                          child: Text(
-                            DoctorConsultationMode.displayLabel(doc.consultationMode),
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: doc.isOnlineOnly ? const Color(0xFF047857) : AppTheme.gsNavy,
-                            ),
-                          ),
-                        ),
-                      ],
+                    // Specialization
+                    Text(
+                      doc.specialty.isNotEmpty ? doc.specialty : 'General Dentistry',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF0F172A),
+                      ),
                     ),
                     const SizedBox(height: 10),
 
@@ -1681,163 +1577,137 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                     ),
                     const SizedBox(height: 8),
 
-                    // Clinic Details or Online-Only Indicator
-                    if (doc.isOnlineOnly) ...[
-                      const Row(
-                        key: Key('doctor_profile_online_only_row'),
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.videocam_outlined,
-                            size: 18,
-                            color: Color(0xFF047857),
+                    // Clinic Name
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.apartment_rounded,
+                          size: 18,
+                          color: Color(0xFF64748B),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            doc.clinicName.trim().isNotEmpty
+                                ? doc.clinicName.trim()
+                                : 'Clinic name not set',
+                            key: const Key('doctor_profile_clinic_name_text'),
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF334155),
+                            ),
                           ),
-                          SizedBox(width: 8),
+                        ),
+                      ],
+                    ),
+                    if (doc.clinicAddress.trim().isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.only(top: 1),
+                            child: Icon(
+                              Icons.place_outlined,
+                              size: 18,
+                              color: Color(0xFF64748B),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Online Consultation Only',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF047857),
+                              doc.clinicAddress.trim(),
+                              key: const Key('doctor_profile_clinic_address_text'),
+                              style: const TextStyle(
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w500,
+                                color: Color(0xFF475569),
                               ),
                             ),
                           ),
                         ],
                       ),
-                    ] else ...[
-                      // Clinic Name
+                    ],
+                    if (doc.city.trim().isNotEmpty ||
+                        doc.state.trim().isNotEmpty ||
+                        doc.pincode.trim().isNotEmpty) ...[
+                      const SizedBox(height: 8),
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
                           const Icon(
-                            Icons.apartment_rounded,
+                            Icons.location_city_rounded,
                             size: 18,
                             color: Color(0xFF64748B),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              doc.clinicName.trim().isNotEmpty
-                                  ? doc.clinicName.trim()
-                                  : 'Clinic name not set',
-                              key: const Key('doctor_profile_clinic_name_text'),
+                              [
+                                if (doc.city.trim().isNotEmpty) doc.city.trim(),
+                                if (doc.state.trim().isNotEmpty) doc.state.trim(),
+                                if (doc.pincode.trim().isNotEmpty) doc.pincode.trim(),
+                              ].join(', '),
+                              key: const Key('doctor_profile_city_state_pincode_text'),
                               style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF334155),
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w500,
+                                color: Color(0xFF475569),
                               ),
                             ),
                           ),
                         ],
                       ),
-                      if (doc.clinicAddress.trim().isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Padding(
-                              padding: EdgeInsets.only(top: 1),
-                              child: Icon(
-                                Icons.place_outlined,
-                                size: 18,
-                                color: Color(0xFF64748B),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                doc.clinicAddress.trim(),
-                                key: const Key('doctor_profile_clinic_address_text'),
-                                style: const TextStyle(
-                                  fontSize: 13.5,
-                                  fontWeight: FontWeight.w500,
-                                  color: Color(0xFF475569),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                      if (doc.city.trim().isNotEmpty ||
-                          doc.state.trim().isNotEmpty ||
-                          doc.pincode.trim().isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            const Icon(
-                              Icons.location_city_rounded,
-                              size: 18,
-                              color: Color(0xFF64748B),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                [
-                                  if (doc.city.trim().isNotEmpty) doc.city.trim(),
-                                  if (doc.state.trim().isNotEmpty) doc.state.trim(),
-                                  if (doc.pincode.trim().isNotEmpty) doc.pincode.trim(),
-                                ].join(', '),
-                                key: const Key('doctor_profile_city_state_pincode_text'),
-                                style: const TextStyle(
-                                  fontSize: 13.5,
-                                  fontWeight: FontWeight.w500,
-                                  color: Color(0xFF475569),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                      const SizedBox(height: 10),
-                      if (doc.hasCoordinates)
-                        OsmLocationPreviewCard(
-                          key: const Key('doctor_profile_osm_preview'),
-                          latitude: doc.latitude!,
-                          longitude: doc.longitude!,
-                          title: doc.clinicName.trim().isNotEmpty ? doc.clinicName.trim() : 'Pinned Clinic Location',
-                          subtitle: doc.clinicAddress.trim(),
-                          mapHeight: 118,
-                          onChangeLocation: () => _showEditProfileDialog(context, doc),
-                        )
-                      else
-                        Container(
-                          key: const Key('doctor_profile_no_map_pin_banner'),
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF8FAFC),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFFE2E8F0)),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.location_off_outlined, size: 16, color: Color(0xFF64748B)),
-                              const SizedBox(width: 8),
-                              const Expanded(
-                                child: Text(
-                                  'Map pin not set yet (optional)',
-                                  style: TextStyle(fontSize: 12.5, color: Color(0xFF64748B)),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              TextButton(
-                                onPressed: () => _showEditProfileDialog(context, doc),
-                                style: TextButton.styleFrom(
-                                  foregroundColor: AppTheme.gsNavy,
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                  minimumSize: const Size(0, 28),
-                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                ),
-                                child: const Text(
-                                  'Pin on map',
-                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
                     ],
+                    const SizedBox(height: 10),
+                    if (doc.hasCoordinates)
+                      OsmLocationPreviewCard(
+                        key: const Key('doctor_profile_osm_preview'),
+                        latitude: doc.latitude!,
+                        longitude: doc.longitude!,
+                        title: doc.clinicName.trim().isNotEmpty ? doc.clinicName.trim() : 'Selected Clinic Location',
+                        subtitle: doc.clinicAddress.trim(),
+                        mapHeight: 118,
+                        onChangeLocation: () => _showEditProfileDialog(context, doc),
+                      )
+                    else
+                      Container(
+                        key: const Key('doctor_profile_no_map_pin_banner'),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.location_off_outlined, size: 16, color: Color(0xFF64748B)),
+                            const SizedBox(width: 8),
+                            const Expanded(
+                              child: Text(
+                                'Clinic map location not set yet',
+                                style: TextStyle(fontSize: 12.5, color: Color(0xFF64748B)),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: () => _showEditProfileDialog(context, doc),
+                              style: TextButton.styleFrom(
+                                foregroundColor: AppTheme.gsNavy,
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                minimumSize: const Size(0, 28),
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              child: const Text(
+                                'Select Clinic Location',
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     const SizedBox(height: 10),
 
                     // Languages Known Summary Row

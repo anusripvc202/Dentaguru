@@ -89,11 +89,13 @@ const ASSIGNMENT_SOURCES = {
     SUB_ADMIN_ASSIGNMENT: 'SUB_ADMIN_ASSIGNMENT',
 };
 
-// Helper: canonical 10-digit Indian phone normalization across +91 / 91 / 0 / spaces / hyphens
+// Helper: canonical 10-digit Indian phone normalization across +91 / 0091 / 91 / 910 / 0 / spaces / hyphens
 function canonicalPhone10(rawPhone) {
     const clean = String(rawPhone || '').trim();
     if (!clean) return '';
     const digits = clean.replace(/[^0-9]/g, '');
+    if (digits.length === 14 && digits.startsWith('0091')) return digits.slice(4);
+    if (digits.length === 13 && digits.startsWith('910')) return digits.slice(3);
     if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
     if (digits.length === 11 && digits.startsWith('0')) return digits.slice(1);
     if (digits.length > 10) return digits.slice(-10);
@@ -187,13 +189,18 @@ const User = {
         }
 
         if (last10 && last10.length >= 10) {
+            const isRecordActive = (u) => {
+                const st = String(u?.status || 'ACTIVE').trim().toUpperCase();
+                return !['INACTIVE', 'DEACTIVATED', 'SUSPENDED', 'BLOCKED'].includes(st);
+            };
             const { data } = await supabaseAdmin
                 .from('users')
                 .select('*')
                 .ilike('phone', `%${last10}%`)
-                .limit(5);
+                .limit(10);
             if (data && data.length > 0) {
-                const match = data.find(u => canonicalPhone10(u.phone) === last10) || data[0];
+                const exactMatches = data.filter(u => canonicalPhone10(u.phone) === last10);
+                const match = exactMatches.find(isRecordActive) || exactMatches[0] || data[0];
                 const unpacked = _unpackUserRecord(match);
                 if (unpacked && (unpacked.role === 'Sub-Admin' || unpacked.role === 'SUB_ADMIN' || unpacked.role === 'SUB-ADMIN')) {
                     if (!unpacked.permissions || unpacked.permissions.length === 0) {
@@ -212,7 +219,8 @@ const User = {
                 .ilike('phone', `%${last4}%`)
                 .limit(25);
             if (spacedData && spacedData.length > 0) {
-                const match = spacedData.find(u => canonicalPhone10(u.phone) === last10);
+                const exactMatches = spacedData.filter(u => canonicalPhone10(u.phone) === last10);
+                const match = exactMatches.find(isRecordActive) || exactMatches[0];
                 if (match) {
                     const unpacked = _unpackUserRecord(match);
                     if (unpacked && (unpacked.role === 'Sub-Admin' || unpacked.role === 'SUB_ADMIN' || unpacked.role === 'SUB-ADMIN')) {
@@ -1066,12 +1074,32 @@ const PatientAssignmentHistory = {
     }
 };
 
-// Helper: attach associated owner email/phone to clinic rows cleanly
+// Helper: attach associated owner email/phone & structured address/coordinates to clinic rows cleanly
 function _hydrateClinicRecord(c) {
     if (!c) return c;
     const u = Array.isArray(c.users) ? c.users[0] : c.users;
+    let uMeta = {};
+    if (u?.device_token && typeof u.device_token === 'string' && u.device_token.trim().startsWith('{')) {
+        try { uMeta = JSON.parse(u.device_token); } catch (_) { }
+    }
+    const rawLat = c.latitude ?? u?.latitude ?? uMeta.latitude ?? null;
+    const rawLng = c.longitude ?? u?.longitude ?? uMeta.longitude ?? null;
+    const parsedLat = rawLat !== null && rawLat !== '' && Number.isFinite(Number(rawLat)) ? Number(rawLat) : null;
+    const parsedLng = rawLng !== null && rawLng !== '' && Number.isFinite(Number(rawLng)) ? Number(rawLng) : null;
+    const resolvedAddress = String(c.clinic_address || c.location || uMeta.clinicAddress || '').trim();
+    const resolvedCity = String(c.city || u?.city || uMeta.city || '').trim();
+    const resolvedState = String(c.state || u?.state || uMeta.state || '').trim();
+    const resolvedPincode = String(c.pincode || u?.pincode || uMeta.pincode || '').trim();
     return {
         ...c,
+        clinic_address: resolvedAddress,
+        clinicAddress: resolvedAddress,
+        location: c.location || resolvedAddress,
+        city: resolvedCity,
+        state: resolvedState,
+        pincode: resolvedPincode,
+        latitude: parsedLat,
+        longitude: parsedLng,
         email: c.email || u?.email || '',
         phone: c.phone || u?.phone || ''
     };
@@ -1080,7 +1108,7 @@ function _hydrateClinicRecord(c) {
 // 2. CLINIC MODEL (Supabase PostgreSQL)
 const Clinic = {
     async findOne(query) {
-        let req = supabaseAdmin.from('clinics').select('*, users(id, name, email, phone)');
+        let req = supabaseAdmin.from('clinics').select('*, users(id, name, email, phone, state, city, pincode, latitude, longitude, device_token)');
         for (const [key, val] of Object.entries(query)) {
             if (key === 'clinic_name' && typeof val === 'string') {
                 const safePattern = val.trim().replace(/[%_]/g, '\\$&');
@@ -1109,7 +1137,7 @@ const Clinic = {
     },
 
     async findById(id) {
-        let { data, error } = await supabaseAdmin.from('clinics').select('*, users(id, name, email, phone)').eq('id', id).single();
+        let { data, error } = await supabaseAdmin.from('clinics').select('*, users(id, name, email, phone, state, city, pincode, latitude, longitude, device_token)').eq('id', id).single();
         if (error) {
             const fb = await supabaseAdmin.from('clinics').select('*').eq('id', id).single();
             if (fb.error) return null;
@@ -1120,7 +1148,7 @@ const Clinic = {
 
     async find(query = {}) {
         try {
-            let req = supabaseAdmin.from('clinics').select('*, users(id, name, email, phone)');
+            let req = supabaseAdmin.from('clinics').select('*, users(id, name, email, phone, state, city, pincode, latitude, longitude, device_token)');
             if (query.clinicName) {
                 req = req.ilike('clinic_name', `%${query.clinicName}%`);
             }
@@ -1153,34 +1181,139 @@ const Clinic = {
             ? Number(clinicData.longitude)
             : (clinicData.coordinates?.coordinates?.[0] !== undefined ? Number(clinicData.coordinates.coordinates[0]) : null);
 
-        const payload = {
+        const cleanAddress = String(clinicData.clinic_address || clinicData.clinicAddress || clinicData.location || '').trim();
+        const cleanCity = String(clinicData.city || '').trim();
+        const cleanState = String(clinicData.state || '').trim();
+        const cleanPincode = String(clinicData.pincode || '').trim();
+
+        const basePayload = {
             user_id: validUserId,
             clinic_name: clinicData.clinic_name || clinicData.clinicName || '',
-            location: clinicData.location || '',
+            location: clinicData.location || cleanAddress || '',
             rating: clinicData.rating ?? 0,
             reviews_count: clinicData.reviews_count || clinicData.reviewsCount || 0,
             verified: clinicData.verified !== undefined ? clinicData.verified : true,
             services: clinicData.services || clinicData.departments || ['General Medicine', 'General Consultation'],
             pricing: clinicData.pricing || [],
-            latitude: Number.isFinite(parsedLat) ? parsedLat : null,
-            longitude: Number.isFinite(parsedLng) ? parsedLng : null
         };
-        const { data, error } = await supabaseAdmin.from('clinics').insert(payload).select().single();
+        const fullPayload = {
+            ...basePayload,
+            clinic_address: cleanAddress,
+            city: cleanCity,
+            state: cleanState,
+            pincode: cleanPincode,
+            latitude: Number.isFinite(parsedLat) ? parsedLat : null,
+            longitude: Number.isFinite(parsedLng) ? parsedLng : null,
+        };
+
+        let { data, error } = await supabaseAdmin.from('clinics').insert(fullPayload).select().single();
         if (error) {
-            console.error('❌ Supabase Clinic Insert Error:', error.message);
-            throw error;
+            // Pre-Migration-06 schema fallback: retry with base columns
+            const fb = await supabaseAdmin.from('clinics').insert(basePayload).select().single();
+            if (fb.error) {
+                console.error('❌ Supabase Clinic Insert Error:', fb.error.message);
+                throw fb.error;
+            }
+            data = {
+                ...fb.data,
+                clinic_address: cleanAddress,
+                city: cleanCity,
+                state: cleanState,
+                pincode: cleanPincode,
+                latitude: Number.isFinite(parsedLat) ? parsedLat : null,
+                longitude: Number.isFinite(parsedLng) ? parsedLng : null,
+            };
         }
-        return data;
+        return _hydrateClinicRecord(data);
     },
 
     async findByIdAndUpdate(id, updateData) {
         if (!id) return null;
+        const payload = { ...updateData, updated_at: new Date().toISOString() };
         try {
-            const payload = { ...updateData, updated_at: new Date().toISOString() };
             const { data, error } = await supabaseAdmin.from('clinics').update(payload).eq('id', id).select().maybeSingle();
-            if (!error && data) return data;
+            if (!error && data) return _hydrateClinicRecord(data);
+            if (error) {
+                // Pre-Migration-06 schema fallback: strip unmigrated optional columns and retry
+                const safePayload = { ...payload };
+                delete safePayload.clinic_address;
+                delete safePayload.city;
+                delete safePayload.state;
+                delete safePayload.pincode;
+                delete safePayload.latitude;
+                delete safePayload.longitude;
+                const fb = await supabaseAdmin.from('clinics').update(safePayload).eq('id', id).select().maybeSingle();
+                if (!fb.error && fb.data) {
+                    return _hydrateClinicRecord({ ...fb.data, ...updateData });
+                }
+            }
         } catch (_) { }
         return await this.findById(id);
+    }
+};
+
+// 2b. CLINIC-DOCTOR ASSOCIATION HELPER (uses public.clinic_doctors when migrated, gracefully synced with dentists.clinic_id)
+const ClinicDoctor = {
+    async getDoctorIdsForClinic(clinicId) {
+        if (!clinicId) return [];
+        const ids = new Set();
+        try {
+            const { data, error } = await supabaseAdmin
+                .from('clinic_doctors')
+                .select('doctor_id, status')
+                .eq('clinic_id', clinicId);
+            if (!error && Array.isArray(data)) {
+                for (const row of data) {
+                    if (row?.doctor_id && String(row.status || 'ACTIVE').toUpperCase() !== 'REMOVED') {
+                        ids.add(String(row.doctor_id).trim());
+                    }
+                }
+            }
+        } catch (_) { }
+        return Array.from(ids);
+    },
+
+    async associate(clinicId, doctorId) {
+        if (!clinicId || !doctorId) return { ok: false, duplicate: false };
+        try {
+            const { data: existing, error: selErr } = await supabaseAdmin
+                .from('clinic_doctors')
+                .select('id, status')
+                .eq('clinic_id', clinicId)
+                .eq('doctor_id', doctorId)
+                .limit(1);
+            if (!selErr) {
+                if (existing && existing.length > 0) {
+                    if (String(existing[0].status || 'ACTIVE').toUpperCase() === 'ACTIVE') {
+                        return { ok: true, duplicate: true };
+                    }
+                    await supabaseAdmin
+                        .from('clinic_doctors')
+                        .update({ status: 'ACTIVE', updated_at: new Date().toISOString() })
+                        .eq('id', existing[0].id);
+                    return { ok: true, duplicate: false };
+                }
+                const { error: insErr } = await supabaseAdmin
+                    .from('clinic_doctors')
+                    .insert({ clinic_id: clinicId, doctor_id: doctorId, status: 'ACTIVE' });
+                if (!insErr) return { ok: true, duplicate: false };
+            }
+        } catch (_) { }
+        return { ok: false, duplicate: false, tableUnavailable: true };
+    },
+
+    async remove(clinicId, doctorId) {
+        if (!doctorId) return false;
+        try {
+            let query = supabaseAdmin.from('clinic_doctors').delete().eq('doctor_id', doctorId);
+            if (clinicId && clinicId !== 'default') {
+                query = query.eq('clinic_id', clinicId);
+            }
+            const { error } = await query;
+            return !error;
+        } catch (_) {
+            return false;
+        }
     }
 };
 
@@ -1754,16 +1887,12 @@ const Dentist = {
             }
         }
 
-        const { normalizeConsultationMode, validateCoordinates } = require('../utils/doctorClinicLocationHelper');
-        const resolvedConsultationMode = normalizeConsultationMode(
-            dentistData.consultation_mode || dentistData.consultationMode,
-            'BOTH'
-        );
+        const { validateCoordinates } = require('../utils/doctorClinicLocationHelper');
         const coordCheck = validateCoordinates(dentistData.latitude, dentistData.longitude, false);
 
         const payload = {
             user_id: validUserId,
-            clinic_id: resolvedConsultationMode === 'ONLINE_ONLY' ? null : validClinicId,
+            clinic_id: validClinicId,
             speciality: resolvedSpec,
             specialty_id: specResolution.specialty_id || null,
             department: dentistData.department || specResolution.department || '',
@@ -1776,23 +1905,15 @@ const Dentist = {
             rating: dentistData.rating ?? 0,
             reviews_count: dentistData.reviews_count ?? 0,
             consultation_fee: (dentistData.consultation_fee || dentistData.consultationFee || '').toString(),
-            bio: (dentistData.bio || '').toString(),
-            consultation_mode: resolvedConsultationMode
+            bio: (dentistData.bio || '').toString()
         };
-        if (resolvedConsultationMode !== 'ONLINE_ONLY') {
-            const rawClinicName = (dentistData.clinic_name ?? dentistData.clinicName ?? '').toString().trim();
-            const rawClinicAddress = (dentistData.clinic_address ?? dentistData.clinicAddress ?? '').toString().trim();
-            if (rawClinicName) payload.clinic_name = rawClinicName;
-            if (rawClinicAddress) payload.clinic_address = rawClinicAddress;
-            if (coordCheck.ok && coordCheck.hasUpdate) {
-                payload.latitude = coordCheck.latitude;
-                payload.longitude = coordCheck.longitude;
-            }
-        } else {
-            payload.clinic_name = null;
-            payload.clinic_address = null;
-            payload.latitude = null;
-            payload.longitude = null;
+        const rawClinicName = (dentistData.clinic_name ?? dentistData.clinicName ?? '').toString().trim();
+        const rawClinicAddress = (dentistData.clinic_address ?? dentistData.clinicAddress ?? '').toString().trim();
+        if (rawClinicName) payload.clinic_name = rawClinicName;
+        if (rawClinicAddress) payload.clinic_address = rawClinicAddress;
+        if (coordCheck.ok && coordCheck.hasUpdate) {
+            payload.latitude = coordCheck.latitude;
+            payload.longitude = coordCheck.longitude;
         }
         if (dentistData.state !== undefined && dentistData.state !== null) payload.state = String(dentistData.state).trim();
         if (dentistData.city !== undefined && dentistData.city !== null) payload.city = String(dentistData.city).trim();
@@ -1816,14 +1937,12 @@ const Dentist = {
                 errMsg.includes('languages') ||
                 errMsg.includes('clinic_name') ||
                 errMsg.includes('clinic_address') ||
-                errMsg.includes('consultation_mode') ||
                 errMsg.includes('column')
             ) {
                 const fallbackPayload = { ...payload };
                 if (errMsg.includes('languages')) delete fallbackPayload.languages;
                 delete fallbackPayload.clinic_name;
                 delete fallbackPayload.clinic_address;
-                delete fallbackPayload.consultation_mode;
                 const { data: retryData, error: retryErr } = await supabaseAdmin.from('dentists').insert(fallbackPayload).select().single();
                 if (!retryErr && retryData) return retryData;
             }
@@ -1863,7 +1982,7 @@ const Dentist = {
         if (updateData.bio !== undefined) {
             payload.bio = String(updateData.bio ?? '');
         }
-        const { normalizeConsultationMode, validateCoordinates } = require('../utils/doctorClinicLocationHelper');
+        const { validateCoordinates } = require('../utils/doctorClinicLocationHelper');
         if (updateData.clinic_id !== undefined) payload.clinic_id = updateData.clinic_id;
         if (updateData.clinic_name !== undefined || updateData.clinicName !== undefined) {
             const val = updateData.clinic_name ?? updateData.clinicName;
@@ -1872,12 +1991,6 @@ const Dentist = {
         if (updateData.clinic_address !== undefined || updateData.clinicAddress !== undefined) {
             const val = updateData.clinic_address ?? updateData.clinicAddress;
             payload.clinic_address = val === null ? null : String(val).trim();
-        }
-        if (updateData.consultation_mode !== undefined || updateData.consultationMode !== undefined) {
-            payload.consultation_mode = normalizeConsultationMode(
-                updateData.consultation_mode ?? updateData.consultationMode,
-                'BOTH'
-            );
         }
         if (updateData.city !== undefined) payload.city = updateData.city;
         if (updateData.pincode !== undefined) payload.pincode = updateData.pincode;
@@ -1912,13 +2025,11 @@ const Dentist = {
                 if (
                     errMsg.includes('clinic_name') ||
                     errMsg.includes('clinic_address') ||
-                    errMsg.includes('consultation_mode') ||
                     errMsg.includes('column')
                 ) {
                     const fallbackPayload = { ...payload };
                     delete fallbackPayload.clinic_name;
                     delete fallbackPayload.clinic_address;
-                    delete fallbackPayload.consultation_mode;
                     const retry = await supabaseAdmin
                         .from('dentists')
                         .update(fallbackPayload)
@@ -5362,6 +5473,7 @@ module.exports = {
     PatientDoctor,
     DoctorAvailability,
     DoctorSchedulingSettings,
+    ClinicDoctor,
     AppointmentSlotLock,
     ReleasedSlot,
     PatientDoctorPreference,

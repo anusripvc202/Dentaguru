@@ -1,24 +1,7 @@
 /**
- * Doctor Clinic Details, Consultation Mode & OpenStreetMap Coordinates Helper
+ * Doctor Clinic Details & OpenStreetMap Coordinates Validation Helper
  * Shared across authController, clinicController, and Schemas.js.
  */
-
-const VALID_CONSULTATION_MODES = ['BOTH', 'IN_PERSON', 'ONLINE_ONLY'];
-
-function normalizeConsultationMode(raw, fallback = 'BOTH') {
-    if (raw === undefined || raw === null) return fallback;
-    const norm = String(raw).trim().toUpperCase().replace(/[\s-]+/g, '_');
-    if (norm === 'ONLINE' || norm === 'ONLINE_ONLY' || norm === 'TELEMEDICINE') {
-        return 'ONLINE_ONLY';
-    }
-    if (norm === 'IN_PERSON' || norm === 'CLINIC' || norm === 'CLINIC_ONLY') {
-        return 'IN_PERSON';
-    }
-    if (norm === 'BOTH' || norm === 'HYBRID' || norm === 'ALL') {
-        return 'BOTH';
-    }
-    return fallback;
-}
 
 function parseCoordinateValue(raw, min, max) {
     if (raw === undefined) return undefined;
@@ -31,7 +14,7 @@ function parseCoordinateValue(raw, min, max) {
 }
 
 /**
- * Validates optional latitude/longitude pair.
+ * Validates latitude/longitude pair.
  * - Both omitted -> { ok: true, hasUpdate: false, latitude: undefined, longitude: undefined }
  * - clearLocation === true or both explicitly null/empty -> { ok: true, hasUpdate: true, latitude: null, longitude: null }
  * - One provided without the other or out of range -> { ok: false, message }
@@ -69,6 +52,65 @@ function validateCoordinates(rawLat, rawLng, clearLocation = false) {
     };
 }
 
+function isValidIndianPincode(raw) {
+    if (raw === undefined || raw === null) return false;
+    return /^\d{6}$/.test(String(raw).trim());
+}
+
+/**
+ * Validates all required doctor clinic registration fields.
+ */
+function validateDoctorRegistrationClinicFields({
+    clinicName,
+    clinicAddress,
+    city,
+    state,
+    pincode,
+    latitude,
+    longitude
+}) {
+    const cleanClinicName = (clinicName || '').toString().trim();
+    const cleanClinicAddress = (clinicAddress || '').toString().trim();
+    const cleanCity = (city || '').toString().trim();
+    const cleanState = (state || '').toString().trim();
+    const cleanPincode = (pincode !== undefined && pincode !== null) ? String(pincode).trim() : '';
+
+    if (!cleanClinicName) {
+        return { ok: false, message: 'Clinic name is required for doctor registration.' };
+    }
+    if (!cleanClinicAddress) {
+        return { ok: false, message: 'Clinic address is required for doctor registration.' };
+    }
+    if (!cleanCity) {
+        return { ok: false, message: 'City is required for doctor registration.' };
+    }
+    if (!cleanState) {
+        return { ok: false, message: 'State is required for doctor registration.' };
+    }
+    if (!cleanPincode || !isValidIndianPincode(cleanPincode)) {
+        return { ok: false, message: 'Please enter a valid 6-digit pincode.' };
+    }
+
+    const coordCheck = validateCoordinates(latitude, longitude, false);
+    if (!coordCheck.ok) {
+        return coordCheck;
+    }
+    if (!coordCheck.hasUpdate || coordCheck.latitude === null || coordCheck.longitude === null) {
+        return { ok: false, message: 'Please select your clinic location on the map.' };
+    }
+
+    return {
+        ok: true,
+        clinicName: cleanClinicName,
+        clinicAddress: cleanClinicAddress,
+        city: cleanCity,
+        state: cleanState,
+        pincode: cleanPincode,
+        latitude: coordCheck.latitude,
+        longitude: coordCheck.longitude
+    };
+}
+
 function parseUserDeviceMeta(rawDeviceToken) {
     if (!rawDeviceToken || typeof rawDeviceToken !== 'string') return {};
     const trimmed = rawDeviceToken.trim();
@@ -82,9 +124,9 @@ function parseUserDeviceMeta(rawDeviceToken) {
 }
 
 module.exports = {
-    VALID_CONSULTATION_MODES,
-    normalizeConsultationMode,
     parseCoordinateValue,
     validateCoordinates,
+    isValidIndianPincode,
+    validateDoctorRegistrationClinicFields,
     parseUserDeviceMeta
 };

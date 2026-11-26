@@ -196,28 +196,141 @@ const buildPatientUserPayload = (user, overrideMeta = null) => {
     };
 };
 
-// Single authorized Admin phone number configuration (Environment or Database)
-const getAuthorizedAdminPhone = async () => {
-    // 1. Backend environment variable configuration
-    const envAdminPhone = (process.env.ADMIN_PHONE || process.env.ADMIN_MOBILE_NUMBER || '').trim();
-    if (envAdminPhone) {
-        return normalizeAdminPhone(envAdminPhone);
+// Authoritative Admin / Sub-Admin role & account status helpers
+const MAIN_ADMIN_ROLES = new Set([
+    'admin',
+    'primaryadmin',
+    'primary_admin',
+    'superadmin',
+    'super_admin'
+]);
+
+const SUB_ADMIN_ROLES = new Set([
+    'sub-admin',
+    'subadmin',
+    'sub_admin'
+]);
+
+const INACTIVE_ACCOUNT_STATUSES = new Set([
+    'INACTIVE',
+    'DEACTIVATED',
+    'SUSPENDED',
+    'BLOCKED'
+]);
+
+const isMainAdminRole = (role) => MAIN_ADMIN_ROLES.has(String(role || '').trim().toLowerCase());
+const isSubAdminRole = (role) => SUB_ADMIN_ROLES.has(String(role || '').trim().toLowerCase());
+
+const getEffectiveUserStatus = (user, tokenMeta = {}) => {
+    const raw = user?.status ?? tokenMeta?.status ?? 'ACTIVE';
+    const normalized = String(raw || '').trim().toUpperCase();
+    return normalized || 'ACTIVE';
+};
+
+const isAccountActive = (user, tokenMeta = {}) =>
+    !INACTIVE_ACCOUNT_STATUSES.has(getEffectiveUserStatus(user, tokenMeta));
+
+// Parse valid 10-digit admin phones from env config (ignores placeholders like "+91XXXXXXXXXX")
+const getConfiguredEnvAdminPhones = (env = process.env) => {
+    const raw = [env.ADMIN_PHONE || '', env.ADMIN_MOBILE_NUMBER || '']
+        .filter(Boolean)
+        .join(',');
+    const phones = new Set();
+    for (const part of raw.split(',')) {
+        const norm = normalizeAdminPhone(part);
+        if (/^\d{10}$/.test(norm)) {
+            phones.add(norm);
+        }
     }
-    // 2. Existing secure admin account record in database (supports both 'ADMIN' and 'Admin')
+    return phones;
+};
+
+/**
+ * Authoritative Main Admin verification backed by the database user record.
+ * - Requires an existing user record with a valid ID and Main Admin role in public.users.
+ * - Requires the account to be active (rejects INACTIVE/DEACTIVATED/SUSPENDED/BLOCKED).
+ * - When authenticating via mobile number/OTP, requires exact normalized 10-digit phone match
+ *   between the verified mobile number and the stored Admin record's phone.
+ * - Never lets a stale/placeholder/mismatched ADMIN_PHONE env var override a verified active DB Admin record.
+ */
+const evaluateMainAdminAuthorization = ({ user, normalizedPhone = '', isPhoneAuth = true }) => {
+    if (!user || !user.id) {
+        return {
+            authorized: false,
+            isMainAdminRole: false,
+            isActive: false,
+            reason: 'USER_NOT_FOUND'
+        };
+    }
+
+    const hasMainAdminRole = isMainAdminRole(user.role);
+    const tokenMeta = parseUserTokenMeta(user);
+    const effectiveStatus = getEffectiveUserStatus(user, tokenMeta);
+    const active = isAccountActive(user, tokenMeta);
+
+    if (!hasMainAdminRole) {
+        return {
+            authorized: false,
+            isMainAdminRole: false,
+            isActive: active,
+            effectiveStatus,
+            reason: 'NOT_MAIN_ADMIN_ROLE'
+        };
+    }
+
+    if (!active) {
+        return {
+            authorized: false,
+            isMainAdminRole: true,
+            isActive: false,
+            effectiveStatus,
+            reason: 'ACCOUNT_DEACTIVATED'
+        };
+    }
+
+    const storedAdminPhone = normalizeAdminPhone(user.phone);
+    if (isPhoneAuth) {
+        const validVerifiedPhone = /^\d{10}$/.test(normalizedPhone);
+        const validStoredPhone = /^\d{10}$/.test(storedAdminPhone);
+        if (!validVerifiedPhone || !validStoredPhone || storedAdminPhone !== normalizedPhone) {
+            return {
+                authorized: false,
+                isMainAdminRole: true,
+                isActive: true,
+                effectiveStatus,
+                reason: 'PHONE_MISMATCH'
+            };
+        }
+    }
+
+    return {
+        authorized: true,
+        isMainAdminRole: true,
+        isActive: true,
+        effectiveStatus,
+        normalizedAdminPhone: storedAdminPhone,
+        reason: 'AUTHORIZED'
+    };
+};
+
+// Retrieve authorized active Main Admin phone numbers from database (and valid 10-digit env config)
+const getAuthorizedAdminPhone = async () => {
     try {
         const adminUser = await User.findOne({ role: 'Admin' }) || await User.findOne({ role: 'ADMIN' });
-        if (adminUser && adminUser.phone) {
-            return normalizeAdminPhone(adminUser.phone);
+        if (adminUser && adminUser.phone && isAccountActive(adminUser, parseUserTokenMeta(adminUser))) {
+            const norm = normalizeAdminPhone(adminUser.phone);
+            if (/^\d{10}$/.test(norm)) return norm;
         }
     } catch (_) { }
-    return null;
+    const envPhones = Array.from(getConfiguredEnvAdminPhones());
+    return envPhones.length > 0 ? envPhones[0] : null;
 };
 
 // 1. REGISTER
 exports.register = async (req, res) => {
-    const { name, email, password, phone, role, fcmToken, specialty, licenseNumber, clinicName, clinicAddress, location, state, city, pincode, latitude, longitude, consultationMode, consultation_mode, qualification, experienceYears, profilePhoto, age, gender, bloodGroup, emergencyContact, languages, languagesKnown, referralCode, ref } = req.body;
+    const { name, email, password, phone, role, fcmToken, specialty, licenseNumber, clinicName, clinicAddress, location, state, city, pincode, latitude, longitude, qualification, experienceYears, profilePhoto, age, gender, bloodGroup, emergencyContact, languages, languagesKnown, referralCode, ref } = req.body;
     try {
-        const { normalizeConsultationMode, validateCoordinates } = require('../utils/doctorClinicLocationHelper');
+        const { validateCoordinates, validateDoctorRegistrationClinicFields } = require('../utils/doctorClinicLocationHelper');
         const normalizedRole = (role || 'Patient').toString().trim();
         const rawPhone = (phone || '').toString().trim();
         const canonical10 = canonicalPhone10(rawPhone);
@@ -269,7 +382,7 @@ exports.register = async (req, res) => {
             });
         }
 
-        // 2. Mandatory Field Validation: City (Pincode, Age, and Profile Image are optional)
+        // 2. Mandatory Field Validation: City & Doctor Clinic Location Fields
         const normalizedCity = (city || '').toString().trim();
         const normalizedState = (state || '').toString().trim();
         const normalizedPincode = (pincode !== undefined && pincode !== null) ? String(pincode).trim() : '';
@@ -278,23 +391,39 @@ exports.register = async (req, res) => {
         const normalizedLocation = (normalizedClinicAddress || normalizedState || '').toString().trim();
 
         const isDoctorReg = normalizedRole.toLowerCase() === 'dentist' || normalizedRole.toLowerCase() === 'doctor';
-        const resolvedConsultationMode = isDoctorReg
-            ? normalizeConsultationMode(consultationMode ?? consultation_mode, 'BOTH')
-            : null;
-        const isOnlineOnlyDoctor = isDoctorReg && resolvedConsultationMode === 'ONLINE_ONLY';
+        const isClinicReg = normalizedRole.toLowerCase() === 'clinic' || normalizedRole.toLowerCase() === 'clinic_admin';
+        let effectiveLatitude = null;
+        let effectiveLongitude = null;
+        let effectiveClinicName = (clinicName || (isClinicReg ? name : '') || '').toString().trim();
+        let effectiveClinicAddress = normalizedClinicAddress;
 
-        const coordValidation = isOnlineOnlyDoctor
-            ? { ok: true, hasUpdate: false, latitude: null, longitude: null }
-            : validateCoordinates(latitude, longitude, false);
-        if (!coordValidation.ok) {
-            return res.status(400).json({ success: false, message: coordValidation.message });
+        if (isDoctorReg || isClinicReg) {
+            const facilityCheck = validateDoctorRegistrationClinicFields({
+                clinicName: effectiveClinicName,
+                clinicAddress: effectiveClinicAddress,
+                city: normalizedCity,
+                state: normalizedState,
+                pincode: normalizedPincode,
+                latitude,
+                longitude
+            });
+            if (!facilityCheck.ok) {
+                return res.status(400).json({ success: false, message: facilityCheck.message });
+            }
+            effectiveClinicName = facilityCheck.clinicName;
+            effectiveClinicAddress = facilityCheck.clinicAddress;
+            effectiveLatitude = facilityCheck.latitude;
+            effectiveLongitude = facilityCheck.longitude;
+        } else {
+            const coordValidation = validateCoordinates(latitude, longitude, false);
+            if (!coordValidation.ok) {
+                return res.status(400).json({ success: false, message: coordValidation.message });
+            }
+            effectiveLatitude = coordValidation.hasUpdate ? coordValidation.latitude : null;
+            effectiveLongitude = coordValidation.hasUpdate ? coordValidation.longitude : null;
         }
-        const effectiveLatitude = (!isOnlineOnlyDoctor && coordValidation.hasUpdate) ? coordValidation.latitude : null;
-        const effectiveLongitude = (!isOnlineOnlyDoctor && coordValidation.hasUpdate) ? coordValidation.longitude : null;
-        const effectiveClinicName = isOnlineOnlyDoctor ? '' : (clinicName || '').toString().trim();
-        const effectiveClinicAddress = isOnlineOnlyDoctor ? '' : normalizedClinicAddress;
 
-        if (!isOnlineOnlyDoctor && normalizedPincode.length > 0 && !/^\d{6}$/.test(normalizedPincode)) {
+        if (!isDoctorReg && normalizedPincode.length > 0 && !/^\d{6}$/.test(normalizedPincode)) {
             return res.status(400).json({ success: false, message: 'Please enter a valid 6-digit pincode.' });
         }
         if (normalizedAge.length > 0) {
@@ -311,7 +440,7 @@ exports.register = async (req, res) => {
             cleanLanguages = rawLanguages.split(',').map(s => s.trim()).filter(Boolean);
         }
 
-        const requestedClinicId = isOnlineOnlyDoctor ? '' : (req.body.clinicId || req.body.clinic_id || '').toString().trim();
+        const requestedClinicId = (req.body.clinicId || req.body.clinic_id || '').toString().trim();
         const hasClinicContext = Boolean(requestedClinicId || effectiveClinicName.length > 0);
         if (!normalizedCity && !(isDoctorReg && hasClinicContext)) {
             return res.status(400).json({ success: false, message: 'City is mandatory for registration.' });
@@ -352,8 +481,8 @@ exports.register = async (req, res) => {
         const resolvedProfilePhotoUrl = photoResolution.photoUrl || null;
 
         let user;
-        const effectiveState = isOnlineOnlyDoctor ? '' : (normalizedState || (isDoctorReg ? '' : normalizedLocation));
-        const effectivePincode = isOnlineOnlyDoctor ? '' : normalizedPincode;
+        const effectiveState = normalizedState;
+        const effectivePincode = normalizedPincode;
         const profileMetaObj = {
             age: normalizedAge,
             gender: gender || '',
@@ -362,8 +491,8 @@ exports.register = async (req, res) => {
             city: normalizedCity,
             state: effectiveState,
             pincode: effectivePincode,
-            location: isOnlineOnlyDoctor ? '' : normalizedLocation,
-            address: isOnlineOnlyDoctor ? '' : normalizedLocation,
+            location: normalizedLocation,
+            address: normalizedClinicAddress || normalizedLocation,
             languages: finalLanguages,
             referral_code: userReferralCode,
             ...(resolvedProfilePhotoUrl ? { profilePhoto: resolvedProfilePhotoUrl } : {}),
@@ -376,7 +505,6 @@ exports.register = async (req, res) => {
                 clinicId: requestedClinicId || null,
                 clinicName: effectiveClinicName,
                 clinicAddress: effectiveClinicAddress,
-                consultationMode: resolvedConsultationMode,
                 latitude: effectiveLatitude,
                 longitude: effectiveLongitude,
                 licenseNumber: licenseNumber || ''
@@ -493,7 +621,7 @@ exports.register = async (req, res) => {
 
             let clinicId = null;
             const cName = linkedClinicName;
-            if (!isOnlineOnlyDoctor && (requestedClinicId || cName.length > 0)) {
+            if (requestedClinicId || cName.length > 0) {
                 try {
                     let clinic = requestedClinicId ? await Clinic.findById(requestedClinicId).catch(() => null) : null;
                     if (!clinic && cName.length > 0) {
@@ -546,16 +674,15 @@ exports.register = async (req, res) => {
                     console.error('⚠️ Clinic Table Creation Warning:', cErr.message);
                 }
             } else {
-                console.log(`ℹ️ No clinic linkage needed for doctor ${user.name} (${resolvedConsultationMode}). Leaving clinic_id as NULL.`);
+                console.log(`ℹ️ No clinic name provided for doctor ${user.name}. Leaving clinic_id as NULL.`);
             }
 
             try {
                 createdDentistRecord = await Dentist.create({
                     user_id: user.id,
-                    clinic_id: isOnlineOnlyDoctor ? null : clinicId,
-                    clinic_name: isOnlineOnlyDoctor ? null : linkedClinicName,
-                    clinic_address: isOnlineOnlyDoctor ? null : effectiveClinicAddress,
-                    consultation_mode: resolvedConsultationMode,
+                    clinic_id: clinicId,
+                    clinic_name: linkedClinicName,
+                    clinic_address: effectiveClinicAddress,
                     speciality: resolvedDocSpecialty,
                     specialty_id: specResolution.specialty_id || null,
                     department: specResolution.department || '',
@@ -584,24 +711,36 @@ exports.register = async (req, res) => {
         let createdClinicRecord = null;
         const regRoleLower = (effectiveAssignedRole || '').toLowerCase();
         if (regRoleLower === 'clinic' || regRoleLower === 'clinic_admin') {
-            const cName = (clinicName && clinicName.trim()) ? clinicName.trim() : (user.name || 'GS HEALTH Clinic').trim();
-            const fullLoc = normalizedCity
-                ? `${normalizedLocation || cName}${normalizedCity ? ', ' + normalizedCity : ''}${normalizedPincode ? ' - ' + normalizedPincode : ''}`
-                : (normalizedLocation || 'GS HEALTH Medical Center');
+            const cName = effectiveClinicName || (user.name || 'GS HEALTH Clinic').trim();
+            const cAddr = effectiveClinicAddress || normalizedLocation || '';
             try {
                 let existingClinic = await Clinic.findOne({ clinic_name: cName });
                 if (!existingClinic) {
                     existingClinic = await Clinic.create({
                         user_id: user.id,
                         clinic_name: cName,
-                        location: fullLoc,
+                        clinic_address: cAddr,
+                        location: cAddr,
+                        city: normalizedCity,
+                        state: effectiveState,
+                        pincode: effectivePincode,
+                        latitude: effectiveLatitude,
+                        longitude: effectiveLongitude,
                         verified: true,
-                        rating: 5.0,
+                        rating: 0,
                         reviews_count: 0,
                         services: ['General Consultation']
                     });
-                } else if (!existingClinic.user_id) {
-                    existingClinic = await Clinic.findByIdAndUpdate(existingClinic.id, { user_id: user.id });
+                } else {
+                    const clinicPatch = {
+                        ...(!existingClinic.user_id ? { user_id: user.id } : {}),
+                        ...(cAddr ? { clinic_address: cAddr, location: cAddr } : {}),
+                        ...(normalizedCity ? { city: normalizedCity } : {}),
+                        ...(effectiveState ? { state: effectiveState } : {}),
+                        ...(effectivePincode ? { pincode: effectivePincode } : {}),
+                        ...(effectiveLatitude !== null && effectiveLongitude !== null ? { latitude: effectiveLatitude, longitude: effectiveLongitude } : {})
+                    };
+                    existingClinic = await Clinic.findByIdAndUpdate(existingClinic.id, clinicPatch);
                 }
                 createdClinicRecord = existingClinic;
             } catch (cErr) {
@@ -701,28 +840,32 @@ exports.register = async (req, res) => {
                 ...(isDoctorReg ? {
                     dentistId: createdDentistRecord?.id || user.id,
                     userId: user.id,
-                    clinicId: isOnlineOnlyDoctor ? null : (createdDentistRecord?.clinic_id || requestedClinicId || null),
+                    clinicId: createdDentistRecord?.clinic_id || requestedClinicId || null,
                     specialty: createdDentistRecord?.speciality || resolvedDocSpecialty,
                     specialtyId: createdDentistRecord?.specialty_id || specResolution.specialty_id || null,
                     department: createdDentistRecord?.department || specResolution.department || '',
                     qualification: createdDentistRecord?.qualifications || resolvedDocQualification,
                     experienceYears: createdDentistRecord?.experience_years || resolvedDocExp,
-                    clinicName: isOnlineOnlyDoctor ? '' : (linkedClinicName || effectiveClinicName),
-                    clinicAddress: isOnlineOnlyDoctor ? '' : effectiveClinicAddress,
+                    clinicName: linkedClinicName || effectiveClinicName,
+                    clinicAddress: effectiveClinicAddress,
                     state: effectiveState,
                     pincode: effectivePincode,
                     latitude: effectiveLatitude,
                     longitude: effectiveLongitude,
-                    consultationMode: resolvedConsultationMode,
-                    consultation_mode: resolvedConsultationMode,
                     licenseNumber: createdDentistRecord?.license_number || licenseNumber || '',
                     availability_status: 'Available',
                     isAvailable: true
                 } : {}),
                 ...(createdClinicRecord ? {
                     clinicId: createdClinicRecord.id,
-                    clinicName: createdClinicRecord.clinic_name || clinicName || user.name,
-                    clinicLocation: createdClinicRecord.location || normalizedLocation
+                    clinicName: createdClinicRecord.clinic_name || effectiveClinicName || user.name,
+                    clinicAddress: createdClinicRecord.clinic_address || effectiveClinicAddress || normalizedLocation,
+                    clinicLocation: createdClinicRecord.location || effectiveClinicAddress || normalizedLocation,
+                    city: createdClinicRecord.city || normalizedCity,
+                    state: createdClinicRecord.state || effectiveState,
+                    pincode: createdClinicRecord.pincode || effectivePincode,
+                    latitude: createdClinicRecord.latitude ?? effectiveLatitude,
+                    longitude: createdClinicRecord.longitude ?? effectiveLongitude
                 } : {})
             },
             accessToken,
@@ -807,37 +950,37 @@ exports.login = async (req, res) => {
         // Direct registered mobile / email sign in permitted only in non-cloud local test/dev environments
 
         const userRoleStr = (user.role || '').toString().trim().toLowerCase();
-        const isSubAdminUser = userRoleStr === 'sub-admin' || userRoleStr === 'subadmin' || userRoleStr === 'sub_admin';
-        const isStrictMainAdminRole = userRoleStr === 'admin' || userRoleStr === 'primaryadmin' || userRoleStr === 'primary_admin' || userRoleStr === 'superadmin' || userRoleStr === 'super_admin';
+        const isSubAdminUser = isSubAdminRole(userRoleStr);
+        const isStrictMainAdminRole = isMainAdminRole(userRoleStr);
+        const tokenMeta = parseUserTokenMeta(user);
+        const effectiveStatus = getEffectiveUserStatus(user, tokenMeta);
 
-        let tokenMeta = {};
-        if (user.device_token && typeof user.device_token === 'string' && user.device_token.startsWith('{')) {
-            try {
-                tokenMeta = JSON.parse(user.device_token);
-            } catch (_) { }
-        }
-
-        const effectiveStatus = (user.status || tokenMeta.status || 'ACTIVE').toString().trim().toUpperCase();
-
-        // Check active status for Sub-Admins (immediately block deactivated accounts)
-        if (isSubAdminUser && (effectiveStatus === 'INACTIVE' || effectiveStatus === 'DEACTIVATED')) {
+        // Enforce active account status for both Main Admin and Sub-Admin accounts
+        if ((isStrictMainAdminRole || isSubAdminUser) && !isAccountActive(user, tokenMeta)) {
             return res.status(403).json({
                 success: false,
                 code: 'ACCOUNT_DEACTIVATED',
-                message: 'Access Denied: Your Sub-Admin account has been deactivated by the Main Admin. Please contact the administrator.'
+                message: isSubAdminUser
+                    ? 'Access Denied: Your Sub-Admin account has been deactivated by the Main Admin. Please contact the administrator.'
+                    : 'Access Denied: Your Admin account is currently inactive or deactivated.'
             });
         }
 
-        // Enforce Portal Role Matching and Strict Main Admin Number Verification
+        // Enforce Portal Role Matching and Authoritative DB-Backed Main Admin Verification
         const requestedRole = (role || '').trim().toLowerCase();
-        const userRole = (user.role || '').trim().toLowerCase();
-        const isReqSubAdmin = requestedRole === 'sub-admin' || requestedRole === 'subadmin' || requestedRole === 'sub_admin';
+        const userRole = userRoleStr;
+        const isReqSubAdmin = isSubAdminRole(requestedRole);
         const isReqAdmin = requestedRole.includes('admin') && !isReqSubAdmin;
         const isUserAdmin = isStrictMainAdminRole;
 
-        const authorizedAdminPhone = await getAuthorizedAdminPhone();
-        const normalizedIdentifier = normalizeAdminPhone(identifier);
-        const isAuthorizedAdmin = Boolean(authorizedAdminPhone && (normalizedIdentifier === authorizedAdminPhone || normalizeAdminPhone(user.phone) === authorizedAdminPhone));
+        const isPhoneIdentifier = !identifier.includes('@');
+        const normalizedIdentifier = isPhoneIdentifier ? normalizeAdminPhone(identifier) : '';
+        const mainAdminAuth = evaluateMainAdminAuthorization({
+            user,
+            normalizedPhone: normalizedIdentifier,
+            isPhoneAuth: isPhoneIdentifier
+        });
+        const isAuthorizedAdmin = mainAdminAuth.authorized;
 
         if (isReqAdmin && !isSubAdminUser && !isAuthorizedAdmin) {
             return res.status(403).json({
@@ -907,6 +1050,10 @@ exports.login = async (req, res) => {
                 const resolvedSpec = docRec?.speciality || docRec?.specialty || tokenMeta.specialty || 'General Medicine';
                 const docLanguages = docRec ? extractDoctorLanguages({ ...docRec, users: user }) : userLanguages;
                 userLanguages = docLanguages;
+                const rawDocLat = docRec?.latitude ?? docRec?.clinics?.latitude ?? user.latitude ?? tokenMeta.latitude ?? null;
+                const rawDocLng = docRec?.longitude ?? docRec?.clinics?.longitude ?? user.longitude ?? tokenMeta.longitude ?? null;
+                const parsedDocLat = rawDocLat !== null && rawDocLat !== '' && Number.isFinite(Number(rawDocLat)) ? Number(rawDocLat) : null;
+                const parsedDocLng = rawDocLng !== null && rawDocLng !== '' && Number.isFinite(Number(rawDocLng)) ? Number(rawDocLng) : null;
                 doctorExtra = {
                     dentistId: docRec?.id || user.id,
                     userId: user.id,
@@ -914,7 +1061,13 @@ exports.login = async (req, res) => {
                     specialty: resolvedSpec,
                     qualification: docRec?.qualifications || docRec?.qualification || tokenMeta.qualification || getDefaultQualificationForSpecialty(resolvedSpec),
                     experienceYears: docRec?.experience_years || docRec?.experienceYears || tokenMeta.experienceYears || 5,
-                    clinicName: docRec?.clinics?.clinic_name || docRec?.clinicName || tokenMeta.clinicName || '',
+                    clinicName: docRec?.clinic_name || docRec?.clinics?.clinic_name || docRec?.clinicName || tokenMeta.clinicName || '',
+                    clinicAddress: docRec?.clinic_address || docRec?.clinics?.location || docRec?.clinicAddress || tokenMeta.clinicAddress || '',
+                    city: docRec?.city || user.city || tokenMeta.city || '',
+                    state: docRec?.state || user.state || tokenMeta.state || '',
+                    pincode: docRec?.pincode || user.pincode || tokenMeta.pincode || '',
+                    latitude: parsedDocLat,
+                    longitude: parsedDocLng,
                     licenseNumber: docRec?.license_number || docRec?.licenseNumber || tokenMeta.licenseNumber || 'MED-LIC-REG',
                     languages: docLanguages,
                     verificationStatus: docRec?.verification_status || 'VERIFIED',
@@ -930,13 +1083,20 @@ exports.login = async (req, res) => {
                 const cName = (tokenMeta.clinicName || user.name || '').toString().trim();
                 const clinicRec = await Clinic.findOne({ user_id: user.id })
                     || (cName ? await Clinic.findOne({ clinic_name: cName }) : null);
-                if (clinicRec) {
-                    clinicExtra = {
-                        clinicId: clinicRec.id,
-                        clinicName: clinicRec.clinic_name || cName,
-                        clinicLocation: clinicRec.location || tokenMeta.location || ''
-                    };
-                }
+                const resolvedClinicAddr = clinicRec?.clinic_address || clinicRec?.location || tokenMeta.clinicAddress || tokenMeta.location || '';
+                const resolvedClinicLat = clinicRec?.latitude ?? user.latitude ?? tokenMeta.latitude ?? null;
+                const resolvedClinicLng = clinicRec?.longitude ?? user.longitude ?? tokenMeta.longitude ?? null;
+                clinicExtra = {
+                    clinicId: clinicRec?.id || null,
+                    clinicName: clinicRec?.clinic_name || cName,
+                    clinicAddress: resolvedClinicAddr,
+                    clinicLocation: resolvedClinicAddr,
+                    city: clinicRec?.city || user.city || tokenMeta.city || '',
+                    state: clinicRec?.state || user.state || tokenMeta.state || '',
+                    pincode: clinicRec?.pincode || user.pincode || tokenMeta.pincode || '',
+                    latitude: resolvedClinicLat !== null && Number.isFinite(Number(resolvedClinicLat)) ? Number(resolvedClinicLat) : null,
+                    longitude: resolvedClinicLng !== null && Number.isFinite(Number(resolvedClinicLng)) ? Number(resolvedClinicLng) : null,
+                };
             } catch (_) { }
         }
 
@@ -1791,8 +1951,21 @@ exports.requestOTP = async (req, res) => {
         }
 
         const normalizedPhone = normalizeAdminPhone(pNum);
-        const authorizedAdminPhone = await getAuthorizedAdminPhone();
-        const isAdmin = Boolean(authorizedAdminPhone && normalizedPhone === authorizedAdminPhone);
+        let isAdmin = false;
+        if (/^\d{10}$/.test(normalizedPhone)) {
+            try {
+                const matchedUser = await User.findByMobile(pNum)
+                    || await User.findOne({ phone: normalizedPhone });
+                const adminCheck = evaluateMainAdminAuthorization({
+                    user: matchedUser,
+                    normalizedPhone,
+                    isPhoneAuth: true
+                });
+                isAdmin = adminCheck.authorized;
+            } catch (_) {
+                isAdmin = false;
+            }
+        }
 
         if (!ensureAuthorizedStagingOtp(req, res, pNum)) {
             return;
@@ -1863,41 +2036,60 @@ exports.verifyOTP = async (req, res) => {
             });
         }
 
-        const authorizedAdminPhone = await getAuthorizedAdminPhone();
-        const isAdmin = Boolean(authorizedAdminPhone && normalizedPhone === authorizedAdminPhone);
+        const requestedRoleLower = (req.body.role || '').toString().trim().toLowerCase();
+        const isReqSubAdmin = isSubAdminRole(requestedRoleLower);
+        const isReqMainAdmin = requestedRoleLower.includes('admin') && !isReqSubAdmin;
 
         const user = (pNum ? await User.findByMobile(pNum) : null)
             || (pNum ? await User.findOne({ phone: pNum }) : null)
             || (normalizedPhone ? await User.findOne({ phone: normalizedPhone }) : null)
+            || (eMail ? await User.findOne({ email: eMail.toLowerCase() }) : null)
             || (eMail ? await User.findOne({ email: eMail }) : null);
 
         if (user) {
             const roleLower = (user.role || '').toString().trim().toLowerCase();
-            const isSubAdminUser = roleLower === 'sub-admin' || roleLower === 'subadmin' || roleLower === 'sub_admin';
-            const isStrictMainAdminRole = roleLower === 'admin' || roleLower === 'primaryadmin' || roleLower === 'primary_admin' || roleLower === 'superadmin' || roleLower === 'super_admin';
+            const isSubAdminUser = isSubAdminRole(roleLower);
+            const isStrictMainAdminRole = isMainAdminRole(roleLower);
+            const tokenMeta = parseUserTokenMeta(user);
+            const effectiveStatus = getEffectiveUserStatus(user, tokenMeta);
 
-            let tokenMeta = {};
-            if (user.device_token && typeof user.device_token === 'string' && user.device_token.startsWith('{')) {
-                try {
-                    tokenMeta = JSON.parse(user.device_token);
-                } catch (_) { }
+            const mainAdminAuth = evaluateMainAdminAuthorization({
+                user,
+                normalizedPhone,
+                isPhoneAuth: Boolean(pNum)
+            });
+
+            if (isStrictMainAdminRole && mainAdminAuth.reason === 'ACCOUNT_DEACTIVATED') {
+                return res.status(403).json({
+                    success: false,
+                    code: 'ACCOUNT_DEACTIVATED',
+                    message: 'Access Denied: Your Admin account is currently inactive or deactivated.'
+                });
             }
 
-            if (isStrictMainAdminRole && !isAdmin) {
+            if (isStrictMainAdminRole && !mainAdminAuth.authorized) {
                 return res.status(403).json({
                     success: false,
                     message: 'Unauthorized Admin access. OTP verification alone cannot grant Admin access.'
                 });
             }
 
-            const effectiveStatus = (user.status || tokenMeta.status || 'ACTIVE').toString().trim().toUpperCase();
-            if (isSubAdminUser && (effectiveStatus === 'INACTIVE' || effectiveStatus === 'DEACTIVATED')) {
+            if (isSubAdminUser && !isAccountActive(user, tokenMeta)) {
                 return res.status(403).json({
                     success: false,
                     code: 'ACCOUNT_DEACTIVATED',
                     message: 'Access Denied: Your Sub-Admin account has been deactivated by the Main Admin. Please contact the administrator.'
                 });
             }
+
+            if ((isReqMainAdmin || isReqSubAdmin) && !mainAdminAuth.authorized && !isSubAdminUser) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Unauthorized Admin access. OTP verification alone cannot grant Admin access.'
+                });
+            }
+
+            const isAdmin = mainAdminAuth.authorized;
 
             let resolvedPermissions = Array.isArray(user.permissions) && user.permissions.length > 0
                 ? user.permissions
@@ -1956,13 +2148,20 @@ exports.verifyOTP = async (req, res) => {
                     const cName = (tokenMeta.clinicName || user.name || '').toString().trim();
                     const clinicRec = await Clinic.findOne({ user_id: user.id })
                         || (cName ? await Clinic.findOne({ clinic_name: cName }) : null);
-                    if (clinicRec) {
-                        clinicExtra = {
-                            clinicId: clinicRec.id,
-                            clinicName: clinicRec.clinic_name || cName,
-                            clinicLocation: clinicRec.location || tokenMeta.location || ''
-                        };
-                    }
+                    const resolvedClinicAddr = clinicRec?.clinic_address || clinicRec?.location || tokenMeta.clinicAddress || tokenMeta.location || '';
+                    const resolvedClinicLat = clinicRec?.latitude ?? user.latitude ?? tokenMeta.latitude ?? null;
+                    const resolvedClinicLng = clinicRec?.longitude ?? user.longitude ?? tokenMeta.longitude ?? null;
+                    clinicExtra = {
+                        clinicId: clinicRec?.id || null,
+                        clinicName: clinicRec?.clinic_name || cName,
+                        clinicAddress: resolvedClinicAddr,
+                        clinicLocation: resolvedClinicAddr,
+                        city: clinicRec?.city || user.city || tokenMeta.city || '',
+                        state: clinicRec?.state || user.state || tokenMeta.state || '',
+                        pincode: clinicRec?.pincode || user.pincode || tokenMeta.pincode || '',
+                        latitude: resolvedClinicLat !== null && Number.isFinite(Number(resolvedClinicLat)) ? Number(resolvedClinicLat) : null,
+                        longitude: resolvedClinicLng !== null && Number.isFinite(Number(resolvedClinicLng)) ? Number(resolvedClinicLng) : null,
+                    };
                 } catch (_) { }
             }
 
@@ -2013,10 +2212,15 @@ exports.verifyOTP = async (req, res) => {
             });
         }
 
-        const requestedRoleLower = (req.body.role || '').toString().trim().toLowerCase();
+        if (isReqMainAdmin || isReqSubAdmin) {
+            return res.status(403).json({
+                success: false,
+                message: 'Unauthorized Admin access. OTP verification alone cannot grant Admin access.'
+            });
+        }
+
         const shouldAutoCreatePatient = req.body.autoCreatePatient === true
             && Boolean(pNum)
-            && !isAdmin
             && (requestedRoleLower === '' || requestedRoleLower === 'patient');
 
         if (shouldAutoCreatePatient) {
@@ -2092,7 +2296,7 @@ exports.verifyOTP = async (req, res) => {
             success: true,
             verified: true,
             message: 'OTP verified successfully.',
-            isAdmin: isAdmin
+            isAdmin: false
         });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Verification failed.' });
@@ -2480,4 +2684,8 @@ exports.supabaseAuthSync = async (req, res) => {
 
 exports._resolveAndUploadProfilePhoto = resolveAndUploadProfilePhoto;
 exports._PATIENT_PROFILE_REQUIREMENTS = PATIENT_PROFILE_REQUIREMENTS;
+exports._evaluateMainAdminAuthorization = evaluateMainAdminAuthorization;
+exports._getConfiguredEnvAdminPhones = getConfiguredEnvAdminPhones;
+exports._isMainAdminRole = isMainAdminRole;
+exports._isAccountActive = isAccountActive;
 

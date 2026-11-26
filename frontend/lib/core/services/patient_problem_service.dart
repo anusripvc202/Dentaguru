@@ -21,6 +21,7 @@ class DoctorModel {
   final String clinicId;
   final String name;
   final String specialty;
+  final String department;
   final String qualification;
   final int experienceYears;
   final double rating;
@@ -44,7 +45,6 @@ class DoctorModel {
   final List<String> languages;
   final double? latitude;
   final double? longitude;
-  final String consultationMode; // 'BOTH', 'IN_PERSON', 'ONLINE_ONLY'
   final Map<String, String> procedureFees;
 
   DoctorModel({
@@ -53,6 +53,7 @@ class DoctorModel {
     this.clinicId = '',
     required this.name,
     required this.specialty,
+    this.department = '',
     required this.qualification,
     required this.experienceYears,
     required this.rating,
@@ -76,25 +77,20 @@ class DoctorModel {
     this.languages = const ['English'],
     this.latitude,
     this.longitude,
-    String? consultationMode,
     Map<String, String>? procedureFees,
-  })  : consultationMode = DoctorConsultationMode.normalize(consultationMode),
-        procedureFees = procedureFees ?? const {};
+  }) : procedureFees = procedureFees ?? const {};
 
-  bool get isOnlineOnly => DoctorConsultationMode.isOnlineOnly(consultationMode);
-  bool get offersInPerson => !isOnlineOnly;
   bool get hasCoordinates =>
-      !isOnlineOnly && ClinicDirectionsHelper.hasValidCoordinates(latitude, longitude);
+      ClinicDirectionsHelper.hasValidCoordinates(latitude, longitude);
   bool get hasPhysicalClinicLocation =>
-      !isOnlineOnly &&
-      (hasCoordinates ||
-          ClinicDirectionsHelper.composeAddressQuery(
-            clinicName: clinicName,
-            clinicAddress: clinicAddress,
-            city: city,
-            state: state,
-            pincode: pincode,
-          ).isNotEmpty);
+      hasCoordinates ||
+      ClinicDirectionsHelper.composeAddressQuery(
+        clinicName: clinicName,
+        clinicAddress: clinicAddress,
+        city: city,
+        state: state,
+        pincode: pincode,
+      ).isNotEmpty;
   String get formattedFullAddress => ClinicDirectionsHelper.composeAddressQuery(
         clinicAddress: clinicAddress,
         city: city,
@@ -116,7 +112,6 @@ class DoctorModel {
     double? latitude,
     double? longitude,
     bool clearCoordinates = false,
-    String? consultationMode,
   }) {
     return DoctorModel(
       id: id,
@@ -147,7 +142,6 @@ class DoctorModel {
       languages: languages,
       latitude: clearCoordinates ? null : (latitude ?? this.latitude),
       longitude: clearCoordinates ? null : (longitude ?? this.longitude),
-      consultationMode: consultationMode ?? this.consultationMode,
       procedureFees: procedureFees,
     );
   }
@@ -222,6 +216,7 @@ class DoctorModel {
         'clinicId': clinicId,
         'name': name,
         'specialty': specialty,
+        'department': department,
         'qualification': qualification,
         'experienceYears': experienceYears,
         'rating': rating,
@@ -243,7 +238,6 @@ class DoctorModel {
         'languages': languages,
         'latitude': latitude,
         'longitude': longitude,
-        'consultationMode': consultationMode,
         'procedureFees': procedureFees,
         'photoBase64': photoBytes != null ? base64Encode(photoBytes!) : null,
         'profileImageUrl': profileImageUrl,
@@ -314,6 +308,7 @@ class DoctorModel {
       clinicId: (json['clinicId'] ?? json['clinic_id'] ?? (json['clinics'] != null ? json['clinics']['id'] : '') ?? '').toString(),
       name: json['name'] ?? (json['users'] is Map ? (json['users']['name'] ?? '') : '') ?? '',
       specialty: parsedSpecialty,
+      department: (json['department'] ?? '').toString().trim(),
       qualification: parsedQual.isNotEmpty
           ? parsedQual
           : (parsedSpecialty.isNotEmpty ? MedicalSpecialtyModel.getDefaultQualificationForSpecialty(parsedSpecialty) : ''),
@@ -361,9 +356,6 @@ class DoctorModel {
                   (json['users'] is Map ? json['users']['longitude'] : null))
               .toString())
           : null,
-      consultationMode: DoctorConsultationMode.normalize(
-        (json['consultationMode'] ?? json['consultation_mode'])?.toString(),
-      ),
       procedureFees: pFees.isNotEmpty ? pFees : null,
     );
   }
@@ -1219,6 +1211,13 @@ class ClinicModel {
   final String userId;
   final String clinicName;
   final String location;
+  final String clinicAddress;
+  final String city;
+  final String state;
+  final String pincode;
+  final double? latitude;
+  final double? longitude;
+  final int associatedDoctorsCount;
   final String phone;
   final String email;
   final String coverImageUrl;
@@ -1236,6 +1235,13 @@ class ClinicModel {
     this.userId = '',
     required this.clinicName,
     required this.location,
+    this.clinicAddress = '',
+    this.city = '',
+    this.state = '',
+    this.pincode = '',
+    this.latitude,
+    this.longitude,
+    this.associatedDoctorsCount = 0,
     this.phone = '',
     this.email = '',
     this.coverImageUrl = '',
@@ -1250,6 +1256,18 @@ class ClinicModel {
   })  : services = services ?? const [],
         pricing = pricing ?? const [];
 
+  String get displayAddress =>
+      clinicAddress.trim().isNotEmpty ? clinicAddress.trim() : location.trim();
+
+  String get cityStatePincode {
+    final parts = <String>[
+      if (city.trim().isNotEmpty) city.trim(),
+      if (state.trim().isNotEmpty) state.trim(),
+      if (pincode.trim().isNotEmpty) pincode.trim(),
+    ];
+    return parts.join(', ');
+  }
+
   factory ClinicModel.fromJson(Map<String, dynamic> json) {
     List<String> servList = [];
     if (json['services'] is List) {
@@ -1260,11 +1278,26 @@ class ClinicModel {
       priceList = (json['pricing'] as List).map((p) => p is Map<String, dynamic> ? p : <String, dynamic>{}).toList();
     }
     final userObj = json['users'] is Map ? json['users'] as Map : (json['user'] is Map ? json['user'] as Map : const {});
+    final addr = (json['clinicAddress'] ?? json['clinic_address'] ?? json['location'] ?? json['address'] ?? '').toString().trim();
+    final rawLat = json['latitude'] ?? userObj['latitude'];
+    final rawLng = json['longitude'] ?? userObj['longitude'];
+    final double? parsedLat = rawLat != null ? double.tryParse(rawLat.toString()) : null;
+    final double? parsedLng = rawLng != null ? double.tryParse(rawLng.toString()) : null;
+    final rawDocCount = json['associatedDoctorsCount'] ?? json['totalDoctors'] ?? 0;
+    final int docCount = rawDocCount is int ? rawDocCount : (int.tryParse(rawDocCount.toString()) ?? 0);
+
     return ClinicModel(
-      id: (json['id'] ?? json['_id'] ?? '').toString(),
+      id: (json['id'] ?? json['clinicId'] ?? json['_id'] ?? '').toString(),
       userId: (json['user_id'] ?? json['userId'] ?? userObj['id'] ?? '').toString(),
       clinicName: (json['clinic_name'] ?? json['clinicName'] ?? userObj['name'] ?? '').toString(),
-      location: (json['location'] ?? json['address'] ?? '').toString(),
+      location: (json['location'] ?? addr).toString(),
+      clinicAddress: addr,
+      city: (json['city'] ?? userObj['city'] ?? '').toString().trim(),
+      state: (json['state'] ?? userObj['state'] ?? '').toString().trim(),
+      pincode: (json['pincode'] ?? userObj['pincode'] ?? '').toString().trim(),
+      latitude: parsedLat,
+      longitude: parsedLng,
+      associatedDoctorsCount: docCount,
       phone: (json['phone'] ?? json['contact'] ?? userObj['phone'] ?? '').toString(),
       email: (json['email'] ?? userObj['email'] ?? '').toString(),
       coverImageUrl: (json['cover_image_url'] ?? json['coverImageUrl'] ?? '').toString(),
@@ -1284,6 +1317,13 @@ class ClinicModel {
         'userId': userId,
         'clinicName': clinicName,
         'location': location,
+        'clinicAddress': clinicAddress,
+        'city': city,
+        'state': state,
+        'pincode': pincode,
+        if (latitude != null) 'latitude': latitude,
+        if (longitude != null) 'longitude': longitude,
+        'associatedDoctorsCount': associatedDoctorsCount,
         'phone': phone,
         'email': email,
         'coverImageUrl': coverImageUrl,
@@ -6291,7 +6331,6 @@ class PatientProblemService extends ChangeNotifier {
     String pincode = '',
     double? latitude,
     double? longitude,
-    String consultationMode = DoctorConsultationMode.both,
     List<String>? languages,
     bool skipApiRegister = false,
     bool setAsCurrentDoctor = true,
@@ -6352,19 +6391,17 @@ class PatientProblemService extends ChangeNotifier {
                 .firstOrNull ??
             '');
 
-    final resolvedMode = DoctorConsultationMode.normalize(consultationMode);
-    final bool isOnlineOnlyMode = DoctorConsultationMode.isOnlineOnly(resolvedMode);
     final newDoctor = DoctorModel(
       id: doctorId,
       userId: doctorUserId,
-      clinicId: isOnlineOnlyMode ? '' : resolvedClinicId,
+      clinicId: resolvedClinicId,
       name: formattedName.isEmpty ? (cleanEmail.isNotEmpty ? cleanEmail : 'Doctor') : formattedName,
       specialty: cleanSpecialty,
       qualification: cleanQual,
       experienceYears: experienceYears <= 0 ? 5 : experienceYears,
       rating: 5.0,
       reviewCount: 1,
-      clinicName: isOnlineOnlyMode ? '' : cleanClinic,
+      clinicName: cleanClinic,
       phone: cleanPhone,
       email: cleanEmail,
       status: status.trim().isNotEmpty ? status.trim() : (existingDoc.status.isNotEmpty ? existingDoc.status : 'Available'),
@@ -6375,14 +6412,13 @@ class PatientProblemService extends ChangeNotifier {
       profileImageUrl: (profileImageUrl != null && profileImageUrl.trim().isNotEmpty)
           ? profileImageUrl.trim()
           : existingDoc.profileImageUrl,
-      clinicAddress: isOnlineOnlyMode ? '' : cleanAddress,
+      clinicAddress: cleanAddress,
       city: cleanCity,
-      state: isOnlineOnlyMode ? '' : state.trim(),
-      pincode: isOnlineOnlyMode ? '' : cleanPincode,
+      state: state.trim(),
+      pincode: cleanPincode,
       bio: bio.trim(),
-      latitude: isOnlineOnlyMode ? null : latitude,
-      longitude: isOnlineOnlyMode ? null : longitude,
-      consultationMode: resolvedMode,
+      latitude: latitude,
+      longitude: longitude,
       languages: doctorLangs,
     );
 
@@ -6435,10 +6471,12 @@ class PatientProblemService extends ChangeNotifier {
         specialty: cleanSpecialty,
         licenseNumber: cleanLicense.isEmpty ? null : cleanLicense,
         clinicId: resolvedClinicId.isNotEmpty ? resolvedClinicId : null,
-        clinicName: isOnlineOnlyMode ? null : cleanClinic,
-        clinicAddress: isOnlineOnlyMode ? null : cleanAddress,
+        clinicName: cleanClinic,
+        clinicAddress: cleanAddress,
+        state: state.trim().isEmpty ? null : state.trim(),
+        latitude: latitude,
+        longitude: longitude,
         consultationFee: consultationFee.trim().isEmpty ? null : consultationFee.trim(),
-        consultationMode: resolvedMode,
         bio: bio.trim().isEmpty ? null : bio.trim(),
         location: cleanAddress,
         city: cleanCity,
@@ -8477,7 +8515,6 @@ class PatientProblemService extends ChangeNotifier {
     double? latitude,
     double? longitude,
     bool clearLocation = false,
-    String? consultationMode,
     List<String>? languages,
     Uint8List? photoBytes,
     String? profilePhotoDataUri,
@@ -8490,34 +8527,20 @@ class PatientProblemService extends ChangeNotifier {
       return {'success': false, 'message': 'Doctor profile not found.'};
     }
 
-    final resolvedMode = consultationMode != null
-        ? DoctorConsultationMode.normalize(consultationMode)
-        : baseDoc.consultationMode;
-    final switchingToOnlineOnly = DoctorConsultationMode.isOnlineOnly(resolvedMode);
-
     final payload = <String, dynamic>{
       if (name != null) 'name': name,
       if (phone != null) 'phone': phone,
       if (specialty != null) 'specialty': specialty,
       if (qualification != null) 'qualification': qualification,
       if (experienceYears != null) 'experienceYears': experienceYears,
-      if (consultationMode != null) 'consultationMode': resolvedMode,
-      if (switchingToOnlineOnly) ...{
-        'clinicName': '',
-        'clinicAddress': '',
-        'state': '',
-        'pincode': '',
-        'clearLocation': true,
-      } else ...{
-        if (clinicName != null) 'clinicName': clinicName,
-        if (clinicAddress != null) 'clinicAddress': clinicAddress,
-        if (state != null) 'state': state,
-        if (pincode != null) 'pincode': pincode,
-        if (clearLocation) 'clearLocation': true,
-        if (!clearLocation && latitude != null && longitude != null) ...{
-          'latitude': latitude,
-          'longitude': longitude,
-        },
+      if (clinicName != null) 'clinicName': clinicName,
+      if (clinicAddress != null) 'clinicAddress': clinicAddress,
+      if (state != null) 'state': state,
+      if (pincode != null) 'pincode': pincode,
+      if (clearLocation) 'clearLocation': true,
+      if (!clearLocation && latitude != null && longitude != null) ...{
+        'latitude': latitude,
+        'longitude': longitude,
       },
       if (consultationFee != null) 'consultationFee': consultationFee,
       if (licenseNumber != null) 'licenseNumber': licenseNumber,
@@ -8558,14 +8581,14 @@ class PatientProblemService extends ChangeNotifier {
     final updatedDoc = DoctorModel(
       id: baseDoc.id,
       userId: baseDoc.userId,
-      clinicId: switchingToOnlineOnly ? '' : baseDoc.clinicId,
+      clinicId: baseDoc.clinicId,
       name: name ?? baseDoc.name,
       specialty: specialty ?? baseDoc.specialty,
       qualification: qualification ?? baseDoc.qualification,
       experienceYears: experienceYears ?? baseDoc.experienceYears,
       rating: baseDoc.rating,
       reviewCount: baseDoc.reviewCount,
-      clinicName: switchingToOnlineOnly ? '' : (clinicName ?? baseDoc.clinicName),
+      clinicName: clinicName ?? baseDoc.clinicName,
       phone: phone ?? baseDoc.phone,
       email: baseDoc.email,
       status: status ?? baseDoc.status,
@@ -8576,15 +8599,14 @@ class PatientProblemService extends ChangeNotifier {
       licenseNumber: licenseNumber ?? baseDoc.licenseNumber,
       photoBytes: resolvedPhotoBytes,
       profileImageUrl: resolvedImageUrl,
-      clinicAddress: switchingToOnlineOnly ? '' : (clinicAddress ?? baseDoc.clinicAddress),
-      pincode: switchingToOnlineOnly ? '' : (pincode ?? baseDoc.pincode),
+      clinicAddress: clinicAddress ?? baseDoc.clinicAddress,
+      pincode: pincode ?? baseDoc.pincode,
       city: city ?? baseDoc.city,
-      state: switchingToOnlineOnly ? '' : (state ?? baseDoc.state),
+      state: state ?? baseDoc.state,
       bio: bio ?? baseDoc.bio,
       languages: languages ?? baseDoc.languages,
-      latitude: (switchingToOnlineOnly || clearLocation) ? null : (latitude ?? baseDoc.latitude),
-      longitude: (switchingToOnlineOnly || clearLocation) ? null : (longitude ?? baseDoc.longitude),
-      consultationMode: resolvedMode,
+      latitude: clearLocation ? null : (latitude ?? baseDoc.latitude),
+      longitude: clearLocation ? null : (longitude ?? baseDoc.longitude),
       procedureFees: baseDoc.procedureFees,
     );
 

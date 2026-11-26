@@ -1,16 +1,15 @@
 -- ============================================================================
--- Migration 05: Doctor Clinic Details, Consultation Mode & OpenStreetMap Coords
+-- Migration 05: Doctor Clinic Details & OpenStreetMap Coordinates
 -- Target: Staging Supabase (ojinzcdldwugpnxrnjcq) — LOCAL FILE ONLY
 -- Additive, idempotent, 100% backward-compatible with existing doctors & clinics
 -- ============================================================================
 
 BEGIN;
 
--- 1. Add dedicated clinic & consultation mode columns to public.dentists
+-- 1. Add dedicated clinic & location columns to public.dentists
 ALTER TABLE public.dentists
   ADD COLUMN IF NOT EXISTS clinic_name VARCHAR(255),
   ADD COLUMN IF NOT EXISTS clinic_address TEXT,
-  ADD COLUMN IF NOT EXISTS consultation_mode VARCHAR(30) NOT NULL DEFAULT 'BOTH',
   ADD COLUMN IF NOT EXISTS state VARCHAR(100),
   ADD COLUMN IF NOT EXISTS city VARCHAR(100),
   ADD COLUMN IF NOT EXISTS pincode VARCHAR(20),
@@ -38,21 +37,7 @@ WHERE d.clinic_id = c.id
     OR (d.longitude IS NULL AND c.longitude IS NOT NULL)
   );
 
--- 4. Normalize any legacy consultation_mode values before applying CHECK constraint
-UPDATE public.dentists
-SET consultation_mode = CASE
-  WHEN UPPER(BTRIM(COALESCE(consultation_mode, ''))) IN ('ONLINE', 'ONLINE_ONLY', 'ONLINE ONLY') THEN 'ONLINE_ONLY'
-  WHEN UPPER(BTRIM(COALESCE(consultation_mode, ''))) IN ('IN_PERSON', 'IN-PERSON', 'IN PERSON', 'CLINIC') THEN 'IN_PERSON'
-  ELSE 'BOTH'
-END;
-
--- 5. Add validation constraints (idempotent)
-ALTER TABLE public.dentists
-  DROP CONSTRAINT IF EXISTS dentists_consultation_mode_check;
-ALTER TABLE public.dentists
-  ADD CONSTRAINT dentists_consultation_mode_check
-  CHECK (consultation_mode IN ('BOTH', 'IN_PERSON', 'ONLINE_ONLY'));
-
+-- 4. Coordinate range validation constraint (idempotent, NULL-safe for legacy rows)
 ALTER TABLE public.dentists
   DROP CONSTRAINT IF EXISTS dentists_lat_lng_range_check;
 ALTER TABLE public.dentists
@@ -67,12 +52,9 @@ ALTER TABLE public.dentists
     )
   );
 
--- 6. Supporting indexes for doctor discovery & geospatial filtering
+-- 5. Supporting indexes for doctor location lookup & geospatial filtering
 CREATE INDEX IF NOT EXISTS idx_dentists_city_pincode
   ON public.dentists (city, pincode);
-
-CREATE INDEX IF NOT EXISTS idx_dentists_consultation_mode
-  ON public.dentists (consultation_mode);
 
 CREATE INDEX IF NOT EXISTS idx_dentists_geo_coords
   ON public.dentists (latitude, longitude)

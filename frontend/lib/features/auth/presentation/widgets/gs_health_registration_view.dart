@@ -79,11 +79,10 @@ class GsHealthRegistrationView extends StatelessWidget {
   final String? selectedSpecialty;
   final List<String> specialtyOptions;
   final Set<String> selectedLanguages;
-  final String selectedConsultationMode;
-  final ValueChanged<String>? onConsultationModeChanged;
   final double? selectedLatitude;
   final double? selectedLongitude;
   final String? selectedMapLocationName;
+  final String? mapLocationErrorText;
   final VoidCallback? onClearMapLocation;
   final Uint8List? pickedImageBytes;
   final String? pickedImageName;
@@ -129,11 +128,10 @@ class GsHealthRegistrationView extends StatelessWidget {
     required this.selectedSpecialty,
     required this.specialtyOptions,
     required this.selectedLanguages,
-    this.selectedConsultationMode = DoctorConsultationMode.both,
-    this.onConsultationModeChanged,
     required this.selectedLatitude,
     required this.selectedLongitude,
     required this.selectedMapLocationName,
+    this.mapLocationErrorText,
     this.onClearMapLocation,
     required this.pickedImageBytes,
     required this.pickedImageName,
@@ -613,7 +611,8 @@ class GsHealthRegistrationView extends StatelessWidget {
           textInputAction: TextInputAction.next,
           scrollPadding: const EdgeInsets.only(bottom: 120),
           style: _fieldTextStyle(),
-          validator: (_) => null,
+          validator: (val) =>
+              (val == null || val.trim().isEmpty) ? 'Please enter city' : null,
           decoration: _fieldDecoration(hintText: 'e.g. Mumbai'),
         ),
         const SizedBox(height: 18),
@@ -712,157 +711,125 @@ class GsHealthRegistrationView extends StatelessWidget {
         ),
         const SizedBox(height: 20),
 
-        // 7. Consultation Type (Defaults to BOTH; hides clinic details for ONLINE_ONLY)
-        _buildFieldLabel('CONSULTATION TYPE'),
-        const SizedBox(height: 8),
-        _buildConsultationModeSelector(),
+        // 7. Quick Select Registered Clinic (Optional)
+        _buildFieldLabel('CLINIC (OPTIONAL)'),
+        const SizedBox(height: 10),
+        _buildClinicSelector(),
         const SizedBox(height: 18),
 
-        if (DoctorConsultationMode.isOnlineOnly(selectedConsultationMode)) ...[
-          Container(
-            key: const Key('reg_online_only_notice'),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFECFDF5),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFFA7F3D0)),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        // 8. Clinic Name (Required)
+        _buildFieldLabel('CLINIC NAME'),
+        const SizedBox(height: 8),
+        TextFormField(
+          key: const Key('reg_dentist_clinic_name_field'),
+          controller: clinicNameController,
+          textCapitalization: TextCapitalization.words,
+          textInputAction: TextInputAction.next,
+          scrollPadding: const EdgeInsets.only(bottom: 120),
+          style: _fieldTextStyle(),
+          validator: (val) => (val == null || val.trim().isEmpty)
+              ? 'Please enter clinic name'
+              : null,
+          decoration: _fieldDecoration(hintText: 'e.g. Smile Studio Dental Care'),
+        ),
+        const SizedBox(height: 16),
+
+        // 9. Clinic Address (Manual Entry Always Available - Required)
+        _buildFieldLabel('CLINIC ADDRESS'),
+        const SizedBox(height: 8),
+        TextFormField(
+          key: const Key('reg_dentist_clinic_address_field'),
+          controller: clinicAddressController,
+          textCapitalization: TextCapitalization.sentences,
+          textInputAction: TextInputAction.next,
+          minLines: 2,
+          maxLines: 3,
+          scrollPadding: const EdgeInsets.only(bottom: 120),
+          style: _fieldTextStyle(),
+          validator: (val) => (val == null || val.trim().isEmpty)
+              ? 'Please enter clinic address'
+              : null,
+          decoration: _fieldDecoration(hintText: 'Building, street, area, landmark'),
+        ),
+        const SizedBox(height: 16),
+
+        // 10. State & Pincode (Required, Responsive for narrow viewports)
+        LayoutBuilder(
+          builder: (context, box) {
+            final stateField = Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Icon(Icons.videocam_outlined, size: 18, color: Color(0xFF047857)),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Online consultations only — clinic address and map location are not required.',
-                    style: GoogleFonts.plusJakartaSans(
-                      fontSize: 12.5,
-                      height: 1.4,
-                      fontWeight: FontWeight.w600,
-                      color: const Color(0xFF065F46),
-                    ),
-                  ),
+                _buildFieldLabel('STATE'),
+                const SizedBox(height: 8),
+                TextFormField(
+                  key: const Key('reg_dentist_state_field'),
+                  controller: stateController,
+                  textCapitalization: TextCapitalization.words,
+                  textInputAction: TextInputAction.next,
+                  scrollPadding: const EdgeInsets.only(bottom: 120),
+                  style: _fieldTextStyle(),
+                  validator: (val) => (val == null || val.trim().isEmpty)
+                      ? 'Please enter state'
+                      : null,
+                  decoration: _fieldDecoration(hintText: 'e.g. Maharashtra'),
                 ),
               ],
-            ),
-          ),
-        ] else ...[
-          // 8. Quick Select Registered Clinic (Optional)
-          _buildFieldLabel('CLINIC (OPTIONAL)'),
-          const SizedBox(height: 10),
-          _buildClinicSelector(),
-          const SizedBox(height: 18),
-
-          // 9. Clinic / Hospital Name (Required for In-Person / Both)
-          _buildFieldLabel('CLINIC / HOSPITAL NAME'),
-          const SizedBox(height: 8),
-          TextFormField(
-            key: const Key('reg_dentist_clinic_name_field'),
-            controller: clinicNameController,
-            textCapitalization: TextCapitalization.words,
-            textInputAction: TextInputAction.next,
-            scrollPadding: const EdgeInsets.only(bottom: 120),
-            style: _fieldTextStyle(),
-            validator: (val) => (val == null || val.trim().isEmpty)
-                ? 'Please enter clinic name'
-                : null,
-            decoration: _fieldDecoration(hintText: 'e.g. Smile Studio Dental Care'),
-          ),
-          const SizedBox(height: 16),
-
-          // 10. Clinic Address (Manual Text - Required for In-Person / Both)
-          _buildFieldLabel('CLINIC ADDRESS'),
-          const SizedBox(height: 8),
-          TextFormField(
-            key: const Key('reg_dentist_clinic_address_field'),
-            controller: clinicAddressController,
-            textCapitalization: TextCapitalization.sentences,
-            textInputAction: TextInputAction.next,
-            minLines: 2,
-            maxLines: 3,
-            scrollPadding: const EdgeInsets.only(bottom: 120),
-            style: _fieldTextStyle(),
-            validator: (val) => (val == null || val.trim().isEmpty)
-                ? 'Please enter clinic address'
-                : null,
-            decoration: _fieldDecoration(hintText: 'Building, street, area, landmark'),
-          ),
-          const SizedBox(height: 16),
-
-          // 11. State & Pincode (Responsive for narrow viewports)
-          LayoutBuilder(
-            builder: (context, box) {
-              final stateField = Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildFieldLabel('STATE'),
-                  const SizedBox(height: 8),
-                  TextFormField(
-                    key: const Key('reg_dentist_state_field'),
-                    controller: stateController,
-                    textCapitalization: TextCapitalization.words,
-                    textInputAction: TextInputAction.next,
-                    scrollPadding: const EdgeInsets.only(bottom: 120),
-                    style: _fieldTextStyle(),
-                    decoration: _fieldDecoration(hintText: 'e.g. Maharashtra'),
-                  ),
-                ],
-              );
-              final pincodeField = Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildFieldLabel('PINCODE'),
-                  const SizedBox(height: 8),
-                  TextFormField(
-                    key: const Key('reg_dentist_pincode_field'),
-                    controller: pincodeController,
-                    keyboardType: TextInputType.number,
-                    textInputAction: TextInputAction.done,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly,
-                      LengthLimitingTextInputFormatter(6),
-                    ],
-                    scrollPadding: const EdgeInsets.only(bottom: 120),
-                    style: _fieldTextStyle(),
-                    validator: (val) {
-                      if (val == null || val.trim().isEmpty) return null;
-                      if (!RegExp(r'^\d{6}$').hasMatch(val.trim())) {
-                        return '6-digit PIN';
-                      }
-                      return null;
-                    },
-                    decoration: _fieldDecoration(hintText: 'e.g. 400050'),
-                  ),
-                ],
-              );
-
-              if (box.maxWidth < 330) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    stateField,
-                    const SizedBox(height: 16),
-                    pincodeField,
+            );
+            final pincodeField = Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildFieldLabel('PINCODE'),
+                const SizedBox(height: 8),
+                TextFormField(
+                  key: const Key('reg_dentist_pincode_field'),
+                  controller: pincodeController,
+                  keyboardType: TextInputType.number,
+                  textInputAction: TextInputAction.done,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(6),
                   ],
-                );
-              }
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                  scrollPadding: const EdgeInsets.only(bottom: 120),
+                  style: _fieldTextStyle(),
+                  validator: (val) {
+                    final v = (val ?? '').trim();
+                    if (v.isEmpty) return 'Please enter pincode';
+                    if (!ClinicDirectionsHelper.isValidPincode(v)) {
+                      return 'Enter 6-digit pincode';
+                    }
+                    return null;
+                  },
+                  decoration: _fieldDecoration(hintText: 'e.g. 400050'),
+                ),
+              ],
+            );
+
+            if (box.maxWidth < 330) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(flex: 3, child: stateField),
-                  const SizedBox(width: 12),
-                  Expanded(flex: 2, child: pincodeField),
+                  stateField,
+                  const SizedBox(height: 16),
+                  pincodeField,
                 ],
               );
-            },
-          ),
-          const SizedBox(height: 18),
+            }
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(flex: 3, child: stateField),
+                const SizedBox(width: 12),
+                Expanded(flex: 2, child: pincodeField),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 18),
 
-          // 12. OpenStreetMap Clinic Location Picker (Optional)
-          _buildFieldLabel('CLINIC MAP LOCATION (OPTIONAL)'),
-          const SizedBox(height: 8),
-          _buildMapLocationSection(),
-        ],
+        // 11. Clinic Location Map Picker (Required for Doctor Registration)
+        _buildFieldLabel('CLINIC LOCATION ON MAP'),
+        const SizedBox(height: 8),
+        _buildMapLocationSection(isRequired: true),
 
         if (!isOtpVerified) ...[
           const SizedBox(height: 20),
@@ -876,165 +843,118 @@ class GsHealthRegistrationView extends StatelessWidget {
     );
   }
 
-  Widget _buildConsultationModeSelector() {
-    final currentMode = DoctorConsultationMode.normalize(selectedConsultationMode);
-    const modes = <({String code, String label, IconData icon})>[
-      (code: DoctorConsultationMode.both, label: 'In-Person & Online', icon: Icons.hub_outlined),
-      (code: DoctorConsultationMode.inPerson, label: 'In-Person Clinic', icon: Icons.local_hospital_outlined),
-      (code: DoctorConsultationMode.onlineOnly, label: 'Online Only', icon: Icons.videocam_outlined),
-    ];
-
-    return Wrap(
-      key: const Key('reg_consultation_mode_selector'),
-      spacing: 8,
-      runSpacing: 8,
-      children: modes.map((mode) {
-        final isSelected = currentMode == mode.code;
-        return Semantics(
-          button: true,
-          selected: isSelected,
-          label: mode.label,
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              key: Key('reg_consultation_mode_${mode.code}'),
-              borderRadius: BorderRadius.circular(24),
-              onTap: () => onConsultationModeChanged?.call(mode.code),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 160),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                decoration: BoxDecoration(
-                  color: isSelected ? AppTheme.gsNavy : Colors.white,
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(
-                    color: isSelected ? AppTheme.gsNavy : const Color(0xFFE2E8F0),
-                    width: 1.2,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      mode.icon,
-                      size: 15,
-                      color: isSelected ? Colors.white : AppTheme.gsNavy,
-                    ),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        mode.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.plusJakartaSans(
-                          fontSize: 13,
-                          fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
-                          color: isSelected ? Colors.white : const Color(0xFF1E293B),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      }).toList(),
-    );
-  }
-
-  Widget _buildMapLocationSection() {
+  Widget _buildMapLocationSection({bool isRequired = false}) {
     final hasPin = ClinicDirectionsHelper.hasValidCoordinates(
       selectedLatitude,
       selectedLongitude,
     );
+    final hasError = mapLocationErrorText != null && mapLocationErrorText!.trim().isNotEmpty;
 
-    if (hasPin) {
-      return Container(
-        key: const Key('reg_dentist_map_section'),
-        child: OsmLocationPreviewCard(
-          latitude: selectedLatitude!,
-          longitude: selectedLongitude!,
-          title: (selectedMapLocationName != null && selectedMapLocationName!.trim().isNotEmpty)
-              ? selectedMapLocationName!.trim()
-              : (clinicNameController.text.trim().isNotEmpty
-                  ? clinicNameController.text.trim()
-                  : 'Selected Clinic Location'),
-          subtitle: clinicAddressController.text.trim(),
-          onChangeLocation: isRegistering ? null : onOpenMapPicker,
-          onRemoveLocation: isRegistering ? null : onClearMapLocation,
-        ),
-      );
-    }
-
-    return Container(
+    return Column(
       key: const Key('reg_dentist_map_section'),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppTheme.gsNavy.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(Icons.map_outlined, size: 20, color: AppTheme.gsNavy),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (hasPin)
+          OsmLocationPreviewCard(
+            latitude: selectedLatitude!,
+            longitude: selectedLongitude!,
+            title: (selectedMapLocationName != null && selectedMapLocationName!.trim().isNotEmpty)
+                ? selectedMapLocationName!.trim()
+                : (clinicNameController.text.trim().isNotEmpty
+                    ? clinicNameController.text.trim()
+                    : 'Selected Clinic Location'),
+            subtitle: clinicAddressController.text.trim(),
+            onChangeLocation: isRegistering ? null : onOpenMapPicker,
+            onRemoveLocation: isRegistering ? null : onClearMapLocation,
+          )
+        else
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: hasError ? AppTheme.gsRed : const Color(0xFFE2E8F0),
+                width: hasError ? 1.4 : 1.0,
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
                   children: [
-                    Text(
-                      'Pin clinic on OpenStreetMap',
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w700,
-                        color: const Color(0xFF0F172A),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppTheme.gsNavy.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      child: const Icon(Icons.map_outlined, size: 20, color: AppTheme.gsNavy),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Optional — helps patients get accurate directions. Manual address always works.',
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 11.5,
-                        color: const Color(0xFF64748B),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Pin clinic on OpenStreetMap',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w700,
+                              color: const Color(0xFF0F172A),
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            isRequired
+                                ? 'Required — tap or drag marker on the map to save accurate clinic coordinates.'
+                                : 'Tap or drag marker on OpenStreetMap to save clinic coordinates.',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 11.5,
+                              color: const Color(0xFF64748B),
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
                       ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          OutlinedButton.icon(
-            key: const Key('reg_open_map_picker_button'),
-            onPressed: isRegistering ? null : onOpenMapPicker,
-            icon: const Icon(Icons.add_location_alt_outlined, size: 17),
-            label: const Text(
-              'Select Location on Map',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  key: const Key('reg_open_map_picker_button'),
+                  onPressed: isRegistering ? null : onOpenMapPicker,
+                  icon: const Icon(Icons.add_location_alt_outlined, size: 17),
+                  label: const Text(
+                    'Select Clinic Location',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.gsNavy,
+                    side: const BorderSide(color: AppTheme.gsNavy, width: 1.2),
+                    padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ],
             ),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppTheme.gsNavy,
-              side: const BorderSide(color: AppTheme.gsNavy, width: 1.2),
-              padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        if (hasError) ...[
+          const SizedBox(height: 6),
+          Text(
+            mapLocationErrorText!,
+            key: const Key('reg_dentist_map_error'),
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.gsRed,
             ),
           ),
         ],
-      ),
+      ],
     );
   }
 
@@ -1324,39 +1244,8 @@ class GsHealthRegistrationView extends StatelessWidget {
       key: const ValueKey('clinic_form_section'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // 1. Full Name
-        _buildFieldLabel('FULL NAME'),
-        const SizedBox(height: 8),
-        TextFormField(
-          key: const Key('reg_full_name_field'),
-          controller: nameController,
-          textCapitalization: TextCapitalization.words,
-          textInputAction: TextInputAction.next,
-          scrollPadding: const EdgeInsets.only(bottom: 120),
-          style: _fieldTextStyle(),
-          validator: (val) =>
-              (val == null || val.trim().isEmpty) ? 'Please enter your name' : null,
-          decoration: _fieldDecoration(hintText: 'e.g. Riya Sharma'),
-        ),
-        const SizedBox(height: 18),
-
-        // 2. City
-        _buildFieldLabel('CITY'),
-        const SizedBox(height: 8),
-        TextFormField(
-          key: const Key('reg_city_field'),
-          controller: cityController,
-          textCapitalization: TextCapitalization.words,
-          textInputAction: TextInputAction.next,
-          scrollPadding: const EdgeInsets.only(bottom: 120),
-          style: _fieldTextStyle(),
-          validator: (_) => null,
-          decoration: _fieldDecoration(hintText: 'e.g. Mumbai'),
-        ),
-        const SizedBox(height: 18),
-
-        // 3. Clinic / Hospital Name
-        _buildFieldLabel('CLINIC / HOSPITAL NAME'),
+        // 1. Clinic Name (Independent of Doctor Registration — NO Doctor Name, NO Consultation Type)
+        _buildFieldLabel('CLINIC NAME'),
         const SizedBox(height: 8),
         TextFormField(
           key: const Key('reg_clinic_name_field'),
@@ -1369,12 +1258,12 @@ class GsHealthRegistrationView extends StatelessWidget {
               ? 'Please enter clinic name'
               : null,
           decoration: _fieldDecoration(
-            hintText: 'e.g. Smile Studio',
+            hintText: 'e.g. Smile Studio Medical Center',
           ),
         ),
         const SizedBox(height: 18),
 
-        // 4. Clinic Address
+        // 2. Clinic Address (Required; manual entry always available)
         _buildFieldLabel('CLINIC ADDRESS'),
         const SizedBox(height: 8),
         TextFormField(
@@ -1382,16 +1271,52 @@ class GsHealthRegistrationView extends StatelessWidget {
           controller: clinicAddressController,
           textCapitalization: TextCapitalization.sentences,
           textInputAction: TextInputAction.next,
+          maxLines: 2,
           scrollPadding: const EdgeInsets.only(bottom: 120),
           style: _fieldTextStyle(),
-          validator: (_) => null,
+          validator: (val) => (val == null || val.trim().isEmpty)
+              ? 'Please enter clinic address'
+              : null,
           decoration: _fieldDecoration(
-            hintText: 'Street, area',
+            hintText: 'Building, street, landmark, area',
           ),
         ),
         const SizedBox(height: 18),
 
-        // 5. Pincode
+        // 3. City (Required)
+        _buildFieldLabel('CITY'),
+        const SizedBox(height: 8),
+        TextFormField(
+          key: const Key('reg_city_field'),
+          controller: cityController,
+          textCapitalization: TextCapitalization.words,
+          textInputAction: TextInputAction.next,
+          scrollPadding: const EdgeInsets.only(bottom: 120),
+          style: _fieldTextStyle(),
+          validator: (val) =>
+              (val == null || val.trim().isEmpty) ? 'Please enter city' : null,
+          decoration: _fieldDecoration(hintText: 'e.g. Mumbai'),
+        ),
+        const SizedBox(height: 18),
+
+        // 4. State (Required)
+        _buildFieldLabel('STATE'),
+        const SizedBox(height: 8),
+        TextFormField(
+          key: const Key('reg_state_field'),
+          controller: stateController,
+          textCapitalization: TextCapitalization.words,
+          textInputAction: TextInputAction.next,
+          scrollPadding: const EdgeInsets.only(bottom: 120),
+          style: _fieldTextStyle(),
+          validator: (val) => (val == null || val.trim().isEmpty)
+              ? 'Please enter state'
+              : null,
+          decoration: _fieldDecoration(hintText: 'e.g. Maharashtra'),
+        ),
+        const SizedBox(height: 18),
+
+        // 5. Pincode (Required 6-digit PIN)
         _buildFieldLabel('PINCODE'),
         const SizedBox(height: 8),
         TextFormField(
@@ -1406,9 +1331,10 @@ class GsHealthRegistrationView extends StatelessWidget {
           scrollPadding: const EdgeInsets.only(bottom: 120),
           style: _fieldTextStyle(),
           validator: (val) {
-            if (val == null || val.trim().isEmpty) return null;
-            if (!RegExp(r'^\d{6}$').hasMatch(val.trim())) {
-              return '6-digit PIN';
+            final trimmed = (val ?? '').trim();
+            if (trimmed.isEmpty) return 'Please enter 6-digit pincode';
+            if (!RegExp(r'^\d{6}$').hasMatch(trimmed)) {
+              return 'Please enter a valid 6-digit pincode';
             }
             return null;
           },
@@ -1416,9 +1342,10 @@ class GsHealthRegistrationView extends StatelessWidget {
         ),
         const SizedBox(height: 18),
 
-        _buildFieldLabel('CLINIC MAP LOCATION (OPTIONAL)'),
+        // 6. Clinic Location – OpenStreetMap Map Picker (Required)
+        _buildFieldLabel('CLINIC LOCATION (OPENSTREETMAP)'),
         const SizedBox(height: 8),
-        _buildMapLocationSection(),
+        _buildMapLocationSection(isRequired: true),
 
         if (!isOtpVerified) ...[
           const SizedBox(height: 20),

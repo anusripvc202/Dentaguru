@@ -6,6 +6,8 @@ import 'package:dentaguru/core/services/api_service.dart';
 import 'package:dentaguru/core/services/patient_problem_service.dart';
 import 'package:dentaguru/core/services/session_service.dart';
 import 'package:dentaguru/core/theme/app_theme.dart';
+import 'package:dentaguru/core/utils/clinic_directions_helper.dart';
+import 'package:dentaguru/core/widgets/map_location_picker_dialog.dart';
 import 'package:dentaguru/features/auth/presentation/screens/auth_screen.dart';
 import 'package:dentaguru/features/auth/presentation/widgets/gs_health_registration_view.dart';
 import 'package:flutter/material.dart';
@@ -326,6 +328,9 @@ void main() {
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     FlutterSecureStorage.setMockInitialValues({});
+    OsmMapConfig.debugTileProviderOverride = OfflinePlaceholderTileProvider();
+    OsmMapConfig.debugSimulateNetworkError = false;
+    MapLocationPickerDialog.debugSearchOverride = null;
     ApiService.debugLoginOverride = null;
     ApiService.debugRegisterOverride = null;
     await SessionService().clearSession();
@@ -333,6 +338,9 @@ void main() {
   });
 
   tearDown(() async {
+    OsmMapConfig.debugTileProviderOverride = null;
+    OsmMapConfig.debugSimulateNetworkError = false;
+    MapLocationPickerDialog.debugSearchOverride = null;
     ApiService.debugLoginOverride = null;
     ApiService.debugRegisterOverride = null;
     await SessionService().clearSession();
@@ -364,7 +372,7 @@ void main() {
       expect(find.byKey(const Key('reg_role_admin')), findsNothing);
       expect(find.byKey(const ValueKey('dentist_form_section')), findsOneWidget);
 
-      // Exact labels from the reference + Phase 2 clinic & consultation mode fields
+      // Exact labels including complete Clinic Registration & OSM Map Picker (NO consultation type)
       for (final label in [
         'FULL NAME',
         'CITY',
@@ -372,21 +380,23 @@ void main() {
         'SPECIALITY',
         'QUALIFICATION',
         'YEARS OF PRACTICE',
-        'CONSULTATION TYPE',
         'CLINIC (OPTIONAL)',
-        'CLINIC / HOSPITAL NAME',
+        'CLINIC NAME',
         'CLINIC ADDRESS',
         'STATE',
         'PINCODE',
-        'CLINIC MAP LOCATION (OPTIONAL)',
+        'CLINIC LOCATION ON MAP',
       ]) {
         expect(find.text(label), findsOneWidget, reason: label);
       }
 
-      // Removed legacy fields are no longer shown on the Dentist form
+      // Consultation Type / Online-Only options must NOT exist
+      expect(find.text('CONSULTATION TYPE'), findsNothing);
+      expect(find.text('Online Only'), findsNothing);
       expect(find.text('MEDICAL SPECIALTY'), findsNothing);
       expect(find.byKey(const Key('reg_dentist_pincode_field')), findsOneWidget);
       expect(find.byKey(const Key('reg_open_map_picker_button')), findsOneWidget);
+      expect(find.text('Select Clinic Location'), findsOneWidget);
 
       // Placeholders
       expect(find.text('e.g. Riya Sharma'), findsOneWidget);
@@ -522,6 +532,22 @@ void main() {
       await tester.tap(clinicChip);
       await tester.pumpAndSettle();
 
+      // Fill required State, Pincode, and select clinic location on OpenStreetMap
+      await tester.ensureVisible(find.byKey(const Key('reg_dentist_state_field')));
+      await tester.enterText(find.byKey(const Key('reg_dentist_state_field')), 'Tamil Nadu');
+      await tester.enterText(find.byKey(const Key('reg_dentist_pincode_field')), '600040');
+
+      final mapBtn = find.byKey(const Key('reg_open_map_picker_button'));
+      await tester.ensureVisible(mapBtn);
+      await tester.pumpAndSettle();
+      await tester.tap(mapBtn);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('osm_flutter_map')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('osm_picker_confirm_btn')));
+      await tester.pumpAndSettle();
+
       await tester.drag(find.byKey(const Key('registration_scroll_view')), const Offset(0, -1800));
       await tester.pumpAndSettle();
       await tester.ensureVisible(continueFinder);
@@ -539,13 +565,17 @@ void main() {
       expect(_firstDentistPayload?['experienceYears'], 6);
       expect(_firstDentistPayload?['clinicName'], 'Anna Nagar Dental Clinic');
       expect(_firstDentistPayload?['clinicAddress'], '2nd Avenue, Anna Nagar, Chennai');
+      expect(ApiService.debugLastRegisterPayload?['state'], 'Tamil Nadu');
+      expect(ApiService.debugLastRegisterPayload?['pincode'], '600040');
+      expect(ApiService.debugLastRegisterPayload?['latitude'], isNotNull);
+      expect(ApiService.debugLastRegisterPayload?['longitude'], isNotNull);
       expect(_firstDentistPayload?['languages'], ['English', 'Tamil']);
       expect(find.text('DENTIST_ROUTE'), findsOneWidget);
     },
   );
 
   testWidgets(
-    'D3. Online-Only dentist submits without clinic association, address, or coordinates',
+    'D3. Doctor registration requires clinic details and map location before submitting',
     (WidgetTester tester) async {
       _installGoogleFontsAssetHandler(tester);
       tester.view.physicalSize = const Size(390, 844);
@@ -555,35 +585,55 @@ void main() {
 
       await _pumpDentistRegistration(tester);
 
-      // Default mode is BOTH (clinic fields visible); switching to ONLINE_ONLY hides clinic fields
-      expect(find.byKey(const Key('reg_dentist_clinic_name_field')), findsOneWidget);
       await tester.enterText(find.byKey(const Key('reg_full_name_field')), 'Dr. Amit Verma');
       await tester.enterText(find.byKey(const Key('reg_city_field')), 'Mumbai');
+      await tester.ensureVisible(find.byKey(const Key('reg_dentist_clinic_name_field')));
+      await tester.enterText(find.byKey(const Key('reg_dentist_clinic_name_field')), 'Verma Dental Studio');
+      await tester.enterText(find.byKey(const Key('reg_dentist_clinic_address_field')), '18 Carter Road, Bandra');
+      await tester.enterText(find.byKey(const Key('reg_dentist_state_field')), 'Maharashtra');
+      await tester.enterText(find.byKey(const Key('reg_dentist_pincode_field')), '400050');
 
-      final onlineOnlyChip = find.byKey(const Key('reg_consultation_mode_ONLINE_ONLY'));
-      await tester.ensureVisible(onlineOnlyChip);
-      await tester.pumpAndSettle();
-      await tester.tap(onlineOnlyChip);
-      await tester.pumpAndSettle();
-
-      expect(find.byKey(const Key('reg_online_only_notice')), findsOneWidget);
-      expect(find.byKey(const Key('reg_dentist_clinic_name_field')), findsNothing);
-      expect(find.byKey(const Key('reg_dentist_clinic_address_field')), findsNothing);
-      expect(find.byKey(const Key('reg_open_map_picker_button')), findsNothing);
-
+      // Submitting without selecting map location is blocked with clear message
       final continueFinder = find.byKey(const Key('reg_continue_button'));
+      await tester.drag(find.byKey(const Key('registration_scroll_view')), const Offset(0, -1800));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(continueFinder);
+      await tester.pumpAndSettle();
+      await tester.tap(continueFinder);
+      await tester.pumpAndSettle();
+
+      expect(_dentistRegisterCalls, 0);
+      expect(find.byKey(const Key('reg_dentist_map_error')), findsOneWidget);
+
+      // Select location on map and resubmit -> succeeds
+      ScaffoldMessenger.of(tester.element(continueFinder)).clearSnackBars();
+      await tester.pumpAndSettle();
+      final mapBtn = find.byKey(const Key('reg_open_map_picker_button'));
+      await tester.ensureVisible(mapBtn);
+      await tester.pumpAndSettle();
+      await tester.tap(mapBtn);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('osm_flutter_map')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('osm_picker_confirm_btn')));
+      await tester.pumpAndSettle();
+
+      ScaffoldMessenger.of(tester.element(continueFinder)).clearSnackBars();
+      await tester.pumpAndSettle();
+      await tester.drag(find.byKey(const Key('registration_scroll_view')), const Offset(0, -1800));
+      await tester.pumpAndSettle();
       await tester.ensureVisible(continueFinder);
       await tester.pumpAndSettle();
       await tester.tap(continueFinder);
       await tester.pumpAndSettle();
 
       expect(_dentistRegisterCalls, greaterThanOrEqualTo(1));
-      expect(_firstDentistPayload?['specialty'], 'General Medicine');
-      expect(_firstDentistPayload?['clinicName'], isNull);
-      expect(_firstDentistPayload?['clinicAddress'], isNull);
-      expect(ApiService.debugLastRegisterPayload?['consultationMode'], 'ONLINE_ONLY');
-      expect(ApiService.debugLastRegisterPayload?['latitude'], isNull);
-      expect(ApiService.debugLastRegisterPayload?['longitude'], isNull);
+      expect(_firstDentistPayload?['clinicName'], 'Verma Dental Studio');
+      expect(_firstDentistPayload?['clinicAddress'], '18 Carter Road, Bandra');
+      expect(ApiService.debugLastRegisterPayload?['state'], 'Maharashtra');
+      expect(ApiService.debugLastRegisterPayload?['pincode'], '400050');
+      expect(ApiService.debugLastRegisterPayload?['latitude'], isNotNull);
+      expect(ApiService.debugLastRegisterPayload?['longitude'], isNotNull);
       expect(find.text('DENTIST_ROUTE'), findsOneWidget);
     },
   );

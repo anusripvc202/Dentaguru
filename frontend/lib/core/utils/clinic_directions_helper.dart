@@ -8,44 +8,6 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../theme/app_theme.dart';
 
-/// Canonical doctor consultation modes shared across Registration, Profile, and Patient UI.
-class DoctorConsultationMode {
-  static const String both = 'BOTH';
-  static const String inPerson = 'IN_PERSON';
-  static const String onlineOnly = 'ONLINE_ONLY';
-
-  static String normalize(String? raw, {String fallback = both}) {
-    if (raw == null || raw.trim().isEmpty) return fallback;
-    final norm = raw.trim().toUpperCase().replaceAll(RegExp(r'[\s-]+'), '_');
-    if (norm == 'ONLINE' || norm == 'ONLINE_ONLY' || norm == 'TELEMEDICINE') {
-      return onlineOnly;
-    }
-    if (norm == 'IN_PERSON' || norm == 'CLINIC' || norm == 'CLINIC_ONLY') {
-      return inPerson;
-    }
-    if (norm == 'BOTH' || norm == 'HYBRID' || norm == 'ALL') {
-      return both;
-    }
-    return fallback;
-  }
-
-  static bool isOnlineOnly(String? raw) => normalize(raw) == onlineOnly;
-
-  static bool requiresClinicDetails(String? raw) => !isOnlineOnly(raw);
-
-  static String displayLabel(String? raw) {
-    switch (normalize(raw)) {
-      case onlineOnly:
-        return 'Online Only';
-      case inPerson:
-        return 'In-Person Clinic';
-      case both:
-      default:
-        return 'In-Person & Online';
-    }
-  }
-}
-
 /// Centralized OpenStreetMap configuration.
 /// Production deployments can override tiles via:
 /// `--dart-define=OSM_TILE_URL=https://api.maptiler.com/maps/streets-v2/{z}/{x}/{y}.png?key=YOUR_KEY`
@@ -59,13 +21,20 @@ class OsmMapConfig {
 
   static const String userAgentPackageName = 'in.gshealth.app';
 
-  static const LatLng defaultIndiaCenter = LatLng(20.5937, 78.9629);
-  static const double defaultIndiaZoom = 5.0;
+  /// Neutral country-level framing when no clinic pin has been selected yet (never saved as clinic coords).
+  static const LatLng defaultViewportCenter = LatLng(20.5937, 78.9629);
+  static const double defaultViewportZoom = 4.8;
   static const double selectedPinZoom = 15.0;
 
   /// Optional test hook to avoid live HTTP tile requests during headless widget tests.
   @visibleForTesting
   static TileProvider? debugTileProviderOverride;
+
+  /// Optional test hook to simulate OpenStreetMap tile/network failure gracefully.
+  @visibleForTesting
+  static bool debugSimulateNetworkError = false;
+
+  static bool get shouldSimulateNetworkError => debugSimulateNetworkError;
 
   static TileProvider resolveTileProvider() {
     if (debugTileProviderOverride != null) {
@@ -103,6 +72,11 @@ class ClinicDirectionsHelper {
     return latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180;
   }
 
+  static bool isValidPincode(String? pincode) {
+    if (pincode == null) return false;
+    return RegExp(r'^\d{6}$').hasMatch(pincode.trim());
+  }
+
   static String composeAddressQuery({
     String clinicName = '',
     String clinicAddress = '',
@@ -128,11 +102,11 @@ class ClinicDirectionsHelper {
     return parts.join(', ');
   }
 
-  /// Builds the primary external navigation URI.
-  /// - Returns `null` for Online-Only doctors or when neither coordinates nor address exist.
-  /// - Uses exact coordinates when available; falls back to manual address search query otherwise.
+  /// Builds the primary Google Maps directions URI.
+  /// - Uses exact coordinates when valid latitude & longitude are saved.
+  /// - Falls back to the saved clinic address when coordinates are unavailable for an existing doctor.
+  /// - Returns `null` when neither coordinates nor clinic address exist (never fabricates fake coords).
   static Uri? buildDirectionsUri({
-    required String consultationMode,
     double? latitude,
     double? longitude,
     String clinicName = '',
@@ -141,9 +115,6 @@ class ClinicDirectionsHelper {
     String state = '',
     String pincode = '',
   }) {
-    if (DoctorConsultationMode.isOnlineOnly(consultationMode)) {
-      return null;
-    }
     if (hasValidCoordinates(latitude, longitude)) {
       final latStr = latitude!.toStringAsFixed(6);
       final lngStr = longitude!.toStringAsFixed(6);
@@ -168,7 +139,6 @@ class ClinicDirectionsHelper {
 
   /// OpenStreetMap web fallback URI when coordinates or address are available.
   static Uri? buildOsmFallbackUri({
-    required String consultationMode,
     double? latitude,
     double? longitude,
     String clinicName = '',
@@ -177,9 +147,6 @@ class ClinicDirectionsHelper {
     String state = '',
     String pincode = '',
   }) {
-    if (DoctorConsultationMode.isOnlineOnly(consultationMode)) {
-      return null;
-    }
     if (hasValidCoordinates(latitude, longitude)) {
       final latStr = latitude!.toStringAsFixed(6);
       final lngStr = longitude!.toStringAsFixed(6);
@@ -198,7 +165,6 @@ class ClinicDirectionsHelper {
 
   static Future<bool> launchDirections({
     required BuildContext context,
-    required String consultationMode,
     double? latitude,
     double? longitude,
     String clinicName = '',
@@ -208,7 +174,6 @@ class ClinicDirectionsHelper {
     String pincode = '',
   }) async {
     final primaryUri = buildDirectionsUri(
-      consultationMode: consultationMode,
       latitude: latitude,
       longitude: longitude,
       clinicName: clinicName,
@@ -241,7 +206,6 @@ class ClinicDirectionsHelper {
     } catch (_) {}
 
     final osmUri = buildOsmFallbackUri(
-      consultationMode: consultationMode,
       latitude: latitude,
       longitude: longitude,
       clinicName: clinicName,
@@ -270,8 +234,9 @@ class ClinicDirectionsHelper {
   }
 }
 
-/// Compact OpenStreetMap preview card with mandatory © OpenStreetMap contributors attribution.
-class OsmLocationPreviewCard extends StatelessWidget {
+/// Compact OpenStreetMap preview card with mandatory © OpenStreetMap contributors attribution
+/// and graceful network/tile error fallback.
+class OsmLocationPreviewCard extends StatefulWidget {
   final double latitude;
   final double longitude;
   final String title;
@@ -285,7 +250,7 @@ class OsmLocationPreviewCard extends StatelessWidget {
     super.key,
     required this.latitude,
     required this.longitude,
-    this.title = 'Pinned Clinic Location',
+    this.title = 'Selected Clinic Location',
     this.subtitle = '',
     this.onChangeLocation,
     this.onRemoveLocation,
@@ -294,9 +259,23 @@ class OsmLocationPreviewCard extends StatelessWidget {
   });
 
   @override
+  State<OsmLocationPreviewCard> createState() => _OsmLocationPreviewCardState();
+}
+
+class _OsmLocationPreviewCardState extends State<OsmLocationPreviewCard> {
+  bool _tileLoadError = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _tileLoadError = OsmMapConfig.debugSimulateNetworkError;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final point = LatLng(latitude, longitude);
-    final coordLabel = '${latitude.toStringAsFixed(5)}, ${longitude.toStringAsFixed(5)}';
+    final point = LatLng(widget.latitude, widget.longitude);
+    final coordLabel =
+        'Lat: ${widget.latitude.toStringAsFixed(5)}, Lng: ${widget.longitude.toStringAsFixed(5)}';
 
     return Container(
       decoration: BoxDecoration(
@@ -309,41 +288,68 @@ class OsmLocationPreviewCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           SizedBox(
-            height: mapHeight,
+            height: widget.mapHeight,
             child: Stack(
               children: [
-                IgnorePointer(
-                  child: FlutterMap(
-                    options: MapOptions(
-                      initialCenter: point,
-                      initialZoom: OsmMapConfig.selectedPinZoom,
-                      interactionOptions: const InteractionOptions(
-                        flags: InteractiveFlag.none,
-                      ),
+                if (_tileLoadError)
+                  Container(
+                    key: const Key('osm_preview_network_fallback'),
+                    color: const Color(0xFFE2E8F0),
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.all(12),
+                    child: const Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.wifi_off_rounded, size: 22, color: Color(0xFF475569)),
+                        SizedBox(height: 4),
+                        Text(
+                          'Map preview unavailable offline. Coordinates saved.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                        ),
+                      ],
                     ),
-                    children: [
-                      TileLayer(
-                        urlTemplate: OsmMapConfig.tileUrlTemplate,
-                        userAgentPackageName: OsmMapConfig.userAgentPackageName,
-                        tileProvider: OsmMapConfig.resolveTileProvider(),
+                  )
+                else
+                  IgnorePointer(
+                    child: FlutterMap(
+                      key: ValueKey('osm_preview_${widget.latitude}_${widget.longitude}'),
+                      options: MapOptions(
+                        initialCenter: point,
+                        initialZoom: OsmMapConfig.selectedPinZoom,
+                        interactionOptions: const InteractionOptions(
+                          flags: InteractiveFlag.none,
+                        ),
                       ),
-                      MarkerLayer(
-                        markers: [
-                          Marker(
-                            point: point,
-                            width: 40,
-                            height: 40,
-                            child: const Icon(
-                              Icons.location_pin,
-                              color: AppTheme.gsRed,
-                              size: 36,
+                      children: [
+                        TileLayer(
+                          urlTemplate: OsmMapConfig.tileUrlTemplate,
+                          userAgentPackageName: OsmMapConfig.userAgentPackageName,
+                          tileProvider: OsmMapConfig.resolveTileProvider(),
+                          errorTileCallback: (_, __, ___) {
+                            if (mounted && !_tileLoadError) {
+                              setState(() => _tileLoadError = true);
+                            }
+                          },
+                        ),
+                        MarkerLayer(
+                          markers: [
+                            Marker(
+                              point: point,
+                              width: 40,
+                              height: 40,
+                              alignment: Alignment.topCenter,
+                              child: const Icon(
+                                Icons.location_pin,
+                                color: AppTheme.gsRed,
+                                size: 36,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ],
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
-                ),
                 Positioned(
                   right: 6,
                   bottom: 6,
@@ -377,7 +383,7 @@ class OsmLocationPreviewCard extends StatelessWidget {
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        title,
+                        widget.title,
                         style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
@@ -391,7 +397,8 @@ class OsmLocationPreviewCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  subtitle.trim().isNotEmpty ? '$subtitle ($coordLabel)' : 'Coordinates: $coordLabel',
+                  widget.subtitle.trim().isNotEmpty ? '${widget.subtitle} • $coordLabel' : coordLabel,
+                  key: const Key('osm_preview_coords_text'),
                   style: const TextStyle(
                     fontSize: 11.5,
                     color: Color(0xFF64748B),
@@ -400,18 +407,23 @@ class OsmLocationPreviewCard extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
-                if (onChangeLocation != null || onRemoveLocation != null || onOpenDirections != null) ...[
+                if (widget.onChangeLocation != null ||
+                    widget.onRemoveLocation != null ||
+                    widget.onOpenDirections != null) ...[
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
                     runSpacing: 6,
                     children: [
-                      if (onChangeLocation != null)
+                      if (widget.onChangeLocation != null)
                         OutlinedButton.icon(
                           key: const Key('osm_preview_change_location_btn'),
-                          onPressed: onChangeLocation,
+                          onPressed: widget.onChangeLocation,
                           icon: const Icon(Icons.edit_location_alt_outlined, size: 15),
-                          label: const Text('Change Location', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                          label: const Text(
+                            'Change Location',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                          ),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: AppTheme.gsNavy,
                             side: const BorderSide(color: AppTheme.gsNavy),
@@ -420,24 +432,30 @@ class OsmLocationPreviewCard extends StatelessWidget {
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           ),
                         ),
-                      if (onRemoveLocation != null)
+                      if (widget.onRemoveLocation != null)
                         TextButton.icon(
                           key: const Key('osm_preview_remove_location_btn'),
-                          onPressed: onRemoveLocation,
+                          onPressed: widget.onRemoveLocation,
                           icon: const Icon(Icons.location_off_outlined, size: 15),
-                          label: const Text('Remove Pin', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                          label: const Text(
+                            'Remove Pin',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                          ),
                           style: TextButton.styleFrom(
                             foregroundColor: AppTheme.gsRed,
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                             minimumSize: const Size(0, 32),
                           ),
                         ),
-                      if (onOpenDirections != null)
+                      if (widget.onOpenDirections != null)
                         ElevatedButton.icon(
                           key: const Key('osm_preview_directions_btn'),
-                          onPressed: onOpenDirections,
+                          onPressed: widget.onOpenDirections,
                           icon: const Icon(Icons.directions_rounded, size: 15),
-                          label: const Text('Directions', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                          label: const Text(
+                            'Get Directions',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                          ),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppTheme.gsNavy,
                             foregroundColor: Colors.white,

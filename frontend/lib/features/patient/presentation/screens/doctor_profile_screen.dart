@@ -1107,7 +1107,6 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
     void openDirections() {
       ClinicDirectionsHelper.launchDirections(
         context: context,
-        consultationMode: doc.consultationMode,
         latitude: doc.latitude,
         longitude: doc.longitude,
         clinicName: doc.clinicName,
@@ -1129,138 +1128,118 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              const Icon(Icons.local_hospital_outlined, size: 18, color: AppTheme.primaryBlue),
-              const SizedBox(width: 8),
-              const Expanded(
-                child: Text(
-                  'Clinic & Contact Information',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: AppTheme.textDark,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(width: 6),
-              Container(
-                key: const Key('patient_doctor_consultation_mode_badge'),
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: doc.isOnlineOnly ? const Color(0xFFECFDF5) : const Color(0xFFEFF6FF),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: doc.isOnlineOnly ? const Color(0xFFA7F3D0) : const Color(0xFFBFDBFE),
-                  ),
-                ),
-                child: Text(
-                  DoctorConsultationMode.displayLabel(doc.consultationMode),
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w700,
-                    color: doc.isOnlineOnly ? const Color(0xFF047857) : AppTheme.gsNavy,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          if (doc.isOnlineOnly) ...[
-            Container(
-              key: const Key('patient_doctor_online_only_card'),
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFECFDF5),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFA7F3D0)),
-              ),
-              child: const Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              const Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.videocam_outlined, size: 18, color: Color(0xFF047857)),
+                  Icon(Icons.local_hospital_outlined, size: 18, color: AppTheme.primaryBlue),
                   SizedBox(width: 8),
-                  Expanded(
+                  Flexible(
                     child: Text(
-                      'This doctor offers online consultations only. No in-person clinic visit is required.',
+                      'Clinic & Contact Information',
                       style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF065F46),
-                        height: 1.4,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.textDark,
                       ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
               ),
-            ),
-            if (doc.city.trim().isNotEmpty) ...[
-              const SizedBox(height: 10),
-              _buildContactRow(
-                icon: Icons.location_city_rounded,
-                label: 'City',
-                value: doc.city.trim(),
-              ),
-            ],
-          ] else ...[
-            if (doc.clinicName.trim().isNotEmpty)
-              _buildContactRow(
-                icon: Icons.business_rounded,
-                label: 'Clinic Name',
-                value: doc.clinicName.trim(),
-              ),
-            if (doc.clinicAddress.trim().isNotEmpty) ...[
-              const SizedBox(height: 10),
-              _buildContactRow(
-                icon: Icons.place_outlined,
-                label: 'Clinic Address',
-                value: doc.clinicAddress.trim(),
-              ),
-            ],
-            if (cityLine.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              _buildContactRow(
-                icon: Icons.location_city_rounded,
-                label: 'City / Location',
-                value: cityLine,
-              ),
-            ],
-            if (doc.hasCoordinates) ...[
-              const SizedBox(height: 12),
-              OsmLocationPreviewCard(
-                key: const Key('patient_doctor_osm_preview'),
-                latitude: doc.latitude!,
-                longitude: doc.longitude!,
-                title: doc.clinicName.trim().isNotEmpty ? doc.clinicName.trim() : 'Clinic Location',
-                subtitle: doc.clinicAddress.trim().isNotEmpty ? doc.clinicAddress.trim() : cityLine,
-                mapHeight: 130,
-              ),
-            ],
-            if (doc.hasPhysicalClinicLocation) ...[
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  key: const Key('patient_doctor_directions_button'),
-                  onPressed: openDirections,
-                  icon: const Icon(Icons.directions_rounded, size: 18),
-                  label: Text(
-                    doc.hasCoordinates ? 'Get Directions (Map Pin)' : 'Get Directions (Address)',
-                    style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
-                    overflow: TextOverflow.ellipsis,
+              if (doc.hasPhysicalClinicLocation)
+                Container(
+                  key: const Key('patient_doctor_location_indicator'),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: doc.hasCoordinates ? const Color(0xFFEFF6FF) : const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: doc.hasCoordinates ? const Color(0xFFBFDBFE) : const Color(0xFFCBD5E1),
+                    ),
                   ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.gsNavy,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        doc.hasCoordinates ? Icons.location_on_rounded : Icons.map_outlined,
+                        size: 12,
+                        color: doc.hasCoordinates ? AppTheme.gsNavy : const Color(0xFF475569),
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        doc.hasCoordinates ? 'Map Pin Verified' : 'Address Only',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
+                          color: doc.hasCoordinates ? AppTheme.gsNavy : const Color(0xFF475569),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
             ],
+          ),
+          const SizedBox(height: 14),
+          if (doc.clinicName.trim().isNotEmpty)
+            _buildContactRow(
+              icon: Icons.business_rounded,
+              label: 'Clinic Name',
+              value: doc.clinicName.trim(),
+            ),
+          if (doc.clinicAddress.trim().isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _buildContactRow(
+              icon: Icons.place_outlined,
+              label: 'Clinic Address',
+              value: doc.clinicAddress.trim(),
+            ),
+          ],
+          if (cityLine.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _buildContactRow(
+              icon: Icons.location_city_rounded,
+              label: 'City, State & Pincode',
+              value: cityLine,
+            ),
+          ],
+          if (doc.hasCoordinates) ...[
+            const SizedBox(height: 12),
+            OsmLocationPreviewCard(
+              key: const Key('patient_doctor_osm_preview'),
+              latitude: doc.latitude!,
+              longitude: doc.longitude!,
+              title: doc.clinicName.trim().isNotEmpty ? doc.clinicName.trim() : 'Clinic Location',
+              subtitle: doc.clinicAddress.trim().isNotEmpty ? doc.clinicAddress.trim() : cityLine,
+              mapHeight: 130,
+            ),
+          ],
+          if (doc.hasPhysicalClinicLocation) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                key: const Key('patient_doctor_directions_button'),
+                onPressed: openDirections,
+                icon: const Icon(Icons.directions_rounded, size: 18),
+                label: const Text(
+                  'Get Directions',
+                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.gsNavy,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
           ],
           if (doc.phone.trim().isNotEmpty) ...[
             const SizedBox(height: 10),

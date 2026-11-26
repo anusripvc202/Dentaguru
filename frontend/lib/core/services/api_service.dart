@@ -109,7 +109,6 @@ class ApiService {
     String? pincode,
     double? latitude,
     double? longitude,
-    String? consultationMode,
     String? qualification,
     int? experienceYears,
     String? profilePhoto,
@@ -131,7 +130,6 @@ class ApiService {
       'pincode': pincode,
       'latitude': latitude,
       'longitude': longitude,
-      'consultationMode': consultationMode,
       'qualification': qualification,
       'experienceYears': experienceYears,
       'languages': languages,
@@ -224,7 +222,6 @@ class ApiService {
       if (pincode != null) 'pincode': pincode,
       if (latitude != null) 'latitude': latitude,
       if (longitude != null) 'longitude': longitude,
-      if (consultationMode != null && consultationMode.trim().isNotEmpty) 'consultationMode': consultationMode.trim(),
       if (qualification != null) 'qualification': qualification,
       if (experienceYears != null) 'experienceYears': experienceYears,
       if (profilePhoto != null) 'profilePhoto': profilePhoto,
@@ -295,10 +292,6 @@ class ApiService {
 
         final bool isDoctorSupabaseReg =
             role == 'Dentist' || role.toLowerCase() == 'dentist' || role.toLowerCase() == 'doctor';
-        final String effectiveConsultationMode =
-            (consultationMode != null && consultationMode.trim().isNotEmpty) ? consultationMode.trim().toUpperCase() : 'BOTH';
-        final bool isOnlineOnlySupabaseDoc =
-            isDoctorSupabaseReg && (effectiveConsultationMode == 'ONLINE_ONLY' || effectiveConsultationMode == 'ONLINE');
 
         final profileMeta = jsonEncode({
           'age': age ?? '',
@@ -306,15 +299,14 @@ class ApiService {
           'bloodGroup': bloodGroup ?? '',
           'emergencyContact': emergencyContact ?? '',
           'city': city ?? '',
-          'state': isOnlineOnlySupabaseDoc ? '' : (cleanState ?? ''),
-          'pincode': isOnlineOnlySupabaseDoc ? '' : (pincode ?? ''),
-          'location': isOnlineOnlySupabaseDoc ? '' : effectiveLocation,
-          'address': isOnlineOnlySupabaseDoc ? '' : effectiveLocation,
-          if (isDoctorSupabaseReg) 'consultationMode': effectiveConsultationMode,
-          if (isDoctorSupabaseReg && !isOnlineOnlySupabaseDoc && clinicName != null) 'clinicName': clinicName.trim(),
-          if (isDoctorSupabaseReg && !isOnlineOnlySupabaseDoc && cleanClinicAddress != null) 'clinicAddress': cleanClinicAddress,
-          if (!isOnlineOnlySupabaseDoc && latitude != null) 'latitude': latitude,
-          if (!isOnlineOnlySupabaseDoc && longitude != null) 'longitude': longitude,
+          'state': cleanState ?? '',
+          'pincode': pincode ?? '',
+          'location': effectiveLocation,
+          'address': cleanClinicAddress ?? effectiveLocation,
+          if (isDoctorSupabaseReg && clinicName != null) 'clinicName': clinicName.trim(),
+          if (isDoctorSupabaseReg && cleanClinicAddress != null) 'clinicAddress': cleanClinicAddress,
+          if (latitude != null) 'latitude': latitude,
+          if (longitude != null) 'longitude': longitude,
           'languages': effectiveLanguages,
           'referral_code': generatedRefCode,
           if (referralCode != null && referralCode.trim().isNotEmpty) 'referred_by_code': referralCode.trim().toUpperCase(),
@@ -327,11 +319,11 @@ class ApiService {
           'phone': cleanPhone,
           'role': role,
           'city': city?.trim() ?? '',
-          'pincode': isOnlineOnlySupabaseDoc ? '' : (pincode?.trim() ?? ''),
-          'state': isOnlineOnlySupabaseDoc ? '' : (cleanState ?? (isDoctorSupabaseReg ? '' : effectiveLocation)),
+          'pincode': pincode?.trim() ?? '',
+          'state': cleanState ?? '',
           'device_token': profileMeta,
-          if (!isOnlineOnlySupabaseDoc && latitude != null) 'latitude': latitude,
-          if (!isOnlineOnlySupabaseDoc && longitude != null) 'longitude': longitude,
+          if (latitude != null) 'latitude': latitude,
+          if (longitude != null) 'longitude': longitude,
           if (profilePhoto != null) 'biometric_token': profilePhoto,
         };
 
@@ -406,13 +398,9 @@ class ApiService {
             } catch (_) {}
             final dentistInsertPayload = <String, dynamic>{
               'user_id': newUserId,
-              if (!isOnlineOnlySupabaseDoc && resolvedClinicId != null && resolvedClinicId.isNotEmpty)
-                'clinic_id': resolvedClinicId,
-              if (!isOnlineOnlySupabaseDoc && clinicName != null && clinicName.trim().isNotEmpty)
-                'clinic_name': clinicName.trim(),
-              if (!isOnlineOnlySupabaseDoc && cleanClinicAddress != null && cleanClinicAddress.isNotEmpty)
-                'clinic_address': cleanClinicAddress,
-              'consultation_mode': effectiveConsultationMode,
+              if (resolvedClinicId != null && resolvedClinicId.isNotEmpty) 'clinic_id': resolvedClinicId,
+              if (clinicName != null && clinicName.trim().isNotEmpty) 'clinic_name': clinicName.trim(),
+              if (cleanClinicAddress != null && cleanClinicAddress.isNotEmpty) 'clinic_address': cleanClinicAddress,
               'speciality': effectiveSpec,
               if (resolvedSpecId != null) 'specialty_id': resolvedSpecId,
               'license_number': lic,
@@ -422,11 +410,11 @@ class ApiService {
               if (consultationFee != null && consultationFee.trim().isNotEmpty) 'consultation_fee': consultationFee.trim(),
               if (bio != null && bio.trim().isNotEmpty) 'bio': bio.trim(),
               'languages': effectiveLanguages,
-              'state': isOnlineOnlySupabaseDoc ? '' : (cleanState ?? ''),
+              'state': cleanState ?? '',
               'city': city?.trim() ?? '',
-              'pincode': isOnlineOnlySupabaseDoc ? '' : (pincode?.trim() ?? ''),
-              if (!isOnlineOnlySupabaseDoc && latitude != null) 'latitude': latitude,
-              if (!isOnlineOnlySupabaseDoc && longitude != null) 'longitude': longitude,
+              'pincode': pincode?.trim() ?? '',
+              if (latitude != null) 'latitude': latitude,
+              if (longitude != null) 'longitude': longitude,
               'rating': 5.0,
               'reviews_count': 0,
             };
@@ -435,8 +423,7 @@ class ApiService {
             } catch (_) {
               final legacyPayload = Map<String, dynamic>.from(dentistInsertPayload)
                 ..remove('clinic_name')
-                ..remove('clinic_address')
-                ..remove('consultation_mode');
+                ..remove('clinic_address');
               await client.from('dentists').insert(legacyPayload);
             }
           } catch (_) {}
@@ -548,7 +535,11 @@ class ApiService {
     String identifier = rawIdentifier;
     if (!rawIdentifier.contains('@') && RegExp(r'^[+\d\s\-()]+$').hasMatch(rawIdentifier)) {
       final digits = rawIdentifier.replaceAll(RegExp(r'[^0-9]'), '');
-      if (digits.length == 12 && digits.startsWith('91')) {
+      if (digits.length == 14 && digits.startsWith('0091')) {
+        identifier = digits.substring(4);
+      } else if (digits.length == 13 && digits.startsWith('910')) {
+        identifier = digits.substring(3);
+      } else if (digits.length == 12 && digits.startsWith('91')) {
         identifier = digits.substring(2);
       } else if (digits.length == 11 && digits.startsWith('0')) {
         identifier = digits.substring(1);
@@ -665,6 +656,8 @@ class ApiService {
     final trimmed = rawInput.trim();
     if (trimmed.contains('@')) return trimmed.toLowerCase();
     final digits = trimmed.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length == 14 && digits.startsWith('0091')) return digits.substring(4);
+    if (digits.length == 13 && digits.startsWith('910')) return digits.substring(3);
     if (digits.length == 12 && digits.startsWith('91')) return digits.substring(2);
     if (digits.length == 11 && digits.startsWith('0')) return digits.substring(1);
     if (digits.length > 10) return digits.substring(digits.length - 10);
@@ -729,12 +722,23 @@ class ApiService {
       } catch (_) {}
     }
 
+    final isMainAdminUser = userRoleLower == 'admin' ||
+        userRoleLower == 'primaryadmin' ||
+        userRoleLower == 'primary_admin' ||
+        userRoleLower == 'superadmin' ||
+        userRoleLower == 'super_admin';
     final userStatus = (u['status'] ?? tokenMeta['status'] ?? 'ACTIVE').toString().trim().toUpperCase();
-    if (isSubAdminUser && (userStatus == 'INACTIVE' || userStatus == 'DEACTIVATED')) {
+    final isInactiveStatus = userStatus == 'INACTIVE' ||
+        userStatus == 'DEACTIVATED' ||
+        userStatus == 'SUSPENDED' ||
+        userStatus == 'BLOCKED';
+    if ((isSubAdminUser || isMainAdminUser) && isInactiveStatus) {
       return {
         'success': false,
         'code': 'ACCOUNT_DEACTIVATED',
-        'message': 'Access Denied: Your Sub-Admin account has been deactivated by the Main Admin. Please contact the administrator.'
+        'message': isSubAdminUser
+            ? 'Access Denied: Your Sub-Admin account has been deactivated by the Main Admin. Please contact the administrator.'
+            : 'Access Denied: Your Admin account is currently inactive or deactivated.'
       };
     }
 
@@ -937,7 +941,17 @@ class ApiService {
         }
         final u = await _findSupabaseUserByIdentifier(rawId, normKey);
         final roleLower = (u?['role'] ?? '').toString().trim().toLowerCase();
-        final isStrictAdmin = roleLower == 'admin' || roleLower == 'primaryadmin' || roleLower == 'primary_admin' || roleLower == 'superadmin' || roleLower == 'super_admin';
+        final statusUpper = (u?['status'] ?? 'ACTIVE').toString().trim().toUpperCase();
+        final isActiveAccount = statusUpper != 'INACTIVE' &&
+            statusUpper != 'DEACTIVATED' &&
+            statusUpper != 'SUSPENDED' &&
+            statusUpper != 'BLOCKED';
+        final isStrictAdmin = isActiveAccount &&
+            (roleLower == 'admin' ||
+                roleLower == 'primaryadmin' ||
+                roleLower == 'primary_admin' ||
+                roleLower == 'superadmin' ||
+                roleLower == 'super_admin');
         final otpCode = (Random.secure().nextInt(900000) + 100000).toString();
         _localTestingOtpChallenges[normKey] = (
           code: otpCode,
@@ -1014,13 +1028,18 @@ class ApiService {
             'user': data['user'],
             'accessToken': data['accessToken'],
             'refreshToken': data['refreshToken'],
+            if (data['realtimeToken'] != null) 'realtimeToken': data['realtimeToken'],
+            if (data['realtimeTokenExpiresAt'] != null)
+              'realtimeTokenExpiresAt': data['realtimeTokenExpiresAt'],
             'isAdmin': data['isAdmin'] == true,
+            if (data['isSubAdmin'] == true) 'isSubAdmin': true,
             if (data['isNewPatient'] == true) 'isNewPatient': true,
           };
         } else {
           return {
             'success': false,
             'status': response.statusCode,
+            if (data['code'] != null) 'code': data['code'],
             'message': data['message'] ?? 'Invalid or expired OTP code. Please request a new OTP.',
           };
         }
@@ -8322,7 +8341,6 @@ class ApiService {
         if (updates['state'] != null) 'state': updates['state'],
         if (updates['clinicName'] != null) 'clinic_name': updates['clinicName'],
         if (updates['clinicAddress'] != null) 'clinic_address': updates['clinicAddress'],
-        if (updates['consultationMode'] != null) 'consultation_mode': updates['consultationMode'],
         if (updates['clearLocation'] == true) ...{
           'latitude': null,
           'longitude': null,
@@ -8338,8 +8356,7 @@ class ApiService {
         } catch (_) {
           final legacyUpdates = Map<String, dynamic>.from(dbUpdates)
             ..remove('clinic_name')
-            ..remove('clinic_address')
-            ..remove('consultation_mode');
+            ..remove('clinic_address');
           if (legacyUpdates.isNotEmpty) {
             await client.from('dentists').update(legacyUpdates).or('id.eq.$doctorId,user_id.eq.$doctorId');
           }
@@ -8999,9 +9016,335 @@ class ApiService {
         };
       }
     } catch (e) {
-      debugPrint('fetchAdminGlobalVisitsCalendar notice: $e');
+    debugPrint('fetchAdminGlobalVisitsCalendar notice: $e');
     }
     return {'success': false};
+  }
+
+  @visibleForTesting
+  static Future<Map<String, dynamic>> Function({
+    String? date,
+    String? month,
+    String? doctorId,
+    String? appointmentStatus,
+    String? referralStatus,
+    String? search,
+    int page,
+    int pageSize,
+  })? debugDoctorActivityCalendarOverride;
+
+  /// Fetch Admin Doctor Activity Calendar (`GET /api/v1/admin/doctor-activity-calendar`)
+  Future<Map<String, dynamic>> fetchAdminDoctorActivityCalendar({
+    String? date,
+    String? month,
+    String? doctorId,
+    String? appointmentStatus,
+    String? referralStatus,
+    String? search,
+    int page = 1,
+    int pageSize = 25,
+    http.Client? client,
+  }) async {
+    if (debugDoctorActivityCalendarOverride != null) {
+      return debugDoctorActivityCalendarOverride!(
+        date: date,
+        month: month,
+        doctorId: doctorId,
+        appointmentStatus: appointmentStatus,
+        referralStatus: referralStatus,
+        search: search,
+        page: page,
+        pageSize: pageSize,
+      );
+    }
+    try {
+      final qp = <String, String>{
+        if (date != null && date.trim().isNotEmpty) 'date': date.trim(),
+        if (month != null && month.trim().isNotEmpty) 'month': month.trim(),
+        if (doctorId != null && doctorId.trim().isNotEmpty && doctorId != 'All')
+          'doctorId': doctorId.trim(),
+        if (appointmentStatus != null &&
+            appointmentStatus.trim().isNotEmpty &&
+            appointmentStatus != 'All')
+          'appointmentStatus': appointmentStatus.trim(),
+        if (referralStatus != null &&
+            referralStatus.trim().isNotEmpty &&
+            referralStatus != 'All')
+          'referralStatus': referralStatus.trim(),
+        if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
+        'page': page.toString(),
+        'pageSize': pageSize.toString(),
+      };
+      final uri = Uri.parse('${ApiConstants.baseUrl}/admin/doctor-activity-calendar')
+          .replace(queryParameters: qp);
+      final response = await (client != null
+              ? client.get(uri, headers: _headersWithUser())
+              : http.get(uri, headers: _headersWithUser()))
+          .timeout(const Duration(seconds: 35));
+
+      final decoded = jsonDecode(response.body);
+      if (response.statusCode == 200 && decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      if (decoded is Map<String, dynamic>) {
+        return {
+          'success': false,
+          'statusCode': response.statusCode,
+          'message': decoded['message'] ?? 'Unable to load Doctor Activity Calendar.',
+        };
+      }
+    } catch (e) {
+      debugPrint('fetchAdminDoctorActivityCalendar notice: $e');
+      return {
+        'success': false,
+        'message': 'Failed to load Doctor Activity Calendar. Please check your connection and try again.',
+      };
+    }
+    return {
+      'success': false,
+      'message': 'Unable to load Doctor Activity Calendar.',
+    };
+  }
+
+  // ===========================================================================
+  // CLINIC MANAGEMENT SYSTEM APIs (Search, Clinic-wise Doctors, Associations, Profile)
+  // ===========================================================================
+
+  @visibleForTesting
+  static Future<Map<String, dynamic>> Function({
+    String? search,
+    int page,
+    int pageSize,
+  })? debugFetchClinicsSearchOverride;
+
+  /// Fetch Clinics with dynamic search (Clinic Name, ID, City, State, Pincode, Address) & pagination (`GET /clinics`)
+  Future<Map<String, dynamic>> fetchClinicsWithSearch({
+    String? search,
+    int page = 1,
+    int pageSize = 25,
+    http.Client? client,
+  }) async {
+    if (debugFetchClinicsSearchOverride != null) {
+      return debugFetchClinicsSearchOverride!(
+        search: search,
+        page: page,
+        pageSize: pageSize,
+      );
+    }
+    try {
+      final qp = <String, String>{
+        if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
+        'page': page.toString(),
+        'pageSize': pageSize.toString(),
+      };
+      final uri = Uri.parse('${ApiConstants.baseUrl}/clinics').replace(queryParameters: qp);
+      final response = await (client != null
+              ? client.get(uri, headers: _headersWithUser())
+              : http.get(uri, headers: _headersWithUser()))
+          .timeout(const Duration(seconds: 35));
+      final decoded = jsonDecode(response.body);
+      if (response.statusCode == 200 && decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      if (decoded is Map<String, dynamic>) {
+        return {
+          'success': false,
+          'statusCode': response.statusCode,
+          'message': decoded['message'] ?? 'Failed to fetch clinics.',
+        };
+      }
+    } catch (e) {
+      debugPrint('fetchClinicsWithSearch notice: $e');
+    }
+    return {'success': false, 'message': 'Unable to fetch clinics. Please try again.'};
+  }
+
+  @visibleForTesting
+  static Future<Map<String, dynamic>> Function({
+    required String clinicId,
+    String? search,
+    String? specialty,
+    String? department,
+    int page,
+    int pageSize,
+  })? debugFetchClinicDoctorsFilteredOverride;
+
+  /// Fetch clinic-wise associated doctors with dynamic search, specialization & department filters (`GET /clinics/:clinicId/doctors`)
+  Future<Map<String, dynamic>> fetchClinicDoctorsFiltered({
+    required String clinicId,
+    String? search,
+    String? specialty,
+    String? department,
+    int page = 1,
+    int pageSize = 25,
+    http.Client? client,
+  }) async {
+    if (debugFetchClinicDoctorsFilteredOverride != null) {
+      return debugFetchClinicDoctorsFilteredOverride!(
+        clinicId: clinicId,
+        search: search,
+        specialty: specialty,
+        department: department,
+        page: page,
+        pageSize: pageSize,
+      );
+    }
+    try {
+      final qp = <String, String>{
+        'includeUnavailable': 'true',
+        if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
+        if (specialty != null && specialty.trim().isNotEmpty && specialty != 'All')
+          'specialty': specialty.trim(),
+        if (department != null && department.trim().isNotEmpty && department != 'All')
+          'department': department.trim(),
+        'page': page.toString(),
+        'pageSize': pageSize.toString(),
+      };
+      final uri = Uri.parse('${ApiConstants.baseUrl}/clinics/$clinicId/doctors')
+          .replace(queryParameters: qp);
+      final response = await (client != null
+              ? client.get(uri, headers: _headersWithUser())
+              : http.get(uri, headers: _headersWithUser()))
+          .timeout(const Duration(seconds: 35));
+      final decoded = jsonDecode(response.body);
+      if (response.statusCode == 200 && decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      if (decoded is Map<String, dynamic>) {
+        return {
+          'success': false,
+          'statusCode': response.statusCode,
+          'message': decoded['message'] ?? 'Failed to fetch clinic doctors.',
+        };
+      }
+    } catch (e) {
+      debugPrint('fetchClinicDoctorsFiltered notice: $e');
+    }
+    return {'success': false, 'message': 'Unable to load associated doctors.'};
+  }
+
+  @visibleForTesting
+  static Future<Map<String, dynamic>> Function({
+    required String clinicId,
+    required List<String> doctorIds,
+    String? clinicName,
+  })? debugAssociateDoctorsToClinicOverride;
+
+  /// Associate one or multiple existing registered doctors with a clinic (`POST /clinics/:clinicId/doctors/associate`)
+  Future<Map<String, dynamic>> associateDoctorsToClinic({
+    required String clinicId,
+    required List<String> doctorIds,
+    String? clinicName,
+    http.Client? client,
+  }) async {
+    if (debugAssociateDoctorsToClinicOverride != null) {
+      return debugAssociateDoctorsToClinicOverride!(
+        clinicId: clinicId,
+        doctorIds: doctorIds,
+        clinicName: clinicName,
+      );
+    }
+    try {
+      final cleanIds = doctorIds.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet().toList();
+      if (cleanIds.isEmpty) {
+        return {'success': false, 'message': 'Please select at least one doctor.'};
+      }
+      final uri = Uri.parse('${ApiConstants.baseUrl}/clinics/$clinicId/doctors/associate');
+      final body = jsonEncode({
+        if (cleanIds.length == 1) 'doctorId': cleanIds.first,
+        'doctorIds': cleanIds,
+        if (clinicName != null && clinicName.trim().isNotEmpty) 'clinicName': clinicName.trim(),
+      });
+      final response = await (client != null
+              ? client.post(uri, headers: _headersWithUser(), body: body)
+              : http.post(uri, headers: _headersWithUser(), body: body))
+          .timeout(const Duration(seconds: 35));
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) {
+        return {
+          ...decoded,
+          'statusCode': response.statusCode,
+        };
+      }
+    } catch (e) {
+      debugPrint('associateDoctorsToClinic notice: $e');
+    }
+    return {'success': false, 'message': 'Unable to associate selected doctors with this clinic.'};
+  }
+
+  @visibleForTesting
+  static Future<Map<String, dynamic>> Function({
+    required String clinicId,
+    required String doctorId,
+  })? debugRemoveDoctorAssociationOverride;
+
+  /// Remove a doctor's association from a clinic without deleting the doctor account (`DELETE /clinics/:clinicId/doctors/:doctorId`)
+  Future<Map<String, dynamic>> removeDoctorAssociationFromClinic({
+    required String clinicId,
+    required String doctorId,
+    http.Client? client,
+  }) async {
+    if (debugRemoveDoctorAssociationOverride != null) {
+      return debugRemoveDoctorAssociationOverride!(
+        clinicId: clinicId,
+        doctorId: doctorId,
+      );
+    }
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/clinics/$clinicId/doctors/$doctorId');
+      final response = await (client != null
+              ? client.delete(uri, headers: _headersWithUser())
+              : http.delete(uri, headers: _headersWithUser()))
+          .timeout(const Duration(seconds: 35));
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) {
+        return {
+          ...decoded,
+          'statusCode': response.statusCode,
+        };
+      }
+    } catch (e) {
+      debugPrint('removeDoctorAssociationFromClinic notice: $e');
+    }
+    return {'success': false, 'message': 'Unable to remove doctor association.'};
+  }
+
+  /// Update structured clinic profile details & OSM coordinates (`PUT /clinics/:clinicId`)
+  Future<Map<String, dynamic>> updateClinicProfileDetails({
+    required String clinicId,
+    String? clinicName,
+    String? clinicAddress,
+    String? city,
+    String? state,
+    String? pincode,
+    double? latitude,
+    double? longitude,
+    http.Client? client,
+  }) async {
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/clinics/$clinicId');
+      final body = jsonEncode({
+        if (clinicName != null && clinicName.trim().isNotEmpty) 'clinicName': clinicName.trim(),
+        if (clinicAddress != null) 'clinicAddress': clinicAddress.trim(),
+        if (clinicAddress != null) 'location': clinicAddress.trim(),
+        if (city != null) 'city': city.trim(),
+        if (state != null) 'state': state.trim(),
+        if (pincode != null) 'pincode': pincode.trim(),
+        if (latitude != null) 'latitude': latitude,
+        if (longitude != null) 'longitude': longitude,
+      });
+      final response = await (client != null
+              ? client.put(uri, headers: _headersWithUser(), body: body)
+              : http.put(uri, headers: _headersWithUser(), body: body))
+          .timeout(const Duration(seconds: 35));
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+    } catch (e) {
+      debugPrint('updateClinicProfileDetails notice: $e');
+    }
+    return {'success': false, 'message': 'Unable to update clinic profile details.'};
   }
 }
 

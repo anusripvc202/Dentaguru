@@ -105,10 +105,29 @@ class _SessionGateScreenState extends State<SessionGateScreen> with SingleTicker
               ),
             ),
           ),
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0),
-              child: Column(
+          SafeArea(
+            child: Column(
+              children: [
+                Expanded(
+                  child: Center(
+                    child: SingleChildScrollView(
+                      physics: const NeverScrollableScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                      child: _buildSplashContent(),
+                    ),
+                  ),
+                ),
+                const SplashBrandingFooter(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSplashContent() {
+    return Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -171,10 +190,49 @@ class _SessionGateScreenState extends State<SessionGateScreen> with SingleTicker
                     ),
                   ),
                 ],
-              ),
+    );
+  }
+}
+
+/// "Designed by The Patterns Company" credit shown ONLY on the launch splash
+/// (SessionGateScreen). Not used on login, registration or dashboard screens.
+class SplashBrandingFooter extends StatelessWidget {
+  const SplashBrandingFooter({super.key});
+
+  static const String designedByText = 'Designed by The Patterns Company';
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 22),
+      child: Center(
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text.rich(
+            const TextSpan(
+              children: [
+                TextSpan(
+                  text: 'Designed by ',
+                  style: TextStyle(fontWeight: FontWeight.w400, color: Color(0xFF94A3B8)),
+                ),
+                TextSpan(
+                  text: 'The Patterns Company',
+                  style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFFCBD5E1)),
+                ),
+              ],
+            ),
+            key: const Key('splash_designed_by_text'),
+            semanticsLabel: designedByText,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            textScaler: MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.3),
+            style: const TextStyle(
+              fontSize: 11.5,
+              letterSpacing: 0.6,
+              height: 1.2,
             ),
           ),
-        ],
+        ),
       ),
     );
   }

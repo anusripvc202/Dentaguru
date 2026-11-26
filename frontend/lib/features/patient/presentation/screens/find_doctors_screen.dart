@@ -1687,11 +1687,14 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
     final qualText = doc.qualification.trim().isNotEmpty
         ? doc.qualification.trim()
         : MedicalSpecialtyModel.getDefaultQualificationForSpecialty(specialtyText);
-    final clinicText = doc.isOnlineOnly
-        ? 'Online Consultation Only'
-        : (doc.clinicName.trim().isNotEmpty ? doc.clinicName.trim() : 'Independent Practice');
-    final clinicAddrText = doc.isOnlineOnly ? '' : doc.clinicAddress.trim();
-    final cityText = doc.city.trim();
+    final clinicText = doc.clinicName.trim().isNotEmpty ? doc.clinicName.trim() : 'Independent Practice';
+    final clinicAddrText = doc.clinicAddress.trim();
+    final cityStatePinParts = <String>[
+      if (doc.city.trim().isNotEmpty) doc.city.trim(),
+      if (doc.state.trim().isNotEmpty) doc.state.trim(),
+      if (doc.pincode.trim().isNotEmpty) doc.pincode.trim(),
+    ];
+    final locationSummary = cityStatePinParts.join(', ');
     final isDocAvailable = doc.isAvailable;
     final isDocOnline = doc.isOnline;
     final isDocBusy = doc.isBusy;
@@ -1876,11 +1879,12 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          cityText.isNotEmpty ? '$clinicText • $cityText' : clinicText,
-                          style: TextStyle(
+                          locationSummary.isNotEmpty ? '$clinicText • $locationSummary' : clinicText,
+                          key: Key('doctor_clinic_location_${doc.id}'),
+                          style: const TextStyle(
                             fontSize: 12,
-                            color: doc.isOnlineOnly ? const Color(0xFF047857) : const Color(0xFF64748B),
-                            fontWeight: doc.isOnlineOnly ? FontWeight.w600 : FontWeight.w500,
+                            color: Color(0xFF64748B),
+                            fontWeight: FontWeight.w600,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -1907,89 +1911,87 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
                             ],
                           ),
                         ],
-                        if (doc.hasPhysicalClinicLocation || doc.isOnlineOnly) ...[
+                        if (doc.hasPhysicalClinicLocation) ...[
                           const SizedBox(height: 4),
                           Wrap(
                             spacing: 6,
                             runSpacing: 4,
                             crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
-                              if (doc.isOnlineOnly)
-                                Container(
-                                  key: Key('doctor_online_only_badge_${doc.id}'),
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFECFDF5),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: const Color(0xFFA7F3D0)),
-                                  ),
-                                  child: const Text(
-                                    'Online Only',
-                                    style: TextStyle(
-                                      fontSize: 10.5,
-                                      fontWeight: FontWeight.w700,
-                                      color: Color(0xFF047857),
-                                    ),
-                                  ),
-                                )
-                              else ...[
-                                Container(
-                                  key: Key('doctor_location_status_${doc.id}'),
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: doc.hasCoordinates
-                                        ? const Color(0xFFEFF6FF)
-                                        : const Color(0xFFF1F5F9),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Text(
-                                    doc.hasCoordinates ? 'Map Pin Available' : 'Clinic Address',
-                                    style: TextStyle(
-                                      fontSize: 10.5,
-                                      fontWeight: FontWeight.w700,
+                              Container(
+                                key: Key('doctor_location_status_${doc.id}'),
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: doc.hasCoordinates
+                                      ? const Color(0xFFEFF6FF)
+                                      : const Color(0xFFF1F5F9),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      doc.hasCoordinates ? Icons.location_on_rounded : Icons.map_outlined,
+                                      size: 11,
                                       color: doc.hasCoordinates ? AppTheme.gsNavy : const Color(0xFF475569),
                                     ),
-                                  ),
-                                ),
-                                InkWell(
-                                  key: Key('doctor_card_directions_${doc.id}'),
-                                  borderRadius: BorderRadius.circular(8),
-                                  onTap: () => ClinicDirectionsHelper.launchDirections(
-                                    context: context,
-                                    consultationMode: doc.consultationMode,
-                                    latitude: doc.latitude,
-                                    longitude: doc.longitude,
-                                    clinicName: doc.clinicName,
-                                    clinicAddress: doc.clinicAddress,
-                                    city: doc.city,
-                                    state: doc.state,
-                                    pincode: doc.pincode,
-                                  ),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
-                                    decoration: BoxDecoration(
-                                      color: AppTheme.gsNavy.withValues(alpha: 0.08),
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(color: AppTheme.gsNavy.withValues(alpha: 0.2)),
+                                    const SizedBox(width: 3),
+                                    Flexible(
+                                      child: Text(
+                                        doc.hasCoordinates ? 'Map Location Verified' : 'Clinic Address',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: doc.hasCoordinates ? AppTheme.gsNavy : const Color(0xFF475569),
+                                        ),
+                                      ),
                                     ),
-                                    child: const Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(Icons.directions_rounded, size: 12, color: AppTheme.gsNavy),
-                                        SizedBox(width: 4),
-                                        Text(
-                                          'Directions',
+                                  ],
+                                ),
+                              ),
+                              InkWell(
+                                key: Key('doctor_card_directions_${doc.id}'),
+                                borderRadius: BorderRadius.circular(8),
+                                onTap: () => ClinicDirectionsHelper.launchDirections(
+                                  context: context,
+                                  latitude: doc.latitude,
+                                  longitude: doc.longitude,
+                                  clinicName: doc.clinicName,
+                                  clinicAddress: doc.clinicAddress,
+                                  city: doc.city,
+                                  state: doc.state,
+                                  pincode: doc.pincode,
+                                ),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.gsNavy.withValues(alpha: 0.08),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: AppTheme.gsNavy.withValues(alpha: 0.2)),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.directions_rounded, size: 12, color: AppTheme.gsNavy),
+                                      SizedBox(width: 4),
+                                      Flexible(
+                                        child: Text(
+                                          'Get Directions',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
                                             fontSize: 10.5,
                                             fontWeight: FontWeight.w700,
                                             color: AppTheme.gsNavy,
                                           ),
                                         ),
-                                      ],
-                                    ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                              ],
+                              ),
                             ],
                           ),
                         ],

@@ -4,12 +4,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/models/medical_specialty_model.dart';
+import '../../../../core/services/api_service.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/session_service.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/utils/clinic_directions_helper.dart';
+import '../../../../core/widgets/map_location_picker_dialog.dart';
 import '../../../admin/presentation/widgets/doctor_slot_management_dialog.dart';
 import '../../../patient/presentation/screens/doctor_profile_screen.dart';
 import '../../../patient/presentation/widgets/referred_patients_sheet.dart';
+import '../widgets/clinic_add_doctors_dialog.dart';
 import '../widgets/gs_health_clinic_views.dart';
 import 'clinic_profile_screen.dart';
 import 'package:go_router/go_router.dart';
@@ -508,10 +512,16 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
               onTapBookingsStat: (filter) {
                 setState(() {
                   _selectedBookingStatusFilter = filter;
-                  _currentIndex = 1;
+                  _currentIndex = 2;
                 });
               },
-              onAddDoctor: () => _showAddDoctorDialog(context),
+              onAddDoctor: () => _openAssociateExistingDoctorsDialog(
+                context,
+                clinicId: clinicId,
+                clinicName: clinicName,
+                attachedDoctors: attachedDoctors,
+                onRefresh: refreshAll,
+              ),
               onRefresh: refreshAll,
               onToggleDoctorStatus: _toggleClinicDoctorStatus,
               onViewDoctorProfile: _openClinicDoctorProfile,
@@ -519,6 +529,22 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
               onManageDoctorSlots: (doc) =>
                   DoctorSlotManagementDialog.show(context, initialDoctor: doc),
               onRemoveDoctor: (doc) => _confirmRemoveDoctorFromClinic(context, doc),
+            ),
+            _buildClinicDoctorsTab(
+              context,
+              clinic: clinic,
+              clinicId: clinicId,
+              clinicName: clinicName,
+              clinicLocation: clinicLocation,
+              attachedDoctors: attachedDoctors,
+              onAddDoctors: () => _openAssociateExistingDoctorsDialog(
+                context,
+                clinicId: clinicId,
+                clinicName: clinicName,
+                attachedDoctors: attachedDoctors,
+                onRefresh: refreshAll,
+              ),
+              onRefresh: refreshAll,
             ),
             GsHealthClinicBookingsView(
               allBookings: bookings,
@@ -529,6 +555,20 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                   setState(() => _selectedBookingStatusFilter = filter),
               onConfirmBooking: _handleConfirmBooking,
               onCancelBooking: _handleCancelBookingWithDialog,
+              onRefresh: refreshAll,
+            ),
+            _buildClinicProfileTab(
+              context,
+              clinic: clinic,
+              clinicId: clinicId,
+              clinicName: clinicName,
+              clinicLocation: clinicLocation,
+              attachedDoctorsCount: attachedDoctors.length,
+              totalAppointmentsCount: bookings.length,
+              pendingAppointmentsCount: awaitingCount,
+              completedAppointmentsCount: completedCount,
+              onEditDetails: openEditDetails,
+              onOpenFullProfile: openProfile,
               onRefresh: refreshAll,
             ),
           ],
@@ -542,18 +582,18 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
             border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
           ),
           child: BottomNavigationBar(
-            currentIndex: _currentIndex,
+            currentIndex: _currentIndex.clamp(0, 3),
             type: BottomNavigationBarType.fixed,
             backgroundColor: Colors.white,
             elevation: 0,
             selectedItemColor: AppTheme.gsNavy,
             unselectedItemColor: AppTheme.textMuted,
             selectedLabelStyle: const TextStyle(
-              fontSize: 12,
+              fontSize: 11.5,
               fontWeight: FontWeight.w800,
             ),
             unselectedLabelStyle: const TextStyle(
-              fontSize: 12,
+              fontSize: 11.5,
               fontWeight: FontWeight.w600,
             ),
             onTap: (index) => setState(() => _currentIndex = index),
@@ -564,13 +604,388 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                 label: 'Overview',
               ),
               BottomNavigationBarItem(
+                icon: Icon(Icons.medical_services_outlined),
+                activeIcon: Icon(Icons.medical_services_rounded, color: AppTheme.gsNavy),
+                label: 'Doctors',
+              ),
+              BottomNavigationBarItem(
                 icon: Icon(Icons.calendar_today_outlined),
                 activeIcon: Icon(Icons.calendar_today_rounded, color: AppTheme.gsRed),
-                label: 'Bookings',
+                label: 'Appointments',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.store_mall_directory_outlined),
+                activeIcon: Icon(Icons.store_mall_directory_rounded, color: AppTheme.gsNavy),
+                label: 'Profile',
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Future<void> _openAssociateExistingDoctorsDialog(
+    BuildContext context, {
+    required String clinicId,
+    required String clinicName,
+    required List<DoctorModel> attachedDoctors,
+    required Future<void> Function() onRefresh,
+  }) async {
+    final assocIds = <String>{
+      for (final d in attachedDoctors) ...[
+        if (d.id.trim().isNotEmpty) d.id.trim(),
+        if (d.userId.trim().isNotEmpty) d.userId.trim(),
+      ],
+    };
+    await ClinicAddDoctorsDialog.show(
+      context,
+      clinicId: clinicId.isNotEmpty ? clinicId : 'default',
+      clinicName: clinicName.isNotEmpty ? clinicName : 'Clinic',
+      allRegisteredDoctors: _problemService.allDoctors,
+      alreadyAssociatedDoctorIds: assocIds,
+      onDoctorsAssociated: () {
+        onRefresh();
+      },
+    );
+  }
+
+  Widget _buildClinicDoctorsTab(
+    BuildContext context, {
+    required ClinicModel? clinic,
+    required String clinicId,
+    required String clinicName,
+    required String clinicLocation,
+    required List<DoctorModel> attachedDoctors,
+    required VoidCallback onAddDoctors,
+    required Future<void> Function() onRefresh,
+  }) {
+    return RefreshIndicator(
+      onRefresh: onRefresh,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Associated Doctors (${attachedDoctors.length})',
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppTheme.textDark),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      clinicName.isNotEmpty ? clinicName : 'Clinic Directory',
+                      style: const TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              ElevatedButton.icon(
+                key: const Key('clinic_dashboard_add_doctors_btn'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.gsNavy,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: onAddDoctors,
+                icon: const Icon(Icons.person_add_alt_1_rounded, size: 18),
+                label: const Text('Add Doctors'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          if (attachedDoctors.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(28),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Column(
+                children: [
+                  const Icon(Icons.medical_services_outlined, size: 42, color: AppTheme.textMuted),
+                  const SizedBox(height: 10),
+                  const Text('No Doctors Associated Yet', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Tap "Add Doctors" to search and associate existing registered doctors with your clinic.',
+                    style: TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            )
+          else
+            ...attachedDoctors.map((doc) {
+              final hasBytes = doc.photoBytes != null && doc.photoBytes!.isNotEmpty;
+              final hasUrl = (doc.profileImageUrl ?? '').trim().isNotEmpty;
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    CircleAvatar(
+                      radius: 22,
+                      backgroundColor: AppTheme.gsNavy.withValues(alpha: 0.1),
+                      backgroundImage: hasBytes
+                          ? MemoryImage(doc.photoBytes!)
+                          : (hasUrl ? NetworkImage(doc.profileImageUrl!) as ImageProvider : null),
+                      child: (!hasBytes && !hasUrl)
+                          ? const Icon(Icons.person_rounded, color: AppTheme.gsNavy)
+                          : null,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  doc.name,
+                                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF059669).withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Text(
+                                  'Associated',
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF059669),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${doc.specialty} • Doctor ID: ${doc.id}',
+                            style: const TextStyle(fontSize: 12, color: AppTheme.textMedium),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (doc.phone.trim().isNotEmpty)
+                            Text(
+                              'Mobile: ${doc.phone}',
+                              style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: [
+                              OutlinedButton.icon(
+                                onPressed: () => _openClinicDoctorProfile(doc),
+                                icon: const Icon(Icons.visibility_outlined, size: 15),
+                                label: const Text('View Profile', style: TextStyle(fontSize: 12)),
+                              ),
+                              TextButton.icon(
+                                onPressed: () => _confirmRemoveDoctorFromClinic(context, doc),
+                                icon: const Icon(Icons.link_off_rounded, size: 15, color: AppTheme.gsRed),
+                                label: const Text('Remove', style: TextStyle(fontSize: 12, color: AppTheme.gsRed)),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildClinicProfileTab(
+    BuildContext context, {
+    required ClinicModel? clinic,
+    required String clinicId,
+    required String clinicName,
+    required String clinicLocation,
+    required int attachedDoctorsCount,
+    required int totalAppointmentsCount,
+    required int pendingAppointmentsCount,
+    required int completedAppointmentsCount,
+    required VoidCallback onEditDetails,
+    required VoidCallback onOpenFullProfile,
+    required Future<void> Function() onRefresh,
+  }) {
+    final sessionMeta = SessionService().currentSession?.metadata ?? const <String, dynamic>{};
+    final addr = (clinic?.displayAddress.isNotEmpty == true)
+        ? clinic!.displayAddress
+        : (clinicLocation.isNotEmpty
+            ? clinicLocation
+            : (sessionMeta['clinicAddress'] ?? sessionMeta['location'] ?? '').toString());
+    final city = (clinic?.city.isNotEmpty == true) ? clinic!.city : (sessionMeta['city'] ?? '').toString();
+    final state = (clinic?.state.isNotEmpty == true) ? clinic!.state : (sessionMeta['state'] ?? '').toString();
+    final pincode = (clinic?.pincode.isNotEmpty == true) ? clinic!.pincode : (sessionMeta['pincode'] ?? '').toString();
+    final double? lat = clinic?.latitude ?? double.tryParse((sessionMeta['latitude'] ?? '').toString());
+    final double? lng = clinic?.longitude ?? double.tryParse((sessionMeta['longitude'] ?? '').toString());
+    final hasCoords = ClinicDirectionsHelper.hasValidCoordinates(lat, lng);
+
+    return RefreshIndicator(
+      onRefresh: onRefresh,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.local_hospital_rounded, color: AppTheme.gsNavy, size: 22),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        clinicName.isNotEmpty ? clinicName : 'Clinic Profile',
+                        style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: onOpenFullProfile,
+                      child: const Text('Account Settings'),
+                    ),
+                  ],
+                ),
+                const Divider(height: 18),
+                Text('Address: ${addr.isNotEmpty ? addr : 'Not provided'}', style: const TextStyle(fontSize: 13)),
+                const SizedBox(height: 4),
+                Text(
+                  'City / State / Pincode: ${[city, state, pincode].where((e) => e.trim().isNotEmpty).join(', ').isNotEmpty ? [city, state, pincode].where((e) => e.trim().isNotEmpty).join(', ') : 'Not provided'}',
+                  style: const TextStyle(fontSize: 13, color: AppTheme.textMedium),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    Chip(label: Text('Doctors: $attachedDoctorsCount')),
+                    Chip(label: Text('Appointments: $totalAppointmentsCount')),
+                    Chip(label: Text('Pending: $pendingAppointmentsCount')),
+                    Chip(label: Text('Completed: $completedAppointmentsCount')),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                if (hasCoords)
+                  OsmLocationPreviewCard(
+                    latitude: lat!,
+                    longitude: lng!,
+                    title: clinicName.isNotEmpty ? clinicName : 'Clinic Location',
+                    subtitle: addr,
+                    mapHeight: 160,
+                    onChangeLocation: () async {
+                      final picked = await MapLocationPickerDialog.show(
+                        context: context,
+                        initialLat: lat,
+                        initialLng: lng,
+                        initialAddress: addr,
+                        initialCity: city,
+                        initialState: state,
+                        initialPincode: pincode,
+                        isDentist: false,
+                      );
+                      if (picked != null && clinicId.isNotEmpty) {
+                        await ApiService().updateClinicProfileDetails(
+                          clinicId: clinicId,
+                          clinicName: clinicName,
+                          clinicAddress: picked.address.isNotEmpty ? picked.address : addr,
+                          city: picked.city.isNotEmpty ? picked.city : city,
+                          state: picked.state.isNotEmpty ? picked.state : state,
+                          pincode: picked.pincode.isNotEmpty ? picked.pincode : pincode,
+                          latitude: picked.latitude,
+                          longitude: picked.longitude,
+                        );
+                        await onRefresh();
+                      }
+                    },
+                    onOpenDirections: () => ClinicDirectionsHelper.launchDirections(
+                      context: context,
+                      latitude: lat,
+                      longitude: lng,
+                      clinicAddress: addr,
+                      clinicName: clinicName,
+                      city: city,
+                      state: state,
+                      pincode: pincode,
+                    ),
+                  )
+                else
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final picked = await MapLocationPickerDialog.show(
+                        context: context,
+                        initialAddress: addr,
+                        initialCity: city,
+                        initialState: state,
+                        initialPincode: pincode,
+                        isDentist: false,
+                      );
+                      if (picked != null && clinicId.isNotEmpty) {
+                        await ApiService().updateClinicProfileDetails(
+                          clinicId: clinicId,
+                          clinicName: clinicName,
+                          clinicAddress: picked.address.isNotEmpty ? picked.address : addr,
+                          city: picked.city.isNotEmpty ? picked.city : city,
+                          state: picked.state.isNotEmpty ? picked.state : state,
+                          pincode: picked.pincode.isNotEmpty ? picked.pincode : pincode,
+                          latitude: picked.latitude,
+                          longitude: picked.longitude,
+                        );
+                        await onRefresh();
+                      }
+                    },
+                    icon: const Icon(Icons.add_location_alt_outlined),
+                    label: const Text('Select Clinic Location on OpenStreetMap'),
+                  ),
+                const SizedBox(height: 12),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.gsNavy,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: onEditDetails,
+                  icon: const Icon(Icons.edit_outlined, size: 16),
+                  label: const Text('Edit Clinic Details'),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

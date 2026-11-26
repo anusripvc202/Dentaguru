@@ -3,6 +3,7 @@ const { isCloudEnv } = require('../config/secrets');
 const {
     User,
     Clinic,
+    ClinicDoctor,
     Dentist,
     Notification,
     resolveClinicIds,
@@ -17,6 +18,53 @@ const {
     doctorMatchesLanguages,
     mergeSupportedAndDoctorLanguages
 } = require('../models/Schemas');
+const {
+    validateCoordinates,
+    validateDoctorRegistrationClinicFields,
+    isValidIndianPincode,
+    parseUserDeviceMeta
+} = require('../utils/doctorClinicLocationHelper');
+
+function formatClinicRecord(c, associatedDoctorsCount = null) {
+    if (!c) return null;
+    const uObj = Array.isArray(c.users) ? (c.users[0] || {}) : (c.users || {});
+    const uMeta = parseUserDeviceMeta(uObj.device_token);
+    const clinicAddress = String(c.clinic_address || c.clinicAddress || c.location || uMeta.clinicAddress || '').trim();
+    const city = String(c.city || uObj.city || uMeta.city || '').trim();
+    const state = String(c.state || uObj.state || uMeta.state || '').trim();
+    const pincode = String(c.pincode || uObj.pincode || uMeta.pincode || '').trim();
+    const rawLat = c.latitude ?? uObj.latitude ?? uMeta.latitude ?? null;
+    const rawLng = c.longitude ?? uObj.longitude ?? uMeta.longitude ?? null;
+    const latitude = rawLat !== null && rawLat !== '' && Number.isFinite(Number(rawLat)) ? Number(rawLat) : null;
+    const longitude = rawLng !== null && rawLng !== '' && Number.isFinite(Number(rawLng)) ? Number(rawLng) : null;
+
+    return {
+        ...c,
+        id: c.id,
+        clinicId: c.id,
+        user_id: c.user_id || uObj.id || null,
+        userId: c.user_id || uObj.id || null,
+        clinic_name: c.clinic_name || c.clinicName || uObj.name || '',
+        clinicName: c.clinic_name || c.clinicName || uObj.name || '',
+        clinic_address: clinicAddress,
+        clinicAddress,
+        location: c.location || clinicAddress,
+        city,
+        state,
+        pincode,
+        latitude,
+        longitude,
+        phone: c.phone || uObj.phone || '',
+        email: c.email || uObj.email || '',
+        verified: c.verified !== undefined ? c.verified : true,
+        services: Array.isArray(c.services) ? c.services : [],
+        pricing: Array.isArray(c.pricing) ? c.pricing : [],
+        ...(associatedDoctorsCount !== null ? {
+            associatedDoctorsCount,
+            totalDoctors: associatedDoctorsCount
+        } : {})
+    };
+}
 
 function isPrivilegedDoctorViewer(req, targetDoctor = null) {
     const role = (req.user?.role || '').toString().trim().toLowerCase();
@@ -74,23 +122,18 @@ function formatDentistRecord(d) {
         ? (normStatusLower === 'offline' ? 'Offline' : 'Unavailable')
         : (explicitOnline || (normStatusLower.includes('busy') || normStatusLower === 'delayed' ? availabilityStatus : (isOnline ? 'Online' : 'Offline')));
 
-    const { normalizeConsultationMode, parseUserDeviceMeta } = require('../utils/doctorClinicLocationHelper');
+    const { parseUserDeviceMeta } = require('../utils/doctorClinicLocationHelper');
     const uMeta = parseUserDeviceMeta(uObj.device_token);
-    const resolvedConsultationMode = normalizeConsultationMode(
-        d.consultation_mode ?? d.consultationMode ?? uMeta.consultationMode ?? uMeta.consultation_mode,
-        'BOTH'
-    );
-    const isOnlineOnly = resolvedConsultationMode === 'ONLINE_ONLY';
     const rawLat = d.latitude ?? cObj.latitude ?? uObj.latitude ?? uMeta.latitude ?? null;
     const rawLng = d.longitude ?? cObj.longitude ?? uObj.longitude ?? uMeta.longitude ?? null;
-    const resolvedLat = !isOnlineOnly && rawLat !== null && rawLat !== '' && Number.isFinite(Number(rawLat)) ? Number(rawLat) : null;
-    const resolvedLng = !isOnlineOnly && rawLng !== null && rawLng !== '' && Number.isFinite(Number(rawLng)) ? Number(rawLng) : null;
+    const resolvedLat = rawLat !== null && rawLat !== '' && Number.isFinite(Number(rawLat)) ? Number(rawLat) : null;
+    const resolvedLng = rawLng !== null && rawLng !== '' && Number.isFinite(Number(rawLng)) ? Number(rawLng) : null;
 
     return {
         id: d.id,
         user_id: d.user_id || uObj.id,
-        clinic_id: isOnlineOnly ? null : (d.clinic_id || cObj.id || null),
-        clinicId: isOnlineOnly ? null : (d.clinic_id || cObj.id || null),
+        clinic_id: d.clinic_id || cObj.id || null,
+        clinicId: d.clinic_id || cObj.id || null,
         name: formattedName,
         email: d.email || uObj.email || '',
         phone: d.phone || uObj.phone || '',
@@ -109,13 +152,11 @@ function formatDentistRecord(d) {
         bio: d.bio || '',
         rating: reviewCountVal > 0 ? (Number(d.rating) || 0) : 0,
         reviews_count: reviewCountVal,
-        consultation_mode: resolvedConsultationMode,
-        consultationMode: resolvedConsultationMode,
-        clinicName: isOnlineOnly ? '' : (d.clinic_name || cObj.clinic_name || d.clinicName || uMeta.clinicName || ''),
-        clinicAddress: isOnlineOnly ? '' : (d.clinic_address || cObj.location || d.clinicAddress || d.location || uMeta.clinicAddress || ''),
-        state: isOnlineOnly ? '' : (d.state || uObj.state || uMeta.state || ''),
+        clinicName: d.clinic_name || cObj.clinic_name || d.clinicName || uMeta.clinicName || '',
+        clinicAddress: d.clinic_address || cObj.location || d.clinicAddress || d.location || uMeta.clinicAddress || '',
+        state: d.state || uObj.state || uMeta.state || '',
         city: d.city || uObj.city || uMeta.city || '',
-        pincode: isOnlineOnly ? '' : (d.pincode || uObj.pincode || uMeta.pincode || ''),
+        pincode: d.pincode || uObj.pincode || uMeta.pincode || '',
         languages: doctorLangs,
         latitude: resolvedLat,
         longitude: resolvedLng,
@@ -202,33 +243,107 @@ function ensureClinicOrDoctorMutationAuth(req, res) {
     return true;
 }
 
-// 1. REGISTER CLINIC PROFILE
+// 1. REGISTER CLINIC PROFILE (Independent of Doctor Registration, Full Address + OSM Coordinates)
 exports.registerClinicProfile = async (req, res) => {
     if (!ensureClinicOrDoctorMutationAuth(req, res)) return;
-    const { clinicName, location, services, pricing, coordinates } = req.body;
+    const {
+        clinicName,
+        clinicAddress,
+        location,
+        city,
+        state,
+        pincode,
+        latitude,
+        longitude,
+        services,
+        pricing,
+        coordinates
+    } = req.body;
     try {
-        const role = req.user?.role || '';
-        const cleanName = (clinicName || '').toString().trim();
+        const role = String(req.user?.role || '').trim().toLowerCase();
+        const cleanName = String(clinicName || '').trim();
+        const cleanAddress = String(clinicAddress || location || '').trim();
+        const cleanCity = String(city || '').trim();
+        const cleanState = String(state || '').trim();
+        const cleanPincode = String(pincode || '').trim();
+
+        const rawLat = latitude !== undefined ? latitude : (coordinates?.[1] ?? undefined);
+        const rawLng = longitude !== undefined ? longitude : (coordinates?.[0] ?? undefined);
+
+        // When structured clinic fields are provided (new Clinic Registration flow), validate strictly
+        const isStructuredRegistration = Boolean(
+            clinicAddress !== undefined ||
+            city !== undefined ||
+            state !== undefined ||
+            pincode !== undefined ||
+            rawLat !== undefined ||
+            rawLng !== undefined
+        );
+        let resolvedLat = null;
+        let resolvedLng = null;
+
+        if (isStructuredRegistration) {
+            const check = validateDoctorRegistrationClinicFields({
+                clinicName: cleanName,
+                clinicAddress: cleanAddress,
+                city: cleanCity,
+                state: cleanState,
+                pincode: cleanPincode,
+                latitude: rawLat,
+                longitude: rawLng,
+            });
+            if (!check.ok) {
+                return res.status(400).json({ success: false, message: check.message });
+            }
+            resolvedLat = check.latitude;
+            resolvedLng = check.longitude;
+        } else if (!cleanName) {
+            return res.status(400).json({ success: false, message: 'Clinic name is required.' });
+        }
+
         if (cleanName) {
             const byName = await Clinic.findOne({ clinic_name: cleanName }).catch(() => null);
             if (byName) {
-                if (req.user?.id && !byName.user_id) {
-                    await Clinic.findByIdAndUpdate(byName.id, { user_id: req.user.id });
-                }
-                return res.status(200).json({ success: true, message: 'Existing clinic profile linked.', clinic: byName });
+                const patch = {
+                    ...(!byName.user_id && req.user?.id ? { user_id: req.user.id } : {}),
+                    ...(cleanAddress ? { clinic_address: cleanAddress, location: cleanAddress } : {}),
+                    ...(cleanCity ? { city: cleanCity } : {}),
+                    ...(cleanState ? { state: cleanState } : {}),
+                    ...(cleanPincode ? { pincode: cleanPincode } : {}),
+                    ...(resolvedLat !== null && resolvedLng !== null ? { latitude: resolvedLat, longitude: resolvedLng } : {}),
+                };
+                const updated = Object.keys(patch).length > 0
+                    ? await Clinic.findByIdAndUpdate(byName.id, patch)
+                    : byName;
+                return res.status(200).json({
+                    success: true,
+                    message: 'Existing clinic profile linked.',
+                    clinic: formatClinicRecord(updated)
+                });
             }
         }
-        if (role !== 'SuperAdmin' && role !== 'Admin' && req.user?.id) {
+        const isAdminCaller = role === 'superadmin' || role === 'super_admin' || role === 'admin' || role === 'primaryadmin' || role === 'primary_admin';
+        if (!isAdminCaller && req.user?.id) {
             const clinic = await Clinic.findOne({ user_id: req.user.id });
             if (clinic) {
-                return res.status(200).json({ success: true, message: 'Clinic profile already exists.', clinic });
+                return res.status(200).json({
+                    success: true,
+                    message: 'Clinic profile already exists.',
+                    clinic: formatClinicRecord(clinic)
+                });
             }
         }
 
         const clinic = await Clinic.create({
             userId: req.user?.id || null,
-            clinicName,
-            location,
+            clinicName: cleanName,
+            clinicAddress: cleanAddress,
+            location: cleanAddress,
+            city: cleanCity,
+            state: cleanState,
+            pincode: cleanPincode,
+            latitude: resolvedLat,
+            longitude: resolvedLng,
             services,
             pricing,
             coordinates: coordinates ? { type: 'Point', coordinates } : undefined
@@ -239,34 +354,127 @@ exports.registerClinicProfile = async (req, res) => {
                 recipient_role: 'Admin',
                 recipient_id: 'ALL_ADMINS',
                 title: '🏥 New Clinic Profile Registered',
-                message: `Clinic "${clinicName || 'GS Health Clinic'}" registered at ${location || 'Healthcare Hub'}.`,
+                message: `Clinic "${cleanName || 'GS Health Clinic'}" registered at ${cleanCity || cleanAddress || 'Healthcare Hub'}.`,
                 type: 'clinic_registered'
             });
         } catch (_) { }
 
-        res.status(201).json({ success: true, message: 'Clinic profile created in Supabase PostgreSQL.', clinic });
+        res.status(201).json({
+            success: true,
+            message: 'Clinic profile created in Supabase PostgreSQL.',
+            clinic: formatClinicRecord(clinic, 0)
+        });
     } catch (err) {
         console.error('Clinic Profile Error:', err.message);
         res.status(500).json({ success: false, message: 'Failed to create clinic profile.' });
     }
 };
 
-// 2. GET ALL CLINICS
+// 2. GET ALL CLINICS (Dynamic Case-Insensitive Search across Name, ID, City, State, Pincode, Address + Pagination)
 exports.getClinics = async (req, res) => {
-    const { search, service } = req.query;
+    const { search, q, service, city, state, pincode, page, pageSize, limit } = req.query;
     try {
-        let query = {};
-        if (search) query.clinicName = search;
-        if (service) query.services = service;
+        const [rawClinics, allDentists] = await Promise.all([
+            Clinic.find({}),
+            Dentist.find({}).catch(() => [])
+        ]);
 
-        const clinics = await Clinic.find(query);
-        res.json({ success: true, count: clinics.length, clinics });
+        // Compute associated doctors count per clinic (without duplicates)
+        const docCountByClinicId = new Map();
+        const docCountByClinicName = new Map();
+        const seenDocClinicPairs = new Set();
+        for (const d of (allDentists || [])) {
+            const docKey = String(d.id || d.user_id || '').trim();
+            if (!docKey) continue;
+            const cId = String(d.clinic_id || d.clinics?.id || '').trim();
+            const cNameLower = String(d.clinic_name || d.clinics?.clinic_name || d.clinicName || '').trim().toLowerCase();
+            if (cId) {
+                const pair = `${cId}|${docKey}`;
+                if (!seenDocClinicPairs.has(pair)) {
+                    seenDocClinicPairs.add(pair);
+                    docCountByClinicId.set(cId, (docCountByClinicId.get(cId) || 0) + 1);
+                }
+            } else if (cNameLower && cNameLower !== 'independent practice') {
+                const pair = `name:${cNameLower}|${docKey}`;
+                if (!seenDocClinicPairs.has(pair)) {
+                    seenDocClinicPairs.add(pair);
+                    docCountByClinicName.set(cNameLower, (docCountByClinicName.get(cNameLower) || 0) + 1);
+                }
+            }
+        }
+
+        let formatted = (rawClinics || []).map((c) => {
+            const cId = String(c.id || '').trim();
+            const cNameLower = String(c.clinic_name || c.clinicName || '').trim().toLowerCase();
+            const count = (cId && docCountByClinicId.has(cId))
+                ? docCountByClinicId.get(cId)
+                : (docCountByClinicName.get(cNameLower) || 0);
+            return formatClinicRecord(c, count);
+        });
+
+        const searchKw = String(search || q || '').trim().toLowerCase();
+        if (searchKw) {
+            formatted = formatted.filter((c) => {
+                const hay = [
+                    c.clinicName,
+                    c.id,
+                    c.clinicAddress,
+                    c.location,
+                    c.city,
+                    c.state,
+                    c.pincode,
+                ].join(' ').toLowerCase();
+                return hay.includes(searchKw);
+            });
+        }
+        if (city && String(city).trim()) {
+            const cityKw = String(city).trim().toLowerCase();
+            formatted = formatted.filter((c) =>
+                String(c.city || '').toLowerCase().includes(cityKw) ||
+                String(c.clinicAddress || '').toLowerCase().includes(cityKw)
+            );
+        }
+        if (state && String(state).trim()) {
+            const stateKw = String(state).trim().toLowerCase();
+            formatted = formatted.filter((c) => String(c.state || '').toLowerCase().includes(stateKw));
+        }
+        if (pincode && String(pincode).trim()) {
+            const pinKw = String(pincode).trim();
+            formatted = formatted.filter((c) => String(c.pincode || '').includes(pinKw));
+        }
+        if (service && String(service).trim()) {
+            const servKw = String(service).trim().toLowerCase();
+            formatted = formatted.filter((c) =>
+                (c.services || []).some((s) => String(s || '').toLowerCase().includes(servKw))
+            );
+        }
+
+        const totalItems = formatted.length;
+        const hasPagination = page !== undefined || pageSize !== undefined || limit !== undefined;
+        let paginated = formatted;
+        let pagination = null;
+        if (hasPagination) {
+            const safePageSize = Math.min(100, Math.max(1, parseInt(pageSize || limit, 10) || 25));
+            const totalPages = Math.max(1, Math.ceil(totalItems / safePageSize));
+            const safePage = Math.min(Math.max(1, parseInt(page, 10) || 1), totalPages);
+            const start = (safePage - 1) * safePageSize;
+            paginated = formatted.slice(start, start + safePageSize);
+            pagination = { page: safePage, pageSize: safePageSize, totalItems, totalPages };
+        }
+
+        res.json({
+            success: true,
+            count: paginated.length,
+            totalCount: totalItems,
+            ...(pagination ? { pagination } : {}),
+            clinics: paginated
+        });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to fetch clinics list.' });
     }
 };
 
-// 3. GET CLINIC DENTISTS
+// 3. GET CLINIC DENTISTS (With Dynamic Doctor Search, Specialization, Department Filters & Pagination)
 exports.getClinicDentists = async (req, res) => {
     const { clinicId } = req.params;
     try {
@@ -277,14 +485,21 @@ exports.getClinicDentists = async (req, res) => {
         const canonicalClinicId = resolvedScope.clinicId || clinicId;
         const rawDentists = canonicalClinicId ? await Dentist.find({ clinic_id: canonicalClinicId }) : [];
 
-        // Also include clinic-named doctors resolved via resolveClinicRecordAndDoctorIds (without losing clinic_id scoping)
+        // Include clinic_doctors junction associations (when Migration 06 is active) + resolved clinic doctors
         const seenIds = new Set(rawDentists.map(d => String(d.id || '')));
         const seenUserIds = new Set(rawDentists.map(d => String(d.user_id || d.users?.id || '')).filter(Boolean));
-        if (resolvedScope.doctorIds && resolvedScope.doctorIds.length > 0) {
+        const junctionIds = canonicalClinicId
+            ? await ClinicDoctor.getDoctorIdsForClinic(canonicalClinicId).catch(() => [])
+            : [];
+        const combinedScopedIds = new Set([
+            ...(resolvedScope.doctorIds || []).map(id => String(id)),
+            ...junctionIds.map(id => String(id)),
+        ]);
+
+        if (combinedScopedIds.size > 0) {
             const allDentists = await Dentist.find({});
-            const scopedIdSet = new Set(resolvedScope.doctorIds.map(id => String(id)));
             for (const d of (allDentists || [])) {
-                if (!seenIds.has(String(d.id || '')) && (scopedIdSet.has(String(d.id || '')) || scopedIdSet.has(String(d.user_id || '')))) {
+                if (!seenIds.has(String(d.id || '')) && (combinedScopedIds.has(String(d.id || '')) || combinedScopedIds.has(String(d.user_id || '')))) {
                     rawDentists.push(d);
                     seenIds.add(String(d.id || ''));
                     if (d.user_id) seenUserIds.add(String(d.user_id));
@@ -299,10 +514,7 @@ exports.getClinicDentists = async (req, res) => {
             for (const u of doctorRoleUsers) {
                 const uid = String(u.id || '').trim();
                 if (!uid || seenUserIds.has(uid) || seenIds.has(uid)) continue;
-                let meta = {};
-                if (u.device_token && typeof u.device_token === 'string' && u.device_token.startsWith('{')) {
-                    try { meta = JSON.parse(u.device_token); } catch (_) { }
-                }
+                const meta = parseUserDeviceMeta(u.device_token);
                 const metaCid = String(meta.clinicId || meta.clinic_id || '').trim();
                 const metaCName = String(meta.clinicName || u.clinic_name || '').trim().toLowerCase();
                 const matchesClinic = (canonicalClinicId && metaCid && metaCid === String(canonicalClinicId)) ||
@@ -338,15 +550,57 @@ exports.getClinicDentists = async (req, res) => {
         }
 
         const formattedDentists = rawDentists.map(formatDentistRecord);
-        const visibleDentists = allowUnavailable
+        let visibleDentists = allowUnavailable
             ? formattedDentists
             : formattedDentists.filter(d => d.isAvailable);
+
+        // Apply dynamic Doctor Search, Specialization, and Department (existing field) filters
+        const searchKw = String(req.query.search || req.query.q || '').trim().toLowerCase();
+        const specFilter = String(req.query.specialty || req.query.speciality || '').trim();
+        const deptFilter = String(req.query.department || '').trim();
+
+        if (searchKw) {
+            const searchDigits = searchKw.replace(/\D/g, '');
+            visibleDentists = visibleDentists.filter((d) => {
+                const nameMatch = String(d.name || '').toLowerCase().includes(searchKw);
+                const specMatch = String(d.specialty || d.speciality || '').toLowerCase().includes(searchKw);
+                const idMatch = String(d.id || '').toLowerCase().includes(searchKw) ||
+                    String(d.user_id || '').toLowerCase().includes(searchKw);
+                const phoneMatch = String(d.phone || '').toLowerCase().includes(searchKw) ||
+                    (searchDigits.length >= 3 && String(d.phone || '').replace(/\D/g, '').includes(searchDigits));
+                const deptMatch = String(d.department || '').toLowerCase().includes(searchKw);
+                return nameMatch || specMatch || idMatch || phoneMatch || deptMatch;
+            });
+        }
+        if (specFilter && specFilter.toLowerCase() !== 'all') {
+            visibleDentists = visibleDentists.filter((d) => matchesSpecialtyQuery(d.specialty || d.speciality, specFilter));
+        }
+        if (deptFilter && deptFilter.toLowerCase() !== 'all') {
+            const deptLower = deptFilter.toLowerCase();
+            visibleDentists = visibleDentists.filter((d) => String(d.department || '').trim().toLowerCase() === deptLower);
+        }
+
+        const totalItems = visibleDentists.length;
+        const hasPagination = req.query.page !== undefined || req.query.pageSize !== undefined || req.query.limit !== undefined;
+        let paginated = visibleDentists;
+        let pagination = null;
+        if (hasPagination) {
+            const safePageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize || req.query.limit, 10) || 25));
+            const totalPages = Math.max(1, Math.ceil(totalItems / safePageSize));
+            const safePage = Math.min(Math.max(1, parseInt(req.query.page, 10) || 1), totalPages);
+            const start = (safePage - 1) * safePageSize;
+            paginated = visibleDentists.slice(start, start + safePageSize);
+            pagination = { page: safePage, pageSize: safePageSize, totalItems, totalPages };
+        }
+
         res.json({
             success: true,
-            count: visibleDentists.length,
-            clinic: resolvedScope.clinic || null,
-            dentists: visibleDentists,
-            doctors: visibleDentists
+            count: paginated.length,
+            totalCount: totalItems,
+            ...(pagination ? { pagination } : {}),
+            clinic: resolvedScope.clinic ? formatClinicRecord(resolvedScope.clinic, formattedDentists.length) : null,
+            dentists: paginated,
+            doctors: paginated
         });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to fetch clinic doctors.' });
@@ -853,8 +1107,6 @@ exports.updateDoctorProfile = async (req, res) => {
         clinic_address,
         consultationFee,
         consultation_fee,
-        consultationMode,
-        consultation_mode,
         bio,
         city,
         pincode,
@@ -877,22 +1129,14 @@ exports.updateDoctorProfile = async (req, res) => {
 
         const { User } = require('../models/Schemas');
         const { _resolveAndUploadProfilePhoto } = require('./authController');
-        const { normalizeConsultationMode, validateCoordinates } = require('../utils/doctorClinicLocationHelper');
-
-        const hasModeInput = consultationMode !== undefined || consultation_mode !== undefined;
-        const normalizedMode = hasModeInput
-            ? normalizeConsultationMode(consultationMode ?? consultation_mode, 'BOTH')
-            : undefined;
-        const switchingToOnlineOnly = normalizedMode === 'ONLINE_ONLY';
+        const { validateCoordinates } = require('../utils/doctorClinicLocationHelper');
 
         const cleanPincode = pincode !== undefined && pincode !== null ? String(pincode).trim() : undefined;
-        if (!switchingToOnlineOnly && cleanPincode !== undefined && cleanPincode.length > 0 && !/^\d{6}$/.test(cleanPincode)) {
+        if (cleanPincode !== undefined && cleanPincode.length > 0 && !/^\d{6}$/.test(cleanPincode)) {
             return res.status(400).json({ success: false, message: 'Please enter a valid 6-digit pincode.' });
         }
 
-        const coordValidation = switchingToOnlineOnly
-            ? { ok: true, hasUpdate: true, latitude: null, longitude: null }
-            : validateCoordinates(latitude, longitude, clearLocation === true);
+        const coordValidation = validateCoordinates(latitude, longitude, clearLocation === true);
         if (!coordValidation.ok) {
             return res.status(400).json({ success: false, message: coordValidation.message });
         }
@@ -933,9 +1177,7 @@ exports.updateDoctorProfile = async (req, res) => {
         const cleanCity = city !== undefined && city !== null ? String(city).trim() : undefined;
 
         let clinicId = undefined;
-        if (switchingToOnlineOnly) {
-            clinicId = null;
-        } else if (cleanClinicName && cleanClinicName.length > 0) {
+        if (cleanClinicName && cleanClinicName.length > 0) {
             let clinic = await Clinic.findOne({ clinic_name: cleanClinicName });
             const composedLoc = cleanClinicAddress && cleanClinicAddress.length > 0
                 ? cleanClinicAddress
@@ -951,12 +1193,12 @@ exports.updateDoctorProfile = async (req, res) => {
                 });
             } else {
                 const clinicPatch = {};
-                if (cleanClinicAddress && cleanClinicAddress.length > 0 && (!clinic.location || clinic.location === 'GS HEALTH Medical Center')) {
+                if (cleanClinicAddress && cleanClinicAddress.length > 0) {
                     clinicPatch.location = cleanClinicAddress;
                 }
                 if (coordValidation.hasUpdate && coordValidation.latitude !== null && coordValidation.longitude !== null) {
-                    if (clinic.latitude == null) clinicPatch.latitude = coordValidation.latitude;
-                    if (clinic.longitude == null) clinicPatch.longitude = coordValidation.longitude;
+                    clinicPatch.latitude = coordValidation.latitude;
+                    clinicPatch.longitude = coordValidation.longitude;
                 }
                 if (Object.keys(clinicPatch).length > 0) {
                     await Clinic.findByIdAndUpdate(clinic.id, clinicPatch);
@@ -976,16 +1218,11 @@ exports.updateDoctorProfile = async (req, res) => {
             ...(bio !== undefined ? { bio } : {}),
             ...(status || availability_status ? { availability_status: status || availability_status } : {}),
             ...(clinicId !== undefined ? { clinic_id: clinicId } : {}),
-            ...(normalizedMode !== undefined ? { consultation_mode: normalizedMode } : {}),
-            ...(switchingToOnlineOnly
-                ? { clinic_name: null, clinic_address: null, state: '', pincode: '', latitude: null, longitude: null }
-                : {
-                    ...(cleanClinicName !== undefined ? { clinic_name: cleanClinicName } : {}),
-                    ...(cleanClinicAddress !== undefined ? { clinic_address: cleanClinicAddress } : {}),
-                    ...(cleanState !== undefined ? { state: cleanState } : {}),
-                    ...(cleanPincode !== undefined ? { pincode: cleanPincode } : {}),
-                    ...(coordValidation.hasUpdate ? { latitude: coordValidation.latitude, longitude: coordValidation.longitude } : {})
-                }),
+            ...(cleanClinicName !== undefined ? { clinic_name: cleanClinicName } : {}),
+            ...(cleanClinicAddress !== undefined ? { clinic_address: cleanClinicAddress } : {}),
+            ...(cleanState !== undefined ? { state: cleanState } : {}),
+            ...(cleanPincode !== undefined ? { pincode: cleanPincode } : {}),
+            ...(coordValidation.hasUpdate ? { latitude: coordValidation.latitude, longitude: coordValidation.longitude } : {}),
             ...(cleanCity !== undefined ? { city: cleanCity } : {}),
             ...(normalizedLanguages && normalizedLanguages.length > 0 ? { languages: normalizedLanguages } : {})
         };
@@ -994,35 +1231,21 @@ exports.updateDoctorProfile = async (req, res) => {
 
         const targetUserId = updatedDentist?.user_id || id;
         const metaPatch = {};
-        if (normalizedMode !== undefined) metaPatch.consultationMode = normalizedMode;
-        if (switchingToOnlineOnly) {
-            metaPatch.clinicName = '';
-            metaPatch.clinicAddress = '';
-            metaPatch.state = '';
-            metaPatch.pincode = '';
-            metaPatch.latitude = null;
-            metaPatch.longitude = null;
-        } else {
-            if (cleanClinicName !== undefined) metaPatch.clinicName = cleanClinicName;
-            if (cleanClinicAddress !== undefined) metaPatch.clinicAddress = cleanClinicAddress;
-            if (cleanState !== undefined) metaPatch.state = cleanState;
-            if (cleanPincode !== undefined) metaPatch.pincode = cleanPincode;
-            if (coordValidation.hasUpdate) {
-                metaPatch.latitude = coordValidation.latitude;
-                metaPatch.longitude = coordValidation.longitude;
-            }
+        if (cleanClinicName !== undefined) metaPatch.clinicName = cleanClinicName;
+        if (cleanClinicAddress !== undefined) metaPatch.clinicAddress = cleanClinicAddress;
+        if (cleanState !== undefined) metaPatch.state = cleanState;
+        if (cleanPincode !== undefined) metaPatch.pincode = cleanPincode;
+        if (coordValidation.hasUpdate) {
+            metaPatch.latitude = coordValidation.latitude;
+            metaPatch.longitude = coordValidation.longitude;
         }
         const userUpdates = {
             ...(name ? { name } : {}),
             ...(phone ? { phone } : {}),
             ...(cleanCity !== undefined ? { city: cleanCity } : {}),
-            ...(switchingToOnlineOnly
-                ? { state: '', pincode: '', latitude: null, longitude: null }
-                : {
-                    ...(cleanPincode !== undefined ? { pincode: cleanPincode } : {}),
-                    ...(cleanState !== undefined ? { state: cleanState } : {}),
-                    ...(coordValidation.hasUpdate ? { latitude: coordValidation.latitude, longitude: coordValidation.longitude } : {})
-                }),
+            ...(cleanPincode !== undefined ? { pincode: cleanPincode } : {}),
+            ...(cleanState !== undefined ? { state: cleanState } : {}),
+            ...(coordValidation.hasUpdate ? { latitude: coordValidation.latitude, longitude: coordValidation.longitude } : {}),
             ...(normalizedLanguages && normalizedLanguages.length > 0 ? { languages: normalizedLanguages } : {}),
             ...(uploadedPhotoUrl !== undefined ? { biometric_token: uploadedPhotoUrl } : {}),
             ...(Object.keys(metaPatch).length > 0 ? { device_token: JSON.stringify(metaPatch) } : {})
@@ -1037,19 +1260,13 @@ exports.updateDoctorProfile = async (req, res) => {
         const formattedDoctor = refreshed ? formatDentistRecord(refreshed) : updatedDentist;
         if (formattedDoctor) {
             if (uploadedPhotoUrl !== undefined) formattedDoctor.profilePhoto = uploadedPhotoUrl;
-            if (normalizedMode !== undefined) {
-                formattedDoctor.consultationMode = normalizedMode;
-                formattedDoctor.consultation_mode = normalizedMode;
-            }
-            if (!switchingToOnlineOnly) {
-                if (cleanClinicName !== undefined) formattedDoctor.clinicName = cleanClinicName;
-                if (cleanClinicAddress !== undefined) formattedDoctor.clinicAddress = cleanClinicAddress;
-                if (cleanState !== undefined) formattedDoctor.state = cleanState;
-                if (cleanPincode !== undefined) formattedDoctor.pincode = cleanPincode;
-                if (coordValidation.hasUpdate) {
-                    formattedDoctor.latitude = coordValidation.latitude;
-                    formattedDoctor.longitude = coordValidation.longitude;
-                }
+            if (cleanClinicName !== undefined) formattedDoctor.clinicName = cleanClinicName;
+            if (cleanClinicAddress !== undefined) formattedDoctor.clinicAddress = cleanClinicAddress;
+            if (cleanState !== undefined) formattedDoctor.state = cleanState;
+            if (cleanPincode !== undefined) formattedDoctor.pincode = cleanPincode;
+            if (coordValidation.hasUpdate) {
+                formattedDoctor.latitude = coordValidation.latitude;
+                formattedDoctor.longitude = coordValidation.longitude;
             }
         }
         res.json({
@@ -1063,19 +1280,56 @@ exports.updateDoctorProfile = async (req, res) => {
     }
 };
 
-// 10. UPDATE CLINIC DEPARTMENTS & SERVICES (Multi-Specialty Clinic Management)
+// 10. UPDATE CLINIC DETAILS, LOCATION & DEPARTMENTS (Multi-Specialty Clinic Management)
 exports.updateClinicDepartments = async (req, res) => {
     if (!ensureClinicOrDoctorMutationAuth(req, res)) return;
     const { id } = req.params;
-    const { clinicName, location, departments, services, pricing } = req.body;
+    const {
+        clinicName,
+        clinicAddress,
+        location,
+        city,
+        state,
+        pincode,
+        latitude,
+        longitude,
+        departments,
+        services,
+        pricing
+    } = req.body;
     try {
+        const cleanPincode = pincode !== undefined ? String(pincode || '').trim() : undefined;
+        if (cleanPincode !== undefined && cleanPincode.length > 0 && !isValidIndianPincode(cleanPincode)) {
+            return res.status(400).json({ success: false, message: 'Please enter a valid 6-digit pincode.' });
+        }
+        const coordCheck = validateCoordinates(latitude, longitude, false);
+        if (!coordCheck.ok) {
+            return res.status(400).json({ success: false, message: coordCheck.message });
+        }
+
         const mergedServices = Array.isArray(departments) && departments.length > 0
             ? departments
             : (Array.isArray(services) ? services : undefined);
 
+        const cleanAddress = clinicAddress !== undefined
+            ? String(clinicAddress || '').trim()
+            : (location !== undefined ? String(location || '').trim() : undefined);
+        const cleanCity = city !== undefined ? String(city || '').trim() : undefined;
+        const cleanState = state !== undefined ? String(state || '').trim() : undefined;
+
         const updatePayload = {};
-        if (clinicName) updatePayload.clinic_name = clinicName;
-        if (location) updatePayload.location = location;
+        if (clinicName !== undefined && String(clinicName).trim()) updatePayload.clinic_name = String(clinicName).trim();
+        if (cleanAddress !== undefined) {
+            updatePayload.clinic_address = cleanAddress;
+            updatePayload.location = cleanAddress;
+        }
+        if (cleanCity !== undefined) updatePayload.city = cleanCity;
+        if (cleanState !== undefined) updatePayload.state = cleanState;
+        if (cleanPincode !== undefined) updatePayload.pincode = cleanPincode;
+        if (coordCheck.hasUpdate) {
+            updatePayload.latitude = coordCheck.latitude;
+            updatePayload.longitude = coordCheck.longitude;
+        }
         if (mergedServices) updatePayload.services = mergedServices;
         if (pricing) updatePayload.pricing = pricing;
 
@@ -1083,27 +1337,59 @@ exports.updateClinicDepartments = async (req, res) => {
         if (id && id !== 'default') {
             clinic = await Clinic.findByIdAndUpdate(id, updatePayload);
         } else if (clinicName) {
-            const existing = await Clinic.findOne({ clinic_name: clinicName });
+            const existing = await Clinic.findOne({ clinic_name: String(clinicName).trim() });
             if (existing) {
                 clinic = await Clinic.findByIdAndUpdate(existing.id, updatePayload);
             } else {
                 clinic = await Clinic.create({
-                    clinic_name: clinicName,
-                    location: location || 'GS HEALTH Multi-Specialty Center',
+                    clinic_name: String(clinicName).trim(),
+                    clinic_address: cleanAddress || 'GS HEALTH Multi-Specialty Center',
+                    location: cleanAddress || 'GS HEALTH Multi-Specialty Center',
+                    city: cleanCity || '',
+                    state: cleanState || '',
+                    pincode: cleanPincode || '',
+                    latitude: coordCheck.hasUpdate ? coordCheck.latitude : null,
+                    longitude: coordCheck.hasUpdate ? coordCheck.longitude : null,
                     services: mergedServices || ['General Medicine', 'Dentistry'],
                     pricing: pricing || []
                 });
             }
         }
 
+        // Sync structured address/coordinates to linked clinic owner user row for pre-Migration-06 persistence
+        if (clinic?.user_id) {
+            try {
+                const ownerUser = await User.findById(clinic.user_id).catch(() => null);
+                if (ownerUser) {
+                    const existingMeta = parseUserDeviceMeta(ownerUser.device_token);
+                    const nextMeta = {
+                        ...existingMeta,
+                        ...(updatePayload.clinic_name ? { clinicName: updatePayload.clinic_name } : {}),
+                        ...(cleanAddress !== undefined ? { clinicAddress: cleanAddress, location: cleanAddress } : {}),
+                        ...(cleanCity !== undefined ? { city: cleanCity } : {}),
+                        ...(cleanState !== undefined ? { state: cleanState } : {}),
+                        ...(cleanPincode !== undefined ? { pincode: cleanPincode } : {}),
+                        ...(coordCheck.hasUpdate ? { latitude: coordCheck.latitude, longitude: coordCheck.longitude } : {}),
+                    };
+                    await User.findByIdAndUpdate(ownerUser.id, {
+                        ...(cleanCity !== undefined ? { city: cleanCity } : {}),
+                        ...(cleanState !== undefined ? { state: cleanState } : {}),
+                        ...(cleanPincode !== undefined ? { pincode: cleanPincode } : {}),
+                        ...(coordCheck.hasUpdate ? { latitude: coordCheck.latitude, longitude: coordCheck.longitude } : {}),
+                        device_token: JSON.stringify(nextMeta),
+                    }).catch(() => null);
+                }
+            } catch (_) { }
+        }
+
         res.json({
             success: true,
-            message: 'Clinic departments and services updated successfully.',
-            clinic
+            message: 'Clinic profile and departments updated successfully.',
+            clinic: clinic ? formatClinicRecord(clinic) : null
         });
     } catch (err) {
         console.error('Update Clinic Departments Error:', err.message);
-        res.status(500).json({ success: false, message: 'Failed to update clinic departments.' });
+        res.status(500).json({ success: false, message: 'Failed to update clinic details.' });
     }
 };
 
@@ -1289,76 +1575,139 @@ exports.addClinicDoctor = async (req, res) => {
     }
 };
 
-// 11. ASSOCIATE EXISTING DOCTOR WITH CLINIC (No Duplicate Account Creation)
+// 11. ASSOCIATE ONE OR MULTIPLE EXISTING REGISTERED DOCTORS WITH CLINIC (No Duplicate Accounts or Duplicate Associations)
 exports.associateClinicDoctor = async (req, res) => {
     if (!ensureClinicOrDoctorMutationAuth(req, res)) return;
     const { clinicId } = req.params;
-    const { doctorId, phone, email, licenseNumber, clinicName, specialty, consultationFee, availableDays, availableSlots } = req.body;
+    const {
+        doctorId,
+        doctorIds,
+        phone,
+        email,
+        licenseNumber,
+        clinicName,
+        specialty,
+        consultationFee,
+        availableDays,
+        availableSlots
+    } = req.body;
     try {
-        const { User } = require('../models/Schemas');
-        let resolvedClinicId = clinicId !== 'default' ? clinicId : undefined;
-        if (clinicName && String(clinicName).trim()) {
-            let clinic = await Clinic.findOne({ clinic_name: String(clinicName).trim() });
-            if (!clinic) {
-                clinic = await Clinic.create({
-                    clinic_name: String(clinicName).trim(),
-                    location: 'GS HEALTH Partner Clinic',
-                    verified: true,
-                    services: [specialty || 'General Medicine']
-                });
-            }
-            if (clinic && clinic.id) resolvedClinicId = clinic.id;
+        let resolvedClinic = null;
+        let resolvedClinicId = clinicId && clinicId !== 'default' ? String(clinicId).trim() : '';
+        if (resolvedClinicId) {
+            resolvedClinic = await Clinic.findById(resolvedClinicId).catch(() => null);
         }
-
-        let targetDoctor = null;
-        if (doctorId) {
-            targetDoctor = await Dentist.findById(doctorId);
+        if (!resolvedClinic && clinicName && String(clinicName).trim()) {
+            resolvedClinic = await Clinic.findOne({ clinic_name: String(clinicName).trim() }).catch(() => null);
+            if (resolvedClinic?.id) resolvedClinicId = String(resolvedClinic.id).trim();
         }
-        if (!targetDoctor && (phone || email || licenseNumber)) {
-            const allDentists = await Dentist.find({});
-            targetDoctor = allDentists.find(d => {
-                const dPhone = (d.phone || d.users?.phone || '').replace(/[^0-9]/g, '');
-                const qPhone = (phone || '').replace(/[^0-9]/g, '');
-                if (qPhone.length >= 10 && dPhone.length >= 10 && dPhone.slice(-10) === qPhone.slice(-10)) return true;
-                if (email && (d.email || d.users?.email || '').toLowerCase() === String(email).trim().toLowerCase()) return true;
-                if (licenseNumber && (d.license_number || '').toLowerCase() === String(licenseNumber).trim().toLowerCase()) return true;
-                return false;
+        if (!resolvedClinicId) {
+            return res.status(400).json({
+                success: false,
+                message: 'A valid registered Clinic ID is required to associate doctors.'
             });
         }
 
-        if (!targetDoctor && (phone || email)) {
-            const existingUser = email ? await User.findOne({ email: String(email).trim() }) : null;
-            if (existingUser) {
-                targetDoctor = await Dentist.create({
-                    user_id: existingUser.id,
-                    clinic_id: resolvedClinicId || null,
-                    speciality: specialty || existingUser.specialty || 'General Medicine',
-                    qualifications: existingUser.qualification || getDefaultQualificationForSpecialty(specialty || 'General Medicine'),
-                    license_number: licenseNumber || '',
-                    experience_years: existingUser.experienceYears || 5,
-                    availability_status: 'Available'
-                });
+        const requestedIds = Array.isArray(doctorIds)
+            ? Array.from(new Set(doctorIds.map(v => String(v || '').trim()).filter(Boolean)))
+            : (doctorId ? [String(doctorId).trim()] : []);
+
+        const allDentists = await Dentist.find({}).catch(() => []);
+        const findExistingRegisteredDoctor = async (lookupId = '') => {
+            if (lookupId) {
+                const direct = await Dentist.findById(lookupId).catch(() => null)
+                    || await Dentist.findOne({ user_id: lookupId }).catch(() => null)
+                    || allDentists.find(d => String(d.id) === lookupId || String(d.user_id) === lookupId);
+                if (direct) return direct;
+            }
+            if (phone || email || licenseNumber) {
+                const qPhone = String(phone || '').replace(/[^0-9]/g, '');
+                const qEmail = String(email || '').trim().toLowerCase();
+                const qLic = String(licenseNumber || '').trim().toLowerCase();
+                return allDentists.find(d => {
+                    const dPhone = String(d.phone || d.users?.phone || '').replace(/[^0-9]/g, '');
+                    if (qPhone.length >= 10 && dPhone.length >= 10 && dPhone.slice(-10) === qPhone.slice(-10)) return true;
+                    if (qEmail && String(d.email || d.users?.email || '').toLowerCase() === qEmail) return true;
+                    if (qLic && String(d.license_number || '').toLowerCase() === qLic) return true;
+                    return false;
+                }) || null;
+            }
+            return null;
+        };
+
+        const existingAssocIds = new Set(
+            (await ClinicDoctor.getDoctorIdsForClinic(resolvedClinicId).catch(() => [])).map(String)
+        );
+        for (const d of allDentists) {
+            if (String(d.clinic_id || '').trim() === resolvedClinicId) {
+                existingAssocIds.add(String(d.id));
             }
         }
 
-        if (!targetDoctor) {
+        const targets = requestedIds.length > 0 ? requestedIds : ['__lookup__'];
+        const associatedDoctors = [];
+        const alreadyAssociated = [];
+        const notFound = [];
+
+        for (const tid of targets) {
+            const targetDoctor = await findExistingRegisteredDoctor(tid === '__lookup__' ? '' : tid);
+            if (!targetDoctor) {
+                notFound.push(tid);
+                continue;
+            }
+            const canonicalDocId = String(targetDoctor.id).trim();
+            const isDuplicateInClinic = existingAssocIds.has(canonicalDocId) ||
+                String(targetDoctor.clinic_id || '').trim() === resolvedClinicId;
+
+            if (isDuplicateInClinic) {
+                alreadyAssociated.push(formatDentistRecord(targetDoctor));
+                continue;
+            }
+
+            // Record association in clinic_doctors (when migrated) AND synchronize dentists.clinic_id
+            const assocRes = await ClinicDoctor.associate(resolvedClinicId, canonicalDocId);
+            if (assocRes.duplicate) {
+                alreadyAssociated.push(formatDentistRecord(targetDoctor));
+                continue;
+            }
+
+            const updated = await Dentist.findByIdAndUpdate(canonicalDocId, {
+                clinic_id: resolvedClinicId,
+                ...(specialty ? { speciality: specialty } : {}),
+                ...(resolvedClinic?.clinic_name ? { clinic_name: resolvedClinic.clinic_name } : {}),
+            });
+            existingAssocIds.add(canonicalDocId);
+            associatedDoctors.push(formatDentistRecord(updated || { ...targetDoctor, clinic_id: resolvedClinicId }));
+        }
+
+        if (associatedDoctors.length === 0 && alreadyAssociated.length > 0 && notFound.length === 0) {
+            return res.status(409).json({
+                success: false,
+                code: 'ALREADY_ASSOCIATED',
+                message: 'Selected doctor is already associated with this clinic.',
+                alreadyAssociated
+            });
+        }
+
+        if (associatedDoctors.length === 0 && alreadyAssociated.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: 'No existing GS HEALTH doctor account found matching the provided details.'
+                message: 'No existing registered GS HEALTH doctor account found matching the provided details.'
             });
         }
-
-        const updated = await Dentist.findByIdAndUpdate(targetDoctor.id, {
-            ...(resolvedClinicId ? { clinic_id: resolvedClinicId } : {}),
-            ...(specialty ? { speciality: specialty } : {}),
-            availability_status: 'Available'
-        });
 
         res.json({
             success: true,
             associated: true,
-            message: 'Existing doctor associated with clinic successfully without creating a duplicate account.',
-            doctor: updated || targetDoctor,
+            addedCount: associatedDoctors.length,
+            duplicateSkippedCount: alreadyAssociated.length,
+            message: associatedDoctors.length > 1
+                ? `${associatedDoctors.length} existing doctors associated with clinic successfully.`
+                : 'Existing doctor associated with clinic successfully without creating a duplicate account.',
+            doctor: associatedDoctors[0] || alreadyAssociated[0],
+            doctors: associatedDoctors,
+            alreadyAssociated,
+            notFound,
             extra: { consultationFee, availableDays, availableSlots }
         });
     } catch (err) {
@@ -1370,25 +1719,31 @@ exports.associateClinicDoctor = async (req, res) => {
 // 12. REMOVE DOCTOR FROM CLINIC (Preserves Global Doctor Account & Patient Records)
 exports.removeDoctorFromClinic = async (req, res) => {
     if (!ensureClinicOrDoctorMutationAuth(req, res)) return;
-    const { doctorId } = req.params;
+    const { clinicId, doctorId } = req.params;
     try {
         if (!doctorId) {
             return res.status(400).json({ success: false, message: 'Doctor ID is required.' });
         }
 
+        const existingDoc = await Dentist.findById(doctorId).catch(() => null)
+            || await Dentist.findOne({ user_id: doctorId }).catch(() => null);
+        const canonicalDocId = existingDoc?.id || doctorId;
+
+        await ClinicDoctor.remove(clinicId, canonicalDocId).catch(() => false);
+
         // Only clear clinic association (clinic_id: null) — never delete the user or dentist record
-        const updated = await Dentist.findByIdAndUpdate(doctorId, {
+        const updated = await Dentist.findByIdAndUpdate(canonicalDocId, {
             clinic_id: null
         });
 
         res.json({
             success: true,
-            message: 'Doctor removed from clinic directory. Global doctor account and patient records preserved.',
-            doctor: updated
+            message: 'Doctor association removed from clinic. Doctor account and patient records preserved.',
+            doctor: updated ? formatDentistRecord(updated) : null
         });
     } catch (err) {
         console.error('Remove Doctor From Clinic Error:', err.message);
-        res.status(500).json({ success: false, message: 'Failed to remove doctor from clinic.' });
+        res.status(500).json({ success: false, message: 'Failed to remove doctor association from clinic.' });
     }
 };
 
