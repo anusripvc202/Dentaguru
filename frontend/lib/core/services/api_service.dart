@@ -928,11 +928,11 @@ class ApiService {
   }
 
   bool get _canUseIsolatedTestingOtpFallback {
-    // Public production release builds (kReleaseMode && !isStagingFlavorBuild) NEVER use on-screen testing OTP fallback.
-    if (kReleaseMode && !ApiConstants.isStagingFlavorBuild) {
-      return false;
+    if (ApiConstants.isStagingFlavorBuild) {
+      return ApiConstants.allowOnScreenOtpDisplay && SupabaseService.safeClient != null;
     }
-    if (!ApiConstants.allowOnScreenOtpDisplay ||
+    if (kReleaseMode ||
+        !ApiConstants.allowOnScreenOtpDisplay ||
         !ApiConstants.isUsingNonProductionBackend()) {
       return false;
     }
