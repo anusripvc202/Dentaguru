@@ -239,6 +239,10 @@ class ApiService {
         body: payload,
       ).timeout(const Duration(seconds: 35));
 
+      if (response.statusCode >= 500) {
+        throw Exception('Register server unavailable (HTTP ${response.statusCode})');
+      }
+
       final data = jsonDecode(response.body);
       if (response.statusCode == 200 || response.statusCode == 201) {
         if (data['accessToken'] != null) {
@@ -290,8 +294,11 @@ class ApiService {
           }
         }
 
-        final bool isDoctorSupabaseReg =
-            role == 'Dentist' || role.toLowerCase() == 'dentist' || role.toLowerCase() == 'doctor';
+        final bool isDoctorOrClinicReg = role == 'Dentist' ||
+            role.toLowerCase() == 'dentist' ||
+            role.toLowerCase() == 'doctor' ||
+            role == 'Clinic' ||
+            role.toLowerCase() == 'clinic';
 
         final profileMeta = jsonEncode({
           'age': age ?? '',
@@ -303,8 +310,8 @@ class ApiService {
           'pincode': pincode ?? '',
           'location': effectiveLocation,
           'address': cleanClinicAddress ?? effectiveLocation,
-          if (isDoctorSupabaseReg && clinicName != null) 'clinicName': clinicName.trim(),
-          if (isDoctorSupabaseReg && cleanClinicAddress != null) 'clinicAddress': cleanClinicAddress,
+          if (isDoctorOrClinicReg && clinicName != null) 'clinicName': clinicName.trim(),
+          if (isDoctorOrClinicReg && cleanClinicAddress != null) 'clinicAddress': cleanClinicAddress,
           if (latitude != null) 'latitude': latitude,
           if (longitude != null) 'longitude': longitude,
           'languages': effectiveLanguages,
@@ -350,6 +357,8 @@ class ApiService {
         }
 
         final String newUserId = insertedUser['id'].toString();
+        String? registeredDentistId;
+        String? registeredClinicId = (clinicId != null && clinicId.trim().isNotEmpty) ? clinicId.trim() : null;
 
         if (role == 'Dentist' || role.toLowerCase() == 'dentist' || role.toLowerCase() == 'doctor') {
           try {
@@ -365,7 +374,7 @@ class ApiService {
             final effectiveQual = (qualification != null && qualification.trim().isNotEmpty)
                 ? qualification.trim()
                 : MedicalSpecialtyModel.getDefaultQualificationForSpecialty(effectiveSpec);
-            String? resolvedClinicId = (clinicId != null && clinicId.trim().isNotEmpty) ? clinicId.trim() : null;
+            String? resolvedClinicId = registeredClinicId;
             if (resolvedClinicId == null && clinicName != null && clinicName.trim().isNotEmpty) {
               final existingClinic = await client
                   .from('clinics')
@@ -385,6 +394,7 @@ class ApiService {
                 resolvedClinicId = createdClinic['id']?.toString();
               }
             }
+            registeredClinicId = resolvedClinicId;
             String? resolvedSpecId;
             try {
               final specRow = await client
@@ -419,12 +429,14 @@ class ApiService {
               'reviews_count': 0,
             };
             try {
-              await client.from('dentists').insert(dentistInsertPayload);
+              final insertedDentist = await client.from('dentists').insert(dentistInsertPayload).select('id').single();
+              registeredDentistId = insertedDentist['id']?.toString();
             } catch (_) {
               final legacyPayload = Map<String, dynamic>.from(dentistInsertPayload)
                 ..remove('clinic_name')
                 ..remove('clinic_address');
-              await client.from('dentists').insert(legacyPayload);
+              final insertedDentist = await client.from('dentists').insert(legacyPayload).select('id').single();
+              registeredDentistId = insertedDentist['id']?.toString();
             }
           } catch (_) {}
         } else if (role == 'Clinic' || role.toLowerCase() == 'clinic') {
@@ -432,6 +444,7 @@ class ApiService {
             final cName = (clinicName != null && clinicName.trim().isNotEmpty)
                 ? clinicName.trim()
                 : (name.trim().isNotEmpty ? name.trim() : 'GS HEALTH Clinic');
+            final cAddr = cleanClinicAddress ?? effectiveLocation;
             final existingClinic = await client
                 .from('clinics')
                 .select('id, user_id')
@@ -439,17 +452,43 @@ class ApiService {
                 .limit(1)
                 .maybeSingle();
             if (existingClinic == null) {
-              await client.from('clinics').insert({
+              final coreClinicMap = <String, dynamic>{
                 'user_id': newUserId,
                 'clinic_name': cName,
-                'location': effectiveLocation.isNotEmpty ? effectiveLocation : (city?.trim() ?? 'GS HEALTH Medical Center'),
+                'location': cAddr.isNotEmpty ? cAddr : (city?.trim() ?? 'GS HEALTH Medical Center'),
                 'verified': true,
                 'rating': 5.0,
                 'reviews_count': 0,
                 'services': ['General Consultation'],
-              });
-            } else if (existingClinic['user_id'] == null || existingClinic['user_id'].toString().trim().isEmpty) {
-              await client.from('clinics').update({'user_id': newUserId}).eq('id', existingClinic['id']);
+              };
+              try {
+                final createdClinic = await client
+                    .from('clinics')
+                    .insert({
+                      ...coreClinicMap,
+                      'clinic_address': cAddr,
+                      'city': city?.trim() ?? '',
+                      'state': cleanState ?? '',
+                      'pincode': pincode?.trim() ?? '',
+                      if (latitude != null) 'latitude': latitude,
+                      if (longitude != null) 'longitude': longitude,
+                    })
+                    .select('id')
+                    .single();
+                registeredClinicId = createdClinic['id']?.toString();
+              } catch (_) {
+                final createdClinic = await client
+                    .from('clinics')
+                    .insert(coreClinicMap)
+                    .select('id')
+                    .single();
+                registeredClinicId = createdClinic['id']?.toString();
+              }
+            } else {
+              registeredClinicId = existingClinic['id']?.toString();
+              if (existingClinic['user_id'] == null || existingClinic['user_id'].toString().trim().isEmpty) {
+                await client.from('clinics').update({'user_id': newUserId}).eq('id', existingClinic['id']);
+              }
             }
           } catch (_) {}
         } else if (role == 'Sub-Admin' || role.toLowerCase().contains('sub')) {
@@ -478,6 +517,8 @@ class ApiService {
             'accessToken': directToken,
             'user': {
               'id': newUserId,
+              if (registeredDentistId != null) 'dentistId': registeredDentistId,
+              if (registeredClinicId != null) 'clinicId': registeredClinicId,
               'name': insertedUser['name'] ?? name.trim(),
               'email': insertedUser['email'] ?? cleanEmail,
               'phone': insertedUser['phone'] ?? cleanPhone,
@@ -488,8 +529,15 @@ class ApiService {
               'emergencyContact': emergencyContact ?? '',
               'city': city?.trim() ?? '',
               'pincode': pincode?.trim() ?? '',
-              'state': effectiveLocation,
-              'address': effectiveLocation,
+              'state': cleanState ?? '',
+              'address': cleanClinicAddress ?? effectiveLocation,
+              if (clinicName != null && clinicName.trim().isNotEmpty) 'clinicName': clinicName.trim(),
+              if (cleanClinicAddress != null && cleanClinicAddress.isNotEmpty) 'clinicAddress': cleanClinicAddress,
+              if (latitude != null) 'latitude': latitude,
+              if (longitude != null) 'longitude': longitude,
+              if (specialty != null) 'specialty': specialty,
+              if (qualification != null) 'qualification': qualification,
+              if (experienceYears != null) 'experienceYears': experienceYears,
               'languages': effectiveLanguages,
               'referralCode': generatedRefCode,
               'profilePhoto': profilePhoto,
@@ -613,6 +661,10 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
         body: payload,
       ).timeout(const Duration(seconds: 35));
+
+      if (response.statusCode >= 500) {
+        throw Exception('Register server unavailable (HTTP ${response.statusCode})');
+      }
 
       final data = jsonDecode(response.body);
       if (response.statusCode == 200 && data['success'] == true) {
@@ -773,7 +825,7 @@ class ApiService {
       try {
         final docRow = await client
             .from('dentists')
-            .select('id, clinic_id, speciality, qualifications, experience_years, license_number, availability_status, clinics(clinic_name)')
+            .select('*, clinics(clinic_name, location)')
             .eq('user_id', u['id'])
             .limit(1)
             .maybeSingle();
@@ -786,8 +838,25 @@ class ApiService {
           doctorExtra['experienceYears'] = docRow['experience_years'] ?? tokenMeta['experienceYears'];
           doctorExtra['licenseNumber'] = docRow['license_number'] ?? tokenMeta['licenseNumber'];
           doctorExtra['availability_status'] = docRow['availability_status'] ?? 'Available';
-          if (docRow['clinics'] is Map && (docRow['clinics'] as Map)['clinic_name'] != null) {
-            doctorExtra['clinicName'] = (docRow['clinics'] as Map)['clinic_name'];
+          final joinedClinicName = (docRow['clinics'] is Map) ? (docRow['clinics'] as Map)['clinic_name'] : null;
+          final joinedClinicLoc = (docRow['clinics'] is Map) ? (docRow['clinics'] as Map)['location'] : null;
+          final resolvedClinicName = _cleanField(docRow['clinic_name'] ?? joinedClinicName ?? tokenMeta['clinicName']);
+          final resolvedClinicAddress = _cleanField(
+            docRow['clinic_address'] ?? tokenMeta['clinicAddress'] ?? tokenMeta['address'] ?? joinedClinicLoc,
+          );
+          if (resolvedClinicName.isNotEmpty) doctorExtra['clinicName'] = resolvedClinicName;
+          if (resolvedClinicAddress.isNotEmpty) doctorExtra['clinicAddress'] = resolvedClinicAddress;
+          final docCity = _cleanField(docRow['city'] ?? u['city'] ?? tokenMeta['city']);
+          final docState = _cleanField(docRow['state'] ?? u['state'] ?? tokenMeta['state']);
+          final docPincode = _cleanField(docRow['pincode'] ?? u['pincode'] ?? tokenMeta['pincode']);
+          if (docCity.isNotEmpty) doctorExtra['city'] = docCity;
+          if (docState.isNotEmpty) doctorExtra['state'] = docState;
+          if (docPincode.isNotEmpty) doctorExtra['pincode'] = docPincode;
+          if (docRow['latitude'] != null || u['latitude'] != null || tokenMeta['latitude'] != null) {
+            doctorExtra['latitude'] = docRow['latitude'] ?? u['latitude'] ?? tokenMeta['latitude'];
+          }
+          if (docRow['longitude'] != null || u['longitude'] != null || tokenMeta['longitude'] != null) {
+            doctorExtra['longitude'] = docRow['longitude'] ?? u['longitude'] ?? tokenMeta['longitude'];
           }
         }
       } catch (_) {}
@@ -798,14 +867,30 @@ class ApiService {
       try {
         final clinicRow = await client
             .from('clinics')
-            .select('id, clinic_name, location')
+            .select('*')
             .eq('user_id', u['id'])
             .limit(1)
             .maybeSingle();
         if (clinicRow != null) {
+          final cAddr = _cleanField(
+            clinicRow['clinic_address'] ?? tokenMeta['clinicAddress'] ?? tokenMeta['address'] ?? clinicRow['location'],
+          );
           clinicExtra['clinicId'] = clinicRow['id'];
-          clinicExtra['clinicName'] = clinicRow['clinic_name'] ?? u['name'];
-          clinicExtra['clinicLocation'] = clinicRow['location'] ?? '';
+          clinicExtra['clinicName'] = clinicRow['clinic_name'] ?? tokenMeta['clinicName'] ?? u['name'];
+          clinicExtra['clinicLocation'] = cAddr.isNotEmpty ? cAddr : (clinicRow['location'] ?? '');
+          clinicExtra['clinicAddress'] = cAddr;
+          final cCity = _cleanField(clinicRow['city'] ?? u['city'] ?? tokenMeta['city']);
+          final cState = _cleanField(clinicRow['state'] ?? u['state'] ?? tokenMeta['state']);
+          final cPin = _cleanField(clinicRow['pincode'] ?? u['pincode'] ?? tokenMeta['pincode']);
+          if (cCity.isNotEmpty) clinicExtra['city'] = cCity;
+          if (cState.isNotEmpty) clinicExtra['state'] = cState;
+          if (cPin.isNotEmpty) clinicExtra['pincode'] = cPin;
+          if (clinicRow['latitude'] != null || u['latitude'] != null || tokenMeta['latitude'] != null) {
+            clinicExtra['latitude'] = clinicRow['latitude'] ?? u['latitude'] ?? tokenMeta['latitude'];
+          }
+          if (clinicRow['longitude'] != null || u['longitude'] != null || tokenMeta['longitude'] != null) {
+            clinicExtra['longitude'] = clinicRow['longitude'] ?? u['longitude'] ?? tokenMeta['longitude'];
+          }
         }
       } catch (_) {}
     }
@@ -830,7 +915,9 @@ class ApiService {
           'emergencyContact': _cleanField(u['emergency_contact'] ?? u['emergencyContact'] ?? tokenMeta['emergencyContact']),
           'city': _cleanField(u['city'] ?? tokenMeta['city']),
           'pincode': _cleanField(u['pincode'] ?? tokenMeta['pincode']),
-          'state': _cleanField(u['state'] ?? tokenMeta['location']),
+          'state': _cleanField(u['state'] ?? tokenMeta['state'] ?? tokenMeta['location']),
+          'latitude': u['latitude'] ?? tokenMeta['latitude'],
+          'longitude': u['longitude'] ?? tokenMeta['longitude'],
           'languages': u['languages'] ?? tokenMeta['languages'] ?? ['English'],
           'profilePhoto': u['biometric_token'] ?? tokenMeta['profilePhoto'],
           ...doctorExtra,
@@ -841,9 +928,12 @@ class ApiService {
   }
 
   bool get _canUseIsolatedTestingOtpFallback {
-    if (kReleaseMode ||
-        !ApiConstants.allowOnScreenOtpDisplay ||
-        !ApiConstants.isUsingLocalhostBackend) {
+    // Public production release builds (kReleaseMode && !isStagingFlavorBuild) NEVER use on-screen testing OTP fallback.
+    if (kReleaseMode && !ApiConstants.isStagingFlavorBuild) {
+      return false;
+    }
+    if (!ApiConstants.allowOnScreenOtpDisplay ||
+        !ApiConstants.isUsingNonProductionBackend()) {
       return false;
     }
     if (SupabaseService.safeClient == null) return false;
@@ -904,6 +994,10 @@ class ApiService {
                 ? client.post(url, headers: headers, body: payload)
                 : http.post(url, headers: headers, body: payload))
             .timeout(const Duration(seconds: 40));
+
+        if (response.statusCode >= 500) {
+          throw Exception('OTP server unavailable (HTTP ${response.statusCode})');
+        }
 
         final data = jsonDecode(response.body);
         if (response.statusCode == 200 && data['success'] == true) {
@@ -1020,6 +1114,10 @@ class ApiService {
                 : http.post(url, headers: headers, body: payload))
             .timeout(const Duration(seconds: 40));
 
+        if (response.statusCode >= 500) {
+          throw Exception('OTP server unavailable (HTTP ${response.statusCode})');
+        }
+
         final data = jsonDecode(response.body);
         if (response.statusCode == 200 && data['success'] == true) {
           return {
@@ -1078,6 +1176,43 @@ class ApiService {
           var u = await _findSupabaseUserByIdentifier(rawId, normKey);
           bool isNewPatient = false;
           final roleLower = (role ?? '').trim().toLowerCase();
+          final isAdminLoginFlow = roleLower == 'admin' ||
+              roleLower == 'primaryadmin' ||
+              roleLower == 'primary_admin' ||
+              roleLower == 'superadmin' ||
+              roleLower == 'super_admin' ||
+              roleLower == 'sub-admin' ||
+              roleLower == 'subadmin' ||
+              roleLower == 'sub_admin';
+
+          if (isAdminLoginFlow) {
+            if (u == null) {
+              return {
+                'success': false,
+                'status': 403,
+                'code': 'ADMIN_ROLE_REQUIRED',
+                'message': 'Unauthorized Admin access. OTP verification alone cannot grant Admin access.',
+              };
+            }
+            final dbRoleLower = (u['role'] ?? '').toString().trim().toLowerCase();
+            final isDbMainAdmin = dbRoleLower == 'admin' ||
+                dbRoleLower == 'primaryadmin' ||
+                dbRoleLower == 'primary_admin' ||
+                dbRoleLower == 'superadmin' ||
+                dbRoleLower == 'super_admin';
+            final isDbSubAdmin = dbRoleLower == 'sub-admin' ||
+                dbRoleLower == 'subadmin' ||
+                dbRoleLower == 'sub_admin';
+            if (!isDbMainAdmin && !isDbSubAdmin) {
+              return {
+                'success': false,
+                'status': 403,
+                'code': 'ADMIN_ROLE_REQUIRED',
+                'message': 'Unauthorized Admin access. OTP verification alone cannot grant Admin access.',
+              };
+            }
+          }
+
           if (u == null &&
               autoCreatePatient &&
               (roleLower.isEmpty || roleLower == 'patient') &&
@@ -1127,7 +1262,11 @@ class ApiService {
             }
           }
           if (u != null) {
-            final authResult = await _buildDirectSupabaseAuthData(u, fallbackIdentifier: rawId);
+            final authResult = await _buildDirectSupabaseAuthData(
+              u,
+              fallbackIdentifier: rawId,
+              requestedRole: role,
+            );
             if (authResult['success'] != true) {
               return {
                 'success': false,
@@ -1137,12 +1276,25 @@ class ApiService {
               };
             }
             final data = authResult['data'] as Map<String, dynamic>;
+            if (data['accessToken'] != null) {
+              setAuthToken(data['accessToken'].toString());
+            }
+            final dbRoleLower = (u['role'] ?? '').toString().trim().toLowerCase();
+            final isDbMainAdmin = dbRoleLower == 'admin' ||
+                dbRoleLower == 'primaryadmin' ||
+                dbRoleLower == 'primary_admin' ||
+                dbRoleLower == 'superadmin' ||
+                dbRoleLower == 'super_admin';
+            final isDbSubAdmin = dbRoleLower == 'sub-admin' ||
+                dbRoleLower == 'subadmin' ||
+                dbRoleLower == 'sub_admin';
             return {
               'success': true,
               'message': 'OTP verified successfully.',
               'user': data['user'],
               'accessToken': data['accessToken'],
-              'isAdmin': challenge.isAdmin,
+              'isAdmin': isDbMainAdmin || challenge.isAdmin,
+              if (isDbSubAdmin) 'isSubAdmin': true,
               if (isNewPatient) 'isNewPatient': true,
             };
           }
@@ -9082,6 +9234,10 @@ class ApiService {
               : http.get(uri, headers: _headersWithUser()))
           .timeout(const Duration(seconds: 35));
 
+      if (response.statusCode >= 500) {
+        throw Exception('Doctor Activity Calendar backend HTTP ${response.statusCode}');
+      }
+
       final decoded = jsonDecode(response.body);
       if (response.statusCode == 200 && decoded is Map<String, dynamic>) {
         return decoded;
@@ -9094,7 +9250,202 @@ class ApiService {
         };
       }
     } catch (e) {
-      debugPrint('fetchAdminDoctorActivityCalendar notice: $e');
+      debugPrint('fetchAdminDoctorActivityCalendar primary notice ($e), attempting 24/7 Supabase fallback...');
+      final sb = SupabaseService.safeClient;
+      if (sb != null) {
+        try {
+          final now = DateTime.now();
+          final selectedDateStr = (date != null && RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(date.trim()))
+              ? date.trim()
+              : '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+          final selectedMonthStr = (month != null && RegExp(r'^\d{4}-\d{2}$').hasMatch(month.trim()))
+              ? month.trim()
+              : selectedDateStr.substring(0, 7);
+
+          final docRows = await sb.from('dentists').select('*, users(id, name, phone, email)');
+          final apptRows = await sb.from('appointments').select('*, users!appointments_patient_id_fkey(id, name, phone)');
+
+          final doctorsList = <Map<String, dynamic>>[];
+          final docMap = <String, Map<String, dynamic>>{};
+          for (final rawDoc in (docRows as List)) {
+            if (rawDoc is! Map) continue;
+            final dId = (rawDoc['id'] ?? '').toString();
+            final uMap = rawDoc['users'] is Map ? Map<String, dynamic>.from(rawDoc['users'] as Map) : <String, dynamic>{};
+            final dName = (uMap['name'] ?? rawDoc['name'] ?? 'Doctor').toString();
+            final dSpec = (rawDoc['speciality'] ?? rawDoc['specialty'] ?? 'General Medicine').toString();
+            final entry = {
+              'doctorId': dId,
+              'doctorName': dName,
+              'specialty': dSpec,
+              'phone': (uMap['phone'] ?? '').toString(),
+            };
+            doctorsList.add(entry);
+            docMap[dId] = entry;
+          }
+
+          final mParts = selectedMonthStr.split('-');
+          final mYear = int.tryParse(mParts[0]) ?? now.year;
+          final mMonth = int.tryParse(mParts[1]) ?? now.month;
+          final daysInMonth = DateTime(mYear, mMonth + 1, 0).day;
+          final monthDayMap = <String, Map<String, dynamic>>{};
+          final monthActiveDocs = <String, Set<String>>{};
+          for (var d = 1; d <= daysInMonth; d++) {
+            final ds = '$selectedMonthStr-${d.toString().padLeft(2, '0')}';
+            monthDayMap[ds] = {
+              'date': ds,
+              'totalAppointments': 0,
+              'pendingAppointments': 0,
+              'completedAppointments': 0,
+              'cancelledAppointments': 0,
+              'totalReferrals': 0,
+              'activeDoctorsCount': 0,
+              'patientsChecked': 0,
+            };
+            monthActiveDocs[ds] = <String>{};
+          }
+
+          int totalAppts = 0;
+          int pendingAppts = 0;
+          int completedAppts = 0;
+          int cancelledAppts = 0;
+          int totalRefs = 0;
+          final activeDocIdsDay = <String>{};
+          final perDocStats = <String, Map<String, dynamic>>{};
+          final dayAppointments = <Map<String, dynamic>>[];
+          final dayReferrals = <Map<String, dynamic>>[];
+
+          for (final rawA in (apptRows as List)) {
+            if (rawA is! Map) continue;
+            final rawDt = (rawA['date_time'] ?? rawA['appointment_date'] ?? '').toString();
+            final aDate = rawDt.length >= 10 ? rawDt.substring(0, 10) : '';
+            if (aDate.isEmpty) continue;
+            final dId = (rawA['dentist_id'] ?? '').toString();
+            final stRaw = (rawA['status'] ?? 'Pending').toString();
+            final stLower = stRaw.toLowerCase();
+            final isCompleted = stLower.contains('complet');
+            final isCancelled = stLower.contains('cancel') || stLower.contains('reject');
+            final notesStr = (rawA['notes'] ?? '').toString();
+            final isReferral = notesStr.toLowerCase().contains('refer');
+
+            if (monthDayMap.containsKey(aDate)) {
+              final md = monthDayMap[aDate]!;
+              md['totalAppointments'] = (md['totalAppointments'] as int) + 1;
+              if (isCompleted) {
+                md['completedAppointments'] = (md['completedAppointments'] as int) + 1;
+                md['patientsChecked'] = (md['patientsChecked'] as int) + 1;
+              } else if (isCancelled) {
+                md['cancelledAppointments'] = (md['cancelledAppointments'] as int) + 1;
+              } else {
+                md['pendingAppointments'] = (md['pendingAppointments'] as int) + 1;
+              }
+              if (isReferral) md['totalReferrals'] = (md['totalReferrals'] as int) + 1;
+              if (dId.isNotEmpty) {
+                monthActiveDocs[aDate]!.add(dId);
+                md['activeDoctorsCount'] = monthActiveDocs[aDate]!.length;
+              }
+            }
+
+            if (aDate == selectedDateStr) {
+              if (doctorId != null && doctorId.trim().isNotEmpty && doctorId != 'All' && dId != doctorId.trim()) {
+                continue;
+              }
+              final pMap = rawA['users'] is Map ? Map<String, dynamic>.from(rawA['users'] as Map) : <String, dynamic>{};
+              final pName = (pMap['name'] ?? rawA['patient_name'] ?? 'Patient').toString();
+              final pId = (rawA['patient_id'] ?? pMap['id'] ?? '').toString();
+              final dInfo = docMap[dId];
+              final dName = (dInfo?['doctorName'] ?? 'Doctor').toString();
+
+              if (search != null && search.trim().isNotEmpty) {
+                final kw = search.trim().toLowerCase();
+                final blob = '$pName $pId $dName $dId $notesStr'.toLowerCase();
+                if (!blob.contains(kw)) continue;
+              }
+
+              totalAppts++;
+              if (isCompleted) {
+                completedAppts++;
+              } else if (isCancelled) {
+                cancelledAppts++;
+              } else {
+                pendingAppts++;
+              }
+              if (isReferral) totalRefs++;
+              if (dId.isNotEmpty) activeDocIdsDay.add(dId);
+
+              final ds = perDocStats.putIfAbsent(dId, () => {
+                'doctorId': dId,
+                'doctorName': dName,
+                'specialty': (dInfo?['specialty'] ?? 'General Medicine').toString(),
+                'totalAppointments': 0,
+                'patientsChecked': 0,
+                'referralsReceived': 0,
+                'referralsGiven': 0,
+                'pendingAppointments': 0,
+                'completedAppointments': 0,
+                'cancelledAppointments': 0,
+              });
+              ds['totalAppointments'] = (ds['totalAppointments'] as int) + 1;
+              if (isCompleted) {
+                ds['completedAppointments'] = (ds['completedAppointments'] as int) + 1;
+                ds['patientsChecked'] = (ds['patientsChecked'] as int) + 1;
+              } else if (isCancelled) {
+                ds['cancelledAppointments'] = (ds['cancelledAppointments'] as int) + 1;
+              } else {
+                ds['pendingAppointments'] = (ds['pendingAppointments'] as int) + 1;
+              }
+              if (isReferral) ds['referralsReceived'] = (ds['referralsReceived'] as int) + 1;
+
+              final normStatus = isCompleted ? 'Completed' : (isCancelled ? 'Cancelled' : 'Pending');
+              dayAppointments.add({
+                'appointmentId': (rawA['id'] ?? '').toString(),
+                'patientName': pName,
+                'patientId': pId,
+                'doctorName': dName,
+                'doctorId': dId,
+                'appointmentDate': selectedDateStr,
+                'appointmentTime': rawDt.length >= 16 ? rawDt.substring(11, 16) : '10:00',
+                'status': normStatus,
+                'consultationNotes': notesStr,
+                'referralInfo': isReferral ? notesStr : '',
+              });
+            }
+          }
+
+          return {
+            'success': true,
+            'selectedDate': selectedDateStr,
+            'selectedMonth': selectedMonthStr,
+            'monthlyCalendar': monthDayMap.values.toList(),
+            'dailySummary': {
+              'totalDoctorsActive': activeDocIdsDay.length,
+              'totalAppointments': totalAppts,
+              'totalPatientsChecked': completedAppts,
+              'totalReferrals': totalRefs,
+              'pendingAppointments': pendingAppts,
+              'completedAppointments': completedAppts,
+              'cancelledAppointments': cancelledAppts,
+            },
+            'doctorActivities': perDocStats.values.toList(),
+            'appointments': dayAppointments,
+            'appointmentsPagination': {
+              'page': 1,
+              'pageSize': pageSize,
+              'totalItems': dayAppointments.length,
+              'totalPages': 1,
+            },
+            'referrals': dayReferrals,
+            'referralsPagination': {
+              'page': 1,
+              'pageSize': pageSize,
+              'totalItems': dayReferrals.length,
+              'totalPages': 1,
+            },
+            'doctors': doctorsList,
+          };
+        } catch (sbErr) {
+          debugPrint('fetchAdminDoctorActivityCalendar Supabase fallback error: $sbErr');
+        }
+      }
       return {
         'success': false,
         'message': 'Failed to load Doctor Activity Calendar. Please check your connection and try again.',
@@ -9142,6 +9493,9 @@ class ApiService {
               ? client.get(uri, headers: _headersWithUser())
               : http.get(uri, headers: _headersWithUser()))
           .timeout(const Duration(seconds: 35));
+      if (response.statusCode >= 500) {
+        throw Exception('Clinics backend HTTP ${response.statusCode}');
+      }
       final decoded = jsonDecode(response.body);
       if (response.statusCode == 200 && decoded is Map<String, dynamic>) {
         return decoded;
@@ -9154,7 +9508,78 @@ class ApiService {
         };
       }
     } catch (e) {
-      debugPrint('fetchClinicsWithSearch notice: $e');
+      debugPrint('fetchClinicsWithSearch notice ($e), attempting 24/7 Supabase fallback...');
+      final sb = SupabaseService.safeClient;
+      if (sb != null) {
+        try {
+          final cRows = await sb.from('clinics').select('*, users(city, state, pincode, latitude, longitude, device_token)');
+          final dRows = await sb.from('dentists').select('id, clinic_id');
+          final countByClinic = <String, int>{};
+          for (final d in (dRows as List)) {
+            if (d is! Map) continue;
+            final cid = (d['clinic_id'] ?? '').toString().trim();
+            if (cid.isNotEmpty) countByClinic[cid] = (countByClinic[cid] ?? 0) + 1;
+          }
+
+          final formatted = <Map<String, dynamic>>[];
+          final kw = (search ?? '').trim().toLowerCase();
+          for (final rawC in (cRows as List)) {
+            if (rawC is! Map) continue;
+            final cid = (rawC['id'] ?? '').toString();
+            final uMap = rawC['users'] is Map ? Map<String, dynamic>.from(rawC['users'] as Map) : <String, dynamic>{};
+            Map<String, dynamic> meta = {};
+            if (uMap['device_token'] != null && uMap['device_token'].toString().startsWith('{')) {
+              try {
+                meta = Map<String, dynamic>.from(jsonDecode(uMap['device_token'].toString()) as Map);
+              } catch (_) {}
+            }
+            final cName = _cleanField(rawC['clinic_name']);
+            final cAddr = _cleanField(rawC['clinic_address'] ?? meta['clinicAddress'] ?? meta['address'] ?? rawC['location']);
+            final cCity = _cleanField(rawC['city'] ?? uMap['city'] ?? meta['city']);
+            final cState = _cleanField(rawC['state'] ?? uMap['state'] ?? meta['state']);
+            final cPin = _cleanField(rawC['pincode'] ?? uMap['pincode'] ?? meta['pincode']);
+            final cLat = rawC['latitude'] ?? uMap['latitude'] ?? meta['latitude'];
+            final cLng = rawC['longitude'] ?? uMap['longitude'] ?? meta['longitude'];
+
+            if (kw.isNotEmpty) {
+              final blob = '$cName $cid $cAddr $cCity $cState $cPin'.toLowerCase();
+              if (!blob.contains(kw)) continue;
+            }
+            formatted.add({
+              'id': cid,
+              'clinicName': cName,
+              'clinicAddress': cAddr,
+              'location': cAddr,
+              'city': cCity,
+              'state': cState,
+              'pincode': cPin,
+              'latitude': cLat,
+              'longitude': cLng,
+              'verified': rawC['verified'] == true,
+              'associatedDoctorsCount': countByClinic[cid] ?? 0,
+            });
+          }
+
+          final total = formatted.length;
+          final start = ((page - 1) * pageSize).clamp(0, total);
+          final end = (start + pageSize).clamp(0, total);
+          final paged = formatted.sublist(start, end);
+          return {
+            'success': true,
+            'count': paged.length,
+            'totalCount': total,
+            'clinics': paged,
+            'pagination': {
+              'page': page,
+              'pageSize': pageSize,
+              'totalItems': total,
+              'totalPages': total == 0 ? 1 : (total / pageSize).ceil(),
+            },
+          };
+        } catch (sbErr) {
+          debugPrint('fetchClinicsWithSearch Supabase fallback error: $sbErr');
+        }
+      }
     }
     return {'success': false, 'message': 'Unable to fetch clinics. Please try again.'};
   }
@@ -9206,6 +9631,9 @@ class ApiService {
               ? client.get(uri, headers: _headersWithUser())
               : http.get(uri, headers: _headersWithUser()))
           .timeout(const Duration(seconds: 35));
+      if (response.statusCode >= 500) {
+        throw Exception('Clinic doctors backend HTTP ${response.statusCode}');
+      }
       final decoded = jsonDecode(response.body);
       if (response.statusCode == 200 && decoded is Map<String, dynamic>) {
         return decoded;
@@ -9218,7 +9646,63 @@ class ApiService {
         };
       }
     } catch (e) {
-      debugPrint('fetchClinicDoctorsFiltered notice: $e');
+      debugPrint('fetchClinicDoctorsFiltered notice ($e), attempting 24/7 Supabase fallback...');
+      final sb = SupabaseService.safeClient;
+      if (sb != null) {
+        try {
+          final rows = await sb
+              .from('dentists')
+              .select('*, users(id, name, phone, email, biometric_token), clinics(clinic_name)')
+              .eq('clinic_id', clinicId);
+          final kw = (search ?? '').trim().toLowerCase();
+          final specFilter = (specialty ?? '').trim().toLowerCase();
+          final deptFilter = (department ?? '').trim().toLowerCase();
+          final list = <Map<String, dynamic>>[];
+
+          for (final rawD in (rows as List)) {
+            if (rawD is! Map) continue;
+            final uMap = rawD['users'] is Map ? Map<String, dynamic>.from(rawD['users'] as Map) : <String, dynamic>{};
+            final cMap = rawD['clinics'] is Map ? Map<String, dynamic>.from(rawD['clinics'] as Map) : <String, dynamic>{};
+            final dId = (rawD['id'] ?? '').toString();
+            final dName = _cleanField(uMap['name'] ?? rawD['name']);
+            final dSpec = _cleanField(rawD['speciality'] ?? rawD['specialty']);
+            final dDept = _cleanField(rawD['department']);
+            final dPhone = _cleanField(uMap['phone']);
+            final cName = _cleanField(rawD['clinic_name'] ?? cMap['clinic_name']);
+
+            if (specFilter.isNotEmpty && specFilter != 'all' && dSpec.toLowerCase() != specFilter) continue;
+            if (deptFilter.isNotEmpty && deptFilter != 'all' && dDept.toLowerCase() != deptFilter) continue;
+            if (kw.isNotEmpty) {
+              final blob = '$dName $dId $dSpec $dDept $dPhone'.toLowerCase();
+              if (!blob.contains(kw)) continue;
+            }
+            list.add({
+              'id': dId,
+              'userId': (rawD['user_id'] ?? uMap['id'] ?? '').toString(),
+              'name': dName.isNotEmpty ? dName : 'Doctor',
+              'specialty': dSpec.isNotEmpty ? dSpec : 'General Medicine',
+              'speciality': dSpec.isNotEmpty ? dSpec : 'General Medicine',
+              'department': dDept,
+              'phone': dPhone,
+              'clinicId': clinicId,
+              'clinicName': cName,
+              'status': _cleanField(rawD['availability_status']).isNotEmpty
+                  ? _cleanField(rawD['availability_status'])
+                  : 'Available',
+              'profilePhoto': uMap['biometric_token'],
+            });
+          }
+          return {
+            'success': true,
+            'count': list.length,
+            'totalCount': list.length,
+            'doctors': list,
+            'dentists': list,
+          };
+        } catch (sbErr) {
+          debugPrint('fetchClinicDoctorsFiltered Supabase fallback error: $sbErr');
+        }
+      }
     }
     return {'success': false, 'message': 'Unable to load associated doctors.'};
   }
@@ -9244,11 +9728,11 @@ class ApiService {
         clinicName: clinicName,
       );
     }
+    final cleanIds = doctorIds.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet().toList();
+    if (cleanIds.isEmpty) {
+      return {'success': false, 'message': 'Please select at least one doctor.'};
+    }
     try {
-      final cleanIds = doctorIds.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet().toList();
-      if (cleanIds.isEmpty) {
-        return {'success': false, 'message': 'Please select at least one doctor.'};
-      }
       final uri = Uri.parse('${ApiConstants.baseUrl}/clinics/$clinicId/doctors/associate');
       final body = jsonEncode({
         if (cleanIds.length == 1) 'doctorId': cleanIds.first,
@@ -9259,6 +9743,9 @@ class ApiService {
               ? client.post(uri, headers: _headersWithUser(), body: body)
               : http.post(uri, headers: _headersWithUser(), body: body))
           .timeout(const Duration(seconds: 35));
+      if (response.statusCode >= 500) {
+        throw Exception('Associate doctors backend HTTP ${response.statusCode}');
+      }
       final decoded = jsonDecode(response.body);
       if (decoded is Map<String, dynamic>) {
         return {
@@ -9267,7 +9754,30 @@ class ApiService {
         };
       }
     } catch (e) {
-      debugPrint('associateDoctorsToClinic notice: $e');
+      debugPrint('associateDoctorsToClinic notice ($e), attempting 24/7 Supabase fallback...');
+      final sb = SupabaseService.safeClient;
+      if (sb != null) {
+        try {
+          for (final dId in cleanIds) {
+            try {
+              await sb.from('dentists').update({
+                'clinic_id': clinicId,
+                if (clinicName != null && clinicName.trim().isNotEmpty) 'clinic_name': clinicName.trim(),
+              }).eq('id', dId);
+            } catch (_) {
+              await sb.from('dentists').update({'clinic_id': clinicId}).eq('id', dId);
+            }
+          }
+          return {
+            'success': true,
+            'statusCode': 200,
+            'message': '${cleanIds.length} doctor(s) associated with clinic successfully.',
+            'associatedDoctorIds': cleanIds,
+          };
+        } catch (sbErr) {
+          debugPrint('associateDoctorsToClinic Supabase fallback error: $sbErr');
+        }
+      }
     }
     return {'success': false, 'message': 'Unable to associate selected doctors with this clinic.'};
   }
@@ -9296,6 +9806,9 @@ class ApiService {
               ? client.delete(uri, headers: _headersWithUser())
               : http.delete(uri, headers: _headersWithUser()))
           .timeout(const Duration(seconds: 35));
+      if (response.statusCode >= 500) {
+        throw Exception('Remove doctor association backend HTTP ${response.statusCode}');
+      }
       final decoded = jsonDecode(response.body);
       if (decoded is Map<String, dynamic>) {
         return {
@@ -9304,7 +9817,20 @@ class ApiService {
         };
       }
     } catch (e) {
-      debugPrint('removeDoctorAssociationFromClinic notice: $e');
+      debugPrint('removeDoctorAssociationFromClinic notice ($e), attempting 24/7 Supabase fallback...');
+      final sb = SupabaseService.safeClient;
+      if (sb != null) {
+        try {
+          await sb.from('dentists').update({'clinic_id': null}).eq('id', doctorId);
+          return {
+            'success': true,
+            'statusCode': 200,
+            'message': 'Doctor association removed from clinic.',
+          };
+        } catch (sbErr) {
+          debugPrint('removeDoctorAssociationFromClinic Supabase fallback error: $sbErr');
+        }
+      }
     }
     return {'success': false, 'message': 'Unable to remove doctor association.'};
   }
@@ -9337,12 +9863,43 @@ class ApiService {
               ? client.put(uri, headers: _headersWithUser(), body: body)
               : http.put(uri, headers: _headersWithUser(), body: body))
           .timeout(const Duration(seconds: 35));
+      if (response.statusCode >= 500) {
+        throw Exception('Update clinic profile backend HTTP ${response.statusCode}');
+      }
       final decoded = jsonDecode(response.body);
       if (decoded is Map<String, dynamic>) {
         return decoded;
       }
     } catch (e) {
-      debugPrint('updateClinicProfileDetails notice: $e');
+      debugPrint('updateClinicProfileDetails notice ($e), attempting 24/7 Supabase fallback...');
+      final sb = SupabaseService.safeClient;
+      if (sb != null) {
+        try {
+          try {
+            await sb.from('clinics').update({
+              if (clinicName != null && clinicName.trim().isNotEmpty) 'clinic_name': clinicName.trim(),
+              if (clinicAddress != null) 'location': clinicAddress.trim(),
+              if (clinicAddress != null) 'clinic_address': clinicAddress.trim(),
+              if (city != null) 'city': city.trim(),
+              if (state != null) 'state': state.trim(),
+              if (pincode != null) 'pincode': pincode.trim(),
+              if (latitude != null) 'latitude': latitude,
+              if (longitude != null) 'longitude': longitude,
+            }).eq('id', clinicId);
+          } catch (_) {
+            await sb.from('clinics').update({
+              if (clinicName != null && clinicName.trim().isNotEmpty) 'clinic_name': clinicName.trim(),
+              if (clinicAddress != null) 'location': clinicAddress.trim(),
+            }).eq('id', clinicId);
+          }
+          return {
+            'success': true,
+            'message': 'Clinic profile updated successfully.',
+          };
+        } catch (sbErr) {
+          debugPrint('updateClinicProfileDetails Supabase fallback error: $sbErr');
+        }
+      }
     }
     return {'success': false, 'message': 'Unable to update clinic profile details.'};
   }
