@@ -21,6 +21,7 @@ void main() {
     ApiService.debugFetchClinicDoctorsFilteredOverride = null;
     ApiService.debugAssociateDoctorsToClinicOverride = null;
     ApiService.debugRemoveDoctorAssociationOverride = null;
+    ApiService.debugRegisterClinicDoctorOverride = null;
   });
 
   group('GS Health — Complete Clinic Management System Tests', () {
@@ -394,5 +395,237 @@ void main() {
 
       tester.view.resetPhysicalSize();
     });
+
+    testWidgets(
+      '5. ClinicAddDoctorsDialog Option 2 (Register New Doctor) detects duplicate mobile numbers and offers 1-click Attach Existing Doctor Account',
+      (WidgetTester tester) async {
+        tester.view.physicalSize = const Size(960, 820);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+
+        List<String>? attachedDoctorIds;
+        ApiService.debugAssociateDoctorsToClinicOverride = ({
+          required String clinicId,
+          required List<String> doctorIds,
+          String? clinicName,
+        }) async {
+          attachedDoctorIds = doctorIds;
+          return {
+            'success': true,
+            'message': 'Existing doctor attached to clinic.',
+          };
+        };
+
+        final existingDoctor = DoctorModel(
+          id: 'doc-existing-99',
+          userId: 'u-existing-99',
+          name: 'Dr. Rohan Mehta',
+          specialty: 'Orthodontics',
+          qualification: 'BDS, MDS',
+          experienceYears: 8,
+          rating: 4.9,
+          reviewCount: 15,
+          phone: '9822211111',
+          email: 'rohan@gshealth.in',
+          clinicId: '',
+          clinicName: '',
+          status: 'Available',
+          nextAvailableSlots: const [],
+          consultationFee: '500',
+        );
+
+        await tester.pumpWidget(
+          ProviderScope(
+            child: MaterialApp(
+              home: Scaffold(
+                body: Builder(
+                  builder: (ctx) => Center(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        ClinicAddDoctorsDialog.show(
+                          ctx,
+                          clinicId: 'cli-emerald-01',
+                          clinicName: 'Emerald Dental Clinic',
+                          allRegisteredDoctors: [existingDoctor],
+                          alreadyAssociatedDoctorIds: const {},
+                        );
+                      },
+                      child: const Text('Open Add Doctors'),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('Open Add Doctors'));
+        await tester.pumpAndSettle();
+
+        // Both Option 1 and Option 2 tabs are clearly visible
+        expect(find.byKey(const Key('clinic_add_doctors_tab_existing')), findsOneWidget);
+        expect(find.byKey(const Key('clinic_add_doctors_tab_register_new')), findsOneWidget);
+
+        // Switch to Option 2: Register New Doctor
+        await tester.tap(find.byKey(const Key('clinic_add_doctors_tab_register_new')));
+        await tester.pumpAndSettle();
+
+        // Verify Automatic Clinic Association banner & required fields
+        expect(find.byKey(const Key('clinic_reg_doc_auto_clinic_banner')), findsOneWidget);
+        expect(find.textContaining('Automatic Clinic Association: Emerald Dental Clinic'), findsOneWidget);
+        expect(find.byKey(const Key('clinic_reg_doc_name_field')), findsOneWidget);
+        expect(find.byKey(const Key('clinic_reg_doc_phone_field')), findsOneWidget);
+        expect(find.byKey(const Key('clinic_reg_doc_license_field')), findsOneWidget);
+
+        // Entering an already-registered doctor's mobile number shows the duplicate detection card & Attach button
+        await tester.enterText(find.byKey(const Key('clinic_reg_doc_phone_field')), '9822211111');
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('clinic_reg_doc_duplicate_mobile_card')), findsOneWidget);
+        expect(find.textContaining('Dr. Rohan Mehta'), findsWidgets);
+        expect(find.byKey(const Key('clinic_reg_doc_attach_existing_btn')), findsOneWidget);
+
+        // Tapping Attach Existing Doctor attaches the existing account without creating a duplicate
+        await tester.tap(find.byKey(const Key('clinic_reg_doc_attach_existing_btn')));
+        await tester.pumpAndSettle();
+
+        expect(attachedDoctorIds, equals(['doc-existing-99']));
+      },
+    );
+
+    testWidgets(
+      '6. ClinicAddDoctorsDialog Option 2 registers a brand-new doctor, auto-associates with current clinic, and updates associated doctors list',
+      (WidgetTester tester) async {
+        tester.view.physicalSize = const Size(960, 860);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.resetPhysicalSize);
+
+        Map<String, dynamic>? capturedPayload;
+        ApiService.debugRegisterClinicDoctorOverride = ({
+          required String clinicId,
+          required String clinicName,
+          required String name,
+          required String phone,
+          String? email,
+          required String specialty,
+          required String qualification,
+          required int experienceYears,
+          required String licenseNumber,
+          String? city,
+          String? state,
+          String? pincode,
+          String? clinicAddress,
+          double? latitude,
+          double? longitude,
+          List<String>? languages,
+          String? profilePhoto,
+        }) async {
+          capturedPayload = {
+            'clinicId': clinicId,
+            'clinicName': clinicName,
+            'name': name,
+            'phone': phone,
+            'email': email,
+            'specialty': specialty,
+            'qualification': qualification,
+            'experienceYears': experienceYears,
+            'licenseNumber': licenseNumber,
+            'city': city,
+          };
+          return {
+            'success': true,
+            'statusCode': 201,
+            'message': 'Dr. Kavita Iyer registered and associated with Emerald Dental Clinic.',
+            'doctor': {
+              'id': 'doc-new-777',
+              'userId': 'u-new-777',
+              'name': 'Dr. Kavita Iyer',
+              'phone': phone,
+              'email': email ?? '',
+              'specialty': specialty,
+              'qualification': qualification,
+              'experience_years': experienceYears,
+              'license_number': licenseNumber,
+              'clinic_id': clinicId,
+              'clinicName': clinicName,
+            },
+          };
+        };
+
+        bool callbackFired = false;
+        final clinicModel = ClinicModel(
+          id: 'cli-emerald-01',
+          clinicName: 'Emerald Dental Clinic',
+          location: '101 Park Street',
+          clinicAddress: '101 Park Street',
+          city: 'Mumbai',
+          state: 'Maharashtra',
+          pincode: '400001',
+          latitude: 19.076,
+          longitude: 72.8777,
+        );
+
+        await tester.pumpWidget(
+          ProviderScope(
+            child: MaterialApp(
+              home: Scaffold(
+                body: Builder(
+                  builder: (ctx) => Center(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        ClinicAddDoctorsDialog.show(
+                          ctx,
+                          clinicId: clinicModel.id,
+                          clinicName: clinicModel.clinicName,
+                          clinic: clinicModel,
+                          allRegisteredDoctors: const [],
+                          alreadyAssociatedDoctorIds: const {},
+                          initialRegisterNew: true,
+                          onDoctorsAssociated: () {
+                            callbackFired = true;
+                          },
+                        );
+                      },
+                      child: const Text('Open Register New Doctor'),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('Open Register New Doctor'));
+        await tester.pumpAndSettle();
+
+        // Fill in new doctor details
+        await tester.enterText(find.byKey(const Key('clinic_reg_doc_name_field')), 'Dr. Kavita Iyer');
+        await tester.enterText(find.byKey(const Key('clinic_reg_doc_phone_field')), '9833344444');
+        await tester.enterText(find.byKey(const Key('clinic_reg_doc_email_field')), 'kavita@gshealth.in');
+        await tester.enterText(find.byKey(const Key('clinic_reg_doc_license_field')), 'MCI-2026-9981');
+        await tester.enterText(find.byKey(const Key('clinic_reg_doc_qualification_field')), 'BDS, MDS');
+        await tester.enterText(find.byKey(const Key('clinic_reg_doc_experience_field')), '9');
+
+        await tester.tap(find.byKey(const Key('clinic_reg_doc_submit_btn')));
+        await tester.pumpAndSettle();
+
+        expect(capturedPayload, isNotNull);
+        expect(capturedPayload!['clinicId'], 'cli-emerald-01');
+        expect(capturedPayload!['clinicName'], 'Emerald Dental Clinic');
+        expect(capturedPayload!['name'], 'Dr. Kavita Iyer');
+        expect(capturedPayload!['phone'], '9833344444');
+        expect(capturedPayload!['licenseNumber'], 'MCI-2026-9981');
+        expect(capturedPayload!['city'], 'Mumbai');
+        expect(callbackFired, isTrue);
+
+        // Verify newly registered doctor is immediately present in PatientProblemService associated with cli-emerald-01
+        final registeredInState = PatientProblemService()
+            .allDoctors
+            .where((d) => d.id == 'doc-new-777' && d.clinicId == 'cli-emerald-01')
+            .toList();
+        expect(registeredInState, isNotEmpty);
+        expect(registeredInState.first.name, 'Dr. Kavita Iyer');
+      },
+    );
   });
 }

@@ -107,19 +107,24 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal>
     try {
       final client = SupabaseService.safeClient;
       if (client == null) return;
+      final candidateRooms = ApiService.getCandidateRoomIds(
+        _roomId,
+        patientName: widget.patientName,
+        doctorName: widget.doctorName,
+      ).map((e) => e.toUpperCase()).toSet();
+
       _realtimeChannel = client
           .channel('chat_messages_$_roomId')
           .onPostgresChanges(
-            event: PostgresChangeEvent.insert,
+            event: PostgresChangeEvent.all,
             schema: 'public',
             table: 'chat_messages',
-            filter: PostgresChangeFilter(
-              type: PostgresChangeFilterType.eq,
-              column: 'room_id',
-              value: _roomId,
-            ),
-            callback: (_) {
-              _pollMessages();
+            callback: (payload) {
+              final rec = payload.newRecord.isNotEmpty ? payload.newRecord : payload.oldRecord;
+              final evtRoom = ApiService.normalizeRoomId((rec['room_id'] ?? '').toString());
+              if (rec.isEmpty || candidateRooms.contains(evtRoom) || evtRoom == _roomId) {
+                _pollMessages();
+              }
             },
           )
           .subscribe();
@@ -296,6 +301,9 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal>
           setState(() {
             _messages.removeWhere((m) => m['id'] == tempId);
             _errorBanner = sendRes['message']?.toString() ?? 'Failed to send message.';
+            if (_msgController.text.trim().isEmpty) {
+              _msgController.text = text;
+            }
           });
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -328,6 +336,9 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal>
         setState(() {
           _messages.removeWhere((m) => m['id'] == tempId);
           _errorBanner = 'Connection error while sending message. Please try again.';
+          if (_msgController.text.trim().isEmpty) {
+            _msgController.text = text;
+          }
         });
       }
     } finally {
@@ -401,6 +412,15 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal>
                         Text(
                           _counterpartName,
                           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          _isDentist
+                              ? 'Patient Consultation'
+                              : (_isAdmin
+                                  ? 'Patient: ${widget.patientName} • Doctor: ${widget.doctorName}'
+                                  : 'Attending Doctor • ${widget.patientName}'),
+                          style: const TextStyle(fontSize: 11, color: Color(0xFFCBD5E1), fontWeight: FontWeight.w500),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ],
@@ -521,8 +541,9 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal>
                           final senderName = (senderObj['name'] ?? m['sender_id'] ?? '').toString();
 
                           final createdAt = m['created_at'] != null ? DateTime.tryParse(m['created_at'].toString())?.toLocal() : null;
+                          const monthAbbr = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
                           final String timeStr = createdAt != null
-                              ? '${createdAt.hour > 12 ? createdAt.hour - 12 : (createdAt.hour == 0 ? 12 : createdAt.hour)}:${createdAt.minute.toString().padLeft(2, '0')} ${createdAt.hour >= 12 ? 'PM' : 'AM'}'
+                              ? '${createdAt.day} ${monthAbbr[(createdAt.month - 1).clamp(0, 11)]}, ${createdAt.hour > 12 ? createdAt.hour - 12 : (createdAt.hour == 0 ? 12 : createdAt.hour)}:${createdAt.minute.toString().padLeft(2, '0')} ${createdAt.hour >= 12 ? 'PM' : 'AM'}'
                               : 'Just now';
 
                           final displaySenderName = (senderObj['name'] ?? '').toString().trim().isNotEmpty

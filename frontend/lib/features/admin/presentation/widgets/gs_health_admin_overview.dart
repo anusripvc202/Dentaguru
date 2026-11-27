@@ -3,10 +3,12 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../../core/models/referral_model.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/widgets/dental_ads_banner.dart';
+import '../../../../core/widgets/recent_updates_preview_section.dart';
 
 const Color _kBorder = Color(0xFFE2E8F0);
 const Color _kSoftNavy = Color(0x14012A58);
@@ -688,6 +690,13 @@ class GsHealthAdminOverview extends StatefulWidget {
   final bool appointmentsRestricted;
   final bool canViewPhone;
   final void Function(AdminAppointmentItem item)? onAppointmentTap;
+  final VoidCallback? onViewAllAppointments;
+  final List<PatientReferral> recentReferrals;
+  final VoidCallback? onViewAllReferrals;
+  final List<DoctorModel> recentDoctors;
+  final VoidCallback? onViewAllDoctors;
+  final List<ClinicModel> recentClinics;
+  final VoidCallback? onViewAllClinics;
   final Widget? footer;
 
   const GsHealthAdminOverview({
@@ -709,6 +718,13 @@ class GsHealthAdminOverview extends StatefulWidget {
     this.appointmentsRestricted = false,
     this.canViewPhone = true,
     this.onAppointmentTap,
+    this.onViewAllAppointments,
+    this.recentReferrals = const <PatientReferral>[],
+    this.onViewAllReferrals,
+    this.recentDoctors = const <DoctorModel>[],
+    this.onViewAllDoctors,
+    this.recentClinics = const <ClinicModel>[],
+    this.onViewAllClinics,
     this.footer,
   });
 
@@ -771,6 +787,18 @@ class _GsHealthAdminOverviewState extends State<GsHealthAdminOverview> {
           _buildAdsCarousel(),
           const SizedBox(height: 26),
           _buildLatestAppointments(),
+          if (widget.onViewAllReferrals != null || widget.recentReferrals.isNotEmpty) ...[
+            const SizedBox(height: 22),
+            _buildRecentReferralsPreview(),
+          ],
+          if (widget.onViewAllDoctors != null || widget.recentDoctors.isNotEmpty) ...[
+            const SizedBox(height: 22),
+            _buildRecentDoctorsPreview(),
+          ],
+          if (widget.onViewAllClinics != null || widget.recentClinics.isNotEmpty) ...[
+            const SizedBox(height: 22),
+            _buildRecentClinicsPreview(),
+          ],
           if (widget.footer != null) ...[
             const SizedBox(height: 20),
             widget.footer!,
@@ -971,21 +999,72 @@ class _GsHealthAdminOverviewState extends State<GsHealthAdminOverview> {
   }
 
   // --------------------------------------------------------- appointments ----
+  DateTime _appointmentSortTimestamp(AdminAppointmentItem item) {
+    final created = _parseDate(item.createdAtRaw);
+    final apptDate = _parseDate(item.dateRaw);
+    return apptDate ?? created ?? DateTime.fromMillisecondsSinceEpoch(0);
+  }
+
   Widget _buildLatestAppointments() {
-    final total = widget.appointments.length;
-    final shown = total < _visibleAppointments ? total : _visibleAppointments;
+    final bool useStrictTwoRecordPreview = widget.onViewAllAppointments != null;
+    final List<AdminAppointmentItem> sortedAppointments = useStrictTwoRecordPreview
+        ? takeLatestPreviewRecords<AdminAppointmentItem>(
+            widget.appointments,
+            limit: widget.appointments.length,
+            compareDesc: (a, b) => _appointmentSortTimestamp(b).compareTo(_appointmentSortTimestamp(a)),
+          )
+        : widget.appointments;
+    final total = sortedAppointments.length;
+    final shown = useStrictTwoRecordPreview
+        ? (total < kDashboardRecentPreviewLimit ? total : kDashboardRecentPreviewLimit)
+        : (total < _visibleAppointments ? total : _visibleAppointments);
     return Column(
+      key: const Key('admin_latest_appointments_section'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Latest appointments',
-          key: Key('admin_latest_appointments_title'),
-          style: TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.w800,
-            color: AppTheme.gsNavy,
-            letterSpacing: -0.3,
-          ),
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Latest appointments',
+                key: Key('admin_latest_appointments_title'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.gsNavy,
+                  letterSpacing: -0.3,
+                ),
+              ),
+            ),
+            if (widget.onViewAllAppointments != null)
+              TextButton(
+                key: const Key('admin_view_all_appointments_btn'),
+                onPressed: widget.onViewAllAppointments,
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.gsNavy,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'View All',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.gsNavy,
+                      ),
+                    ),
+                    SizedBox(width: 2),
+                    Icon(Icons.chevron_right_rounded, size: 18, color: AppTheme.gsNavy),
+                  ],
+                ),
+              ),
+          ],
         ),
         const SizedBox(height: 12),
         if (widget.appointmentsRestricted)
@@ -1027,13 +1106,13 @@ class _GsHealthAdminOverviewState extends State<GsHealthAdminOverview> {
           for (var i = 0; i < shown; i++)
             _AppointmentCard(
               key: Key('admin_appointment_card_$i'),
-              item: widget.appointments[i],
+              item: sortedAppointments[i],
               showPhone: widget.canViewPhone,
               onTap: widget.onAppointmentTap == null
                   ? null
-                  : () => widget.onAppointmentTap!(widget.appointments[i]),
+                  : () => widget.onAppointmentTap!(sortedAppointments[i]),
             ),
-          if (shown < total)
+          if (!useStrictTwoRecordPreview && shown < total)
             Center(
               child: TextButton.icon(
                 key: const Key('admin_appointments_load_more'),
@@ -1047,6 +1126,123 @@ class _GsHealthAdminOverviewState extends State<GsHealthAdminOverview> {
             ),
         ],
       ],
+    );
+  }
+
+  Widget _buildRecentReferralsPreview() {
+    final latestReferrals = takeLatestPreviewRecords<PatientReferral>(
+      widget.recentReferrals,
+      limit: kDashboardRecentPreviewLimit,
+      compareDesc: (a, b) => b.referralDate.compareTo(a.referralDate),
+    );
+    return RecentUpdatesPreviewSection(
+      sectionKey: const Key('admin_recent_referrals_section'),
+      viewAllKey: const Key('admin_view_all_referrals_btn'),
+      emptyStateKey: const Key('admin_recent_referrals_empty'),
+      title: 'Recent Referrals',
+      totalCount: widget.recentReferrals.length,
+      icon: Icons.share_outlined,
+      onViewAll: widget.onViewAllReferrals,
+      isLoading: widget.isLoading,
+      emptyIcon: Icons.share_outlined,
+      emptyTitle: 'No referrals yet.',
+      emptySubtitle: 'Doctor and patient referrals will appear here.',
+      previewChildren: latestReferrals.asMap().entries.map((entry) {
+        final idx = entry.key;
+        final ref = entry.value;
+        final d = ref.referralDate.toLocal();
+        final dateStr = '${d.day} ${_months[d.month - 1]} ${d.year}';
+        final stColors = _statusColors(ref.status);
+        return RecentUpdatePreviewCard(
+          cardKey: Key('admin_recent_referral_card_$idx'),
+          leadingIcon: Icons.assignment_ind_outlined,
+          title: '${ref.referredPatientName} → ${ref.doctorName.isNotEmpty ? ref.doctorName : "Specialist"}',
+          subtitle: '${ref.requiredSpecialist} • Referred by ${ref.referrerPatientName.isNotEmpty ? ref.referrerPatientName : "Doctor"}',
+          metaLine: '$dateStr • Mobile: ${ref.referredPatientMobile}',
+          statusLabel: _statusLabel(ref.status),
+          statusColor: stColors.fg,
+          statusBgColor: stColors.bg,
+          onTap: widget.onViewAllReferrals,
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildRecentDoctorsPreview() {
+    final latestDoctors = takeLatestPreviewRecords<DoctorModel>(
+      widget.recentDoctors,
+      limit: kDashboardRecentPreviewLimit,
+    );
+    return RecentUpdatesPreviewSection(
+      sectionKey: const Key('admin_recent_doctors_section'),
+      viewAllKey: const Key('admin_view_all_doctors_btn'),
+      emptyStateKey: const Key('admin_recent_doctors_empty'),
+      title: 'Recent Doctor Registrations',
+      totalCount: widget.recentDoctors.length,
+      icon: Icons.medical_services_outlined,
+      onViewAll: widget.onViewAllDoctors,
+      isLoading: widget.isLoading,
+      emptyIcon: Icons.medical_services_outlined,
+      emptyTitle: 'No registered doctors yet.',
+      emptySubtitle: 'Newly registered doctors will appear here.',
+      previewChildren: latestDoctors.asMap().entries.map((entry) {
+        final idx = entry.key;
+        final doc = entry.value;
+        final isPending = isPendingVerificationDoctor(doc);
+        return RecentUpdatePreviewCard(
+          cardKey: Key('admin_recent_doctor_card_$idx'),
+          leadingIcon: Icons.person_outline_rounded,
+          title: doc.name,
+          subtitle: '${doc.specialty}${doc.qualification.isNotEmpty ? " • ${doc.qualification}" : ""}',
+          metaLine: [
+            if (doc.clinicName.trim().isNotEmpty) doc.clinicName.trim(),
+            if (doc.city.trim().isNotEmpty) doc.city.trim(),
+            if (doc.phone.trim().isNotEmpty) doc.phone.trim(),
+          ].join(' • '),
+          statusLabel: isPending ? 'Pending' : (doc.isAvailable ? 'Available' : 'Offline'),
+          statusColor: isPending ? AppTheme.gsRed : AppTheme.gsNavy,
+          statusBgColor: isPending ? AppTheme.gsRed.withValues(alpha: 0.12) : _kSoftNavy,
+          onTap: widget.onViewAllDoctors,
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildRecentClinicsPreview() {
+    final latestClinics = takeLatestPreviewRecords<ClinicModel>(
+      widget.recentClinics,
+      limit: kDashboardRecentPreviewLimit,
+    );
+    return RecentUpdatesPreviewSection(
+      sectionKey: const Key('admin_recent_clinics_section'),
+      viewAllKey: const Key('admin_view_all_clinics_btn'),
+      emptyStateKey: const Key('admin_recent_clinics_empty'),
+      title: 'Recent Clinic Registrations',
+      totalCount: widget.recentClinics.length,
+      icon: Icons.local_hospital_outlined,
+      onViewAll: widget.onViewAllClinics,
+      isLoading: widget.isLoading,
+      emptyIcon: Icons.local_hospital_outlined,
+      emptyTitle: 'No registered clinics yet.',
+      emptySubtitle: 'Newly registered clinics will appear here.',
+      previewChildren: latestClinics.asMap().entries.map((entry) {
+        final idx = entry.key;
+        final c = entry.value;
+        return RecentUpdatePreviewCard(
+          cardKey: Key('admin_recent_clinic_card_$idx'),
+          leadingIcon: Icons.apartment_rounded,
+          title: c.clinicName.isNotEmpty ? c.clinicName : 'Clinic',
+          subtitle: c.displayAddress.isNotEmpty ? c.displayAddress : 'Address not provided',
+          metaLine: [
+            if (c.cityStatePincode.isNotEmpty) c.cityStatePincode,
+            'ID: ${c.id}',
+          ].join(' • '),
+          statusLabel: '${c.associatedDoctorsCount} Doctors',
+          statusColor: AppTheme.gsNavy,
+          statusBgColor: _kSoftNavy,
+          onTap: widget.onViewAllClinics,
+        );
+      }).toList(),
     );
   }
 

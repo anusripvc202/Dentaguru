@@ -8,6 +8,8 @@ import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/widgets/dental_ads_banner.dart';
+import '../../../../core/widgets/recent_updates_preview_section.dart';
+import '../../../../core/widgets/whatsapp_chat_modal.dart';
 
 const Color _kSurfaceBg = Color(0xFFF8FAFC);
 const Color _kBorder = Color(0xFFE2E8F0);
@@ -214,6 +216,7 @@ class GsHealthClinicOverview extends StatefulWidget {
   final int awaitingConfirmationCount;
   final int completedVisitsCount;
   final List<DoctorModel> attachedDoctors;
+  final List<PatientConsultationRequest> recentAppointments;
   final VoidCallback onNotifications;
   final VoidCallback onProfile;
   final VoidCallback onEditDetails;
@@ -221,6 +224,9 @@ class GsHealthClinicOverview extends StatefulWidget {
   final VoidCallback onOpenReferrals;
   final VoidCallback onOpenAdvertise;
   final void Function(String bookingFilter) onTapBookingsStat;
+  final VoidCallback? onViewAllAppointments;
+  final VoidCallback? onViewAllDoctors;
+  final VoidCallback? onViewAllPatientActivity;
   final VoidCallback onAddDoctor;
   final Future<void> Function() onRefresh;
   final void Function(DoctorModel doc) onToggleDoctorStatus;
@@ -243,6 +249,7 @@ class GsHealthClinicOverview extends StatefulWidget {
     required this.awaitingConfirmationCount,
     required this.completedVisitsCount,
     required this.attachedDoctors,
+    this.recentAppointments = const <PatientConsultationRequest>[],
     required this.onNotifications,
     required this.onProfile,
     required this.onEditDetails,
@@ -250,6 +257,9 @@ class GsHealthClinicOverview extends StatefulWidget {
     required this.onOpenReferrals,
     required this.onOpenAdvertise,
     required this.onTapBookingsStat,
+    this.onViewAllAppointments,
+    this.onViewAllDoctors,
+    this.onViewAllPatientActivity,
     required this.onAddDoctor,
     required this.onRefresh,
     required this.onToggleDoctorStatus,
@@ -470,22 +480,53 @@ class _GsHealthClinicOverviewState extends State<GsHealthClinicOverview> {
                     ),
                     const SizedBox(height: 24),
 
-                    // 8. Attached Doctors Section
+                    // 8. Latest Appointments Preview (Max 2 + View All)
+                    _buildClinicLatestAppointmentsSection(),
+                    const SizedBox(height: 22),
+
+                    // 9. Recently Added Doctors Preview (Max 2 + View All)
                     Row(
+                      key: const Key('clinic_recently_added_doctors_section'),
                       children: [
                         Expanded(
                           child: Text(
-                            'Attached doctors (${doctors.length})',
+                            'Recently Added Doctors (${doctors.length})',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              fontSize: 19,
+                              fontSize: 18,
                               fontWeight: FontWeight.w800,
                               color: AppTheme.gsNavy,
                             ),
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        if (widget.onViewAllDoctors != null)
+                          TextButton(
+                            key: const Key('clinic_view_all_doctors_btn'),
+                            onPressed: widget.onViewAllDoctors,
+                            style: TextButton.styleFrom(
+                              foregroundColor: AppTheme.gsNavy,
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              minimumSize: const Size(0, 32),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  'View All',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppTheme.gsNavy,
+                                  ),
+                                ),
+                                SizedBox(width: 2),
+                                Icon(Icons.chevron_right_rounded, size: 18, color: AppTheme.gsNavy),
+                              ],
+                            ),
+                          ),
+                        const SizedBox(width: 6),
                         ElevatedButton.icon(
                           key: const Key('clinic_add_doctor_button'),
                           onPressed: widget.onAddDoctor,
@@ -521,7 +562,10 @@ class _GsHealthClinicOverviewState extends State<GsHealthClinicOverview> {
                             'Add verified specialists to your clinic team using Add Doctor.',
                       )
                     else
-                      ...doctors.map(
+                      ...takeLatestPreviewRecords<DoctorModel>(
+                        doctors.reversed,
+                        limit: kDashboardRecentPreviewLimit,
+                      ).map(
                         (doc) => _ClinicDoctorCard(
                           doc: doc,
                           onToggleStatus: () => widget.onToggleDoctorStatus(doc),
@@ -531,6 +575,10 @@ class _GsHealthClinicOverviewState extends State<GsHealthClinicOverview> {
                           onRemove: () => widget.onRemoveDoctor(doc),
                         ),
                       ),
+                    const SizedBox(height: 18),
+
+                    // 10. Recent Patient Activity Preview (Max 2 + View All)
+                    _buildClinicRecentPatientActivitySection(),
                   ],
                 ),
               ),
@@ -538,6 +586,91 @@ class _GsHealthClinicOverviewState extends State<GsHealthClinicOverview> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildClinicLatestAppointmentsSection() {
+    final latestAppts = takeLatestPreviewRecords<PatientConsultationRequest>(
+      widget.recentAppointments,
+      limit: kDashboardRecentPreviewLimit,
+      compareDesc: (a, b) => b.submittedAt.compareTo(a.submittedAt),
+    );
+    final openAll = widget.onViewAllAppointments ?? () => widget.onTapBookingsStat('All');
+
+    return RecentUpdatesPreviewSection(
+      sectionKey: const Key('clinic_latest_appointments_section'),
+      viewAllKey: const Key('clinic_view_all_appointments_btn'),
+      emptyStateKey: const Key('clinic_latest_appointments_empty'),
+      title: 'Latest Appointments',
+      totalCount: widget.recentAppointments.length,
+      icon: Icons.calendar_today_outlined,
+      onViewAll: openAll,
+      emptyIcon: Icons.event_busy_rounded,
+      emptyTitle: 'No clinic appointments yet.',
+      emptySubtitle: 'Appointments booked with your clinic doctors will appear here.',
+      previewChildren: latestAppts.asMap().entries.map((entry) {
+        final idx = entry.key;
+        final req = entry.value;
+        final docLabel = req.displayDoctorName.trim().isNotEmpty
+            ? req.displayDoctorName.trim()
+            : (req.assignedDoctorName?.trim().isNotEmpty == true
+                ? req.assignedDoctorName!.trim()
+                : 'Clinic Doctor');
+        final dtLabel = (req.confirmedDate != null && req.confirmedDate!.trim().isNotEmpty)
+            ? req.confirmedDate!.split('T').first
+            : '${req.submittedAt.toLocal().day}/${req.submittedAt.toLocal().month}/${req.submittedAt.toLocal().year}';
+        final slotLabel = (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.trim().isNotEmpty)
+            ? ' • ${req.confirmedTimeSlot}'
+            : '';
+        return RecentUpdatePreviewCard(
+          cardKey: Key('clinic_latest_appointment_card_$idx'),
+          leadingIcon: Icons.event_available_rounded,
+          title: req.patientName.trim().isNotEmpty ? req.patientName.trim() : 'Patient',
+          subtitle: '$docLabel • ${req.problemCategory.trim().isNotEmpty ? req.problemCategory.trim() : "Consultation"}',
+          metaLine: '$dtLabel$slotLabel',
+          statusLabel: req.status.trim().isNotEmpty ? req.status.trim() : 'Pending',
+          onTap: openAll,
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildClinicRecentPatientActivitySection() {
+    final latestActivity = takeLatestPreviewRecords<PatientConsultationRequest>(
+      widget.recentAppointments,
+      limit: kDashboardRecentPreviewLimit,
+      compareDesc: (a, b) => b.submittedAt.compareTo(a.submittedAt),
+    );
+    final openAll = widget.onViewAllPatientActivity ??
+        widget.onViewAllAppointments ??
+        () => widget.onTapBookingsStat('All');
+
+    return RecentUpdatesPreviewSection(
+      sectionKey: const Key('clinic_recent_patient_activity_section'),
+      viewAllKey: const Key('clinic_view_all_patient_activity_btn'),
+      emptyStateKey: const Key('clinic_recent_patient_activity_empty'),
+      title: 'Recent Patient Activity',
+      totalCount: widget.recentAppointments.length,
+      icon: Icons.people_outline_rounded,
+      onViewAll: openAll,
+      emptyIcon: Icons.people_outline_rounded,
+      emptyTitle: 'No recent patient activity yet.',
+      emptySubtitle: 'Recent patient consultations and visit records will appear here.',
+      previewChildren: latestActivity.asMap().entries.map((entry) {
+        final idx = entry.key;
+        final req = entry.value;
+        final dt = req.submittedAt.toLocal();
+        final dateStr = '${dt.day}/${dt.month}/${dt.year}';
+        return RecentUpdatePreviewCard(
+          cardKey: Key('clinic_recent_patient_activity_card_$idx'),
+          leadingIcon: Icons.person_outline_rounded,
+          title: req.patientName.trim().isNotEmpty ? req.patientName.trim() : 'Patient',
+          subtitle: req.problemCategory.trim().isNotEmpty ? req.problemCategory.trim() : 'Patient Visit',
+          metaLine: '$dateStr${req.patientPhone.trim().isNotEmpty ? " • ${req.patientPhone.trim()}" : ""}',
+          statusLabel: req.status.trim().isNotEmpty ? req.status.trim() : 'Active',
+          onTap: openAll,
+        );
+      }).toList(),
     );
   }
 
@@ -2025,65 +2158,99 @@ class _ClinicBookingCard extends StatelessWidget {
               ),
             ],
           ),
-          if (category == 'Pending') ...[
+          if (category == 'Pending' || category != 'Cancelled') ...[
             const SizedBox(height: 12),
             Wrap(
               spacing: 10,
               runSpacing: 8,
               children: [
-                ElevatedButton(
-                  key: Key('clinic_booking_confirm_${booking.id}'),
-                  onPressed: isProcessing ? null : onConfirm,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.gsNavy,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 11,
+                if (category == 'Pending') ...[
+                  ElevatedButton(
+                    key: Key('clinic_booking_confirm_${booking.id}'),
+                    onPressed: isProcessing ? null : onConfirm,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.gsNavy,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 11,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                     ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
+                    child: isProcessing
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text(
+                            'Confirm',
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                  ),
+                  ElevatedButton(
+                    key: Key('clinic_booking_cancel_${booking.id}'),
+                    onPressed: isProcessing ? null : onCancel,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _kSoftRedBg,
+                      foregroundColor: AppTheme.gsRed,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 11,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        side: const BorderSide(color: _kSoftRedBorder),
+                      ),
+                    ),
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
-                  child: isProcessing
-                      ? const SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Text(
-                          'Confirm',
-                          style: TextStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                ),
-                ElevatedButton(
-                  key: Key('clinic_booking_cancel_${booking.id}'),
-                  onPressed: isProcessing ? null : onCancel,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _kSoftRedBg,
-                    foregroundColor: AppTheme.gsRed,
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 11,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      side: const BorderSide(color: _kSoftRedBorder),
-                    ),
-                  ),
-                  child: const Text(
-                    'Cancel',
+                ],
+                OutlinedButton.icon(
+                  key: Key('clinic_booking_chat_${booking.id}'),
+                  onPressed: () {
+                    WhatsAppChatModal.show(
+                      context,
+                      patientName: rawPatient,
+                      doctorName: doctorName.isNotEmpty ? doctorName : 'Doctor',
+                      currentUserRole: 'Clinic',
+                      patientId: rawPatientId.isNotEmpty ? rawPatientId : null,
+                      doctorId: booking.assignedDoctorId ?? booking.preferredDoctorId,
+                    );
+                  },
+                  icon: const Icon(Icons.chat_bubble_outline_rounded, size: 15),
+                  label: const Text(
+                    'Chat',
                     style: TextStyle(
                       fontSize: 13.5,
                       fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.gsNavy,
+                    side: const BorderSide(color: AppTheme.gsNavy),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 11,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
                     ),
                   ),
                 ),

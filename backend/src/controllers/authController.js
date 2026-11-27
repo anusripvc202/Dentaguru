@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { supabase, supabaseAdmin } = require('../config/supabase');
-const { User, Dentist, Clinic, Referral, Notification, PatientProblemRequest, comparePassword, getDefaultQualificationForSpecialty, resolveMedicalSpecialtyRecord, isDoctorRecordAvailable, extractDoctorLanguages, canonicalPhone10 } = require('../models/Schemas');
+const { User, Dentist, Clinic, ClinicDoctor, Referral, Notification, PatientProblemRequest, comparePassword, getDefaultQualificationForSpecialty, resolveMedicalSpecialtyRecord, isDoctorRecordAvailable, extractDoctorLanguages, canonicalPhone10 } = require('../models/Schemas');
 const admin = require('firebase-admin');
 const { sendOtpEmail } = require('../services/emailService');
 const { sendRealSmsOtp, normalizePhoneNumber } = require('../services/smsService');
@@ -374,27 +374,50 @@ exports.register = async (req, res) => {
         // Canonical mobile uniqueness check across +91 / 91 / 0 / spaced variants
         const existingPhone = await User.findByMobile(normalizedPhone);
         if (existingPhone) {
+            const existingDentist = await Dentist.findOne({ user_id: existingPhone.id }).catch(() => null);
             return res.status(400).json({
                 success: false,
                 code: 'MOBILE_ALREADY_REGISTERED',
                 existingRole: existingPhone.role || 'Patient',
+                ...(existingDentist || ['doctor', 'dentist'].includes(String(existingPhone.role || '').trim().toLowerCase()) ? {
+                    existingDoctor: {
+                        id: existingDentist?.id || existingPhone.id,
+                        userId: existingPhone.id,
+                        name: existingPhone.name || existingDentist?.name || 'Doctor',
+                        phone: existingPhone.phone || normalizedPhone,
+                        email: existingPhone.email || '',
+                        specialty: existingDentist?.speciality || existingDentist?.specialty || 'General Medicine',
+                        qualification: existingDentist?.qualifications || '',
+                        experienceYears: existingDentist?.experience_years || 5,
+                        clinicId: existingDentist?.clinic_id || null,
+                        clinicName: existingDentist?.clinic_name || ''
+                    }
+                } : {}),
                 message: 'Phone number already registered. Please sign in with OTP.'
             });
         }
 
         // 2. Mandatory Field Validation: City & Doctor Clinic Location Fields
-        const normalizedCity = (city || '').toString().trim();
-        const normalizedState = (state || '').toString().trim();
-        const normalizedPincode = (pincode !== undefined && pincode !== null) ? String(pincode).trim() : '';
+        const requestedClinicId = (req.body.clinicId || req.body.clinic_id || '').toString().trim();
+        let preloadedTargetClinic = null;
+        if (requestedClinicId && requestedClinicId !== 'default') {
+            preloadedTargetClinic = await Clinic.findById(requestedClinicId).catch(() => null);
+        }
+
+        const normalizedCity = (city || preloadedTargetClinic?.city || '').toString().trim();
+        const normalizedState = (state || preloadedTargetClinic?.state || '').toString().trim();
+        const normalizedPincode = (pincode !== undefined && pincode !== null && String(pincode).trim() !== '')
+            ? String(pincode).trim()
+            : String(preloadedTargetClinic?.pincode || '').trim();
         const normalizedAge = (age !== undefined && age !== null) ? String(age).trim() : '';
-        const normalizedClinicAddress = (clinicAddress || location || '').toString().trim();
+        const normalizedClinicAddress = (clinicAddress || location || preloadedTargetClinic?.clinic_address || preloadedTargetClinic?.location || '').toString().trim();
         const normalizedLocation = (normalizedClinicAddress || normalizedState || '').toString().trim();
 
         const isDoctorReg = normalizedRole.toLowerCase() === 'dentist' || normalizedRole.toLowerCase() === 'doctor';
         const isClinicReg = normalizedRole.toLowerCase() === 'clinic' || normalizedRole.toLowerCase() === 'clinic_admin';
-        let effectiveLatitude = null;
-        let effectiveLongitude = null;
-        let effectiveClinicName = (clinicName || (isClinicReg ? name : '') || '').toString().trim();
+        let effectiveLatitude = (latitude !== undefined && latitude !== null) ? latitude : (preloadedTargetClinic?.latitude ?? null);
+        let effectiveLongitude = (longitude !== undefined && longitude !== null) ? longitude : (preloadedTargetClinic?.longitude ?? null);
+        let effectiveClinicName = (clinicName || preloadedTargetClinic?.clinic_name || (isClinicReg ? name : '') || '').toString().trim();
         let effectiveClinicAddress = normalizedClinicAddress;
 
         if (isDoctorReg || isClinicReg) {
@@ -404,8 +427,8 @@ exports.register = async (req, res) => {
                 city: normalizedCity,
                 state: normalizedState,
                 pincode: normalizedPincode,
-                latitude,
-                longitude
+                latitude: effectiveLatitude,
+                longitude: effectiveLongitude
             });
             if (!facilityCheck.ok) {
                 return res.status(400).json({ success: false, message: facilityCheck.message });
@@ -440,7 +463,6 @@ exports.register = async (req, res) => {
             cleanLanguages = rawLanguages.split(',').map(s => s.trim()).filter(Boolean);
         }
 
-        const requestedClinicId = (req.body.clinicId || req.body.clinic_id || '').toString().trim();
         const hasClinicContext = Boolean(requestedClinicId || effectiveClinicName.length > 0);
         if (!normalizedCity && !(isDoctorReg && hasClinicContext)) {
             return res.status(400).json({ success: false, message: 'City is mandatory for registration.' });
@@ -701,6 +723,9 @@ exports.register = async (req, res) => {
                     rating: 5.0,
                     reviews_count: 0
                 });
+                if (clinicId && createdDentistRecord?.id) {
+                    await ClinicDoctor.associate(clinicId, createdDentistRecord.id).catch(() => null);
+                }
                 console.log(`✅ Doctor record created in 'dentists' table for user: ${user.name}`);
             } catch (dErr) {
                 console.error('⚠️ Doctor Table Creation Warning:', dErr.message);
@@ -1352,36 +1377,112 @@ exports.getPatients = async (req, res) => {
     }
 };
 
+const normalizeSubAdminPermissionsList = (rawPermissions) => {
+    const FORBIDDEN_SUBADMIN_PERMS = new Set([
+        '*',
+        'ALL',
+        'ADMIN_SUBADMIN_MANAGE',
+        'ADMIN_DISTRICT_MANAGE',
+        'ADMIN_SYSTEM_CONFIG'
+    ]);
+    const MODULE_SHORTHAND_EXPANSION = {
+        DOCTORS: ['DENTIST_VIEW', 'DENTIST_VERIFY', 'DENTIST_MANAGE'],
+        PATIENTS: ['PATIENT_VIEW', 'PATIENT_CREATE', 'PATIENT_EDIT'],
+        CLINICS: ['CLINIC_VIEW', 'CLINIC_MANAGE'],
+        APPOINTMENTS: ['APPOINTMENT_VIEW', 'APPOINTMENT_MANAGE'],
+        REQUESTS: ['PROBLEM_VIEW', 'PROBLEM_UPDATE', 'ASSIGNMENT_VIEW', 'ASSIGNMENT_CREATE'],
+        REFERRALS: ['REFERRAL_VIEW', 'REFERRAL_MANAGE'],
+        REPORTS: ['REPORT_VIEW']
+    };
+    if (!Array.isArray(rawPermissions) || rawPermissions.length === 0) {
+        return ['PATIENT_VIEW'];
+    }
+    const result = new Set();
+    for (const item of rawPermissions) {
+        const key = (item || '').toString().trim().toUpperCase();
+        if (!key || FORBIDDEN_SUBADMIN_PERMS.has(key)) continue;
+        result.add(key);
+        if (MODULE_SHORTHAND_EXPANSION[key]) {
+            for (const expanded of MODULE_SHORTHAND_EXPANSION[key]) {
+                result.add(expanded);
+            }
+        }
+    }
+    return result.size > 0 ? Array.from(result) : ['PATIENT_VIEW'];
+};
+
 // 10. CREATE SUB-ADMIN (Primary Admin only)
 exports.createSubAdmin = async (req, res) => {
-    const { name, email, password, phone, permissions, status, city, pincode, languages, districtIds, districts } = req.body;
+    const { name, email, password, phone, permissions, status, city, pincode, languages, districtIds, districts, profilePhoto } = req.body;
     try {
         const { SubAdminDistrict, PermissionChangeHistory } = require('../models/Schemas');
-        const normalizedPhone = (phone || '').toString().trim();
+        const cleanName = (name || '').toString().trim();
+        const rawPhone = (phone || '').toString().trim();
+        const canonical10 = canonicalPhone10(rawPhone);
         const normalizedEmail = (email || '').toString().trim().toLowerCase();
 
-        if (!normalizedPhone) {
-            return res.status(400).json({ success: false, message: 'Mobile phone number is mandatory for Sub-Admin registration.' });
+        if (!cleanName) {
+            return res.status(400).json({
+                success: false,
+                code: 'MISSING_NAME',
+                message: 'Full name is required for Sub-Admin creation.'
+            });
         }
 
-        if (normalizedEmail.length > 0) {
+        if (!rawPhone || !/^\d{10}$/.test(canonical10)) {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_PHONE',
+                message: 'Please enter a valid 10-digit mobile phone number for Sub-Admin registration.'
+            });
+        }
+
+        const isInternalEmail = normalizedEmail.endsWith('@dentaguru.internal');
+        if (normalizedEmail.length > 0 && !isInternalEmail) {
+            if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'INVALID_EMAIL',
+                    message: 'Please enter a valid email address.'
+                });
+            }
             const existingUser = await User.findOne({ email: normalizedEmail });
             if (existingUser) {
-                return res.status(400).json({ success: false, message: 'An account with this email already exists.' });
+                return res.status(400).json({
+                    success: false,
+                    code: 'EMAIL_ALREADY_REGISTERED',
+                    message: 'An account with this email already exists.'
+                });
             }
         }
 
-        const existingPhone = await User.findOne({ phone: normalizedPhone });
+        const existingPhone = await User.findByMobile(canonical10)
+            || await User.findOne({ phone: canonical10 })
+            || (rawPhone !== canonical10 ? await User.findOne({ phone: rawPhone }) : null);
         if (existingPhone) {
-            return res.status(400).json({ success: false, message: 'Phone number already registered.' });
+            return res.status(400).json({
+                success: false,
+                code: 'MOBILE_ALREADY_REGISTERED',
+                message: 'Phone number already registered.'
+            });
         }
 
-        // Sub-admin permissions default to RESTRICTED per system requirements
-        const cleanPerms = Array.isArray(permissions) && permissions.length > 0
-            ? permissions.map(p => (p || '').toString().trim().toUpperCase()).filter(p => p.length > 0)
-            : ['PATIENT_VIEW']; // Restricted default
+        const rawPass = (password || '').toString().trim();
+        const isAutoPlaceholderPass = rawPass.startsWith('Passwordless_') || rawPass.startsWith('OTP_SUBADMIN_');
+        if (rawPass.length > 0 && !isAutoPlaceholderPass && rawPass.length < 6) {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_PASSWORD',
+                message: 'Password must be at least 6 characters long.'
+            });
+        }
 
-        const subAdminStatus = (status || 'ACTIVE').toString().trim().toUpperCase();
+        // Sub-admin permissions default to RESTRICTED per system requirements (never automatic full Admin)
+        const cleanPerms = normalizeSubAdminPermissionsList(permissions);
+
+        const subAdminStatus = (status || 'ACTIVE').toString().trim().toUpperCase() === 'INACTIVE'
+            ? 'INACTIVE'
+            : 'ACTIVE';
 
         const rawLanguages = languages || ['English'];
         const cleanLanguages = Array.isArray(rawLanguages)
@@ -1389,29 +1490,44 @@ exports.createSubAdmin = async (req, res) => {
             : (typeof rawLanguages === 'string' ? rawLanguages.split(',').map(s => s.trim()).filter(Boolean) : ['English']);
         const finalLanguages = cleanLanguages.length > 0 ? cleanLanguages : ['English'];
 
-        const effectivePassword = (password && password.trim().length >= 4)
-            ? password.trim()
+        const effectivePassword = (rawPass.length >= 6 && !isAutoPlaceholderPass)
+            ? rawPass
             : (`OTP_SUBADMIN_${require('crypto').randomBytes(12).toString('hex')}`);
 
+        let uploadedPhotoUrl = null;
+        if (profilePhoto && String(profilePhoto).trim().length > 0) {
+            try {
+                uploadedPhotoUrl = await resolveAndUploadProfilePhoto(profilePhoto, { roleFolder: 'subadmins' });
+            } catch (_) {
+                uploadedPhotoUrl = String(profilePhoto).trim();
+            }
+        }
+
+        const effectiveEmail = (normalizedEmail.length > 0 && !isInternalEmail)
+            ? normalizedEmail
+            : `user_${canonical10}@dentaguru.internal`;
+
         const metaObj = {
-            city: city || '',
-            pincode: pincode || '',
+            city: (city || '').toString().trim(),
+            pincode: (pincode || '').toString().trim(),
             languages: finalLanguages,
             status: subAdminStatus,
-            permissions: cleanPerms
+            permissions: cleanPerms,
+            ...(uploadedPhotoUrl ? { profilePhoto: uploadedPhotoUrl } : {})
         };
 
         const subAdmin = await User.create({
-            name: name || 'Sub-Admin',
-            email: normalizedEmail,
+            name: cleanName,
+            email: effectiveEmail,
             password: effectivePassword,
-            phone: normalizedPhone,
+            phone: canonical10,
             role: 'Sub-Admin',
             status: subAdminStatus,
-            city: city || '',
-            pincode: pincode || '',
+            city: (city || '').toString().trim(),
+            pincode: (pincode || '').toString().trim(),
             languages: finalLanguages,
             permissions: cleanPerms,
+            ...(uploadedPhotoUrl ? { biometric_token: uploadedPhotoUrl } : {}),
             device_token: JSON.stringify(metaObj)
         });
 
@@ -1442,8 +1558,8 @@ exports.createSubAdmin = async (req, res) => {
             }
         } catch (_) { }
 
-        // Also ensure Supabase Auth User exists for Sub-Admin if email provided
-        if (normalizedEmail) {
+        // Also ensure Supabase Auth User exists for Sub-Admin if real email provided
+        if (normalizedEmail && !isInternalEmail) {
             try {
                 await supabaseAdmin.auth.admin.createUser({
                     email: normalizedEmail,
@@ -1454,7 +1570,7 @@ exports.createSubAdmin = async (req, res) => {
                         role: 'Sub-Admin',
                         status: subAdminStatus,
                         permissions: cleanPerms,
-                        phone: normalizedPhone
+                        phone: canonical10
                     }
                 });
             } catch (sbErr) {
@@ -1470,12 +1586,13 @@ exports.createSubAdmin = async (req, res) => {
                 name: subAdmin.name,
                 email: subAdmin.email,
                 phone: subAdmin.phone,
-                role: subAdmin.role,
-                status: subAdmin.status || 'ACTIVE',
-                city: subAdmin.city || '',
-                pincode: subAdmin.pincode || '',
+                role: 'Sub-Admin',
+                status: subAdmin.status || subAdminStatus,
+                city: subAdmin.city || (city || '').toString().trim(),
+                pincode: subAdmin.pincode || (pincode || '').toString().trim(),
                 languages: finalLanguages,
                 permissions: cleanPerms,
+                profilePhoto: subAdmin.biometric_token || uploadedPhotoUrl || null,
                 assignedDistricts,
                 created_at: subAdmin.created_at
             }
@@ -1509,6 +1626,7 @@ exports.getSubAdmins = async (req, res) => {
             let userLangs = s.languages || ['English'];
             let sCity = s.city || '';
             let sPin = s.pincode || '';
+            let sPhoto = s.biometric_token || null;
 
             if (s.device_token && typeof s.device_token === 'string' && s.device_token.startsWith('{')) {
                 try {
@@ -1516,6 +1634,7 @@ exports.getSubAdmins = async (req, res) => {
                     if (meta.languages && Array.isArray(meta.languages)) userLangs = meta.languages;
                     if (meta.city && !sCity) sCity = meta.city;
                     if (meta.pincode && !sPin) sPin = meta.pincode;
+                    if (meta.profilePhoto && !sPhoto) sPhoto = meta.profilePhoto;
                 } catch (_) { }
             }
 
@@ -1538,6 +1657,7 @@ exports.getSubAdmins = async (req, res) => {
                 pincode: sPin,
                 languages: userLangs,
                 permissions: perms,
+                profilePhoto: sPhoto,
                 assignedDistricts,
                 assignedPatientsCount,
                 created_at: s.created_at,
@@ -1557,25 +1677,83 @@ exports.getSubAdmins = async (req, res) => {
 // 11b. UPDATE SUB-ADMIN DETAILS & PERMISSIONS (Primary Admin only)
 exports.updateSubAdmin = async (req, res) => {
     const { id } = req.params;
-    const { name, phone, password, permissions, status, districtIds, districts } = req.body;
+    const { name, phone, email, city, pincode, languages, profilePhoto, password, permissions, status, districtIds, districts } = req.body;
     try {
         const { SubAdminDistrict, SubAdminPermission, PermissionChangeHistory } = require('../models/Schemas');
         const target = await User.findById(id);
         if (!target) {
             return res.status(404).json({ success: false, message: 'Sub-Admin not found.' });
         }
-        if (target.role && target.role.toLowerCase() === 'admin') {
+        if (isMainAdminRole(target.role)) {
             return res.status(403).json({ success: false, message: 'Cannot modify Primary Admin through Sub-Admin endpoints.' });
         }
 
         const updatePayload = {};
-        if (name !== undefined) updatePayload.name = name;
-        if (phone !== undefined) updatePayload.phone = phone;
+        if (name !== undefined) {
+            const cleanName = String(name || '').trim();
+            if (!cleanName) {
+                return res.status(400).json({ success: false, code: 'MISSING_NAME', message: 'Full name cannot be empty.' });
+            }
+            updatePayload.name = cleanName;
+        }
+        if (phone !== undefined) {
+            const rawPhone = String(phone || '').trim();
+            const canonical10 = canonicalPhone10(rawPhone);
+            if (!/^\d{10}$/.test(canonical10)) {
+                return res.status(400).json({ success: false, code: 'INVALID_PHONE', message: 'Please enter a valid 10-digit mobile number.' });
+            }
+            const existingPhone = await User.findByMobile(canonical10) || await User.findOne({ phone: canonical10 });
+            if (existingPhone && String(existingPhone.id) !== String(id)) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'MOBILE_ALREADY_REGISTERED',
+                    message: 'Phone number already registered to another user.'
+                });
+            }
+            updatePayload.phone = canonical10;
+        }
+        if (email !== undefined) {
+            const normalizedEmail = String(email || '').trim().toLowerCase();
+            if (normalizedEmail.length > 0 && !normalizedEmail.endsWith('@dentaguru.internal')) {
+                if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
+                    return res.status(400).json({ success: false, code: 'INVALID_EMAIL', message: 'Please enter a valid email address.' });
+                }
+                const existingEmail = await User.findOne({ email: normalizedEmail });
+                if (existingEmail && String(existingEmail.id) !== String(id)) {
+                    return res.status(400).json({
+                        success: false,
+                        code: 'EMAIL_ALREADY_REGISTERED',
+                        message: 'An account with this email already exists.'
+                    });
+                }
+                updatePayload.email = normalizedEmail;
+            }
+        }
+        if (city !== undefined) updatePayload.city = String(city || '').trim();
+        if (pincode !== undefined) updatePayload.pincode = String(pincode || '').trim();
+        if (languages !== undefined) {
+            const cleanLangs = Array.isArray(languages)
+                ? languages.map(l => String(l || '').trim()).filter(Boolean)
+                : (typeof languages === 'string' ? languages.split(',').map(s => s.trim()).filter(Boolean) : ['English']);
+            updatePayload.languages = cleanLangs.length > 0 ? cleanLangs : ['English'];
+        }
+        if (profilePhoto !== undefined && profilePhoto !== null && String(profilePhoto).trim().length > 0) {
+            try {
+                updatePayload.biometric_token = await resolveAndUploadProfilePhoto(profilePhoto, { roleFolder: 'subadmins' });
+            } catch (_) {
+                updatePayload.biometric_token = String(profilePhoto).trim();
+            }
+        }
         if (status !== undefined) updatePayload.status = status.toString().trim().toUpperCase();
-        if (password && password.trim().length > 0) updatePayload.password = password;
+        if (password && password.trim().length > 0) {
+            if (password.trim().length < 6) {
+                return res.status(400).json({ success: false, code: 'INVALID_PASSWORD', message: 'Password must be at least 6 characters long.' });
+            }
+            updatePayload.password = password.trim();
+        }
 
         if (permissions && Array.isArray(permissions)) {
-            const cleanPerms = permissions.map(p => (p || '').toString().trim().toUpperCase()).filter(p => p.length > 0);
+            const cleanPerms = normalizeSubAdminPermissionsList(permissions);
             updatePayload.permissions = cleanPerms;
 
             // Log changes to PermissionChangeHistory
@@ -1638,9 +1816,13 @@ exports.updateSubAdmin = async (req, res) => {
                 name: updated.name,
                 email: updated.email,
                 phone: updated.phone,
-                role: updated.role,
+                role: updated.role || 'Sub-Admin',
                 status: updated.status || 'ACTIVE',
-                permissions: updated.permissions || [],
+                city: updated.city || updatePayload.city || target.city || '',
+                pincode: updated.pincode || updatePayload.pincode || target.pincode || '',
+                languages: updated.languages || updatePayload.languages || target.languages || ['English'],
+                profilePhoto: updated.biometric_token || updatePayload.biometric_token || target.biometric_token || null,
+                permissions: updated.permissions || updatePayload.permissions || target.permissions || [],
                 assignedDistricts,
                 updated_at: updated.updated_at
             }
@@ -1747,7 +1929,7 @@ exports.deleteSubAdmin = async (req, res) => {
         if (!target) {
             return res.status(404).json({ success: false, message: 'Sub-Admin not found.' });
         }
-        if (target.role && target.role.toLowerCase() === 'admin') {
+        if (target && isMainAdminRole(target.role)) {
             return res.status(403).json({ success: false, message: 'Cannot delete the Primary Admin.' });
         }
 
@@ -1810,7 +1992,7 @@ exports.updateSubAdminPermissions = async (req, res) => {
         if (!target) {
             return res.status(404).json({ success: false, message: 'Sub-Admin not found.' });
         }
-        if (target.role && target.role.toLowerCase() === 'admin') {
+        if (target && isMainAdminRole(target.role)) {
             return res.status(403).json({ success: false, message: 'Cannot modify permissions for Primary Admin.' });
         }
 
@@ -1823,7 +2005,7 @@ exports.updateSubAdminPermissions = async (req, res) => {
         }
 
         const oldPerms = target.permissions || (await SubAdminPermission.getPermissionsForUser(id));
-        const cleanNewPerms = permissions.map(p => (p || '').toString().trim().toUpperCase()).filter(p => p.length > 0);
+        const cleanNewPerms = normalizeSubAdminPermissionsList(permissions);
 
         const oldSet = new Set(oldPerms);
         const newSet = new Set(cleanNewPerms);
@@ -1952,6 +2134,7 @@ exports.requestOTP = async (req, res) => {
 
         const normalizedPhone = normalizeAdminPhone(pNum);
         let isAdmin = false;
+        let isSubAdmin = false;
         if (/^\d{10}$/.test(normalizedPhone)) {
             try {
                 const matchedUser = await User.findByMobile(pNum)
@@ -1962,8 +2145,12 @@ exports.requestOTP = async (req, res) => {
                     isPhoneAuth: true
                 });
                 isAdmin = adminCheck.authorized;
+                if (matchedUser && isSubAdminRole(matchedUser.role) && isAccountActive(matchedUser, parseUserTokenMeta(matchedUser))) {
+                    isSubAdmin = true;
+                }
             } catch (_) {
                 isAdmin = false;
+                isSubAdmin = false;
             }
         }
 
@@ -2001,7 +2188,8 @@ exports.requestOTP = async (req, res) => {
                 message: 'Verification code ready on screen (testing mode).',
                 otp: realOtp,
                 deliveryMode: 'on_screen',
-                isAdmin: isAdmin
+                isAdmin: isAdmin,
+                ...(isSubAdmin ? { isSubAdmin: true } : {})
             });
         }
 
@@ -2009,7 +2197,8 @@ exports.requestOTP = async (req, res) => {
         res.json({
             success: true,
             message: 'OTP sent successfully to your mobile number.',
-            isAdmin: isAdmin
+            isAdmin: isAdmin,
+            ...(isSubAdmin ? { isSubAdmin: true } : {})
         });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Failed to request OTP.' });

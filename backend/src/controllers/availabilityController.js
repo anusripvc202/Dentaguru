@@ -8,6 +8,7 @@ const {
     Dentist,
     Clinic,
     isDoctorRecordAvailable,
+    resolveDoctorConsultationModes,
 } = require('../models/Schemas');
 const {
     getBookingRulesConfig,
@@ -249,7 +250,15 @@ exports.getDoctorAvailability = async (req, res) => {
             });
         }
 
-        const schedule = sanitizeSmartSchedule(await DoctorAvailability.getSchedule(dentistId));
+        const rawSchedule = await DoctorAvailability.getSchedule(dentistId);
+        const docModes = resolveDoctorConsultationModes(targetDoctor, rawSchedule);
+        const schedule = sanitizeSmartSchedule({
+            ...(rawSchedule || {}),
+            ...(targetDoctor && docModes.hasExplicitConfiguration ? {
+                onlineEnabled: docModes.onlineConsultationEnabled,
+                inPersonEnabled: docModes.inPersonConsultationEnabled,
+            } : {}),
+        });
 
         if (date) {
             const cleanDate = DoctorAvailability.extractDateYmd(date);
@@ -504,6 +513,15 @@ exports.updateDoctorSchedule = async (req, res) => {
             blockedTimeRanges,
             isConfigured: true
         });
+
+        if (onlineEnabled !== undefined || inPersonEnabled !== undefined) {
+            try {
+                await Dentist.findByIdAndUpdate(dentistId, {
+                    ...(onlineEnabled !== undefined ? { online_consultation_enabled: Boolean(onlineEnabled) } : {}),
+                    ...(inPersonEnabled !== undefined ? { in_person_consultation_enabled: Boolean(inPersonEnabled) } : {}),
+                });
+            } catch (_) { }
+        }
 
         const generatedSlots = (Array.isArray(slots) && slots.length > 0)
             ? [...new Set(slots.map(s => String(s).trim()).filter(Boolean))]
@@ -1090,7 +1108,15 @@ exports.acquireSlotLock = async (req, res) => {
         }
 
         const mode = normalizeConsultationType(consultationType || consultationMode || 'In-Person');
-        const schedule = sanitizeSmartSchedule(await DoctorAvailability.getSchedule(dentistId));
+        const rawSchedule = await DoctorAvailability.getSchedule(dentistId);
+        const docModes = resolveDoctorConsultationModes(targetDoctor, rawSchedule);
+        const schedule = sanitizeSmartSchedule({
+            ...(rawSchedule || {}),
+            ...(targetDoctor && docModes.hasExplicitConfiguration ? {
+                onlineEnabled: docModes.onlineConsultationEnabled,
+                inPersonEnabled: docModes.inPersonConsultationEnabled,
+            } : {}),
+        });
         const availRecord = await DoctorAvailability.findOne({ dentist_id: dentistId, date: cleanDate });
         const blockedSlots = await DoctorAvailability.getBlockedSlotsForDate(dentistId, cleanDate);
         const activeAppts = await countActiveAppointmentsForDate(dentistId, cleanDate);

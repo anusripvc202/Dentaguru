@@ -5,6 +5,7 @@ import '../../../../core/models/referral_model.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
+import '../widgets/admin_requests_referrals_calendar.dart';
 
 class AdminReferralsScreen extends StatefulWidget {
   const AdminReferralsScreen({super.key});
@@ -18,6 +19,7 @@ class _AdminReferralsScreenState extends State<AdminReferralsScreen> {
   String _selectedStatus = 'All';
   String _searchQuery = '';
   final TextEditingController _searchCtrl = TextEditingController();
+  bool _isCalendarView = false;
 
   @override
   void initState() {
@@ -268,6 +270,92 @@ class _AdminReferralsScreenState extends State<AdminReferralsScreen> {
                       ),
                     ),
                   ),
+                  Container(
+                    key: const Key('admin_referrals_screen_view_toggle'),
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(11),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        InkWell(
+                          key: const Key('admin_referrals_screen_list_view_btn'),
+                          onTap: () {
+                            if (_isCalendarView) {
+                              setState(() => _isCalendarView = false);
+                            }
+                          },
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: !_isCalendarView ? AppTheme.gsNavy : Colors.transparent,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.view_list_rounded,
+                                  size: 14,
+                                  color: !_isCalendarView ? Colors.white : const Color(0xFF475569),
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  'List View',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: !_isCalendarView ? Colors.white : const Color(0xFF475569),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        InkWell(
+                          key: const Key('admin_referrals_screen_calendar_view_btn'),
+                          onTap: () {
+                            if (!_isCalendarView) {
+                              setState(() => _isCalendarView = true);
+                            }
+                          },
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: _isCalendarView ? AppTheme.gsNavy : Colors.transparent,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.calendar_month_rounded,
+                                  size: 14,
+                                  color: _isCalendarView ? Colors.white : const Color(0xFF475569),
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  'Calendar View',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: _isCalendarView ? Colors.white : const Color(0xFF475569),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   IconButton(
                     icon: const Icon(Icons.refresh_rounded, color: AppTheme.gsNavy),
                     onPressed: () => _problemService.syncAdminReferralsFromApi(),
@@ -278,7 +366,15 @@ class _AdminReferralsScreenState extends State<AdminReferralsScreen> {
 
             // Main Content
             Expanded(
-              child: RefreshIndicator(
+              child: _isCalendarView
+                  ? SingleChildScrollView(
+                      physics: const BouncingScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                      child: AdminRequestsReferralsCalendarView(
+                        problemService: _problemService,
+                      ),
+                    )
+                  : RefreshIndicator(
                 onRefresh: () => _problemService.syncAdminReferralsFromApi(),
                 child: ListView(
                   physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),

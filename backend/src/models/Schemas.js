@@ -317,23 +317,35 @@ const User = {
         }
 
         // Pack extra profile metadata into device_token if not already a real push token
-        if (!userData.device_token || userData.device_token.startsWith('{')) {
-            const meta = {};
-            if (userData.age) meta.age = userData.age;
-            if (userData.gender) meta.gender = userData.gender;
-            if (userData.blood_group) meta.bloodGroup = userData.blood_group;
-            if (userData.emergency_contact) meta.emergencyContact = userData.emergency_contact;
-            if (userData.languages) meta.languages = userData.languages;
-            if (userData.permissions) meta.permissions = userData.permissions;
-            if (userData.status) meta.status = userData.status;
+        if (!userData.device_token || (typeof userData.device_token === 'string' && userData.device_token.trim().startsWith('{'))) {
+            let meta = {};
+            if (typeof userData.device_token === 'string' && userData.device_token.trim().startsWith('{')) {
+                try {
+                    meta = JSON.parse(userData.device_token.trim());
+                } catch (_) {
+                    meta = {};
+                }
+            }
+            if (userData.age !== undefined) meta.age = userData.age;
+            if (userData.gender !== undefined) meta.gender = userData.gender;
+            if (userData.blood_group !== undefined) meta.bloodGroup = userData.blood_group;
+            if (userData.emergency_contact !== undefined) meta.emergencyContact = userData.emergency_contact;
+            if (userData.city !== undefined) meta.city = userData.city;
+            if (userData.pincode !== undefined) meta.pincode = userData.pincode;
+            if (userData.state !== undefined) meta.state = userData.state;
+            if (userData.languages !== undefined) meta.languages = userData.languages;
+            if (userData.permissions !== undefined) meta.permissions = userData.permissions;
+            if (userData.status !== undefined) meta.status = String(userData.status).trim().toUpperCase();
+            if (userData.biometric_token) meta.profilePhoto = userData.biometric_token;
             if (Object.keys(meta).length > 0) {
                 userData.device_token = JSON.stringify(meta);
             }
         }
 
+        const NON_COLUMN_KEYS = new Set(['permissions', 'districtIds', 'districts', 'assignedDistricts']);
         const payload = {};
         for (const [key, val] of Object.entries(userData)) {
-            if (val !== undefined && val !== null) {
+            if (val !== undefined && val !== null && !NON_COLUMN_KEYS.has(key)) {
                 payload[key] = val;
             }
         }
@@ -344,7 +356,7 @@ const User = {
             if (error) throw error;
             insertedData = data;
         } catch (err) {
-            // Fallback: Strip unmapped columns and use standard core columns
+            // Fallback 1: Strip unmapped/optional columns and use standard columns
             const safePayload = {
                 name: payload.name || 'User',
                 email: payload.email,
@@ -352,19 +364,36 @@ const User = {
                 phone: payload.phone,
                 role: payload.role || 'Patient',
             };
-            if (payload.city) safePayload.city = payload.city;
-            if (payload.pincode) safePayload.pincode = payload.pincode;
-            if (payload.state) safePayload.state = payload.state;
-            if (payload.status) safePayload.status = String(payload.status).trim().toUpperCase();
-            if (payload.device_token) safePayload.device_token = payload.device_token;
-            if (payload.biometric_token) safePayload.biometric_token = payload.biometric_token;
-
-            const { data, error } = await supabaseAdmin.from('users').insert(safePayload).select().single();
-            if (error) {
-                console.error('❌ Supabase User Insert Error:', error.message);
-                throw error;
+            if (payload.city !== undefined) safePayload.city = payload.city;
+            if (payload.pincode !== undefined) safePayload.pincode = payload.pincode;
+            if (payload.state !== undefined) safePayload.state = payload.state;
+            if (payload.status !== undefined && !(err && typeof err.message === 'string' && err.message.toLowerCase().includes('status'))) {
+                safePayload.status = String(payload.status).trim().toUpperCase();
             }
-            insertedData = data;
+            if (payload.device_token !== undefined) safePayload.device_token = payload.device_token;
+            if (payload.biometric_token !== undefined) safePayload.biometric_token = payload.biometric_token;
+
+            const firstRetry = await supabaseAdmin.from('users').insert(safePayload).select().single();
+            if (!firstRetry.error && firstRetry.data) {
+                insertedData = firstRetry.data;
+            } else {
+                // Fallback 2: Minimal guaranteed core columns on legacy public.users schema
+                const minimalPayload = {
+                    name: payload.name || 'User',
+                    email: payload.email,
+                    password: payload.password,
+                    phone: payload.phone,
+                    role: payload.role || 'Patient',
+                };
+                if (payload.device_token !== undefined) minimalPayload.device_token = payload.device_token;
+                if (payload.biometric_token !== undefined) minimalPayload.biometric_token = payload.biometric_token;
+                const secondRetry = await supabaseAdmin.from('users').insert(minimalPayload).select().single();
+                if (secondRetry.error) {
+                    console.error('❌ Supabase User Insert Error:', secondRetry.error.message);
+                    throw secondRetry.error;
+                }
+                insertedData = secondRetry.data;
+            }
         }
 
         if (insertedData && userData.permissions && Array.isArray(userData.permissions)) {
@@ -374,8 +403,11 @@ const User = {
         if (insertedData && userData.languages) {
             insertedData.languages = userData.languages;
         }
+        if (insertedData && userData.status && !insertedData.status) {
+            insertedData.status = String(userData.status).trim().toUpperCase();
+        }
 
-        return insertedData;
+        return _unpackUserRecord(insertedData);
     },
 
     async updateFcmToken(id, fcmToken) {
@@ -1757,6 +1789,177 @@ async function resolveMedicalSpecialtyRecord(rawSpecialty, rawSpecialtyId = null
 }
 
 // 3. DENTIST / DOCTOR MODEL (Supabase PostgreSQL)
+const _inMemoryDoctorConsultationModes = new Map();
+
+function _parseConsultationBoolFlag(val) {
+    if (typeof val === 'boolean') return val;
+    if (typeof val === 'number') return val !== 0;
+    if (typeof val === 'string') {
+        const s = val.trim().toLowerCase();
+        if (s === 'true' || s === '1' || s === 'yes' || s === 'on' || s === 'enabled') return true;
+        if (s === 'false' || s === '0' || s === 'no' || s === 'off' || s === 'disabled') return false;
+    }
+    return undefined;
+}
+
+function _recordInMemoryDoctorConsultationModes(keys, onlineVal, inPersonVal) {
+    if (onlineVal === undefined && inPersonVal === undefined) return;
+    for (const rawKey of keys) {
+        const k = String(rawKey || '').trim();
+        if (!k) continue;
+        const prev = _inMemoryDoctorConsultationModes.get(k) || {};
+        _inMemoryDoctorConsultationModes.set(k, {
+            ...prev,
+            ...(onlineVal !== undefined ? { online_consultation_enabled: onlineVal } : {}),
+            ...(inPersonVal !== undefined ? { in_person_consultation_enabled: inPersonVal } : {}),
+        });
+    }
+}
+
+/**
+ * Resolves a doctor's Online and In-Person consultation support.
+ * CRITICAL RULE:
+ *   - Do NOT assume every registered doctor supports both consultation modes.
+ *   - Existing doctors with unknown consultation availability default to:
+ *       onlineConsultationEnabled = false
+ *       inPersonConsultationEnabled = true
+ */
+function resolveDoctorConsultationModes(d, schedule = null) {
+    if (!d || typeof d !== 'object') {
+        return {
+            onlineConsultationEnabled: false,
+            inPersonConsultationEnabled: true,
+            hasExplicitConfiguration: false,
+            consultationModes: ['In-Person'],
+            consultationModeLabel: 'In-Person Only',
+        };
+    }
+    const uObj = Array.isArray(d.users) ? (d.users[0] || {}) : (d.users || {});
+    let uMeta = {};
+    const rawToken = uObj.device_token || d.device_token;
+    if (rawToken && typeof rawToken === 'string' && rawToken.trim().startsWith('{')) {
+        try { uMeta = JSON.parse(rawToken); } catch (_) { }
+    }
+    const docKey = String(d.id || '').trim();
+    const userKey = String(d.user_id || uObj.id || '').trim();
+    const memEntry = (docKey && _inMemoryDoctorConsultationModes.get(docKey)) ||
+        (userKey && _inMemoryDoctorConsultationModes.get(userKey)) ||
+        null;
+
+    const explicitOnline = _parseConsultationBoolFlag(
+        d.online_consultation_enabled ??
+        d.onlineConsultationEnabled ??
+        d.supports_online_consultation ??
+        d.supportsOnlineConsultation ??
+        d.supports_online ??
+        d.supportsOnline ??
+        memEntry?.online_consultation_enabled ??
+        uMeta.online_consultation_enabled ??
+        uMeta.onlineConsultationEnabled ??
+        uMeta.supportsOnlineConsultation
+    );
+
+    const explicitInPerson = _parseConsultationBoolFlag(
+        d.in_person_consultation_enabled ??
+        d.inPersonConsultationEnabled ??
+        d.offline_consultation_enabled ??
+        d.offlineConsultationEnabled ??
+        d.supports_in_person_consultation ??
+        d.supportsInPersonConsultation ??
+        d.supports_in_person ??
+        d.supportsInPerson ??
+        memEntry?.in_person_consultation_enabled ??
+        uMeta.in_person_consultation_enabled ??
+        uMeta.inPersonConsultationEnabled ??
+        uMeta.supportsInPersonConsultation
+    );
+
+    let modeFromTextOnline = undefined;
+    let modeFromTextInPerson = undefined;
+    const rawModeStr = String(
+        d.consultation_mode || d.consultationMode || uMeta.consultation_mode || uMeta.consultationMode || ''
+    ).trim().toLowerCase();
+    if (rawModeStr) {
+        if (
+            rawModeStr === 'both' ||
+            rawModeStr === 'hybrid' ||
+            (rawModeStr.includes('online') && (rawModeStr.includes('offline') || rawModeStr.includes('in-person') || rawModeStr.includes('in_person') || rawModeStr.includes('clinic')))
+        ) {
+            modeFromTextOnline = true;
+            modeFromTextInPerson = true;
+        } else if (rawModeStr === 'online' || rawModeStr === 'online only' || rawModeStr === 'online_only' || rawModeStr === 'online-only') {
+            modeFromTextOnline = true;
+            modeFromTextInPerson = false;
+        } else if (
+            rawModeStr === 'offline' ||
+            rawModeStr === 'in-person' ||
+            rawModeStr === 'in_person' ||
+            rawModeStr === 'clinic' ||
+            rawModeStr === 'offline only' ||
+            rawModeStr === 'in-person only' ||
+            rawModeStr === 'in_person_only'
+        ) {
+            modeFromTextOnline = false;
+            modeFromTextInPerson = true;
+        }
+    }
+
+    const scheduleConfigured = Boolean(schedule && schedule.isConfigured === true);
+    const scheduleOnline = scheduleConfigured ? _parseConsultationBoolFlag(schedule.onlineEnabled ?? schedule.online_enabled) : undefined;
+    const scheduleInPerson = scheduleConfigured ? _parseConsultationBoolFlag(schedule.inPersonEnabled ?? schedule.in_person_enabled) : undefined;
+
+    const resolvedOnline = explicitOnline !== undefined
+        ? explicitOnline
+        : (modeFromTextOnline !== undefined
+            ? modeFromTextOnline
+            : (scheduleOnline !== undefined ? scheduleOnline : false));
+
+    const resolvedInPerson = explicitInPerson !== undefined
+        ? explicitInPerson
+        : (modeFromTextInPerson !== undefined
+            ? modeFromTextInPerson
+            : (scheduleInPerson !== undefined ? scheduleInPerson : true));
+
+    const hasExplicitConfiguration =
+        explicitOnline !== undefined ||
+        explicitInPerson !== undefined ||
+        modeFromTextOnline !== undefined ||
+        modeFromTextInPerson !== undefined ||
+        scheduleConfigured;
+
+    const consultationModes = [];
+    if (resolvedOnline) consultationModes.push('Online');
+    if (resolvedInPerson) consultationModes.push('In-Person');
+
+    let consultationModeLabel = 'Unavailable';
+    if (resolvedOnline && resolvedInPerson) consultationModeLabel = 'Both (Online & Clinic)';
+    else if (resolvedOnline) consultationModeLabel = 'Online Only';
+    else if (resolvedInPerson) consultationModeLabel = 'In-Person Only';
+
+    return {
+        onlineConsultationEnabled: resolvedOnline,
+        inPersonConsultationEnabled: resolvedInPerson,
+        hasExplicitConfiguration,
+        consultationModes,
+        consultationModeLabel,
+    };
+}
+
+function _hydrateDentistConsultationModes(d) {
+    if (!d || typeof d !== 'object') return d;
+    const modes = resolveDoctorConsultationModes(d);
+    if (modes.hasExplicitConfiguration) {
+        return {
+            ...d,
+            online_consultation_enabled: modes.onlineConsultationEnabled,
+            onlineConsultationEnabled: modes.onlineConsultationEnabled,
+            in_person_consultation_enabled: modes.inPersonConsultationEnabled,
+            inPersonConsultationEnabled: modes.inPersonConsultationEnabled,
+        };
+    }
+    return d;
+}
+
 const Dentist = {
     async findOne(query) {
         if (!query) return null;
@@ -1787,7 +1990,7 @@ const Dentist = {
             if (error) {
                 return null;
             }
-            return data;
+            return _hydrateDentistConsultationModes(data);
         } catch (_) {
             return null;
         }
@@ -1832,11 +2035,11 @@ const Dentist = {
             if (langFilters.length > 0) {
                 list = list.filter(d => doctorMatchesLanguages(d, langFilters));
             }
-            return list;
+            return list.map(_hydrateDentistConsultationModes);
         } catch (e) {
             console.warn('⚠️ Dentist query error, falling back to simple select:', e.message);
             const simple = await supabaseAdmin.from('dentists').select('*');
-            return simple.data || [];
+            return (simple.data || []).map(_hydrateDentistConsultationModes);
         }
     },
 
@@ -1854,9 +2057,9 @@ const Dentist = {
                 .maybeSingle();
             if (error || !data) {
                 const simple = await supabaseAdmin.from('dentists').select('*').or(`id.eq.${str},user_id.eq.${str}`).maybeSingle();
-                return simple.data || null;
+                return _hydrateDentistConsultationModes(simple.data || null);
             }
-            return data;
+            return _hydrateDentistConsultationModes(data);
         } catch (_) {
             return null;
         }
@@ -1890,6 +2093,17 @@ const Dentist = {
         const { validateCoordinates } = require('../utils/doctorClinicLocationHelper');
         const coordCheck = validateCoordinates(dentistData.latitude, dentistData.longitude, false);
 
+        const explicitOnline = _parseConsultationBoolFlag(
+            dentistData.online_consultation_enabled ??
+            dentistData.onlineConsultationEnabled ??
+            dentistData.supportsOnlineConsultation
+        );
+        const explicitInPerson = _parseConsultationBoolFlag(
+            dentistData.in_person_consultation_enabled ??
+            dentistData.inPersonConsultationEnabled ??
+            dentistData.supportsInPersonConsultation
+        );
+
         const payload = {
             user_id: validUserId,
             clinic_id: validClinicId,
@@ -1907,6 +2121,8 @@ const Dentist = {
             consultation_fee: (dentistData.consultation_fee || dentistData.consultationFee || '').toString(),
             bio: (dentistData.bio || '').toString()
         };
+        if (explicitOnline !== undefined) payload.online_consultation_enabled = explicitOnline;
+        if (explicitInPerson !== undefined) payload.in_person_consultation_enabled = explicitInPerson;
         const rawClinicName = (dentistData.clinic_name ?? dentistData.clinicName ?? '').toString().trim();
         const rawClinicAddress = (dentistData.clinic_address ?? dentistData.clinicAddress ?? '').toString().trim();
         if (rawClinicName) payload.clinic_name = rawClinicName;
@@ -1922,7 +2138,8 @@ const Dentist = {
         try {
             const { data, error } = await supabaseAdmin.from('dentists').insert(payload).select().single();
             if (error) throw error;
-            return data;
+            _recordInMemoryDoctorConsultationModes([data?.id, data?.user_id, validUserId], explicitOnline, explicitInPerson);
+            return _hydrateDentistConsultationModes(data);
         } catch (err) {
             const errMsg = (err && err.message ? err.message : '').toLowerCase();
             if (errMsg.includes('dentists_license_number_key')) {
@@ -1931,20 +2148,30 @@ const Dentist = {
                     license_number: `MED-LIC-${Date.now()}-${Math.floor(10000 + Math.random() * 90000)}`
                 };
                 const { data: retryData, error: retryErr } = await supabaseAdmin.from('dentists').insert(retryPayload).select().single();
-                if (!retryErr && retryData) return retryData;
+                if (!retryErr && retryData) {
+                    _recordInMemoryDoctorConsultationModes([retryData?.id, retryData?.user_id, validUserId], explicitOnline, explicitInPerson);
+                    return _hydrateDentistConsultationModes(retryData);
+                }
             }
             if (
                 errMsg.includes('languages') ||
                 errMsg.includes('clinic_name') ||
                 errMsg.includes('clinic_address') ||
+                errMsg.includes('online_consultation_enabled') ||
+                errMsg.includes('in_person_consultation_enabled') ||
                 errMsg.includes('column')
             ) {
                 const fallbackPayload = { ...payload };
                 if (errMsg.includes('languages')) delete fallbackPayload.languages;
                 delete fallbackPayload.clinic_name;
                 delete fallbackPayload.clinic_address;
+                delete fallbackPayload.online_consultation_enabled;
+                delete fallbackPayload.in_person_consultation_enabled;
                 const { data: retryData, error: retryErr } = await supabaseAdmin.from('dentists').insert(fallbackPayload).select().single();
-                if (!retryErr && retryData) return retryData;
+                if (!retryErr && retryData) {
+                    _recordInMemoryDoctorConsultationModes([retryData?.id, retryData?.user_id, validUserId], explicitOnline, explicitInPerson);
+                    return _hydrateDentistConsultationModes(retryData);
+                }
             }
             console.error('❌ Supabase Dentist Insert Error:', err.message);
             throw err;
@@ -1982,6 +2209,20 @@ const Dentist = {
         if (updateData.bio !== undefined) {
             payload.bio = String(updateData.bio ?? '');
         }
+        const explicitOnline = _parseConsultationBoolFlag(
+            updateData.online_consultation_enabled ??
+            updateData.onlineConsultationEnabled ??
+            updateData.supportsOnlineConsultation
+        );
+        const explicitInPerson = _parseConsultationBoolFlag(
+            updateData.in_person_consultation_enabled ??
+            updateData.inPersonConsultationEnabled ??
+            updateData.supportsInPersonConsultation
+        );
+        if (explicitOnline !== undefined) payload.online_consultation_enabled = explicitOnline;
+        if (explicitInPerson !== undefined) payload.in_person_consultation_enabled = explicitInPerson;
+        _recordInMemoryDoctorConsultationModes([str], explicitOnline, explicitInPerson);
+
         const { validateCoordinates } = require('../utils/doctorClinicLocationHelper');
         if (updateData.clinic_id !== undefined) payload.clinic_id = updateData.clinic_id;
         if (updateData.clinic_name !== undefined || updateData.clinicName !== undefined) {
@@ -2019,30 +2260,45 @@ const Dentist = {
                 .or(`id.eq.${str},user_id.eq.${str}`)
                 .select()
                 .maybeSingle();
-            if (!error && data) return data;
+            if (!error && data) {
+                _recordInMemoryDoctorConsultationModes([data.id, data.user_id, str], explicitOnline, explicitInPerson);
+                return _hydrateDentistConsultationModes(data);
+            }
             if (error) {
                 const errMsg = (error.message || '').toLowerCase();
                 if (
                     errMsg.includes('clinic_name') ||
                     errMsg.includes('clinic_address') ||
+                    errMsg.includes('online_consultation_enabled') ||
+                    errMsg.includes('in_person_consultation_enabled') ||
                     errMsg.includes('column')
                 ) {
                     const fallbackPayload = { ...payload };
                     delete fallbackPayload.clinic_name;
                     delete fallbackPayload.clinic_address;
+                    delete fallbackPayload.online_consultation_enabled;
+                    delete fallbackPayload.in_person_consultation_enabled;
                     const retry = await supabaseAdmin
                         .from('dentists')
                         .update(fallbackPayload)
                         .or(`id.eq.${str},user_id.eq.${str}`)
                         .select()
                         .maybeSingle();
-                    if (!retry.error && retry.data) return retry.data;
+                    if (!retry.error && retry.data) {
+                        _recordInMemoryDoctorConsultationModes([retry.data.id, retry.data.user_id, str], explicitOnline, explicitInPerson);
+                        return _hydrateDentistConsultationModes(retry.data);
+                    }
                 }
             }
         } catch (e) {
             console.warn('⚠️ Dentist.findByIdAndUpdate warning:', e.message);
         }
-        return await this.findById(str);
+        const existing = await this.findById(str);
+        if (existing) {
+            _recordInMemoryDoctorConsultationModes([existing.id, existing.user_id, str], explicitOnline, explicitInPerson);
+            return _hydrateDentistConsultationModes(existing);
+        }
+        return null;
     }
 };
 
@@ -2587,37 +2843,525 @@ const normalizeChatRoomId = (roomId) => {
     return str.replace(/[-]/g, '_');
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 6a. CHAT AUTHORIZATION LAYER (role mapping, linked care pairs, room scoping)
+// ─────────────────────────────────────────────────────────────────────────────
+function mapUserRoleToChatRole(rawRole) {
+    if (rawRole === null || rawRole === undefined) return null;
+    const r = String(rawRole).trim().toLowerCase().replace(/\s+/g, '');
+    if (!r) return null;
+    if (r === 'sub-admin' || r === 'subadmin' || r === 'sub_admin') return 'SUB_ADMIN';
+    if (r === 'admin' || r === 'primaryadmin' || r === 'primary_admin' || r === 'superadmin' || r === 'super_admin' || r === 'mainadmin') return 'ADMIN';
+    if (r === 'dentist' || r === 'doctor' || r === 'specialist') return 'DOCTOR';
+    if (r === 'clinic' || r === 'clinic_admin' || r === 'clinicadmin' || r === 'clinic-admin') return 'CLINIC';
+    if (r === 'patient') return 'PATIENT';
+    return null;
+}
+
+const isExplicitActiveStatus = (s) => s !== null && s !== undefined && String(s).trim().toUpperCase() === 'ACTIVE';
+const strictNormalizeChatRoomId = (raw) => String(raw ?? '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '_');
+const CHAT_UUID_SEG = '([0-9A-F]{8}_[0-9A-F]{4}_[0-9A-F]{4}_[0-9A-F]{4}_[0-9A-F]{12})';
+const CANONICAL_CHAT_ROOM_REGEX = new RegExp(`^CHAT_${CHAT_UUID_SEG}_${CHAT_UUID_SEG}$`);
+
+function buildCanonicalChatRoomId(patientUserId, dentistId) {
+    return `CHAT_${strictNormalizeChatRoomId(patientUserId)}_${strictNormalizeChatRoomId(dentistId)}`;
+}
+
+function parseCanonicalChatRoomId(roomId) {
+    const m = strictNormalizeChatRoomId(roomId).match(CANONICAL_CHAT_ROOM_REGEX);
+    if (!m) return null;
+    const toUuid = (seg) => seg.toLowerCase().split('_').join('-');
+    return { patientUserId: toUuid(m[1]), dentistId: toUuid(m[2]) };
+}
+
+// Legacy (pre-canonical) room ids generated by older app builds from display names
+function legacyChatRoomIdsForNames(patientName, doctorName) {
+    const pn = String(patientName || '').trim();
+    if (!pn) return [];
+    const rawToken = (v, isDoc) => {
+        let t = String(v || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '_');
+        if (isDoc) t = t.replace(/^DR_/, '');
+        return t;
+    };
+    const cleanToken = (v, isDoc) => rawToken(v, isDoc).replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+
+    const pTokens = new Set([rawToken(pn, false), cleanToken(pn, false)].filter(Boolean));
+    const out = new Set();
+    for (const pt of pTokens) {
+        out.add(`PATIENT_${pt}`);
+    }
+    const dn = String(doctorName || '').trim();
+    if (dn) {
+        const bare = dn.replace(/^dr\.?\s*/i, '').trim();
+        for (const v of new Set([dn, bare, `Dr. ${bare}`, `Dr ${bare}`])) {
+            for (const dt of [rawToken(v, true), cleanToken(v, true)]) {
+                if (!dt) continue;
+                for (const pt of pTokens) {
+                    out.add(`CHAT_${pt}_${dt}`);
+                }
+            }
+        }
+    }
+    for (const pt of pTokens) {
+        out.add(`CHAT_${pt}_DOCTOR`);
+    }
+    return Array.from(out);
+}
+
+async function _chatRows(builder) {
+    try {
+        const { data, error } = await builder;
+        if (error) return [];
+        return Array.isArray(data) ? data : (data ? [data] : []);
+    } catch (_) {
+        return [];
+    }
+}
+
+async function _chatDentistRows(ids) {
+    const clean = Array.from(new Set((ids || []).map(x => String(x || '').trim()).filter(isUUID)));
+    if (clean.length === 0) return [];
+    const a = await _chatRows(supabaseAdmin.from('dentists').select('id, user_id, clinic_id').in('id', clean));
+    const b = await _chatRows(supabaseAdmin.from('dentists').select('id, user_id, clinic_id').in('user_id', clean));
+    const map = new Map();
+    for (const r of [...a, ...b]) {
+        if (r && r.id) map.set(String(r.id), r);
+    }
+    return Array.from(map.values());
+}
+
+const _chatPairsCache = new Map();
+const CHAT_PAIRS_CACHE_TTL_MS = 15000;
+
+/**
+ * Computes verified patient↔doctor care pairs for a caller from real clinical records
+ * (problem requests, appointments, dentist suggestions, referrals, saved doctors).
+ */
+async function computeChatLinkedPairs(user, chatRole, options = {}) {
+    if (!user || !user.id || !chatRole) return [];
+    const cacheKey = `${chatRole}:${user.id}`;
+    if (!options.bypassCache) {
+        const cached = _chatPairsCache.get(cacheKey);
+        if (cached && Date.now() - cached.at < CHAT_PAIRS_CACHE_TTL_MS) return cached.pairs;
+    }
+
+    const rawPairs = [];
+    if (chatRole === 'PATIENT') {
+        const pid = String(user.id);
+        const reqs = await _chatRows(supabaseAdmin.from('patient_problem_requests').select('patient_id, patient_name, suggested_dentist_id').eq('patient_id', pid));
+        const appts = await _chatRows(supabaseAdmin.from('appointments').select('patient_id, dentist_id').eq('patient_id', pid));
+        const suggs = await _chatRows(supabaseAdmin.from('dentist_suggestions').select('patient_id, dentist_id').eq('patient_id', pid));
+        const refs = await _chatRows(supabaseAdmin.from('referrals').select('referred_patient_id, doctor_id, assigned_doctor_id').eq('referred_patient_id', pid));
+        const rawDocIds = [
+            ...reqs.map(r => r.suggested_dentist_id),
+            ...appts.map(r => r.dentist_id),
+            ...suggs.map(r => r.dentist_id),
+            ...refs.map(r => r.doctor_id),
+            ...refs.map(r => r.assigned_doctor_id),
+        ];
+        try {
+            const saved = await PatientDoctor.getDoctorsForPatient(pid);
+            for (const s of (saved || [])) rawDocIds.push(s?.dentist_id, s?.doctor_id, s?.id, s?.user_id);
+        } catch (_) { }
+        const dRows = await _chatDentistRows(rawDocIds);
+        for (const d of dRows) {
+            rawPairs.push({ patientId: pid, dentistId: String(d.id), doctorUserId: d.user_id ? String(d.user_id) : null, clinicId: d.clinic_id ? String(d.clinic_id) : null });
+        }
+    } else if (chatRole === 'DOCTOR' || chatRole === 'CLINIC') {
+        let myDentists = [];
+        if (chatRole === 'DOCTOR') {
+            myDentists = await _chatDentistRows([user.id]);
+        } else {
+            const c = await resolveClinicIds(user.id);
+            if (c.clinicId) {
+                myDentists = await _chatRows(supabaseAdmin.from('dentists').select('id, user_id, clinic_id').eq('clinic_id', c.clinicId));
+            }
+        }
+        for (const d of myDentists) {
+            const dIds = [d.id, d.user_id].filter(Boolean).map(String);
+            if (dIds.length === 0) continue;
+            const reqs = await _chatRows(supabaseAdmin.from('patient_problem_requests').select('patient_id, patient_name, suggested_dentist_id').in('suggested_dentist_id', dIds));
+            const appts = await _chatRows(supabaseAdmin.from('appointments').select('patient_id, dentist_id').in('dentist_id', dIds));
+            const suggs = await _chatRows(supabaseAdmin.from('dentist_suggestions').select('patient_id, dentist_id').in('dentist_id', dIds));
+            const refs = await _chatRows(supabaseAdmin.from('referrals').select('referred_patient_id, referred_patient_name, doctor_id').in('doctor_id', dIds));
+            const patientIds = new Set([
+                ...reqs.map(r => r.patient_id),
+                ...appts.map(r => r.patient_id),
+                ...suggs.map(r => r.patient_id),
+                ...refs.map(r => r.referred_patient_id),
+            ].filter(Boolean).map(String).filter(isUUID));
+            for (const pid of patientIds) {
+                rawPairs.push({ patientId: pid, dentistId: String(d.id), doctorUserId: d.user_id ? String(d.user_id) : null, clinicId: d.clinic_id ? String(d.clinic_id) : null });
+            }
+            for (const r of reqs) {
+                if (!r.patient_id && r.patient_name) {
+                    rawPairs.push({ patientId: `name:${r.patient_name.trim().toLowerCase()}`, patientNameHint: r.patient_name.trim(), dentistId: String(d.id), doctorUserId: d.user_id ? String(d.user_id) : null, clinicId: d.clinic_id ? String(d.clinic_id) : null });
+                }
+            }
+            for (const rf of refs) {
+                if (!rf.referred_patient_id && rf.referred_patient_name) {
+                    rawPairs.push({ patientId: `name:${rf.referred_patient_name.trim().toLowerCase()}`, patientNameHint: rf.referred_patient_name.trim(), dentistId: String(d.id), doctorUserId: d.user_id ? String(d.user_id) : null, clinicId: d.clinic_id ? String(d.clinic_id) : null });
+                }
+            }
+        }
+    }
+
+    // Deduplicate pairs and enrich with names + clinic user ids
+    const pairMap = new Map();
+    for (const p of rawPairs) pairMap.set(`${p.patientId}|${p.dentistId}`, p);
+    const pairs = Array.from(pairMap.values());
+    const userIds = Array.from(new Set(pairs.flatMap(p => [isUUID(p.patientId) ? p.patientId : null, p.doctorUserId]).filter(Boolean)));
+    const userRows = userIds.length ? await _chatRows(supabaseAdmin.from('users').select('id, name').in('id', userIds)) : [];
+    const nameById = new Map(userRows.map(u => [String(u.id), u.name || '']));
+    const clinicIds = Array.from(new Set(pairs.map(p => p.clinicId).filter(Boolean)));
+    const clinicRows = clinicIds.length ? await _chatRows(supabaseAdmin.from('clinics').select('id, user_id').in('id', clinicIds)) : [];
+    const clinicUserById = new Map(clinicRows.map(c => [String(c.id), c.user_id ? String(c.user_id) : null]));
+    for (const p of pairs) {
+        p.patientName = (isUUID(p.patientId) ? nameById.get(p.patientId) : null) || p.patientNameHint || (chatRole === 'PATIENT' ? (user.name || '') : '');
+        p.doctorName = p.doctorUserId ? (nameById.get(p.doctorUserId) || '') : (chatRole === 'DOCTOR' ? (user.name || '') : '');
+        p.clinicUserId = p.clinicId ? (clinicUserById.get(p.clinicId) || null) : null;
+        p.canonicalRoomId = isUUID(p.patientId) ? buildCanonicalChatRoomId(p.patientId, p.dentistId) : null;
+        p.legacyRoomIds = [
+            ...(p.canonicalRoomId ? [p.canonicalRoomId] : []),
+            ...legacyChatRoomIdsForNames(p.patientName, p.doctorName)
+        ];
+    }
+
+    _chatPairsCache.set(cacheKey, { at: Date.now(), pairs });
+    return pairs;
+}
+
+/**
+ * Fail-closed authorization of the logged-in caller, the target conversation/room, and the receiver.
+ * Supports Phase 2B conversations (when tables exist), canonical CHAT_<patientUserId>_<dentistId> rooms,
+ * and legacy name-based rooms (only when they map to a verified care pair of the caller).
+ */
+async function authorizeChatParticipantAndReceiver({
+    callerUser,
+    roomId = null,
+    conversationId = null,
+    receiverId = null,
+    senderIdFromBody = null,
+    operation = 'ACCESS'
+} = {}) {
+    const deny = (status, message) => ({ authorized: false, status, message });
+    if (!callerUser || !callerUser.id) return deny(401, 'Authentication required.');
+
+    let dbCaller = null;
+    try { dbCaller = await User.findById(callerUser.id); } catch (_) { dbCaller = null; }
+    if (!dbCaller) return deny(403, 'Access Denied: Authenticated user account could not be verified.');
+    if (!isExplicitActiveStatus(dbCaller.status)) return deny(403, 'Access Denied: Only explicitly active accounts may use chat.');
+    const chatRole = mapUserRoleToChatRole(dbCaller.role);
+    if (!chatRole) return deny(403, 'Access Denied: Your role is not authorized for chat.');
+    if (chatRole === 'SUB_ADMIN') return deny(403, 'Access Denied: Sub-Admins are strictly prohibited from chat conversations.');
+
+    const isAdmin = chatRole === 'ADMIN';
+    const isWrite = operation === 'SEND' || operation === 'SEND_PRECHECK';
+    const isReceipt = operation === 'READ_RECEIPT';
+
+    let callerDentistIds = [];
+    if (chatRole === 'DOCTOR') {
+        callerDentistIds = (await _chatDentistRows([dbCaller.id]))
+            .flatMap(d => [d.id, d.user_id])
+            .filter(Boolean)
+            .map(String);
+    }
+
+    // Reject spoofed senderId values in request bodies
+    if (senderIdFromBody !== null && senderIdFromBody !== undefined && String(senderIdFromBody).trim()) {
+        const s = String(senderIdFromBody).trim();
+        if (isUUID(s) && s !== String(dbCaller.id) && !callerDentistIds.includes(s)) {
+            return deny(403, 'Access Denied: senderId does not match the authenticated user.');
+        }
+    }
+
+    const normRoom = roomId ? strictNormalizeChatRoomId(roomId) : null;
+    let conversation = null;
+    if (conversationId) {
+        const cid = String(conversationId).trim();
+        if (!isUUID(cid)) return deny(404, 'Target conversation could not be resolved.');
+        const rows = await _chatRows(supabaseAdmin.from('chat_conversations').select('*').eq('id', cid).limit(1));
+        conversation = rows[0] || null;
+        if (!conversation) return deny(404, 'Target conversation could not be resolved.');
+        if (normRoom && conversation.legacy_room_id && strictNormalizeChatRoomId(conversation.legacy_room_id) !== normRoom) {
+            return deny(403, 'Access Denied: roomId does not match the requested conversation.');
+        }
+    } else if (normRoom) {
+        const rows = await _chatRows(supabaseAdmin.from('chat_conversations').select('*').eq('legacy_room_id', normRoom).limit(5));
+        conversation = rows.find(r => String(r.status || '').toUpperCase() === 'ACTIVE') || rows[0] || null;
+    } else {
+        return deny(400, 'A valid conversationId or roomId is required.');
+    }
+
+    let scope = null;
+    if (conversation) {
+        const st = String(conversation.status || 'ACTIVE').trim().toUpperCase();
+        if (st === 'BLOCKED' && !isAdmin) return deny(403, 'Access Denied: This conversation is blocked.');
+        if (st !== 'ACTIVE' && (isWrite || isReceipt)) {
+            return deny(403, `Access Denied: This conversation is ${st.toLowerCase()} and no longer accepts new activity.`);
+        }
+        const dRows = conversation.dentist_id ? await _chatDentistRows([conversation.dentist_id]) : [];
+        const d = dRows.find(x => String(x.id) === String(conversation.dentist_id)) || null;
+        const participants = await _chatRows(supabaseAdmin.from('chat_participants').select('*').eq('conversation_id', conversation.id));
+        const activeParticipantIds = participants.filter(p => p.is_active !== false).map(p => String(p.user_id));
+        const clinicId = conversation.clinic_id || d?.clinic_id || null;
+        let clinicUserId = null;
+        if (clinicId) {
+            const cr = await _chatRows(supabaseAdmin.from('clinics').select('id, user_id').eq('id', clinicId).limit(1));
+            clinicUserId = cr[0]?.user_id ? String(cr[0].user_id) : null;
+        }
+        if (!isAdmin) {
+            let member = activeParticipantIds.includes(String(dbCaller.id));
+            if (!member && chatRole === 'PATIENT') member = String(conversation.patient_id || '') === String(dbCaller.id);
+            if (!member && chatRole === 'DOCTOR') member = callerDentistIds.includes(String(conversation.dentist_id || ''));
+            if (!member && chatRole === 'CLINIC') {
+                const c = await resolveClinicIds(dbCaller.id);
+                member = !!(c.clinicId && clinicId && String(c.clinicId) === String(clinicId));
+            }
+            if (!member) return deny(403, 'Access Denied: You are not a participant of this conversation.');
+        }
+        const target = conversation.legacy_room_id
+            ? strictNormalizeChatRoomId(conversation.legacy_room_id)
+            : (normRoom || `CONV_${strictNormalizeChatRoomId(conversation.id)}`);
+        scope = {
+            patientUserId: conversation.patient_id ? String(conversation.patient_id) : null,
+            dentistId: conversation.dentist_id ? String(conversation.dentist_id) : null,
+            doctorUserId: d?.user_id ? String(d.user_id) : null,
+            clinicId,
+            clinicUserId,
+            targetRoomId: target,
+            scopeRoomIds: [target],
+            activeParticipantIds,
+        };
+    } else {
+        const canon = parseCanonicalChatRoomId(normRoom);
+        if (canon) {
+            const dRows = await _chatDentistRows([canon.dentistId]);
+            const d = dRows.find(x => String(x.id) === canon.dentistId) || null;
+            let pUser = null;
+            try { pUser = await User.findById(canon.patientUserId); } catch (_) { pUser = null; }
+            if (!d || !pUser) return deny(404, 'Target conversation participants could not be resolved.');
+            if (!isAdmin) {
+                const pairs = await computeChatLinkedPairs(dbCaller, chatRole);
+                const linked = pairs.some(p => p.patientId === canon.patientUserId && p.dentistId === canon.dentistId);
+                if (!linked) return deny(403, 'Access Denied: You are not authorized for this conversation.');
+            }
+            let docUser = null;
+            if (d.user_id) { try { docUser = await User.findById(String(d.user_id)); } catch (_) { docUser = null; } }
+            let clinicUserId = null;
+            if (d.clinic_id) {
+                const cr = await _chatRows(supabaseAdmin.from('clinics').select('id, user_id').eq('id', d.clinic_id).limit(1));
+                clinicUserId = cr[0]?.user_id ? String(cr[0].user_id) : null;
+            }
+            scope = {
+                patientUserId: canon.patientUserId,
+                dentistId: canon.dentistId,
+                doctorUserId: d.user_id ? String(d.user_id) : null,
+                clinicId: d.clinic_id ? String(d.clinic_id) : null,
+                clinicUserId,
+                patientName: pUser.name || '',
+                doctorName: docUser?.name || '',
+                targetRoomId: normRoom,
+                scopeRoomIds: [normRoom, ...legacyChatRoomIdsForNames(pUser.name, docUser?.name)],
+            };
+        } else if (isAdmin) {
+            scope = { targetRoomId: normRoom, scopeRoomIds: [normRoom] };
+        } else {
+            let pairs = await computeChatLinkedPairs(dbCaller, chatRole);
+            let match = pairs.find(p => (p.legacyRoomIds || []).includes(normRoom));
+            if (!match) {
+                pairs = await computeChatLinkedPairs(dbCaller, chatRole, { bypassCache: true });
+                match = pairs.find(p => (p.legacyRoomIds || []).includes(normRoom));
+            }
+            if (!match) return deny(403, 'Access Denied: You are not authorized for this conversation.');
+            scope = {
+                ...match,
+                patientUserId: isUUID(match.patientId) ? match.patientId : null,
+                targetRoomId: normRoom,
+                scopeRoomIds: Array.from(new Set([normRoom, ...(match.legacyRoomIds || [])])),
+            };
+        }
+    }
+
+    const participantIds = new Set(
+        [scope.patientUserId, scope.doctorUserId, scope.clinicUserId, ...(scope.activeParticipantIds || [])]
+            .filter(Boolean)
+            .map(String)
+    );
+
+    let receiverUser = null;
+    if (isWrite) {
+        const rawRecv = receiverId !== null && receiverId !== undefined ? String(receiverId).trim() : '';
+        if (rawRecv && isUUID(rawRecv)) {
+            let r = null;
+            try { r = await User.findById(rawRecv); } catch (_) { r = null; }
+            if (!r) {
+                const dr = await _chatDentistRows([rawRecv]);
+                const d = dr.find(x => String(x.id) === rawRecv);
+                if (d?.user_id) { try { r = await User.findById(String(d.user_id)); } catch (_) { r = null; } }
+            }
+            if (!r) return deny(403, 'Access Denied: Message receiver could not be verified.');
+            if (!isExplicitActiveStatus(r.status)) return deny(403, 'Access Denied: Message receiver account is not active.');
+            const rRole = mapUserRoleToChatRole(r.role);
+            if (!rRole || rRole === 'SUB_ADMIN' || rRole === 'ADMIN') return deny(403, 'Access Denied: Receiver role is not permitted for this conversation.');
+            if (String(r.id) === String(dbCaller.id)) return deny(403, 'Access Denied: You cannot message yourself.');
+            if (chatRole === 'PATIENT' && rRole === 'PATIENT') return deny(403, 'Access Denied: Patients cannot message other patients.');
+            if (!participantIds.has(String(r.id))) return deny(403, 'Access Denied: Receiver is not a participant of this conversation.');
+            receiverUser = r;
+        } else {
+            const inferredId = chatRole === 'PATIENT' || chatRole === 'CLINIC'
+                ? scope.doctorUserId
+                : (chatRole === 'DOCTOR' ? scope.patientUserId : null);
+            if (inferredId && String(inferredId) !== String(dbCaller.id)) {
+                let r = null;
+                try { r = await User.findById(String(inferredId)); } catch (_) { r = null; }
+                const rRole = r ? mapUserRoleToChatRole(r.role) : null;
+                if (r && isExplicitActiveStatus(r.status) && rRole && rRole !== 'SUB_ADMIN' && rRole !== 'ADMIN') {
+                    receiverUser = r;
+                }
+            }
+        }
+    }
+
+    return {
+        authorized: true,
+        status: 200,
+        senderUser: dbCaller,
+        senderChatRole: chatRole,
+        receiverUser,
+        targetRoomId: scope.targetRoomId,
+        rawOrNormalizedRoomId: normRoom,
+        resolvedConversationId: conversation ? conversation.id : null,
+        scopeRoomIds: Array.from(new Set((scope.scopeRoomIds || []).filter(Boolean))),
+        participantUserIds: Array.from(participantIds),
+        patientUserId: scope.patientUserId || null,
+        doctorUserId: scope.doctorUserId || null,
+        dentistId: scope.dentistId || null,
+        patientName: scope.patientName || '',
+        doctorName: scope.doctorName || '',
+    };
+}
+
+/**
+ * Resolves the canonical CHAT_<patientUserId>_<dentistId> room for a patient↔doctor pair
+ * from any accepted identifier form (users.id or dentists.id), defaulting to the caller's own identity.
+ */
+async function resolveCanonicalChatRoom({ callerUser, patientId = null, doctorId = null } = {}) {
+    const fail = (status, message) => ({ ok: false, status, message });
+    if (!callerUser || !callerUser.id) return fail(401, 'Authentication required.');
+    const chatRole = mapUserRoleToChatRole(callerUser.role);
+    if (!chatRole || chatRole === 'SUB_ADMIN') return fail(403, 'Access Denied: Your role is not authorized for chat.');
+
+    let patientUserId = patientId ? String(patientId).trim() : '';
+    if (chatRole === 'PATIENT') {
+        if (patientUserId && patientUserId !== String(callerUser.id)) return fail(403, 'Access Denied: Patients can only open their own conversations.');
+        patientUserId = String(callerUser.id);
+    }
+    if (!isUUID(patientUserId)) return fail(400, 'A valid patient identifier is required to open this chat.');
+    let pUser = null;
+    try { pUser = await User.findById(patientUserId); } catch (_) { pUser = null; }
+    if (!pUser || mapUserRoleToChatRole(pUser.role) !== 'PATIENT') return fail(404, 'Patient account could not be resolved.');
+
+    let rawDoctor = doctorId ? String(doctorId).trim() : '';
+    if (!rawDoctor && chatRole === 'DOCTOR') rawDoctor = String(callerUser.id);
+    if (!isUUID(rawDoctor)) return fail(400, 'A valid doctor identifier is required to open this chat.');
+    const dRows = await _chatDentistRows([rawDoctor]);
+    const d = dRows.find(x => String(x.id) === rawDoctor || String(x.user_id) === rawDoctor) || null;
+    if (!d) return fail(404, 'Doctor profile could not be resolved.');
+    if (chatRole === 'DOCTOR' && String(d.user_id || '') !== String(callerUser.id)) {
+        return fail(403, 'Access Denied: Doctors can only open their own conversations.');
+    }
+    let docUser = null;
+    if (d.user_id) { try { docUser = await User.findById(String(d.user_id)); } catch (_) { docUser = null; } }
+
+    return {
+        ok: true,
+        roomId: buildCanonicalChatRoomId(pUser.id, d.id),
+        patientUserId: String(pUser.id),
+        patientName: pUser.name || '',
+        dentistId: String(d.id),
+        doctorUserId: d.user_id ? String(d.user_id) : null,
+        doctorName: docUser?.name || '',
+        legacyRoomIds: legacyChatRoomIdsForNames(pUser.name, docUser?.name),
+    };
+}
+
+const CHAT_MESSAGE_SELECT = '*, sender:users!sender_id(id, name, email, role), receiver:users!receiver_id(id, name, email, role)';
+
+function _chatRoomOrExpression(roomIds) {
+    const variants = new Set();
+    for (const r of (roomIds || [])) {
+        const n = strictNormalizeChatRoomId(r);
+        if (!n) continue;
+        variants.add(n);
+        variants.add(n.replace(/_/g, '-'));
+    }
+    return Array.from(variants).map(v => `room_id.eq.${v}`).join(',');
+}
+
 const ChatMessage = {
-    async create(messageData) {
+    async create(messageData, options = {}) {
         const cleanMessage = (messageData.message || '').toString().trim();
         if (!cleanMessage) {
             throw new Error('Message text cannot be empty.');
         }
 
-        const rawSender = messageData.sender_id || messageData.senderId || '';
-        let senderId = null;
+        const httpErr = (statusCode, message) => {
+            const e = new Error(message);
+            e.statusCode = statusCode;
+            return e;
+        };
 
-        if (rawSender) {
-            const str = String(rawSender).trim();
-            if (isUUID(str)) {
-                senderId = str;
-            } else {
-                senderId = await resolveUserUuid(str);
-            }
+        // Mandatory authorized caller (defense-in-depth for service-role writes)
+        const caller = options ? options.authorizedCaller : null;
+        if (!caller || !caller.id || !String(caller.id).trim()) {
+            throw httpErr(401, 'An authenticated caller is required to persist chat messages.');
+        }
+        if (!isExplicitActiveStatus(caller.status)) {
+            throw httpErr(403, 'Access Denied: Only explicitly active accounts may send chat messages.');
+        }
+        const callerRole = mapUserRoleToChatRole(caller.role);
+        if (!callerRole || callerRole === 'SUB_ADMIN') {
+            throw httpErr(403, 'Access Denied: Caller role is not authorized to send chat messages.');
+        }
+        if (options.authorizedChatRole && options.authorizedChatRole !== callerRole) {
+            throw httpErr(403, 'Access Denied: Supplied chat role does not match the authorized caller.');
+        }
+
+        const rawSender = String(messageData.sender_id || messageData.senderId || caller.id).trim();
+        if (rawSender !== String(caller.id).trim()) {
+            throw httpErr(403, 'Access Denied: Sender must be the authenticated caller.');
+        }
+        const senderId = rawSender;
+
+        let dbSender = null;
+        try { dbSender = await User.findById(senderId); } catch (_) { dbSender = null; }
+        const dbSenderRole = dbSender ? mapUserRoleToChatRole(dbSender.role) : null;
+        if (!dbSender || !isExplicitActiveStatus(dbSender.status) || !dbSenderRole || dbSenderRole === 'SUB_ADMIN') {
+            throw httpErr(403, 'Access Denied: Sender account is not authorized to send chat messages.');
         }
 
         let receiverId = null;
         const rawReceiver = messageData.receiver_id || messageData.receiverId;
         if (rawReceiver) {
             const strR = String(rawReceiver).trim();
-            if (isUUID(strR)) {
-                receiverId = strR;
-            } else {
-                receiverId = await resolveUserUuid(strR);
+            if (!isUUID(strR)) {
+                throw httpErr(400, 'Receiver identifier must be a valid user id.');
             }
+            let dbReceiver = null;
+            try { dbReceiver = await User.findById(strR); } catch (_) { dbReceiver = null; }
+            const dbReceiverRole = dbReceiver ? mapUserRoleToChatRole(dbReceiver.role) : null;
+            if (!dbReceiver || !isExplicitActiveStatus(dbReceiver.status) || !dbReceiverRole || dbReceiverRole === 'SUB_ADMIN') {
+                throw httpErr(403, 'Access Denied: Receiver account is not authorized for chat.');
+            }
+            if (dbSenderRole === 'PATIENT' && dbReceiverRole === 'PATIENT') {
+                throw httpErr(403, 'Access Denied: Patients cannot message other patients.');
+            }
+            receiverId = strR;
         }
 
         const normalizedRoom = normalizeChatRoomId(messageData.room_id || messageData.roomId);
+        const conversationId = messageData.conversation_id || messageData.conversationId || null;
 
         // Deduplicate rapid double-submits (same room, sender, and message within 3 seconds)
         try {
@@ -2640,14 +3384,35 @@ const ChatMessage = {
 
         const payload = {
             room_id: normalizedRoom,
+            ...(conversationId ? { conversation_id: conversationId } : {}),
             sender_id: senderId || null,
             receiver_id: receiverId || null,
             message: cleanMessage,
             type: messageData.type || 'text',
+            ...(messageData.message_type ? { message_type: messageData.message_type } : {}),
             read: messageData.read ?? false
         };
 
-        const { data, error } = await supabaseAdmin.from('chat_messages').insert(payload).select('*, sender:users!sender_id(id, name, email, role), receiver:users!receiver_id(id, name, email, role)');
+        let { data, error } = await supabaseAdmin
+            .from('chat_messages')
+            .insert(payload)
+            .select(CHAT_MESSAGE_SELECT);
+        if (error && (payload.conversation_id || payload.message_type)) {
+            const legacyPayload = {
+                room_id: normalizedRoom,
+                sender_id: senderId || null,
+                receiver_id: receiverId || null,
+                message: cleanMessage,
+                type: messageData.type || 'text',
+                read: messageData.read ?? false
+            };
+            const retry = await supabaseAdmin
+                .from('chat_messages')
+                .insert(legacyPayload)
+                .select(CHAT_MESSAGE_SELECT);
+            data = retry.data;
+            error = retry.error;
+        }
         if (error) {
             console.error('❌ Supabase ChatMessage Insert Error:', error.message);
             throw error;
@@ -2658,45 +3423,66 @@ const ChatMessage = {
     async find(query = {}, options = {}) {
         // Enforce DB/Query-Level Access Control if caller user is passed in options
         let isMainAdmin = true;
-        let callerRole = '';
-        let callerUser = options.user || null;
+        let callerChatRole = null;
+        const callerUser = options.user || null;
         if (callerUser) {
-            callerRole = (callerUser.role || '').toString().trim().toLowerCase();
-            isMainAdmin = callerRole === 'admin' || callerRole === 'primaryadmin' || callerRole === 'primary_admin' || callerRole === 'superadmin' || callerRole === 'super_admin' || callerUser.email === 'admin@dentaguru.com';
-            const isSubAdmin = callerRole === 'sub-admin' || callerRole === 'subadmin' || callerRole === 'sub_admin';
-
-            // Sub-Admins NEVER receive chat messages
-            if (isSubAdmin) {
+            if ('status' in callerUser && !isExplicitActiveStatus(callerUser.status)) {
                 return [];
             }
+            callerChatRole = mapUserRoleToChatRole(callerUser.role);
+            if (!callerChatRole || callerChatRole === 'SUB_ADMIN') {
+                return [];
+            }
+            isMainAdmin = callerChatRole === 'ADMIN';
         }
 
-        let req = supabaseAdmin.from('chat_messages').select('*, sender:users!sender_id(id, name, email, role), receiver:users!receiver_id(id, name, email, role)');
-        const rawRoom = query.room_id || query.roomId;
-        if (rawRoom) {
-            const normalized = normalizeChatRoomId(rawRoom);
-            const hyphenated = normalized.replace(/_/g, '-');
-            req = req.or(`room_id.eq.${normalized},room_id.eq.${hyphenated},room_id.eq.${rawRoom}`);
+        const convId = query.conversation_id || query.conversationId || null;
+        const rawRoom = query.room_id || query.roomId || null;
+        const roomList = Array.isArray(query.roomIds) && query.roomIds.length > 0
+            ? query.roomIds
+            : (rawRoom ? [rawRoom] : []);
+
+        let req = supabaseAdmin
+            .from('chat_messages')
+            .select(CHAT_MESSAGE_SELECT);
+
+        if (convId) {
+            req = req.eq('conversation_id', String(convId).trim());
+        } else if (roomList.length > 0) {
+            const orExpr = _chatRoomOrExpression(roomList);
+            if (orExpr) req = req.or(orExpr);
         }
+
         const sId = query.sender_id || query.senderId;
         if (sId) {
             const resolvedS = await resolveUserUuid(sId);
             if (typeof resolvedS === 'string' && resolvedS.length > 0) req = req.eq('sender_id', resolvedS);
         }
+
         const { data, error } = await req.order('created_at', { ascending: true });
         let rows = data || [];
         if (error) {
-            // Fallback to simple sender select if receiver foreign key is missing
-            const fallback = await supabaseAdmin.from('chat_messages').select('*, sender:users!sender_id(id, name, email, role)').order('created_at', { ascending: true });
+            // Fallback to simple sender select if receiver foreign key or conversation_id column is missing
+            const fallback = await supabaseAdmin
+                .from('chat_messages')
+                .select('*, sender:users!sender_id(id, name, email, role)')
+                .order('created_at', { ascending: true });
             rows = fallback.data || [];
-            if (rawRoom) {
-                const norm = normalizeChatRoomId(rawRoom);
-                rows = rows.filter(m => normalizeChatRoomId(m.room_id) === norm);
+            if (convId) {
+                rows = rows.filter(m => String(m.conversation_id || '') === String(convId).trim());
+            } else if (roomList.length > 0) {
+                const normSet = new Set(roomList.map(r => normalizeChatRoomId(r)));
+                rows = rows.filter(m => normSet.has(normalizeChatRoomId(m.room_id)));
             }
         }
 
-        // If caller is non-admin (Patient / Doctor) and requested unscoped listing, restrict to authorized conversations
-        if (callerUser && !isMainAdmin && !rawRoom) {
+        rows = rows.filter(m => m && m.is_deleted !== true);
+        if (convId) {
+            rows = rows.filter(m => String(m.conversation_id || '') === String(convId).trim());
+        }
+
+        // If caller is non-admin (Patient / Doctor / Clinic) and requested unscoped listing, restrict to authorized conversations
+        if (callerUser && !isMainAdmin && !convId && roomList.length === 0) {
             const allowedConvs = await this.getConversations(callerUser);
             const allowedRoomSet = new Set(allowedConvs.map(c => normalizeChatRoomId(c.roomId)));
             rows = rows.filter(m =>
@@ -2709,19 +3495,41 @@ const ChatMessage = {
         return rows;
     },
 
-    async markAsRead({ roomId, userId }) {
-        if (!roomId) return 0;
-        const normalized = normalizeChatRoomId(roomId);
-        const hyphenated = normalized.replace(/_/g, '-');
+    async markAsRead({ conversationId = null, roomId = null, roomIds = null, userId = null, lastReadMessageId = null }) {
+        if (!conversationId && !roomId && (!Array.isArray(roomIds) || roomIds.length === 0)) return 0;
         try {
+            let cutoffIso = null;
+            if (lastReadMessageId) {
+                const cleanMsgId = String(lastReadMessageId).trim();
+                const scoped = await this.find(
+                    conversationId ? { conversation_id: conversationId } : { room_id: roomId, roomIds }
+                );
+                const targetMsg = (scoped || []).find(m => String(m.id) === cleanMsgId);
+                if (targetMsg && targetMsg.created_at) {
+                    cutoffIso = targetMsg.created_at;
+                }
+            }
+
             let req = supabaseAdmin
                 .from('chat_messages')
                 .update({ read: true })
-                .eq('read', false)
-                .or(`room_id.eq.${normalized},room_id.eq.${hyphenated},room_id.eq.${roomId}`);
+                .eq('read', false);
+
+            if (conversationId) {
+                req = req.eq('conversation_id', String(conversationId).trim());
+            } else {
+                const list = Array.isArray(roomIds) && roomIds.length > 0 ? roomIds : [roomId];
+                const orExpr = _chatRoomOrExpression(list);
+                if (orExpr) req = req.or(orExpr);
+            }
+
             if (userId) {
                 req = req.or(`sender_id.is.null,sender_id.neq.${userId}`);
             }
+            if (cutoffIso) {
+                req = req.lte('created_at', cutoffIso);
+            }
+
             const { data, error } = await req.select('id');
             if (error) throw error;
             return (data || []).length;
@@ -2732,21 +3540,21 @@ const ChatMessage = {
     },
 
     async getConversations(user) {
-        if (!user) return [];
-        const role = (user.role || '').toString().trim().toLowerCase();
-        const isMainAdmin = role === 'admin' || role === 'primaryadmin' || role === 'primary_admin' || role === 'superadmin' || role === 'super_admin' || user.email === 'admin@dentaguru.com';
-        const isSubAdmin = role === 'sub-admin' || role === 'subadmin' || role === 'sub_admin';
-
-        // Sub-Admins are strictly forbidden
-        if (isSubAdmin) {
+        if (!user || !user.id) return [];
+        if ('status' in user && !isExplicitActiveStatus(user.status)) {
             return [];
         }
+        const chatRole = mapUserRoleToChatRole(user.role);
+        if (!chatRole || chatRole === 'SUB_ADMIN') {
+            return [];
+        }
+        const isMainAdmin = chatRole === 'ADMIN';
+        const role = (user.role || '').toString().trim().toLowerCase();
 
         try {
-            // Fetch all chat messages with sender info
             const { data: messages, error } = await supabaseAdmin
                 .from('chat_messages')
-                .select('*, sender:users!sender_id(id, name, email, role), receiver:users!receiver_id(id, name, email, role)')
+                .select(CHAT_MESSAGE_SELECT)
                 .order('created_at', { ascending: false });
 
             if (error) {
@@ -2755,25 +3563,33 @@ const ChatMessage = {
                     .select('*, sender:users!sender_id(id, name, email, role)')
                     .order('created_at', { ascending: false });
                 if (!fallback.data || fallback.data.length === 0) return [];
-                return this._assembleConversations(fallback.data, user, isMainAdmin, role);
+                return this._assembleConversations(fallback.data, user, isMainAdmin, role, chatRole);
             }
 
             if (!messages || messages.length === 0) return [];
-            return this._assembleConversations(messages, user, isMainAdmin, role);
+            return this._assembleConversations(messages, user, isMainAdmin, role, chatRole);
         } catch (e) {
             console.error('Error in getConversations:', e.message);
             return [];
         }
     },
 
-    async _assembleConversations(messages, user, isMainAdmin, role) {
+    async _assembleConversations(messages, user, isMainAdmin, role, chatRole = null) {
+        const effectiveChatRole = chatRole || mapUserRoleToChatRole(role);
+        if (!effectiveChatRole || effectiveChatRole === 'SUB_ADMIN') return [];
+
+        const linkedPairs = !isMainAdmin ? await computeChatLinkedPairs(user, effectiveChatRole) : [];
+        const allowedLegacyRooms = new Set(linkedPairs.flatMap(p => p.legacyRoomIds || []));
+
         // Group by normalized room_id
         const roomMap = new Map();
         for (const msg of messages) {
+            if (msg && msg.is_deleted === true) continue;
             const rId = normalizeChatRoomId(msg.room_id);
             if (!roomMap.has(rId)) {
                 roomMap.set(rId, {
                     roomId: rId,
+                    conversationId: msg.conversation_id || null,
                     lastMessage: msg.message,
                     lastMessageType: msg.type,
                     lastMessageTime: msg.created_at,
@@ -2781,6 +3597,8 @@ const ChatMessage = {
                     lastSenderRole: msg.sender?.role || (msg.type === 'doctor' ? 'DOCTOR' : 'Patient'),
                     doctorName: null,
                     patientName: null,
+                    patientId: null,
+                    doctorId: null,
                     totalMessages: 0,
                     unreadCount: 0
                 });
@@ -2795,7 +3613,6 @@ const ChatMessage = {
             if (msg.sender_id) thread.senderIds.add(msg.sender_id);
             if (msg.receiver_id) thread.receiverIds.add(msg.receiver_id);
 
-            // Resolve doctor name from messages
             const msgSenderRoleLower = String(msg.sender?.role || '').trim().toLowerCase();
             if (!thread.doctorName && (msg.type === 'doctor' || msgSenderRoleLower === 'dentist' || msgSenderRoleLower === 'doctor')) {
                 let dName = msg.sender?.name || '';
@@ -2803,16 +3620,18 @@ const ChatMessage = {
                     dName = `Dr. ${dName}`;
                 }
                 if (dName) thread.doctorName = dName;
+                if (msg.sender_id) thread.doctorId = msg.sender_id;
             }
-            // Resolve patient name from messages
-            if (!thread.patientName && (msg.type === 'patient' || msg.sender?.role === 'Patient')) {
+            if (!thread.patientName && (msg.type === 'patient' || msgSenderRoleLower === 'patient')) {
                 if (msg.sender?.name) thread.patientName = msg.sender.name;
+                if (msg.sender_id) thread.patientId = msg.sender_id;
             }
         }
 
         // Fetch consultation requests and appointments to resolve doctor names and patient names
         let doctorLookup = new Map();
         let patientLookup = new Map();
+        let dentistNameById = new Map();
         try {
             const { data: problemReqs } = await supabaseAdmin
                 .from('patient_problem_requests')
@@ -2826,6 +3645,7 @@ const ChatMessage = {
                         const formatted = dName.toLowerCase().startsWith('dr') ? dName : `Dr. ${dName}`;
                         if (pr.patient_name) doctorLookup.set(pr.patient_name.toLowerCase(), formatted);
                         if (pr.patient_id) doctorLookup.set(String(pr.patient_id).toLowerCase(), formatted);
+                        if (prDentist?.id) dentistNameById.set(String(prDentist.id).toLowerCase(), formatted);
                     }
                     if (pr.patient_name && pr.patient_id) {
                         patientLookup.set(String(pr.patient_id).toLowerCase(), pr.patient_name);
@@ -2845,6 +3665,7 @@ const ChatMessage = {
                     if (dName) {
                         const formatted = dName.toLowerCase().startsWith('dr') ? dName : `Dr. ${dName}`;
                         if (ap.patient_id) doctorLookup.set(String(ap.patient_id).toLowerCase(), formatted);
+                        if (apDentist?.id) dentistNameById.set(String(apDentist.id).toLowerCase(), formatted);
                     }
                     if (apPatient?.name && ap.patient_id) {
                         patientLookup.set(String(ap.patient_id).toLowerCase(), apPatient.name);
@@ -2853,15 +3674,39 @@ const ChatMessage = {
             }
         } catch (_) { }
 
-        // Extract clean patient names and doctor names for each room
         const conversations = [];
         for (const [roomId, thread] of roomMap.entries()) {
             let inferredPatientName = thread.patientName;
             let inferredDoctorName = thread.doctorName;
+            const canon = parseCanonicalChatRoomId(roomId);
 
-            // Handle pair room syntax: CHAT_PATIENTNAME_DOCTORNAME
-            if (roomId.startsWith('CHAT_')) {
-                const parts = roomId.replace(/^CHAT_/, '').split('_');
+            if (canon) {
+                if (!inferredPatientName) {
+                    inferredPatientName = patientLookup.get(canon.patientUserId.toLowerCase()) || null;
+                    if (!inferredPatientName) {
+                        try {
+                            const pu = await User.findById(canon.patientUserId);
+                            if (pu?.name) inferredPatientName = pu.name;
+                        } catch (_) { }
+                    }
+                }
+                if (!inferredDoctorName) {
+                    inferredDoctorName = dentistNameById.get(canon.dentistId.toLowerCase()) || null;
+                    if (!inferredDoctorName) {
+                        const dr = await _chatDentistRows([canon.dentistId]);
+                        const d = dr[0];
+                        if (d?.user_id) {
+                            try {
+                                const du = await User.findById(String(d.user_id));
+                                if (du?.name) {
+                                    inferredDoctorName = du.name.toLowerCase().startsWith('dr') ? du.name : `Dr. ${du.name}`;
+                                }
+                            } catch (_) { }
+                        }
+                    }
+                }
+            } else if (roomId.startsWith('CHAT_')) {
+                const parts = roomId.replace(/^CHAT_/, '').split('_').filter(Boolean);
                 if (parts.length >= 2) {
                     if (!inferredPatientName) {
                         inferredPatientName = parts[0].charAt(0).toUpperCase() + parts[0].slice(1).toLowerCase();
@@ -2879,6 +3724,7 @@ const ChatMessage = {
                     inferredPatientName = 'Patient Consultation';
                 }
                 inferredPatientName = inferredPatientName.split(' ')
+                    .filter(Boolean)
                     .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
                     .join(' ');
             }
@@ -2887,7 +3733,7 @@ const ChatMessage = {
             let resolvedDoc = inferredDoctorName;
             if (!resolvedDoc) {
                 for (const [k, v] of doctorLookup.entries()) {
-                    if (cleanKey.includes(k) || k.includes(cleanKey) || roomId.toLowerCase().includes(k)) {
+                    if (cleanKey === k) {
                         resolvedDoc = v;
                         break;
                     }
@@ -2899,6 +3745,9 @@ const ChatMessage = {
 
             const conversation = {
                 roomId,
+                ...(thread.conversationId ? { conversationId: thread.conversationId } : {}),
+                patientId: canon ? canon.patientUserId : (thread.patientId || null),
+                doctorId: canon ? canon.dentistId : (thread.doctorId || null),
                 patientName: inferredPatientName,
                 doctorName: resolvedDoc,
                 lastMessage: thread.lastMessage,
@@ -2908,63 +3757,27 @@ const ChatMessage = {
                 unreadCount: thread.unreadCount
             };
 
+            const threadHasUser = (thread.senderIds && thread.senderIds.has(user.id)) ||
+                (thread.receiverIds && thread.receiverIds.has(user.id));
+
             if (isMainAdmin) {
                 conversations.push(conversation);
-            } else if (role === 'dentist' || role === 'doctor') {
-                const userDocName = (user?.name || '').replace(/^Dr\.\s*/i, '').trim().toLowerCase();
-                const roomNorm = roomId.toLowerCase();
-                const threadHasUser = (thread.senderIds && thread.senderIds.has(user.id)) ||
-                    (thread.receiverIds && thread.receiverIds.has(user.id));
-                const nameMatches = userDocName.length > 0 && (
-                    resolvedDoc.toLowerCase().includes(userDocName) ||
-                    roomNorm.includes(userDocName)
-                );
-
-                if (threadHasUser || nameMatches) {
+            } else if (effectiveChatRole === 'DOCTOR') {
+                if (threadHasUser || allowedLegacyRooms.has(roomId)) {
                     conversations.push(conversation);
                 }
-            } else if (role === 'patient') {
-                const userNameNorm = (user?.name || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-                const roomNorm = roomId.toUpperCase().replace(/[^A-Z0-9]/g, '');
-                const threadHasUser = (thread.senderIds && thread.senderIds.has(user.id)) ||
-                    (thread.receiverIds && thread.receiverIds.has(user.id));
-                if (threadHasUser || roomNorm.includes(userNameNorm) || (user?.id && roomNorm.includes(user.id))) {
+            } else if (effectiveChatRole === 'PATIENT') {
+                const userToken = String(user?.name || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '_');
+                const exactLegacyPatientRoom = userToken.length > 0 && (
+                    roomId === `PATIENT_${userToken}` ||
+                    roomId.startsWith(`CHAT_${userToken}_`)
+                );
+                const matchesCanonicalPatient = canon && String(canon.patientUserId) === String(user.id);
+                if (threadHasUser || matchesCanonicalPatient || allowedLegacyRooms.has(roomId) || exactLegacyPatientRoom) {
                     conversations.push(conversation);
                 }
-            } else if (role === 'clinic' || role === 'clinic_admin') {
-                // Clinic can view threads belonging to doctors affiliated with this clinic
-                if (!this._clinicDocNamesCache || this._clinicDocCacheFor !== user.id) {
-                    this._clinicDocCacheFor = user.id;
-                    this._clinicDocNamesCache = new Set();
-                    this._clinicDocIdsCache = new Set();
-                    try {
-                        const cResolved = await resolveClinicIds(user.id);
-                        const cId = cResolved.clinicId;
-                        if (cId) {
-                            const { data: clinicDocs } = await supabaseAdmin
-                                .from('dentists')
-                                .select('id, user_id, users(name)')
-                                .eq('clinic_id', cId);
-                            for (const d of (clinicDocs || [])) {
-                                if (d.id) this._clinicDocIdsCache.add(d.id);
-                                if (d.user_id) this._clinicDocIdsCache.add(d.user_id);
-                                const du = Array.isArray(d.users) ? d.users[0] : d.users;
-                                const dName = (du?.name || '').replace(/^Dr\.\s*/i, '').trim().toLowerCase();
-                                if (dName) this._clinicDocNamesCache.add(dName);
-                            }
-                        }
-                    } catch (_) { }
-                }
-                const threadHasClinicDoc = Array.from(this._clinicDocIdsCache || []).some(cid =>
-                    (thread.senderIds && thread.senderIds.has(cid)) ||
-                    (thread.receiverIds && thread.receiverIds.has(cid))
-                );
-                const docNameLower = resolvedDoc.replace(/^Dr\.\s*/i, '').trim().toLowerCase();
-                const roomLower = roomId.toLowerCase();
-                const nameMatchesClinicDoc = Array.from(this._clinicDocNamesCache || []).some(dn =>
-                    dn.length > 0 && (docNameLower.includes(dn) || roomLower.includes(dn))
-                );
-                if (threadHasClinicDoc || nameMatchesClinicDoc) {
+            } else if (effectiveChatRole === 'CLINIC') {
+                if (allowedLegacyRooms.has(roomId) || threadHasUser) {
                     conversations.push(conversation);
                 }
             }
@@ -2977,6 +3790,8 @@ const ChatMessage = {
         let req = supabaseAdmin.from('chat_messages').delete();
         if (query.messageId || query.id) {
             req = req.eq('id', query.messageId || query.id);
+        } else if (query.conversationId || query.conversation_id) {
+            req = req.eq('conversation_id', String(query.conversationId || query.conversation_id).trim());
         } else if (query.roomId || query.room_id) {
             const raw = query.roomId || query.room_id;
             const norm = normalizeChatRoomId(raw);
@@ -3394,7 +4209,8 @@ const Notification = {
 const _inMemoryAuditLogs = [];
 
 const AuditLog = {
-    async create(logData) {
+    async create(logData, options = {}) {
+        const strict = Boolean(options && options.strict);
         const payload = {
             id: `audit-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
             user_id: logData.user_id || logData.userId || null,
@@ -3406,9 +4222,6 @@ const AuditLog = {
             ip_address: logData.ip_address || logData.ipAddress || null,
             created_at: new Date().toISOString()
         };
-
-        _inMemoryAuditLogs.unshift(payload);
-        if (_inMemoryAuditLogs.length > 500) _inMemoryAuditLogs.pop();
 
         try {
             const { data, error } = await supabaseAdmin.from('audit_logs').insert({
@@ -3423,10 +4236,22 @@ const AuditLog = {
             }).select().maybeSingle();
 
             if (error) {
+                if (strict) {
+                    throw new Error(error.message || 'Mandatory audit log write failed.');
+                }
+                _inMemoryAuditLogs.unshift(payload);
+                if (_inMemoryAuditLogs.length > 500) _inMemoryAuditLogs.pop();
                 return payload;
             }
+            _inMemoryAuditLogs.unshift(data || payload);
+            if (_inMemoryAuditLogs.length > 500) _inMemoryAuditLogs.pop();
             return data || payload;
         } catch (err) {
+            if (strict) {
+                throw err;
+            }
+            _inMemoryAuditLogs.unshift(payload);
+            if (_inMemoryAuditLogs.length > 500) _inMemoryAuditLogs.pop();
             return payload;
         }
     },
@@ -5501,6 +6326,14 @@ module.exports = {
     isDoctorAvailableStatus,
     isDoctorRecordAvailable,
     normalizeAvailabilityStatus,
+    resolveDoctorConsultationModes,
+    mapUserRoleToChatRole,
+    authorizeChatParticipantAndReceiver,
+    resolveCanonicalChatRoom,
+    buildCanonicalChatRoomId,
+    parseCanonicalChatRoomId,
+    legacyChatRoomIdsForNames,
+    isUUID,
     resolveUserUuid,
     resolveDentistIds,
     resolveClinicIds,

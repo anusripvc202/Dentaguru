@@ -18,6 +18,7 @@ const {
     SubAdminPermission,
     ASSIGNMENT_SOURCES,
     isDoctorRecordAvailable,
+    resolveDoctorConsultationModes,
     resolveClinicIds,
     resolveDentistIds,
 } = require('../models/Schemas');
@@ -305,7 +306,42 @@ exports.bookAppointment = async (req, res) => {
             //    separate Online/In-Person schedules, daily limit, blocked time ranges, capacity lane conflicts)
             if (dentistId) {
                 const avail = await DoctorAvailability.findOne({ dentist_id: dentistId, date: requestedDateStr });
-                const schedule = sanitizeSmartSchedule(await DoctorAvailability.getSchedule(dentistId));
+                const rawSchedule = await DoctorAvailability.getSchedule(dentistId);
+                const docModes = resolveDoctorConsultationModes(resolvedDoctor, rawSchedule);
+
+                // Strictly validate that the doctor supports the selected consultation mode (Online vs In-Person)
+                if (resolvedDoctor && docModes.hasExplicitConfiguration) {
+                    if (requestedMode === 'Online' && !docModes.onlineConsultationEnabled) {
+                        return {
+                            errorStatus: 400,
+                            errorBody: {
+                                success: false,
+                                reason: 'CONSULTATION_MODE_NOT_SUPPORTED',
+                                consultationType: 'Online',
+                                message: 'This doctor does not offer Online consultations. Please select an In-Person clinic appointment or choose an online-enabled doctor.'
+                            }
+                        };
+                    }
+                    if (requestedMode === 'In-Person' && !docModes.inPersonConsultationEnabled) {
+                        return {
+                            errorStatus: 400,
+                            errorBody: {
+                                success: false,
+                                reason: 'CONSULTATION_MODE_NOT_SUPPORTED',
+                                consultationType: 'In-Person',
+                                message: 'This doctor provides Online consultations only and is not available for In-Person clinic visits.'
+                            }
+                        };
+                    }
+                }
+
+                const schedule = sanitizeSmartSchedule({
+                    ...(rawSchedule || {}),
+                    ...(docModes.hasExplicitConfiguration ? {
+                        onlineEnabled: docModes.onlineConsultationEnabled,
+                        inPersonEnabled: docModes.inPersonConsultationEnabled,
+                    } : {}),
+                });
                 const blockedSlots = await DoctorAvailability.getBlockedSlotsForDate(dentistId, requestedDateStr);
                 const existingDentistAppts = await Appointment.find({ dentistId });
 

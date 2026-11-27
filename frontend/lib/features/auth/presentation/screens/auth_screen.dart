@@ -593,6 +593,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
       if (res['success'] == true) {
         final bool isAuthorizedAdminMatch = res['isAdmin'] == true;
+        final bool isAuthorizedSubAdminMatch = res['isSubAdmin'] == true;
         final bool canShowOnScreenOtp = ApiConstants.allowOnScreenOtpDisplay &&
             res['deliveryMode'] == 'on_screen';
         final String? returnedOtp = canShowOnScreenOtp ? res['otp']?.toString().trim() : null;
@@ -604,6 +605,11 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           if (isAuthorizedAdminMatch) {
             _isAdminMode = true;
             _selectedRole = UserRole.admin;
+            _selectedAdminRoleType = 'Admin';
+          } else if (isAuthorizedSubAdminMatch) {
+            _isAdminMode = true;
+            _selectedRole = UserRole.admin;
+            _selectedAdminRoleType = 'Sub-Admin';
           } else {
             _isAdminMode = false;
           }
@@ -777,7 +783,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ? userData['phone'].toString()
             : (!identifier.contains('@') && identifier.isNotEmpty ? identifier : '');
 
-        final String effectiveToken = (responseData['accessToken'] ?? res['accessToken'] ?? res['token'] ?? 'sb_session_${userData['id'] ?? DateTime.now().millisecondsSinceEpoch}').toString();
+        final String effectiveToken = (responseData['accessToken'] ?? res['accessToken'] ?? res['token'] ?? 'sb_direct_${userData['id'] ?? DateTime.now().millisecondsSinceEpoch}').toString();
         final String? effectiveRealtimeToken = (responseData['realtimeToken'] ?? res['realtimeToken'])?.toString();
         final DateTime? effectiveRealtimeExpiresAt = DateTime.tryParse(
           (responseData['realtimeTokenExpiresAt'] ?? res['realtimeTokenExpiresAt'] ?? '').toString(),

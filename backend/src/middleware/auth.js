@@ -74,10 +74,10 @@ const authenticateJWT = async (req, res, next) => {
             console.log('Supabase token verification failed, checking local fallback JWT...');
         }
 
-        // 2. Direct Supabase session token fallback (sb_direct_<userId>) — strictly disabled in cloud (staging/production)
-        if (!isCloudEnv() && token.startsWith('sb_direct_')) {
+        // 2. Direct Supabase session token fallback (sb_direct_<userId> / sb_session_<userId>) — strictly disabled in cloud (staging/production)
+        if (!isCloudEnv() && (token.startsWith('sb_direct_') || token.startsWith('sb_session_'))) {
             try {
-                const directUserId = token.replace('sb_direct_', '').trim();
+                const directUserId = token.replace(/^sb_(?:direct|session)_/, '').trim();
                 const dbUser = await User.findById(directUserId);
                 if (dbUser) {
                     let userPermissions = dbUser.permissions || [];
@@ -214,9 +214,9 @@ const optionalAuth = async (req, res, next) => {
             }
         } catch (_) { }
 
-        if (!isCloudEnv() && token.startsWith('sb_direct_')) {
+        if (!isCloudEnv() && (token.startsWith('sb_direct_') || token.startsWith('sb_session_'))) {
             try {
-                const directUserId = token.replace('sb_direct_', '').trim();
+                const directUserId = token.replace(/^sb_(?:direct|session)_/, '').trim();
                 const dbUser = await User.findById(directUserId);
                 if (dbUser) {
                     const blockedMsg = enforceActiveSubAdminStatus(dbUser);
@@ -306,6 +306,44 @@ const requireMainAdmin = (req, res, next) => {
     next();
 };
 
+const MODULE_PERMISSION_ALIASES = {
+    DENTIST_VIEW: ['DOCTORS', 'DOCTOR_VIEW', 'DENTIST_MANAGE', 'DENTIST_VERIFY', 'DENTIST_EDIT', 'DENTIST_CREATE', 'VIEW_DENTISTS', 'MANAGE_DOCTORS'],
+    DENTIST_EDIT: ['DOCTORS', 'DENTIST_VERIFY', 'DENTIST_MANAGE', 'MANAGE_DOCTORS'],
+    DENTIST_VERIFY: ['DOCTORS', 'DENTIST_EDIT', 'DENTIST_MANAGE', 'MANAGE_DOCTORS'],
+    DENTIST_MANAGE: ['DOCTORS', 'DENTIST_EDIT', 'MANAGE_DOCTORS'],
+    PATIENT_VIEW: ['PATIENTS', 'PATIENT_CREATE', 'PATIENT_ADD', 'PATIENT_EDIT', 'PATIENT_DELETE', 'MANAGE_PATIENTS', 'VIEW_PATIENTS'],
+    PATIENT_CREATE: ['PATIENTS', 'PATIENT_ADD', 'MANAGE_PATIENTS'],
+    PATIENT_EDIT: ['PATIENTS', 'MANAGE_PATIENTS'],
+    PATIENT_DELETE: ['PATIENTS', 'MANAGE_PATIENTS'],
+    CLINIC_VIEW: ['CLINICS', 'CLINIC_MANAGE', 'MANAGE_CLINICS', 'VIEW_CLINICS'],
+    CLINIC_MANAGE: ['CLINICS', 'MANAGE_CLINICS'],
+    APPOINTMENT_VIEW: ['APPOINTMENTS', 'APPOINTMENT_MANAGE', 'MANAGE_APPOINTMENTS', 'VIEW_APPOINTMENTS'],
+    APPOINTMENT_MANAGE: ['APPOINTMENTS', 'MANAGE_APPOINTMENTS'],
+    PROBLEM_VIEW: ['REQUESTS', 'PROBLEM_UPDATE', 'ASSIGNMENT_VIEW', 'ASSIGNMENT_CREATE', 'MANAGE_REQUESTS', 'VIEW_REQUESTS'],
+    PROBLEM_UPDATE: ['REQUESTS', 'ASSIGNMENT_CREATE', 'MANAGE_REQUESTS'],
+    ASSIGNMENT_VIEW: ['REQUESTS', 'ASSIGNMENTS', 'ASSIGNMENT_CREATE', 'ASSIGNMENT_HISTORY_VIEW', 'PROBLEM_VIEW', 'MANAGE_REQUESTS'],
+    ASSIGNMENT_CREATE: ['REQUESTS', 'ASSIGNMENTS', 'PATIENT_ASSIGN', 'PATIENT_REASSIGN', 'MANAGE_REQUESTS'],
+    REFERRAL_VIEW: ['REFERRALS', 'REFERRAL_MANAGE', 'MANAGE_REFERRALS', 'VIEW_REFERRALS'],
+    REFERRAL_MANAGE: ['REFERRALS', 'MANAGE_REFERRALS'],
+    REPORT_VIEW: ['REPORTS', 'REPORT_ASSIGNMENT_VIEW', 'REPORT_DISTRICT_VIEW', 'VIEW_REPORTS', 'MANAGE_REPORTS']
+};
+
+const expandAcceptedPermissions = (requiredPermission, alternativePermissions = []) => {
+    const base = [requiredPermission, ...(alternativePermissions || [])]
+        .map(p => (p || '').toString().trim().toUpperCase())
+        .filter(Boolean);
+    const expanded = new Set(base);
+    for (const key of base) {
+        const aliases = MODULE_PERMISSION_ALIASES[key];
+        if (Array.isArray(aliases)) {
+            for (const alias of aliases) {
+                expanded.add(alias);
+            }
+        }
+    }
+    return expanded;
+};
+
 // Granular Permission Checker (Allows Main Admin or Sub-Admin with required permission)
 const requirePermission = (requiredPermission, alternativePermissions = []) => {
     return async (req, res, next) => {
@@ -328,6 +366,7 @@ const requirePermission = (requiredPermission, alternativePermissions = []) => {
             if (status === 'INACTIVE' || status === 'DEACTIVATED') {
                 return res.status(403).json({
                     success: false,
+                    code: 'ACCOUNT_DEACTIVATED',
                     message: 'Access Denied: Your Sub-Admin account has been deactivated by the Main Admin.'
                 });
             }
@@ -339,13 +378,11 @@ const requirePermission = (requiredPermission, alternativePermissions = []) => {
             }
 
             const permsList = (userPerms || []).map(p => (p || '').toString().trim().toUpperCase());
-            const requiredUpper = (requiredPermission || '').toString().trim().toUpperCase();
-            const alternativesUpper = (alternativePermissions || []).map(p => (p || '').toString().trim().toUpperCase());
+            const acceptedSet = expandAcceptedPermissions(requiredPermission, alternativePermissions);
 
             const hasPerm = permsList.includes('*') ||
                 permsList.includes('ALL') ||
-                permsList.includes(requiredUpper) ||
-                alternativesUpper.some(alt => permsList.includes(alt));
+                permsList.some(p => acceptedSet.has(p));
 
             if (hasPerm) {
                 return next();
@@ -353,6 +390,8 @@ const requirePermission = (requiredPermission, alternativePermissions = []) => {
 
             return res.status(403).json({
                 success: false,
+                code: 'PERMISSION_DENIED',
+                requiredPermission,
                 message: `Access Denied: You lack the required permission '${requiredPermission}' to access this resource.`
             });
         }
@@ -362,6 +401,18 @@ const requirePermission = (requiredPermission, alternativePermissions = []) => {
             success: false,
             message: `Access Denied: Role '${req.user.role}' is not authorized for this admin resource.`
         });
+    };
+};
+
+// Enforces module permission whenever an authenticated Sub-Admin (or non-Admin role) calls an admin endpoint,
+// while allowing unauthenticated internal service/test calls that rely on optionalAuth.
+const enforceSubAdminPermissionIfAuthenticated = (requiredPermission, alternativePermissions = []) => {
+    const checker = requirePermission(requiredPermission, alternativePermissions);
+    return async (req, res, next) => {
+        if (!req.user) {
+            return next();
+        }
+        return checker(req, res, next);
     };
 };
 
@@ -544,6 +595,7 @@ module.exports = {
     requireRole,
     requireMainAdmin,
     requirePermission,
+    enforceSubAdminPermissionIfAuthenticated,
     requireChatAccess,
     enforceDistrictAccess
 };

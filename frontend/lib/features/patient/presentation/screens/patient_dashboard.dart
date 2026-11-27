@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
+import '../../../../core/widgets/recent_updates_preview_section.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/services/session_service.dart';
@@ -570,19 +571,34 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
     );
 
     final docName = doctor?.name ?? (assignedReq.displayDoctorName.isNotEmpty ? assignedReq.displayDoctorName : (assignedReq.assignedDoctorName?.isNotEmpty == true ? assignedReq.assignedDoctorName! : 'Doctor'));
-    final docId = doctor?.id ?? assignedReq.assignedDoctorId;
+    String? docId = doctor?.id ?? assignedReq.assignedDoctorId ?? assignedReq.preferredDoctorId;
+    if ((docId == null || docId.trim().isEmpty) && docName.trim().isNotEmpty) {
+      final cleanTarget = docName.replaceAll(RegExp(r'^Dr\.?\s*', caseSensitive: false), '').trim().toLowerCase();
+      final matchedDoc = _patientService.allDoctors.where((d) {
+        final cleanD = d.name.replaceAll(RegExp(r'^Dr\.?\s*', caseSensitive: false), '').trim().toLowerCase();
+        return cleanD.isNotEmpty && (cleanD == cleanTarget || cleanD.contains(cleanTarget) || cleanTarget.contains(cleanD));
+      }).firstOrNull;
+      if (matchedDoc != null) {
+        docId = matchedDoc.userId.trim().isNotEmpty ? matchedDoc.userId.trim() : matchedDoc.id.trim();
+      }
+    }
     final pName = (patient.name.trim().isNotEmpty && patient.name.trim().toLowerCase() != 'patient')
         ? patient.name
         : (assignedReq.patientName.trim().isNotEmpty
             ? assignedReq.patientName
             : _resolveProfileDisplayName(patient));
+    final resolvedPatientId = patient.id.trim().isNotEmpty
+        ? patient.id.trim()
+        : ((assignedReq.patientId != null && assignedReq.patientId!.trim().isNotEmpty)
+            ? assignedReq.patientId!.trim()
+            : SessionService().currentSession?.canonicalUserId);
 
     WhatsAppChatModal.show(
       context,
       patientName: pName,
       doctorName: docName,
       currentUserRole: 'Patient',
-      patientId: patient.id.isNotEmpty ? patient.id : null,
+      patientId: (resolvedPatientId != null && resolvedPatientId.isNotEmpty) ? resolvedPatientId : null,
       doctorId: docId,
     );
   }
@@ -1179,6 +1195,14 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               ),
               const SizedBox(height: 16),
 
+              // 1a. Online & Offline Consultation Selection Section
+              _buildConsultationModeSelectionSection(),
+              const SizedBox(height: 16),
+
+              // 1b. Upcoming Appointments Preview (Max 2 + View All)
+              _buildPatientUpcomingAppointmentsPreviewSection(myRequests),
+              const SizedBox(height: 16),
+
               // 2. AI Dental Triage Card ("Something hurting?")
               _buildAiTriageCard(),
               const SizedBox(height: 14),
@@ -1195,11 +1219,15 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               _buildFavouriteDentistsSection(),
               const SizedBox(height: 16),
 
+              // 5b. Recent Consultations Preview (Max 2 + View All)
+              _buildPatientRecentConsultationsPreviewSection(myRequests),
+              const SizedBox(height: 16),
+
               // 6. Refer a Friend Section
               _buildReferAFriendSection(),
               const SizedBox(height: 16),
 
-              // 6b. Patient Referrals (Received for Patient & Sent Referrals)
+              // 6b. Patient Referrals (Received for Patient & Sent Referrals — Max 2 + View All)
               _buildPatientReferralsSummarySection(),
 
               // 7. Prescriptions, Diagnostics & Recent/Previous Visits Overview
@@ -1212,6 +1240,222 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  String _selectedHomeConsultationMode = 'Online';
+
+  void _openConsultationModeDoctors(String mode) {
+    setState(() {
+      _selectedHomeConsultationMode = mode;
+    });
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => FindDoctorsScreen(
+          initialConsultationMode: mode,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildConsultationModeSelectionSection() {
+    final isOnlineSelected = _selectedHomeConsultationMode == 'Online';
+    final isOfflineSelected = _selectedHomeConsultationMode == 'Offline';
+
+    return Container(
+      key: const Key('patient_consultation_mode_selector_section'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.gsNavy.withValues(alpha: 0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppTheme.gsNavy.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.medical_services_rounded, size: 18, color: AppTheme.gsNavy),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Choose Consultation Mode',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.textDark,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Select your preferred consultation mode to find eligible doctors',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF64748B),
+                        fontWeight: FontWeight.w500,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  key: const Key('patient_select_online_consultation_card'),
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () => _openConsultationModeDoctors('Online'),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: isOnlineSelected ? const Color(0xFFEFF6FF) : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isOnlineSelected ? const Color(0xFF0284C7) : const Color(0xFFCBD5E1),
+                        width: isOnlineSelected ? 1.8 : 1.1,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF0284C7).withValues(alpha: 0.14),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(Icons.videocam_rounded, color: Color(0xFF0284C7), size: 20),
+                            ),
+                            const Spacer(),
+                            Icon(
+                              isOnlineSelected ? Icons.check_circle_rounded : Icons.arrow_forward_ios_rounded,
+                              size: isOnlineSelected ? 18 : 13,
+                              color: isOnlineSelected ? const Color(0xFF0284C7) : const Color(0xFF64748B),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        const Text(
+                          'Online Consultation',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.textDark,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Video & tele-consult with online-enabled doctors',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: Color(0xFF475569),
+                            height: 1.3,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: InkWell(
+                  key: const Key('patient_select_offline_consultation_card'),
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () => _openConsultationModeDoctors('Offline'),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: isOfflineSelected ? const Color(0xFFECFDF5) : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isOfflineSelected ? const Color(0xFF059669) : const Color(0xFFCBD5E1),
+                        width: isOfflineSelected ? 1.8 : 1.1,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF059669).withValues(alpha: 0.14),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(Icons.local_hospital_rounded, color: Color(0xFF059669), size: 20),
+                            ),
+                            const Spacer(),
+                            Icon(
+                              isOfflineSelected ? Icons.check_circle_rounded : Icons.arrow_forward_ios_rounded,
+                              size: isOfflineSelected ? 18 : 13,
+                              color: isOfflineSelected ? const Color(0xFF059669) : const Color(0xFF64748B),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        const Text(
+                          'Offline Consultation (Visit Clinic)',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.textDark,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'In-person visit at a clinic with directions & slots',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: Color(0xFF475569),
+                            height: 1.3,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -1803,7 +2047,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
             scrollDirection: Axis.horizontal,
             physics: const BouncingScrollPhysics(),
             child: Row(
-              children: myDocs.map((doc) {
+              children: myDocs.take(kDashboardRecentPreviewLimit).map((doc) {
                 return Container(
                   width: 220,
                   margin: const EdgeInsets.only(right: 12),
@@ -1987,6 +2231,133 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
   }
 
 
+  Widget _buildPatientUpcomingAppointmentsPreviewSection(
+    List<PatientConsultationRequest> myRequests,
+  ) {
+    final upcomingAll = myRequests.where((r) {
+      final st = r.status.trim().toUpperCase();
+      return st != 'COMPLETED' && st != 'CANCELLED' && st != 'REJECTED';
+    }).toList();
+    final latestTwoUpcoming = takeLatestPreviewRecords<PatientConsultationRequest>(
+      upcomingAll,
+      limit: kDashboardRecentPreviewLimit,
+      compareDesc: (a, b) => b.submittedAt.compareTo(a.submittedAt),
+    );
+
+    void openAllUpcoming() {
+      _guardServiceAccess(
+        context,
+        serviceTitle: 'My Visits',
+        onAllowed: () {
+          _patientService.syncAppointmentsFromApi();
+          setState(() {
+            _visitsSubTabIndex = 0;
+            _showAllVisits = true;
+            _expandedVisitsLimit = _visitsExpandedPageSize;
+            _currentIndex = 2;
+          });
+        },
+      );
+    }
+
+    return RecentUpdatesPreviewSection(
+      sectionKey: const Key('patient_upcoming_appointments_section'),
+      viewAllKey: const Key('patient_view_all_upcoming_appointments_btn'),
+      emptyStateKey: const Key('patient_upcoming_appointments_empty'),
+      title: 'Upcoming Appointments',
+      totalCount: upcomingAll.length,
+      icon: Icons.calendar_today_outlined,
+      onViewAll: openAllUpcoming,
+      emptyIcon: Icons.event_available_outlined,
+      emptyTitle: 'No upcoming appointments yet.',
+      emptySubtitle: 'Book a consultation to see your upcoming appointments here.',
+      previewChildren: latestTwoUpcoming.asMap().entries.map((entry) {
+        final idx = entry.key;
+        final req = entry.value;
+        final docName = req.displayDoctorName.trim().isNotEmpty
+            ? req.displayDoctorName.trim()
+            : (req.assignedDoctorName?.trim().isNotEmpty == true
+                ? req.assignedDoctorName!.trim()
+                : 'Doctor Pending Assignment');
+        final dtLabel = (req.confirmedDate != null && req.confirmedDate!.trim().isNotEmpty)
+            ? req.confirmedDate!.split('T').first
+            : '${req.submittedAt.toLocal().day}/${req.submittedAt.toLocal().month}/${req.submittedAt.toLocal().year}';
+        final slotLabel = (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.trim().isNotEmpty)
+            ? ' • ${req.confirmedTimeSlot}'
+            : '';
+        return RecentUpdatePreviewCard(
+          cardKey: Key('patient_upcoming_appointment_card_$idx'),
+          leadingIcon: Icons.medical_services_outlined,
+          title: docName,
+          subtitle: req.problemCategory.trim().isNotEmpty ? req.problemCategory.trim() : 'Scheduled Visit',
+          metaLine: '$dtLabel$slotLabel',
+          statusLabel: req.status.trim().isNotEmpty ? req.status.trim() : 'Scheduled',
+          onTap: openAllUpcoming,
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildPatientRecentConsultationsPreviewSection(
+    List<PatientConsultationRequest> myRequests,
+  ) {
+    final latestTwoConsultations = takeLatestPreviewRecords<PatientConsultationRequest>(
+      myRequests,
+      limit: kDashboardRecentPreviewLimit,
+      compareDesc: (a, b) => b.submittedAt.compareTo(a.submittedAt),
+    );
+
+    void openAllConsultations() {
+      _guardServiceAccess(
+        context,
+        serviceTitle: 'My Visits',
+        onAllowed: () {
+          _patientService.syncAppointmentsFromApi();
+          setState(() {
+            _visitsSubTabIndex = 0;
+            _showAllVisits = true;
+            _expandedVisitsLimit = _visitsExpandedPageSize;
+            _currentIndex = 2;
+          });
+        },
+      );
+    }
+
+    return RecentUpdatesPreviewSection(
+      sectionKey: const Key('patient_recent_consultations_section'),
+      viewAllKey: const Key('patient_view_all_consultations_btn'),
+      emptyStateKey: const Key('patient_recent_consultations_empty'),
+      title: 'Recent Consultations',
+      totalCount: myRequests.length,
+      icon: Icons.history_rounded,
+      onViewAll: openAllConsultations,
+      emptyIcon: Icons.history_rounded,
+      emptyTitle: 'No recent consultations yet.',
+      emptySubtitle: 'Your recent and past consultations will appear here.',
+      previewChildren: latestTwoConsultations.asMap().entries.map((entry) {
+        final idx = entry.key;
+        final req = entry.value;
+        final docName = req.displayDoctorName.trim().isNotEmpty
+            ? req.displayDoctorName.trim()
+            : (req.assignedDoctorName?.trim().isNotEmpty == true
+                ? req.assignedDoctorName!.trim()
+                : 'Consultation Request');
+        final dtLabel = (req.confirmedDate != null && req.confirmedDate!.trim().isNotEmpty)
+            ? req.confirmedDate!.split('T').first
+            : '${req.submittedAt.toLocal().day}/${req.submittedAt.toLocal().month}/${req.submittedAt.toLocal().year}';
+        return RecentUpdatePreviewCard(
+          cardKey: Key('patient_recent_consultation_card_$idx'),
+          leadingIcon: Icons.assignment_outlined,
+          title: req.problemCategory.trim().isNotEmpty ? req.problemCategory.trim() : 'Consultation',
+          subtitle: docName,
+          metaLine: dtLabel,
+          statusLabel: req.status.trim().isNotEmpty ? req.status.trim() : 'Submitted',
+          onTap: openAllConsultations,
+        );
+      }).toList(),
+    );
+  }
+
   Widget _buildPatientReferralsSummarySection() {
     final received = _patientService.receivedForMePatientReferrals;
     final sent = _patientService.myCreatedPatientReferrals;
@@ -1996,10 +2367,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
       final key = r.id.isNotEmpty ? r.id : '${r.referredPatientMobile}_${r.doctorId}';
       if (seenIds.add(key)) combined.add(r);
     }
-
-    if (combined.isEmpty) {
-      return const SizedBox(height: 4);
-    }
+    combined.sort((a, b) => (b.referralDate as DateTime).compareTo(a.referralDate as DateTime));
 
     final receivedKeys = received.map((r) => r.id.isNotEmpty ? r.id : '${r.referredPatientMobile}_${r.doctorId}').toSet();
 
@@ -2035,7 +2403,7 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Referrals (${combined.length})',
+                  'Recent Referrals (${combined.length})',
                   style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppTheme.textDark),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -2049,12 +2417,28 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> with Ti
                     onAllowed: () => ReferredPatientsSheet.show(context),
                   );
                 },
-                child: const Text('View all', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
+                child: const Text('View All', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
               ),
             ],
           ),
           const SizedBox(height: 10),
-          ...combined.take(3).map((ref) {
+          if (combined.isEmpty)
+            Container(
+              key: const Key('patient_recent_referrals_empty'),
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: const Text(
+                'No referrals yet.',
+                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppTheme.textMuted),
+              ),
+            )
+          else
+            ...combined.take(kDashboardRecentPreviewLimit).map((ref) {
             final key = ref.id.isNotEmpty ? ref.id : '${ref.referredPatientMobile}_${ref.doctorId}';
             final isReceivedForMe = receivedKeys.contains(key);
             final rawStatus = ref.status.toString().trim();

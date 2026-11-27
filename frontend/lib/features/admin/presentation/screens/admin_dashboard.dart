@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -16,6 +18,7 @@ import '../../../../core/models/medical_specialty_model.dart';
 import 'patient_details_screen.dart';
 import '../widgets/admin_global_visits_calendar.dart';
 import '../widgets/admin_doctor_activity_calendar.dart';
+import '../widgets/admin_requests_referrals_calendar.dart';
 import '../widgets/admin_clinic_management_panel.dart';
 import '../widgets/doctor_slot_management_dialog.dart';
 import '../widgets/gs_health_admin_overview.dart';
@@ -53,6 +56,107 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   String _adminApptDateFilter = '';
   final Set<String> _expandedAppointmentIds = {};
   final Set<String> _togglingSubAdminIds = {};
+  bool _isRequestsReferralsCalendarView = false;
+
+  Widget _buildRequestsReferralsViewToggle({String keyPrefix = 'admin_requests_referrals'}) {
+    return Container(
+      key: Key('${keyPrefix}_view_toggle'),
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          InkWell(
+            key: Key('${keyPrefix}_list_view_btn'),
+            onTap: () {
+              if (_isRequestsReferralsCalendarView) {
+                setState(() => _isRequestsReferralsCalendarView = false);
+              }
+            },
+            borderRadius: BorderRadius.circular(9),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: !_isRequestsReferralsCalendarView
+                    ? const Color(0xFF012A58)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.view_list_rounded,
+                    size: 15,
+                    color: !_isRequestsReferralsCalendarView
+                        ? Colors.white
+                        : const Color(0xFF475569),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'List View',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: !_isRequestsReferralsCalendarView
+                          ? Colors.white
+                          : const Color(0xFF475569),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          InkWell(
+            key: Key('${keyPrefix}_calendar_view_btn'),
+            onTap: () {
+              if (!_isRequestsReferralsCalendarView) {
+                setState(() => _isRequestsReferralsCalendarView = true);
+              }
+            },
+            borderRadius: BorderRadius.circular(9),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: _isRequestsReferralsCalendarView
+                    ? const Color(0xFF012A58)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.calendar_month_rounded,
+                    size: 15,
+                    color: _isRequestsReferralsCalendarView
+                        ? Colors.white
+                        : const Color(0xFF475569),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Calendar View',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: _isRequestsReferralsCalendarView
+                          ? Colors.white
+                          : const Color(0xFF475569),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Timer? _autoSyncTimer;
   RealtimeChannel? _realtimeChannel;
@@ -3625,6 +3729,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
         canViewPhone: true,
         onOpenSchedule: () => setState(() => _selectedNavIndex = 4),
       ),
+      onViewAllAppointments: () => setState(() => _selectedNavIndex = 4),
+      recentReferrals: allReferrals,
+      onViewAllReferrals: () => setState(() => _selectedNavIndex = 11),
+      recentDoctors: doctors.reversed.toList(),
+      onViewAllDoctors: () => _selectAdminNavSection(2),
+      recentClinics: clinics.reversed.toList(),
+      onViewAllClinics: () => setState(() => _selectedNavIndex = 1),
       footer: isDesktop ? null : _buildMobileSectionPillsBar(embedded: true),
     );
   }
@@ -3653,7 +3764,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
   void _showAdminChatInspectionModal(BuildContext context, String roomId, String patientName, String doctorName) {
     final replyCtrl = TextEditingController();
     bool isSendingReply = false;
-    bool didMarkRead = false;
+    Future<List<dynamic>> messagesFuture = ApiService().fetchChatMessages(roomId: roomId, markRead: false);
 
     showModalBottomSheet(
       context: context,
@@ -3662,12 +3773,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
       builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setModalState) {
-            if (!didMarkRead) {
-              didMarkRead = true;
-              ApiService().markChatRoomRead(roomId: roomId).then((_) {
-                _fetchAdminConversations();
-              });
-            }
             return Container(
               height: MediaQuery.of(context).size.height * 0.85,
               decoration: const BoxDecoration(
@@ -3746,7 +3851,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                         IconButton(
                           icon: const Icon(Icons.refresh_rounded, color: Colors.white, size: 19),
                           tooltip: 'Refresh Messages',
-                          onPressed: () => setModalState(() {}),
+                          onPressed: () => setModalState(() {
+                            messagesFuture = ApiService().fetchChatMessages(roomId: roomId, markRead: false);
+                          }),
                         ),
                         IconButton(
                           icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFFE3434), size: 20),
@@ -3770,7 +3877,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             );
                             if (confirm == true) {
                               await ApiService().clearChatMessages(roomId: roomId);
-                              setModalState(() {});
+                              setModalState(() {
+                                messagesFuture = ApiService().fetchChatMessages(roomId: roomId, markRead: false);
+                              });
                               _fetchAdminConversations();
                             }
                           },
@@ -3788,7 +3897,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     child: Container(
                       color: const Color(0xFFF1F5F9),
                       child: FutureBuilder<List<dynamic>>(
-                        future: ApiService().fetchChatMessages(roomId: roomId, markRead: true),
+                        future: messagesFuture,
                         builder: (ctx, snapshot) {
                           if (snapshot.connectionState == ConnectionState.waiting) {
                             return const Center(child: CircularProgressIndicator());
@@ -3976,7 +4085,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                   );
                                   if (res['success'] == true) {
                                     replyCtrl.clear();
-                                    setModalState(() => isSendingReply = false);
+                                    setModalState(() {
+                                      isSendingReply = false;
+                                      messagesFuture = ApiService().fetchChatMessages(roomId: roomId, markRead: false);
+                                    });
                                     _fetchAdminConversations();
                                   } else {
                                     setModalState(() => isSendingReply = false);
@@ -5152,11 +5264,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
     final nameCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
+    final passwordCtrl = TextEditingController();
     final cityCtrl = TextEditingController();
     final pincodeCtrl = TextEditingController();
     String selectedSubAdminLanguage = 'English';
+    bool showPassword = false;
     bool isLoading = false;
     String status = 'ACTIVE';
+    String? formError;
+    Uint8List? pickedImageBytes;
+    String? pickedImageBase64;
 
     final Set<String> selectedPerms = Set.from(AppPermissions.defaultPermissions);
     final Set<String> selectedDistrictIds = {};
@@ -5174,17 +5291,50 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
       'Punjabi',
     ];
 
+    String normalizePhone10(String raw) {
+      final digits = raw.trim().replaceAll(RegExp(r'[^0-9]'), '');
+      if (digits.length == 14 && digits.startsWith('0091')) return digits.substring(4);
+      if (digits.length == 13 && digits.startsWith('910')) return digits.substring(3);
+      if (digits.length == 12 && digits.startsWith('91')) return digits.substring(2);
+      if (digits.length == 11 && digits.startsWith('0')) return digits.substring(1);
+      return digits;
+    }
+
     showDialog(
       context: context,
       builder: (dialogCtx) {
         return StatefulBuilder(
           builder: (ctx, setModalState) {
+            Future<void> pickSubAdminPhoto() async {
+              try {
+                final picker = ImagePicker();
+                final XFile? file = await picker.pickImage(
+                  source: ImageSource.gallery,
+                  imageQuality: 80,
+                  maxWidth: 600,
+                );
+                if (file == null) return;
+                final bytes = await file.readAsBytes();
+                if (bytes.isEmpty) return;
+                final ext = file.name.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+                setModalState(() {
+                  pickedImageBytes = bytes;
+                  pickedImageBase64 = 'data:$ext;base64,${base64Encode(bytes)}';
+                });
+              } catch (e) {
+                setModalState(() {
+                  formError = 'Unable to pick profile image: $e';
+                });
+              }
+            }
+
             return Dialog(
+              key: const Key('create_sub_admin_dialog'),
               insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
               backgroundColor: Colors.white,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
               child: Container(
-                constraints: const BoxConstraints(maxWidth: 580, maxHeight: 720),
+                constraints: const BoxConstraints(maxWidth: 580, maxHeight: 760),
                 padding: const EdgeInsets.all(22),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -5212,7 +5362,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 overflow: TextOverflow.ellipsis,
                               ),
                               Text(
-                                'Mobile identifier authentication • Assign module permissions',
+                                'Assign role & module permissions • Mobile OTP & Password login',
                                 style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -5229,14 +5379,131 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     const Divider(color: Color(0xFFF1F5F9)),
                     const SizedBox(height: 10),
 
+                    if (formError != null && formError!.trim().isNotEmpty) ...[
+                      Container(
+                        key: const Key('subadmin_create_error_banner'),
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: const Color(0x14FE3434),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0x40FE3434)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.error_outline_rounded, color: Color(0xFFFE3434), size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                formError!,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFFFE3434),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
                     Expanded(
                       child: SingleChildScrollView(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
+                            // Profile Image & Role Row
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF8FAFC),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: const Color(0xFFE2E8F0)),
+                              ),
+                              child: Row(
+                                children: [
+                                  GestureDetector(
+                                    key: const Key('subadmin_create_photo_picker'),
+                                    onTap: pickSubAdminPhoto,
+                                    child: CircleAvatar(
+                                      radius: 24,
+                                      backgroundColor: const Color(0xFF012A58).withValues(alpha: 0.1),
+                                      backgroundImage: pickedImageBytes != null ? MemoryImage(pickedImageBytes!) : null,
+                                      child: pickedImageBytes == null
+                                          ? const Icon(Icons.add_a_photo_outlined, color: Color(0xFF012A58), size: 20)
+                                          : null,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            const Flexible(
+                                              child: Text(
+                                                'Profile Image (Optional)',
+                                                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Container(
+                                              key: const Key('subadmin_create_role_field'),
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0x14012A58),
+                                                borderRadius: BorderRadius.circular(8),
+                                                border: Border.all(color: const Color(0x33012A58)),
+                                              ),
+                                              child: const Text(
+                                                'Role: Sub-Admin',
+                                                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: Color(0xFF012A58)),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Wrap(
+                                          spacing: 8,
+                                          children: [
+                                            InkWell(
+                                              onTap: pickSubAdminPhoto,
+                                              child: Text(
+                                                pickedImageBytes == null ? 'Upload Photo' : 'Change Photo',
+                                                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: AppTheme.primaryBlue),
+                                              ),
+                                            ),
+                                            if (pickedImageBytes != null)
+                                              InkWell(
+                                                onTap: () => setModalState(() {
+                                                  pickedImageBytes = null;
+                                                  pickedImageBase64 = null;
+                                                }),
+                                                child: const Text(
+                                                  'Remove',
+                                                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFFFE3434)),
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+
                             // Full Name *
                             TextField(
+                              key: const Key('subadmin_create_name_field'),
                               controller: nameCtrl,
+                              onChanged: (_) {
+                                if (formError != null) setModalState(() => formError = null);
+                              },
                               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                               cursorColor: AppTheme.primaryBlue,
                               decoration: InputDecoration(
@@ -5252,13 +5519,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
                             // Mobile Phone Number *
                             TextField(
+                              key: const Key('subadmin_create_phone_field'),
                               controller: phoneCtrl,
                               keyboardType: TextInputType.phone,
+                              onChanged: (_) {
+                                if (formError != null) setModalState(() => formError = null);
+                              },
                               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                               cursorColor: AppTheme.primaryBlue,
                               decoration: InputDecoration(
                                 labelText: 'Mobile Phone Number *',
-                                hintText: '+91 98765 43210',
+                                hintText: '10-digit mobile number (e.g. 9876543210)',
                                 prefixIcon: const Icon(Icons.phone_android_rounded, size: 18),
                                 filled: true,
                                 fillColor: const Color(0xFFF8FAFC),
@@ -5267,16 +5538,45 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             ),
                             const SizedBox(height: 12),
 
-                            // Email (Optional)
+                            // Email Address
                             TextField(
+                              key: const Key('subadmin_create_email_field'),
                               controller: emailCtrl,
                               keyboardType: TextInputType.emailAddress,
+                              onChanged: (_) {
+                                if (formError != null) setModalState(() => formError = null);
+                              },
                               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                               cursorColor: AppTheme.primaryBlue,
                               decoration: InputDecoration(
-                                labelText: 'Email Address (Optional)',
-                                hintText: 'subadmin@gshealth.com (Optional)',
+                                labelText: 'Email Address',
+                                hintText: 'subadmin@gshealth.com',
                                 prefixIcon: const Icon(Icons.email_outlined, size: 18),
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+
+                            // Password (Optional - for password login in addition to Mobile OTP)
+                            TextField(
+                              key: const Key('subadmin_create_password_field'),
+                              controller: passwordCtrl,
+                              obscureText: !showPassword,
+                              onChanged: (_) {
+                                if (formError != null) setModalState(() => formError = null);
+                              },
+                              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                              cursorColor: AppTheme.primaryBlue,
+                              decoration: InputDecoration(
+                                labelText: 'Password (Optional • Leave blank for OTP-only sign in)',
+                                hintText: 'Minimum 6 characters',
+                                prefixIcon: const Icon(Icons.lock_outline_rounded, size: 18),
+                                suffixIcon: IconButton(
+                                  icon: Icon(showPassword ? Icons.visibility_off_rounded : Icons.visibility_rounded, size: 18),
+                                  onPressed: () => setModalState(() => showPassword = !showPassword),
+                                ),
                                 filled: true,
                                 fillColor: const Color(0xFFF8FAFC),
                                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -5290,6 +5590,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 Expanded(
                                   flex: 3,
                                   child: TextField(
+                                    key: const Key('subadmin_create_city_field'),
                                     controller: cityCtrl,
                                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                                     cursorColor: AppTheme.primaryBlue,
@@ -5307,6 +5608,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 Expanded(
                                   flex: 2,
                                   child: TextField(
+                                    key: const Key('subadmin_create_pincode_field'),
                                     controller: pincodeCtrl,
                                     keyboardType: TextInputType.number,
                                     style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
@@ -5385,13 +5687,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                const Text('Module Permissions', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark)),
+                                const Flexible(
+                                  child: Text(
+                                    'Module Permissions *',
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
                                 Row(
                                   children: [
                                     TextButton(
+                                      key: const Key('subadmin_create_select_all_perms_btn'),
                                       child: const Text('Select All', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                                       onPressed: () {
                                         setModalState(() {
+                                          formError = null;
                                           for (final g in AppPermissions.groups) {
                                             for (final p in g.permissions) {
                                               selectedPerms.add(p.key);
@@ -5401,6 +5711,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                       },
                                     ),
                                     TextButton(
+                                      key: const Key('subadmin_create_clear_perms_btn'),
                                       child: const Text('Clear', style: TextStyle(fontSize: 11, color: Color(0xFFFE3434))),
                                       onPressed: () => setModalState(() => selectedPerms.clear()),
                                     ),
@@ -5412,50 +5723,56 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
                             // Groups of permissions
                             ...AppPermissions.groups.map((group) {
-                              return Container(
-                                margin: const EdgeInsets.only(bottom: 10),
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: Material(
                                   color: const Color(0xFFF8FAFC),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: const Color(0xFFE2E8F0)),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    side: const BorderSide(color: Color(0xFFE2E8F0)),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Text(group.icon, style: const TextStyle(fontSize: 14)),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: Text(
-                                            group.title,
-                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
-                                          ),
+                                        Row(
+                                          children: [
+                                            Text(group.icon, style: const TextStyle(fontSize: 14)),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                group.title,
+                                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
+                                              ),
+                                            ),
+                                          ],
                                         ),
+                                        const SizedBox(height: 6),
+                                        ...group.permissions.map((perm) {
+                                          final isChecked = selectedPerms.contains(perm.key);
+                                          return CheckboxListTile(
+                                            key: Key('subadmin_perm_checkbox_${perm.key}'),
+                                            dense: true,
+                                            contentPadding: EdgeInsets.zero,
+                                            title: Text(perm.label, style: const TextStyle(fontSize: 12)),
+                                            value: isChecked,
+                                            activeColor: const Color(0xFFFE3434),
+                                            onChanged: (val) {
+                                              setModalState(() {
+                                                formError = null;
+                                                if (val == true) {
+                                                  selectedPerms.add(perm.key);
+                                                } else {
+                                                  selectedPerms.remove(perm.key);
+                                                }
+                                              });
+                                            },
+                                          );
+                                        }),
                                       ],
                                     ),
-                                    const SizedBox(height: 6),
-                                    ...group.permissions.map((perm) {
-                                      final isChecked = selectedPerms.contains(perm.key);
-                                      return CheckboxListTile(
-                                        dense: true,
-                                        contentPadding: EdgeInsets.zero,
-                                        title: Text(perm.label, style: const TextStyle(fontSize: 12)),
-                                        value: isChecked,
-                                        activeColor: const Color(0xFFFE3434),
-                                        onChanged: (val) {
-                                          setModalState(() {
-                                            if (val == true) {
-                                              selectedPerms.add(perm.key);
-                                            } else {
-                                              selectedPerms.remove(perm.key);
-                                            }
-                                          });
-                                        },
-                                      );
-                                    }),
-                                  ],
+                                  ),
                                 ),
                               );
                             }),
@@ -5469,6 +5786,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     SizedBox(
                       height: 48,
                       child: ElevatedButton.icon(
+                        key: const Key('subadmin_create_submit_btn'),
                         icon: isLoading
                             ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                             : const Icon(Icons.check_circle_rounded, size: 18),
@@ -5482,58 +5800,111 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             ? null
                             : () async {
                                 final name = nameCtrl.text.trim();
-                                final phone = phoneCtrl.text.trim();
+                                final rawPhone = phoneCtrl.text.trim();
+                                final phone10 = normalizePhone10(rawPhone);
                                 final email = emailCtrl.text.trim();
+                                final password = passwordCtrl.text.trim();
                                 final city = cityCtrl.text.trim();
                                 final pincode = pincodeCtrl.text.trim();
 
-                                if (name.isEmpty || phone.isEmpty) {
+                                if (name.isEmpty) {
+                                  const msg = 'Please enter the Sub-Admin Full Name.';
+                                  setModalState(() => formError = msg);
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('⚠️ Please fill in Full Name and Mobile Phone Number.'), backgroundColor: Color(0xFFFE3434)),
+                                    const SnackBar(content: Text('⚠️ $msg'), backgroundColor: Color(0xFFFE3434)),
+                                  );
+                                  return;
+                                }
+                                if (phone10.length != 10 || !RegExp(r'^\d{10}$').hasMatch(phone10)) {
+                                  const msg = 'Please enter a valid 10-digit Mobile Phone Number.';
+                                  setModalState(() => formError = msg);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('⚠️ $msg'), backgroundColor: Color(0xFFFE3434)),
+                                  );
+                                  return;
+                                }
+                                if (email.isNotEmpty && !RegExp(r'^\S+@\S+\.\S+$').hasMatch(email)) {
+                                  const msg = 'Please enter a valid Email Address.';
+                                  setModalState(() => formError = msg);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('⚠️ $msg'), backgroundColor: Color(0xFFFE3434)),
+                                  );
+                                  return;
+                                }
+                                if (password.isNotEmpty && password.length < 6) {
+                                  const msg = 'Password must be at least 6 characters long.';
+                                  setModalState(() => formError = msg);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('⚠️ $msg'), backgroundColor: Color(0xFFFE3434)),
+                                  );
+                                  return;
+                                }
+                                if (selectedPerms.isEmpty) {
+                                  const msg = 'Please select at least one module permission for the Sub-Admin.';
+                                  setModalState(() => formError = msg);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('⚠️ $msg'), backgroundColor: Color(0xFFFE3434)),
                                   );
                                   return;
                                 }
 
-                                setModalState(() => isLoading = true);
+                                setModalState(() {
+                                  isLoading = true;
+                                  formError = null;
+                                });
 
                                 try {
                                   final res = await ApiService().createSubAdmin(
                                     name: name,
-                                    phone: phone,
-                                    email: email,
-                                    city: city,
-                                    pincode: pincode,
+                                    phone: phone10,
+                                    email: email.isNotEmpty ? email : null,
+                                    password: password.isNotEmpty ? password : null,
+                                    city: city.isNotEmpty ? city : null,
+                                    pincode: pincode.isNotEmpty ? pincode : null,
                                     languages: [selectedSubAdminLanguage],
                                     permissions: selectedPerms.toList(),
                                     districtIds: selectedDistrictIds.isNotEmpty ? selectedDistrictIds.toList() : null,
                                     status: status,
+                                    profilePhoto: pickedImageBase64,
                                   );
-
-                                  await _problemService.syncSubAdminsFromApi();
-                                  setModalState(() => isLoading = false);
-
-                                  if (!dialogCtx.mounted) return;
-                                  Navigator.of(dialogCtx).pop();
 
                                   if (res['success'] == true) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text('✅ Sub-Admin "$name" created successfully with ${selectedPerms.length} permissions.'),
-                                        backgroundColor: const Color(0xFF012A58),
-                                      ),
-                                    );
+                                    await _problemService.syncSubAdminsFromApi();
+                                    if (mounted) setState(() {});
+                                    setModalState(() => isLoading = false);
+                                    if (!dialogCtx.mounted) return;
+                                    Navigator.of(dialogCtx).pop();
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('✅ Sub-Admin "$name" created successfully with ${selectedPerms.length} permissions.'),
+                                          backgroundColor: const Color(0xFF012A58),
+                                        ),
+                                      );
+                                    }
                                   } else {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('⚠️ ${res['message'] ?? 'Notice during creation'}'), backgroundColor: const Color(0xFFFE3434)),
-                                    );
+                                    final errMsg = (res['message'] ?? 'Failed to create Sub-Admin.').toString();
+                                    setModalState(() {
+                                      isLoading = false;
+                                      formError = errMsg;
+                                    });
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('⚠️ $errMsg'), backgroundColor: const Color(0xFFFE3434)),
+                                      );
+                                    }
                                   }
                                 } catch (e) {
-                                  setModalState(() => isLoading = false);
-                                  if (!dialogCtx.mounted) return;
-                                  Navigator.of(dialogCtx).pop();
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('⚠️ Error creating Sub-Admin: $e'), backgroundColor: const Color(0xFFFE3434)),
-                                  );
+                                  final errMsg = 'Error creating Sub-Admin: $e';
+                                  setModalState(() {
+                                    isLoading = false;
+                                    formError = errMsg;
+                                  });
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('⚠️ $errMsg'), backgroundColor: const Color(0xFFFE3434)),
+                                    );
+                                  }
                                 }
                               },
                       ),
@@ -5550,12 +5921,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
   void _showEditSubAdminModal(BuildContext context, Map<String, dynamic> sa) {
     final String saId = (sa['id'] ?? '').toString();
+    final String rawInitialEmail = (sa['email'] ?? '').toString().trim();
+    final String initialEmail = rawInitialEmail.endsWith('@dentaguru.internal') ? '' : rawInitialEmail;
     final nameCtrl = TextEditingController(text: (sa['name'] ?? '').toString());
     final phoneCtrl = TextEditingController(text: (sa['phone'] ?? '').toString());
+    final emailCtrl = TextEditingController(text: initialEmail);
     final passwordCtrl = TextEditingController();
     bool showPassword = false;
     bool isLoading = false;
     String status = (sa['status'] ?? 'ACTIVE').toString().toUpperCase();
+    String? editError;
 
     final Set<String> selectedPerms = {};
     if (sa['permissions'] is List) {
@@ -5566,17 +5941,27 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
       }
     }
 
+    String normalizePhone10(String raw) {
+      final digits = raw.trim().replaceAll(RegExp(r'[^0-9]'), '');
+      if (digits.length == 14 && digits.startsWith('0091')) return digits.substring(4);
+      if (digits.length == 13 && digits.startsWith('910')) return digits.substring(3);
+      if (digits.length == 12 && digits.startsWith('91')) return digits.substring(2);
+      if (digits.length == 11 && digits.startsWith('0')) return digits.substring(1);
+      return digits;
+    }
+
     showDialog(
       context: context,
       builder: (dialogCtx) {
         return StatefulBuilder(
           builder: (ctx, setModalState) {
             return Dialog(
+              key: const Key('edit_sub_admin_dialog'),
               insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
               backgroundColor: Colors.white,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
               child: Container(
-                constraints: const BoxConstraints(maxWidth: 580, maxHeight: 720),
+                constraints: const BoxConstraints(maxWidth: 580, maxHeight: 740),
                 padding: const EdgeInsets.all(22),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -5604,7 +5989,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                                 overflow: TextOverflow.ellipsis,
                               ),
                               Text(
-                                '${sa['email']} • Update details and assigned roles',
+                                '${initialEmail.isNotEmpty ? initialEmail : (sa['phone'] ?? 'Sub-Admin')} • Update details and permissions',
                                 style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -5621,6 +6006,35 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     const Divider(color: Color(0xFFF1F5F9)),
                     const SizedBox(height: 10),
 
+                    if (editError != null && editError!.trim().isNotEmpty) ...[
+                      Container(
+                        key: const Key('subadmin_edit_error_banner'),
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: const Color(0x14FE3434),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0x40FE3434)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.error_outline_rounded, color: Color(0xFFFE3434), size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                editError!,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFFFE3434),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
                     Expanded(
                       child: SingleChildScrollView(
                         child: Column(
@@ -5628,7 +6042,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                           children: [
                             // Full Name *
                             TextField(
+                              key: const Key('subadmin_edit_name_field'),
                               controller: nameCtrl,
+                              onChanged: (_) {
+                                if (editError != null) setModalState(() => editError = null);
+                              },
                               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                               cursorColor: AppTheme.primaryBlue,
                               decoration: InputDecoration(
@@ -5651,8 +6069,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
                             // Contact Number *
                             TextField(
+                              key: const Key('subadmin_edit_phone_field'),
                               controller: phoneCtrl,
                               keyboardType: TextInputType.phone,
+                              onChanged: (_) {
+                                if (editError != null) setModalState(() => editError = null);
+                              },
                               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                               cursorColor: AppTheme.primaryBlue,
                               decoration: InputDecoration(
@@ -5673,15 +6095,40 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             ),
                             const SizedBox(height: 12),
 
+                            // Email Address
+                            TextField(
+                              key: const Key('subadmin_edit_email_field'),
+                              controller: emailCtrl,
+                              keyboardType: TextInputType.emailAddress,
+                              onChanged: (_) {
+                                if (editError != null) setModalState(() => editError = null);
+                              },
+                              style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
+                              cursorColor: AppTheme.primaryBlue,
+                              decoration: InputDecoration(
+                                labelText: 'Email Address',
+                                hintText: 'subadmin@gshealth.com',
+                                prefixIcon: const Icon(Icons.email_outlined, size: 18),
+                                filled: true,
+                                fillColor: const Color(0xFFF8FAFC),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+
                             // New Password (Optional)
                             TextField(
+                              key: const Key('subadmin_edit_password_field'),
                               controller: passwordCtrl,
                               obscureText: !showPassword,
+                              onChanged: (_) {
+                                if (editError != null) setModalState(() => editError = null);
+                              },
                               style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w500),
                               cursorColor: AppTheme.primaryBlue,
                               decoration: InputDecoration(
                                 labelText: 'Reset Password (Leave blank to keep unchanged)',
-                                hintText: 'New password',
+                                hintText: 'New password (min 6 characters)',
                                 prefixIcon: const Icon(Icons.lock_outline_rounded, size: 18),
                                 suffixIcon: IconButton(
                                   icon: Icon(showPassword ? Icons.visibility_off_rounded : Icons.visibility_rounded, size: 18),
@@ -5720,13 +6167,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                const Text('Module Permissions', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark)),
+                                const Flexible(
+                                  child: Text(
+                                    'Module Permissions *',
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textDark),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
                                 Row(
                                   children: [
                                     TextButton(
                                       child: const Text('Select All', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                                       onPressed: () {
                                         setModalState(() {
+                                          editError = null;
                                           for (final g in AppPermissions.groups) {
                                             for (final p in g.permissions) {
                                               selectedPerms.add(p.key);
@@ -5746,50 +6200,56 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             const SizedBox(height: 8),
 
                             ...AppPermissions.groups.map((group) {
-                              return Container(
-                                margin: const EdgeInsets.only(bottom: 10),
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: Material(
                                   color: const Color(0xFFF8FAFC),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: const Color(0xFFE2E8F0)),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    side: const BorderSide(color: Color(0xFFE2E8F0)),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Text(group.icon, style: const TextStyle(fontSize: 14)),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: Text(
-                                            group.title,
-                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
-                                          ),
+                                        Row(
+                                          children: [
+                                            Text(group.icon, style: const TextStyle(fontSize: 14)),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                group.title,
+                                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
+                                              ),
+                                            ),
+                                          ],
                                         ),
+                                        const SizedBox(height: 6),
+                                        ...group.permissions.map((perm) {
+                                          final isChecked = selectedPerms.contains(perm.key);
+                                          return CheckboxListTile(
+                                            key: Key('subadmin_edit_perm_checkbox_${perm.key}'),
+                                            dense: true,
+                                            contentPadding: EdgeInsets.zero,
+                                            title: Text(perm.label, style: const TextStyle(fontSize: 12)),
+                                            value: isChecked,
+                                            activeColor: const Color(0xFFFE3434),
+                                            onChanged: (val) {
+                                              setModalState(() {
+                                                editError = null;
+                                                if (val == true) {
+                                                  selectedPerms.add(perm.key);
+                                                } else {
+                                                  selectedPerms.remove(perm.key);
+                                                }
+                                              });
+                                            },
+                                          );
+                                        }),
                                       ],
                                     ),
-                                    const SizedBox(height: 6),
-                                    ...group.permissions.map((perm) {
-                                      final isChecked = selectedPerms.contains(perm.key);
-                                      return CheckboxListTile(
-                                        dense: true,
-                                        contentPadding: EdgeInsets.zero,
-                                        title: Text(perm.label, style: const TextStyle(fontSize: 12)),
-                                        value: isChecked,
-                                        activeColor: const Color(0xFFFE3434),
-                                        onChanged: (val) {
-                                          setModalState(() {
-                                            if (val == true) {
-                                              selectedPerms.add(perm.key);
-                                            } else {
-                                              selectedPerms.remove(perm.key);
-                                            }
-                                          });
-                                        },
-                                      );
-                                    }),
-                                  ],
+                                  ),
                                 ),
                               );
                             }),
@@ -5803,6 +6263,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                     SizedBox(
                       height: 48,
                       child: ElevatedButton.icon(
+                        key: const Key('subadmin_edit_submit_btn'),
                         icon: isLoading
                             ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                             : const Icon(Icons.save_rounded, size: 18),
@@ -5816,58 +6277,106 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                             ? null
                             : () async {
                                 final name = nameCtrl.text.trim();
-                                final phone = phoneCtrl.text.trim();
+                                final phone10 = normalizePhone10(phoneCtrl.text.trim());
+                                final email = emailCtrl.text.trim();
+                                final password = passwordCtrl.text.trim();
+
                                 if (name.isEmpty) {
+                                  const msg = 'Full Name cannot be empty.';
+                                  setModalState(() => editError = msg);
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('⚠️ Full Name cannot be empty.')),
+                                    const SnackBar(content: Text('⚠️ $msg'), backgroundColor: Color(0xFFFE3434)),
                                   );
                                   return;
                                 }
-                                final cleanPhone = phone.replaceAll(RegExp(r'[^0-9]'), '');
-                                if (cleanPhone.length < 10) {
+                                if (phone10.length != 10 || !RegExp(r'^\d{10}$').hasMatch(phone10)) {
+                                  const msg = 'Please enter a valid 10-digit Contact Number.';
+                                  setModalState(() => editError = msg);
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('⚠️ Enter a valid 10-digit Contact Number.')),
+                                    const SnackBar(content: Text('⚠️ $msg'), backgroundColor: Color(0xFFFE3434)),
                                   );
                                   return;
                                 }
-                                setModalState(() => isLoading = true);
+                                if (email.isNotEmpty && !RegExp(r'^\S+@\S+\.\S+$').hasMatch(email)) {
+                                  const msg = 'Please enter a valid Email Address.';
+                                  setModalState(() => editError = msg);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('⚠️ $msg'), backgroundColor: Color(0xFFFE3434)),
+                                  );
+                                  return;
+                                }
+                                if (password.isNotEmpty && password.length < 6) {
+                                  const msg = 'Password must be at least 6 characters long.';
+                                  setModalState(() => editError = msg);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('⚠️ $msg'), backgroundColor: Color(0xFFFE3434)),
+                                  );
+                                  return;
+                                }
+                                if (selectedPerms.isEmpty) {
+                                  const msg = 'Please select at least one module permission.';
+                                  setModalState(() => editError = msg);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('⚠️ $msg'), backgroundColor: Color(0xFFFE3434)),
+                                  );
+                                  return;
+                                }
+
+                                setModalState(() {
+                                  isLoading = true;
+                                  editError = null;
+                                });
 
                                 try {
                                   final res = await ApiService().updateSubAdmin(
                                     id: saId,
-                                    name: nameCtrl.text.trim(),
-                                    phone: phoneCtrl.text.trim(),
-                                    password: passwordCtrl.text.trim().isNotEmpty ? passwordCtrl.text.trim() : null,
+                                    name: name,
+                                    phone: phone10,
+                                    email: email.isNotEmpty ? email : null,
+                                    password: password.isNotEmpty ? password : null,
                                     status: status,
                                     permissions: selectedPerms.toList(),
                                   );
 
-                                  await _problemService.syncSubAdminsFromApi();
-                                  if (mounted) setState(() {});
-                                  setModalState(() => isLoading = false);
-
-                                  if (!dialogCtx.mounted) return;
-                                  Navigator.of(dialogCtx).pop();
-
                                   if (res['success'] == true) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text('✅ Sub-Admin "${nameCtrl.text.trim()}" updated successfully.'),
-                                        backgroundColor: const Color(0xFF012A58),
-                                      ),
-                                    );
+                                    await _problemService.syncSubAdminsFromApi();
+                                    if (mounted) setState(() {});
+                                    setModalState(() => isLoading = false);
+
+                                    if (!dialogCtx.mounted) return;
+                                    Navigator.of(dialogCtx).pop();
+
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('✅ Sub-Admin "$name" updated successfully.'),
+                                          backgroundColor: const Color(0xFF012A58),
+                                        ),
+                                      );
+                                    }
                                   } else {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('⚠️ ${res['message'] ?? 'Notice during update'}'), backgroundColor: const Color(0xFFFE3434)),
-                                    );
+                                    final errMsg = (res['message'] ?? 'Failed to update Sub-Admin.').toString();
+                                    setModalState(() {
+                                      isLoading = false;
+                                      editError = errMsg;
+                                    });
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('⚠️ $errMsg'), backgroundColor: const Color(0xFFFE3434)),
+                                      );
+                                    }
                                   }
                                 } catch (e) {
-                                  setModalState(() => isLoading = false);
-                                  if (!dialogCtx.mounted) return;
-                                  Navigator.of(dialogCtx).pop();
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('⚠️ Error updating Sub-Admin: $e'), backgroundColor: const Color(0xFFFE3434)),
-                                  );
+                                  final errMsg = 'Error updating Sub-Admin: $e';
+                                  setModalState(() {
+                                    isLoading = false;
+                                    editError = errMsg;
+                                  });
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('⚠️ $errMsg'), backgroundColor: const Color(0xFFFE3434)),
+                                    );
+                                  }
                                 }
                               },
                       ),
@@ -8674,6 +9183,49 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
           ),
           const SizedBox(height: 20),
 
+          // VIEW SWITCHER HEADER (List View | Calendar View) FOR REQUESTS & REFERRALS
+          Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 12,
+              runSpacing: 10,
+              children: [
+                const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Requests & Referrals View Mode',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.textDark,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Switch between List View and Monthly Calendar View for date-wise Requests & Referrals',
+                      style: TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
+                    ),
+                  ],
+                ),
+                _buildRequestsReferralsViewToggle(keyPrefix: 'admin_requests_panel'),
+              ],
+            ),
+          ),
+
+          if (_isRequestsReferralsCalendarView)
+            AdminRequestsReferralsCalendarView(
+              problemService: _problemService,
+            )
+          else ...[
           // PATIENT PROBLEM CONSULTATIONS CONTAINER
           Container(
             padding: const EdgeInsets.all(16),
@@ -9484,6 +10036,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
 
           // DIRECT PATIENT-TO-DOCTOR REFERRALS OVERVIEW CONTAINER
           _buildDashboardReferralsSection(),
+          ],
           const SizedBox(height: 20),
 
           // Charts Row
@@ -10310,6 +10863,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                   ],
                 ),
               ),
+              _buildRequestsReferralsViewToggle(keyPrefix: 'admin_referrals_panel'),
+              const SizedBox(width: 10),
               ElevatedButton.icon(
                 onPressed: _isRefreshingReferrals ? null : _refreshAdminReferrals,
                 icon: _isRefreshingReferrals
@@ -10383,6 +10938,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
           ),
           const SizedBox(height: 20),
 
+          if (_isRequestsReferralsCalendarView)
+            AdminRequestsReferralsCalendarView(
+              problemService: _problemService,
+            )
+          else ...[
           // 3. Status Filters & Search Bar
           LayoutBuilder(
             builder: (context, constraints) {
@@ -10699,6 +11259,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> with Ticker
                 ),
               ),
             ),
+          ],
         ],
       ),
     );

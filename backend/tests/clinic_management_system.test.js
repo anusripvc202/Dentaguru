@@ -310,3 +310,152 @@ test('4. Migration 06 & Rollback 06 SQL are idempotent and strictly non-destruct
     assert.doesNotMatch(rbExecutable, /\bTRUNCATE\b/i);
     assert.doesNotMatch(rbExecutable, /\bDELETE\s+FROM\b/i);
 });
+
+test('5. Clinic Dashboard Option 2 (Register New Doctor) auto-associates doctor with clinic, assigns DOCTOR role, and detects duplicate mobile numbers with existingDoctor attach payload', async () => {
+    const origUserFindByMobile = Schemas.User.findByMobile;
+    const origUserCreate = Schemas.User.create;
+    const origDentistFind = Schemas.Dentist.find;
+    const origDentistFindOne = Schemas.Dentist.findOne;
+    const origDentistFindById = Schemas.Dentist.findById;
+    const origDentistCreate = Schemas.Dentist.create;
+    const origClinicFindByIdAndUpdate = Schemas.Clinic.findByIdAndUpdate;
+    const origAssoc = Schemas.ClinicDoctor.associate;
+    const origNotifCreate = Schemas.Notification.create;
+    const origResolveScope = clinicController.resolveClinicRecordAndDoctorIds;
+
+    const clinicRecord = {
+        id: 'cli-reg-01',
+        clinic_name: 'Emerald Dental & Health Clinic',
+        clinic_address: '101 Park Street',
+        city: 'Mumbai',
+        state: 'Maharashtra',
+        pincode: '400001',
+        latitude: 18.922,
+        longitude: 72.834,
+        services: ['General Consultation']
+    };
+    const usersStore = [
+        { id: 'u-existing-doc', name: 'Dr. Rohan Mehta', phone: '9822211111', email: 'rohan@gshealth.in', role: 'DOCTOR' }
+    ];
+    const dentistsStore = [
+        {
+            id: 'doc-existing-1',
+            user_id: 'u-existing-doc',
+            clinic_id: null,
+            name: 'Dr. Rohan Mehta',
+            phone: '9822211111',
+            speciality: 'Orthodontics',
+            qualifications: 'BDS, MDS',
+            experience_years: 8,
+            availability_status: 'Available',
+            users: usersStore[0]
+        }
+    ];
+    const assocPairs = [];
+
+    Schemas.User.findByMobile = async (phone) => usersStore.find(u => u.phone === phone) || null;
+    Schemas.User.create = async (payload) => {
+        const created = { id: `u-new-${usersStore.length + 1}`, ...payload };
+        usersStore.push(created);
+        return created;
+    };
+    Schemas.Dentist.find = async (q = {}) => {
+        if (q.clinic_id) return dentistsStore.filter(d => d.clinic_id === q.clinic_id);
+        return dentistsStore;
+    };
+    Schemas.Dentist.findOne = async (q = {}) => {
+        if (q.user_id) return dentistsStore.find(d => d.user_id === q.user_id) || null;
+        if (q.license_number) return dentistsStore.find(d => d.license_number === q.license_number) || null;
+        return null;
+    };
+    Schemas.Dentist.findById = async (id) => dentistsStore.find(d => d.id === id) || null;
+    Schemas.Dentist.create = async (payload) => {
+        const u = usersStore.find(x => x.id === payload.user_id) || {};
+        const created = {
+            id: `doc-new-${dentistsStore.length + 1}`,
+            ...payload,
+            name: u.name,
+            phone: u.phone,
+            email: u.email,
+            users: u,
+            clinics: clinicRecord
+        };
+        dentistsStore.push(created);
+        return created;
+    };
+    Schemas.Clinic.findByIdAndUpdate = async (id, patch) => Object.assign(clinicRecord, patch);
+    Schemas.ClinicDoctor.associate = async (cid, did) => {
+        assocPairs.push({ clinicId: cid, doctorId: did });
+        return { associated: true, duplicate: false };
+    };
+    Schemas.Notification.create = async () => ({ id: 'notif-1' });
+    clinicController.resolveClinicRecordAndDoctorIds = async () => ({
+        clinic: clinicRecord,
+        clinicId: clinicRecord.id,
+        clinicName: clinicRecord.clinic_name,
+        doctorIds: dentistsStore.filter(d => d.clinic_id === clinicRecord.id).map(d => d.id)
+    });
+
+    try {
+        // 5a. Registering with an existing doctor's mobile number (9822211111) with rejectExistingAccount=true
+        // must NOT create a duplicate user/doctor and must return 409 MOBILE_ALREADY_REGISTERED with existingDoctor details
+        const dupRes = createMockRes();
+        await clinicController.addClinicDoctor({
+            user: { id: 'cli-owner-1', role: 'Clinic' },
+            params: { clinicId: 'cli-reg-01' },
+            body: {
+                name: 'Dr. Duplicate Attempt',
+                phone: '+91 9822211111',
+                specialty: 'Orthodontics',
+                qualification: 'MDS',
+                experienceYears: 7,
+                rejectExistingAccount: true
+            }
+        }, dupRes);
+        assert.strictEqual(dupRes.result.statusCode, 409);
+        assert.strictEqual(dupRes.result.body.success, false);
+        assert.strictEqual(dupRes.result.body.code, 'MOBILE_ALREADY_REGISTERED');
+        assert.ok(dupRes.result.body.existingDoctor);
+        assert.strictEqual(dupRes.result.body.existingDoctor.id, 'doc-existing-1');
+        assert.strictEqual(usersStore.length, 1, 'Must not create duplicate user account');
+        assert.strictEqual(dentistsStore.length, 1, 'Must not create duplicate dentist account');
+
+        // 5b. Registering a brand-new doctor automatically associates with cli-reg-01 and sets role=DOCTOR (never Admin)
+        const newRes = createMockRes();
+        await clinicController.addClinicDoctor({
+            user: { id: 'cli-owner-1', role: 'Clinic' },
+            params: { clinicId: 'cli-reg-01' },
+            body: {
+                name: 'Dr. Kavita Iyer',
+                phone: '9833344444',
+                email: 'kavita.iyer@gshealth.in',
+                specialty: 'Endodontics',
+                qualification: 'BDS, MDS',
+                experienceYears: 9,
+                licenseNumber: 'MCI-2026-9981',
+                languages: ['English', 'Hindi', 'Marathi'],
+                rejectExistingAccount: true
+            }
+        }, newRes);
+        assert.strictEqual(newRes.result.statusCode, 201);
+        assert.strictEqual(newRes.result.body.success, true);
+        assert.strictEqual(newRes.result.body.doctor.clinic_id, 'cli-reg-01');
+        assert.strictEqual(newRes.result.body.doctor.specialty, 'Endodontics');
+        assert.strictEqual(usersStore.length, 2);
+        assert.strictEqual(usersStore[1].role, 'DOCTOR');
+        assert.notStrictEqual(usersStore[1].role, 'ADMIN');
+        assert.strictEqual(assocPairs.length, 1);
+        assert.deepStrictEqual(assocPairs[0], { clinicId: 'cli-reg-01', doctorId: newRes.result.body.doctor.id });
+    } finally {
+        Schemas.User.findByMobile = origUserFindByMobile;
+        Schemas.User.create = origUserCreate;
+        Schemas.Dentist.find = origDentistFind;
+        Schemas.Dentist.findOne = origDentistFindOne;
+        Schemas.Dentist.findById = origDentistFindById;
+        Schemas.Dentist.create = origDentistCreate;
+        Schemas.Clinic.findByIdAndUpdate = origClinicFindByIdAndUpdate;
+        Schemas.ClinicDoctor.associate = origAssoc;
+        Schemas.Notification.create = origNotifCreate;
+        clinicController.resolveClinicRecordAndDoctorIds = origResolveScope;
+    }
+});

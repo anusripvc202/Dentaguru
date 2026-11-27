@@ -418,8 +418,29 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
     return '$m:$s';
   }
 
+  bool _doctorSupportsConsultationMode(DoctorModel? doc, String mode) {
+    if (doc == null) return true;
+    final isOnline = mode.trim().toLowerCase() == 'online';
+    return isOnline ? doc.onlineConsultationEnabled : doc.inPersonConsultationEnabled;
+  }
+
+  String _unsupportedModeErrorMessage(String mode) {
+    if (mode.trim().toLowerCase() == 'online') {
+      return 'This doctor does not offer Online consultations. Please select In-Person Consultation or choose an online-enabled doctor.';
+    }
+    return 'This doctor provides Online consultations only and is not available for In-Person clinic visits.';
+  }
+
   Future<void> _acquireLockAndProceedToStep3() async {
     if (_selectedDoctor == null || _selectedTimeSlot == null || _isAcquiringLock) return;
+    if (!_doctorSupportsConsultationMode(_selectedDoctor, _selectedConsultationMode)) {
+      final msg = _unsupportedModeErrorMessage(_selectedConsultationMode);
+      setState(() {
+        _slotRefreshNotice = msg;
+        _errorMessage = msg;
+      });
+      return;
+    }
     final docId = _selectedDoctor!.id.isNotEmpty ? _selectedDoctor!.id : _selectedDoctor!.userId;
     final releasedId = _selectedReleasedSlotId ?? _findReleasedSlotIdForTime(_selectedTimeSlot!);
 
@@ -657,7 +678,14 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
   // ==========================================
   Widget _buildStep1SelectDoctor() {
     final allDoctors = _patientService.availableDoctors;
+    final strictOnlineFilter = widget.initialConsultationMode.trim().toLowerCase().contains('online');
     final filteredDoctors = allDoctors.where((doc) {
+      if (strictOnlineFilter && !doc.onlineConsultationEnabled) {
+        return false;
+      }
+      if (!strictOnlineFilter && _selectedConsultationMode == 'In-Person' && !doc.inPersonConsultationEnabled) {
+        return false;
+      }
       final matchesQuery = _doctorSearchQuery.isEmpty ||
           doc.name.toLowerCase().contains(_doctorSearchQuery.toLowerCase()) ||
           doc.specialty.toLowerCase().contains(_doctorSearchQuery.toLowerCase()) ||
@@ -1106,6 +1134,34 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
               ],
             ),
           ),
+          if (!_doctorSupportsConsultationMode(_selectedDoctor, _selectedConsultationMode)) ...[
+            const SizedBox(height: 8),
+            Container(
+              key: const Key('booking_unsupported_mode_warning'),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF2F2),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFFCA5A5)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline_rounded, size: 16, color: Color(0xFFDC2626)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _unsupportedModeErrorMessage(_selectedConsultationMode),
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFFB91C1C),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
 
           // Date Selection Section
@@ -1815,6 +1871,69 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
               style: const TextStyle(fontSize: 13, color: AppTheme.textMuted, height: 1.4),
               textAlign: TextAlign.center,
             ),
+            if (_selectedConsultationMode == 'Online') ...[
+              const SizedBox(height: 14),
+              Container(
+                key: const Key('booking_confirmed_online_access_badge'),
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE0F2FE),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF7DD3FC)),
+                ),
+                child: Column(
+                  children: [
+                    const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.videocam_rounded, size: 18, color: Color(0xFF0284C7)),
+                        SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            'In-App Video Consultation Enabled',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF0369A1),
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'You can join the live video & chat consultation room directly from My Visits at your scheduled slot.',
+                      style: TextStyle(fontSize: 11.5, color: Color(0xFF0C4A6E), height: 1.3),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        key: const Key('booking_confirmed_open_online_consultation_btn'),
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                          widget.onBookingSuccess?.call();
+                        },
+                        icon: const Icon(Icons.video_call_rounded, size: 17),
+                        label: const Text(
+                          'Access Video Consultation Room',
+                          style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF0284C7),
+                          side: const BorderSide(color: Color(0xFF0284C7), width: 1.3),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 24),
             SizedBox(
               width: double.infinity,
@@ -1841,6 +1960,12 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
   // Submission handler (Atomic confirmation using active slot lock + releasedSlotId)
   Future<void> _submitBooking() async {
     if (_selectedDoctor == null || _selectedTimeSlot == null) return;
+    if (!_doctorSupportsConsultationMode(_selectedDoctor, _selectedConsultationMode)) {
+      setState(() {
+        _errorMessage = _unsupportedModeErrorMessage(_selectedConsultationMode);
+      });
+      return;
+    }
     if (_activeSlotLock != null && _activeSlotLock!.isExpired) {
       await _releaseActiveLock();
       if (!mounted) return;

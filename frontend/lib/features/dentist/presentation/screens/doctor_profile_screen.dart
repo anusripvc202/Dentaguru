@@ -204,6 +204,8 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
     double? selectedLat = doc.latitude;
     double? selectedLng = doc.longitude;
     bool clearLocationFlag = false;
+    bool onlineConsultationEnabled = doc.onlineConsultationEnabled;
+    bool inPersonConsultationEnabled = doc.inPersonConsultationEnabled;
     bool isSaving = false;
     String? photoError;
 
@@ -733,6 +735,99 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                           ),
                         ],
                       ),
+                      const SizedBox(height: 12),
+                      Container(
+                        key: const Key('edit_doctor_consultation_modes_section'),
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'CONSULTATION MODES OFFERED',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.5,
+                                color: Color(0xFF64748B),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Select whether you provide Online Consultation, In-Person Clinic Visits, or both.',
+                              style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                            ),
+                            const SizedBox(height: 8),
+                            SwitchListTile(
+                              key: const Key('edit_doctor_online_consultation_switch'),
+                              contentPadding: EdgeInsets.zero,
+                              dense: true,
+                              activeThumbColor: const Color(0xFF0EA5E9),
+                              title: const Text(
+                                'Online Consultation Available',
+                                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
+                              ),
+                              subtitle: const Text(
+                                'Allow patients to book video / online consultations with you',
+                                style: TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
+                              ),
+                              value: onlineConsultationEnabled,
+                              onChanged: isSaving
+                                  ? null
+                                  : (val) {
+                                      if (!val && !inPersonConsultationEnabled) {
+                                        ScaffoldMessenger.of(sheetCtx).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('At least one consultation mode (Online or In-Person) must remain enabled.'),
+                                            backgroundColor: Colors.orange,
+                                          ),
+                                        );
+                                        return;
+                                      }
+                                      setSheetState(() {
+                                        onlineConsultationEnabled = val;
+                                      });
+                                    },
+                            ),
+                            const Divider(height: 8),
+                            SwitchListTile(
+                              key: const Key('edit_doctor_in_person_consultation_switch'),
+                              contentPadding: EdgeInsets.zero,
+                              dense: true,
+                              activeThumbColor: const Color(0xFF10B981),
+                              title: const Text(
+                                'In-Person Consultation (Visit Clinic)',
+                                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
+                              ),
+                              subtitle: const Text(
+                                'Allow patients to book offline clinic visits at your practice',
+                                style: TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
+                              ),
+                              value: inPersonConsultationEnabled,
+                              onChanged: isSaving
+                                  ? null
+                                  : (val) {
+                                      if (!val && !onlineConsultationEnabled) {
+                                        ScaffoldMessenger.of(sheetCtx).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('At least one consultation mode (Online or In-Person) must remain enabled.'),
+                                            backgroundColor: Colors.orange,
+                                          ),
+                                        );
+                                        return;
+                                      }
+                                      setSheetState(() {
+                                        inPersonConsultationEnabled = val;
+                                      });
+                                    },
+                            ),
+                          ],
+                        ),
+                      ),
                             ],
                           ),
                         ),
@@ -772,6 +867,8 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                                     clearLocation: clearLocationFlag,
                                     consultationFee: feeCtrl.text.trim(),
                                     city: cityCtrl.text.trim(),
+                                    onlineConsultationEnabled: onlineConsultationEnabled,
+                                    inPersonConsultationEnabled: inPersonConsultationEnabled,
                                     photoBytes: removeExistingPhoto ? null : pickedPhotoBytes,
                                     profilePhotoDataUri: photoDataUri,
                                     removeProfilePhoto: removeExistingPhoto,

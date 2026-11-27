@@ -16,9 +16,10 @@ const specialties = require('../controllers/specialtyController');
 const districts = require('../controllers/districtController');
 const assignments = require('../controllers/assignmentController');
 const doctorActivityCalendar = require('../controllers/doctorActivityCalendarController');
+const requestsReferralsCalendar = require('../controllers/requestsReferralsCalendarController');
 
 // Middlewares
-const { authenticateJWT, optionalAuth, requireRole, requireMainAdmin, requirePermission, requireChatAccess, enforceDistrictAccess } = require('../middleware/auth');
+const { authenticateJWT, optionalAuth, requireRole, requireMainAdmin, requirePermission, enforceSubAdminPermissionIfAuthenticated, requireChatAccess, enforceDistrictAccess } = require('../middleware/auth');
 
 // ─────────────────────────────────────────────
 // 1. AUTHENTICATION ENDPOINTS
@@ -33,6 +34,7 @@ router.patch('/auth/patient/profile', authenticateJWT, auth.updatePatientProfile
 router.post('/auth/forgot-password', auth.forgotPassword);
 router.post('/auth/reset-password', auth.resetPassword);
 router.post('/auth/refresh', auth.refreshToken);
+router.get('/auth/realtime-token', authenticateJWT, auth.getRealtimeToken);
 router.post('/auth/realtime-token', authenticateJWT, auth.getRealtimeToken);
 router.post('/auth/supabase-sync', auth.supabaseAuthSync);
 router.post('/auth/biometric', authenticateJWT, auth.saveBiometric);
@@ -99,9 +101,9 @@ router.get('/admin/reports/districts', optionalAuth, requirePermission('REPORT_V
 // 3. ADMIN VERIFICATION ENDPOINTS
 // ─────────────────────────────────────────────
 router.get('/admin/dentists/verification', optionalAuth, requirePermission('DENTIST_VIEW'), verification.getDentistsForVerification);
-router.patch('/admin/dentists/:id/verify', optionalAuth, requirePermission('DENTIST_EDIT'), verification.verifyDentist);
-router.get('/admin/clinics/verification', optionalAuth, requirePermission('DENTIST_VIEW'), verification.getClinicsForVerification);
-router.patch('/admin/clinics/:id/verify', optionalAuth, requirePermission('DENTIST_EDIT'), verification.verifyClinic);
+router.patch('/admin/dentists/:id/verify', optionalAuth, requirePermission('DENTIST_EDIT', ['DENTIST_VERIFY', 'DENTIST_MANAGE']), verification.verifyDentist);
+router.get('/admin/clinics/verification', optionalAuth, requirePermission('CLINIC_VIEW', ['DENTIST_VIEW']), verification.getClinicsForVerification);
+router.patch('/admin/clinics/:id/verify', optionalAuth, requirePermission('CLINIC_MANAGE', ['DENTIST_EDIT', 'DENTIST_VERIFY', 'DENTIST_MANAGE']), verification.verifyClinic);
 
 // ─────────────────────────────────────────────
 // 4. APPOINTMENTS STATE MACHINE & NOTIFICATIONS ENDPOINTS
@@ -143,10 +145,12 @@ router.put('/patient/doctor-preferences', optionalAuth, availability.upsertPatie
 router.post('/patient/doctor-preferences', optionalAuth, availability.upsertPatientDoctorPreference);
 router.get('/visits-calendar/doctor', optionalAuth, appointments.getDoctorVisitsCalendar);
 router.get('/doctor/visits-calendar', optionalAuth, appointments.getDoctorVisitsCalendar);
-router.get('/visits-calendar/admin', optionalAuth, appointments.getAdminGlobalVisitsCalendar);
-router.get('/admin/visits-calendar', optionalAuth, appointments.getAdminGlobalVisitsCalendar);
-router.get('/admin/doctor-activity-calendar', optionalAuth, doctorActivityCalendar.getDoctorActivityCalendar);
-router.get('/doctor-activity-calendar/admin', optionalAuth, doctorActivityCalendar.getDoctorActivityCalendar);
+router.get('/visits-calendar/admin', optionalAuth, enforceSubAdminPermissionIfAuthenticated('APPOINTMENT_VIEW'), appointments.getAdminGlobalVisitsCalendar);
+router.get('/admin/visits-calendar', optionalAuth, enforceSubAdminPermissionIfAuthenticated('APPOINTMENT_VIEW'), appointments.getAdminGlobalVisitsCalendar);
+router.get('/admin/doctor-activity-calendar', optionalAuth, enforceSubAdminPermissionIfAuthenticated('DENTIST_VIEW', ['APPOINTMENT_VIEW']), doctorActivityCalendar.getDoctorActivityCalendar);
+router.get('/doctor-activity-calendar/admin', optionalAuth, enforceSubAdminPermissionIfAuthenticated('DENTIST_VIEW', ['APPOINTMENT_VIEW']), doctorActivityCalendar.getDoctorActivityCalendar);
+router.get('/admin/requests-referrals-calendar', optionalAuth, enforceSubAdminPermissionIfAuthenticated('PROBLEM_VIEW', ['ASSIGNMENT_VIEW', 'REFERRAL_VIEW']), requestsReferralsCalendar.getRequestsReferralsCalendar);
+router.get('/requests-referrals-calendar/admin', optionalAuth, enforceSubAdminPermissionIfAuthenticated('PROBLEM_VIEW', ['ASSIGNMENT_VIEW', 'REFERRAL_VIEW']), requestsReferralsCalendar.getRequestsReferralsCalendar);
 
 router.get('/notifications', optionalAuth, appointments.getNotifications);
 router.put('/notifications/read-all', optionalAuth, appointments.markAllNotificationsRead);
@@ -238,8 +242,8 @@ router.get('/referrals/clinic', optionalAuth, referrals.getClinicReferrals);
 router.get('/referrals/received', optionalAuth, referrals.getDoctorReferrals);
 router.get('/referrals/for-me', optionalAuth, referrals.getReferralsForReferredPatient);
 router.post('/referrals/check-patient', optionalAuth, referrals.checkPatientExists);
-router.get('/referrals/all', optionalAuth, referrals.getAllReferralsAdmin);
-router.get('/referrals/analytics', optionalAuth, referrals.getAdminReferralAnalytics);
+router.get('/referrals/all', optionalAuth, enforceSubAdminPermissionIfAuthenticated('REFERRAL_VIEW', ['ASSIGNMENT_VIEW']), referrals.getAllReferralsAdmin);
+router.get('/referrals/analytics', optionalAuth, enforceSubAdminPermissionIfAuthenticated('REFERRAL_VIEW', ['REPORT_VIEW']), referrals.getAdminReferralAnalytics);
 router.get('/referrals/:referralId', optionalAuth, referrals.getReferralById);
 router.patch('/referrals/:referralId/accept', optionalAuth, referrals.acceptReferral);
 router.patch('/referrals/:referralId/reject', optionalAuth, referrals.rejectReferral);

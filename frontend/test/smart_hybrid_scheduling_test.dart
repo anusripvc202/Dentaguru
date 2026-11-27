@@ -308,22 +308,18 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 300));
 
-      expect(find.text('Ananya Verma'), findsOneWidget);
+      expect(find.text('Ananya Verma'), findsWidgets);
       expect(find.byKey(const Key('doctor_appt_mode_badge_doc-appt-1')), findsOneWidget);
       expect(find.text('Online'), findsWidgets);
-      final startBtn = find.byKey(const Key('doctor_start_consultation_btn_doc-appt-1'));
-      expect(startBtn, findsOneWidget);
-      expect(find.byKey(const Key('doctor_mark_delayed_btn_doc-appt-1')), findsOneWidget);
-      expect(find.byKey(const Key('doctor_mark_noshow_btn_doc-appt-1')), findsOneWidget);
-
-      await tester.ensureVisible(startBtn);
-      await tester.pump();
-      // Tap Start Consultation -> transitions card to Complete Consultation & Busy – Online Consultation
-      await tester.tap(startBtn);
-      await tester.pump(const Duration(milliseconds: 300));
-
-      expect(find.byKey(const Key('doctor_complete_consultation_btn_doc-appt-1')), findsOneWidget);
-      expect(find.textContaining('Busy – Online Consultation'), findsWidgets);
+      // Verify the 4 removed consultation lifecycle buttons do not appear on Doctor Dashboard cards
+      expect(find.byKey(const Key('doctor_start_consultation_btn_doc-appt-1')), findsNothing);
+      expect(find.byKey(const Key('doctor_complete_consultation_btn_doc-appt-1')), findsNothing);
+      expect(find.byKey(const Key('doctor_mark_delayed_btn_doc-appt-1')), findsNothing);
+      expect(find.byKey(const Key('doctor_mark_noshow_btn_doc-appt-1')), findsNothing);
+      // Verify Cancel, Issue E-Prescription, and Chat remain visible
+      expect(find.byKey(const Key('doctor_cancel_consultation_btn_doc-appt-1')), findsOneWidget);
+      expect(find.byKey(const Key('doctor_issue_eprescription_btn_doc-appt-1')), findsOneWidget);
+      expect(find.byKey(const Key('doctor_chat_btn_doc-appt-1')), findsOneWidget);
     });
 
     testWidgets('DoctorSlotManagementDialog renders manual slot block UI', (tester) async {

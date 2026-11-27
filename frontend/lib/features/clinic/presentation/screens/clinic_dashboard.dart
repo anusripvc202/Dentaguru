@@ -480,6 +480,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
               awaitingConfirmationCount: awaitingCount,
               completedVisitsCount: completedCount,
               attachedDoctors: attachedDoctors,
+              recentAppointments: bookings,
               onNotifications: openNotifications,
               onProfile: openProfile,
               onEditDetails: openEditDetails,
@@ -515,8 +516,24 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                   _currentIndex = 2;
                 });
               },
+              onViewAllAppointments: () {
+                setState(() {
+                  _selectedBookingStatusFilter = 'All';
+                  _currentIndex = 2;
+                });
+              },
+              onViewAllDoctors: () {
+                setState(() => _currentIndex = 1);
+              },
+              onViewAllPatientActivity: () {
+                setState(() {
+                  _selectedBookingStatusFilter = 'All';
+                  _currentIndex = 2;
+                });
+              },
               onAddDoctor: () => _openAssociateExistingDoctorsDialog(
                 context,
+                clinic: clinic,
                 clinicId: clinicId,
                 clinicName: clinicName,
                 attachedDoctors: attachedDoctors,
@@ -539,10 +556,20 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
               attachedDoctors: attachedDoctors,
               onAddDoctors: () => _openAssociateExistingDoctorsDialog(
                 context,
+                clinic: clinic,
                 clinicId: clinicId,
                 clinicName: clinicName,
                 attachedDoctors: attachedDoctors,
                 onRefresh: refreshAll,
+              ),
+              onRegisterNewDoctor: () => _openAssociateExistingDoctorsDialog(
+                context,
+                clinic: clinic,
+                clinicId: clinicId,
+                clinicName: clinicName,
+                attachedDoctors: attachedDoctors,
+                onRefresh: refreshAll,
+                initialRegisterNew: true,
               ),
               onRefresh: refreshAll,
             ),
@@ -627,10 +654,12 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
 
   Future<void> _openAssociateExistingDoctorsDialog(
     BuildContext context, {
+    ClinicModel? clinic,
     required String clinicId,
     required String clinicName,
     required List<DoctorModel> attachedDoctors,
     required Future<void> Function() onRefresh,
+    bool initialRegisterNew = false,
   }) async {
     final assocIds = <String>{
       for (final d in attachedDoctors) ...[
@@ -642,8 +671,10 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
       context,
       clinicId: clinicId.isNotEmpty ? clinicId : 'default',
       clinicName: clinicName.isNotEmpty ? clinicName : 'Clinic',
+      clinic: clinic,
       allRegisteredDoctors: _problemService.allDoctors,
       alreadyAssociatedDoctorIds: assocIds,
+      initialRegisterNew: initialRegisterNew,
       onDoctorsAssociated: () {
         onRefresh();
       },
@@ -658,6 +689,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
     required String clinicLocation,
     required List<DoctorModel> attachedDoctors,
     required VoidCallback onAddDoctors,
+    required VoidCallback onRegisterNewDoctor,
     required Future<void> Function() onRefresh,
   }) {
     return RefreshIndicator(
@@ -665,37 +697,56 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Row(
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Associated Doctors (${attachedDoctors.length})',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppTheme.textDark),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    Text(
-                      clinicName.isNotEmpty ? clinicName : 'Clinic Directory',
-                      style: const TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Associated Doctors (${attachedDoctors.length})',
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppTheme.textDark),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    clinicName.isNotEmpty ? clinicName : 'Clinic Directory',
+                    style: const TextStyle(fontSize: 12.5, color: AppTheme.textMuted),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
               ),
-              ElevatedButton.icon(
-                key: const Key('clinic_dashboard_add_doctors_btn'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.gsNavy,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                onPressed: onAddDoctors,
-                icon: const Icon(Icons.person_add_alt_1_rounded, size: 18),
-                label: const Text('Add Doctors'),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    key: const Key('clinic_dashboard_register_new_doctor_btn'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.gsNavy,
+                      side: const BorderSide(color: AppTheme.gsNavy),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: onRegisterNewDoctor,
+                    icon: const Icon(Icons.person_add_alt_rounded, size: 18),
+                    label: const Text('Register New Doctor'),
+                  ),
+                  ElevatedButton.icon(
+                    key: const Key('clinic_dashboard_add_doctors_btn'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.gsNavy,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: onAddDoctors,
+                    icon: const Icon(Icons.person_add_alt_1_rounded, size: 18),
+                    label: const Text('Add Doctors'),
+                  ),
+                ],
               ),
             ],
           ),

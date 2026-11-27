@@ -14,6 +14,7 @@ class FindDoctorsScreen extends StatefulWidget {
   final int initialTabFilter; // 0 = All Doctors, 1 = My Favourite Doctors
   final String initialSpecialty;
   final String initialLanguage;
+  final String initialConsultationMode; // 'All', 'Online', or 'Offline' / 'In-Person'
   final bool isSpecialtyPage;
   final bool isAdminView;
   final void Function(BuildContext context, DoctorModel doctor)? onAdminEditDoctor;
@@ -27,6 +28,7 @@ class FindDoctorsScreen extends StatefulWidget {
     this.initialTabFilter = 0,
     this.initialSpecialty = 'All',
     this.initialLanguage = 'Any language',
+    this.initialConsultationMode = 'All',
     this.isSpecialtyPage = false,
     this.isAdminView = false,
     this.onAdminEditDoctor,
@@ -73,6 +75,9 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
   Timer? _filterDebounce;
   bool _isUsingMyLocation = false;
   bool _onlineOnlyFilter = false;
+  String _selectedConsultationMode = 'All'; // 'All', 'Online', 'Offline'
+  DateTime? _selectedDateFilter;
+  String _selectedSlotFilter = 'Any Slot';
   bool _isSyncing = false;
   String? _syncError;
   static const int _pageSize = 20;
@@ -163,11 +168,29 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
         ..._supportedAndDoctorLanguages,
       ];
 
+  static String _normalizeConsultationModeSelection(String rawMode) {
+    final lower = rawMode.trim().toLowerCase();
+    if (lower == 'online' || lower == 'online consultation') return 'Online';
+    if (lower == 'offline' ||
+        lower == 'in-person' ||
+        lower == 'in_person' ||
+        lower == 'clinic' ||
+        lower.contains('offline') ||
+        lower.contains('visit clinic')) {
+      return 'Offline';
+    }
+    return 'All';
+  }
+
   @override
   void initState() {
     super.initState();
     _doctorTabFilter = widget.initialTabFilter;
     _selectedSpecialty = widget.initialSpecialty.trim().isNotEmpty ? widget.initialSpecialty.trim() : 'All';
+    _selectedConsultationMode = _normalizeConsultationModeSelection(widget.initialConsultationMode);
+    if (_selectedConsultationMode == 'Online') {
+      _onlineOnlyFilter = true;
+    }
     final rawInitLang = widget.initialLanguage.trim();
     if (rawInitLang.isNotEmpty && rawInitLang.toLowerCase() != 'any language') {
       for (final part in rawInitLang.split(',')) {
@@ -443,6 +466,69 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
     );
   }
 
+  bool _matchesDateAndSlotFilter(DoctorModel d) {
+    if (_selectedDateFilter != null) {
+      final ymd =
+          '${_selectedDateFilter!.year.toString().padLeft(4, '0')}-${_selectedDateFilter!.month.toString().padLeft(2, '0')}-${_selectedDateFilter!.day.toString().padLeft(2, '0')}';
+      final cachedAvail = _patientService.getCachedAvailability(d.id, ymd);
+      if (cachedAvail != null) {
+        if (cachedAvail.isBlocked || cachedAvail.availableSlots.isEmpty) {
+          return false;
+        }
+        if (_selectedSlotFilter != 'Any Slot') {
+          final targetSlot = _selectedSlotFilter.trim().toLowerCase();
+          final hasSlotInDate = cachedAvail.availableSlots.any((s) => s.trim().toLowerCase() == targetSlot);
+          if (!hasSlotInDate) return false;
+        }
+      } else {
+        final blockedList = _patientService.getCachedBlockedDates(d.id);
+        if (blockedList.any((b) => b.isBlocked && b.date.split('T').first == ymd)) {
+          return false;
+        }
+      }
+    }
+    if (_selectedSlotFilter != 'Any Slot') {
+      final targetSlot = _selectedSlotFilter.trim().toLowerCase();
+      if (d.nextAvailableSlots.isNotEmpty) {
+        final hasMatchingSlot = d.nextAvailableSlots.any((s) => s.trim().toLowerCase() == targetSlot);
+        if (!hasMatchingSlot) return false;
+      }
+    }
+    return true;
+  }
+
+  List<String> get _availableSlotFilterOptions {
+    final slots = <String>{
+      '09:00 AM',
+      '10:00 AM',
+      '10:30 AM',
+      '11:00 AM',
+      '02:00 PM',
+      '04:00 PM',
+      '05:00 PM',
+    };
+    for (final d in _patientService.allDoctors) {
+      for (final s in d.nextAvailableSlots) {
+        if (s.trim().isNotEmpty) slots.add(s.trim());
+      }
+    }
+    return <String>['Any Slot', ...slots];
+  }
+
+  void _selectConsultationMode(String mode) {
+    final normalized = _normalizeConsultationModeSelection(mode);
+    setState(() {
+      _selectedConsultationMode = normalized;
+      if (normalized == 'Online') {
+        _onlineOnlyFilter = true;
+      } else if (normalized == 'Offline') {
+        _onlineOnlyFilter = false;
+      }
+      _visibleCount = _pageSize;
+    });
+    _triggerBackendFilterFetch();
+  }
+
   @override
   Widget build(BuildContext context) {
     final allDocs = _patientService.allDoctors;
@@ -454,11 +540,20 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
         : (useBackendFiltered ? _backendFilteredDoctors! : allDocs);
 
     final filteredDocs = baseDocs.where((d) {
-      if (_onlineOnlyFilter && !d.isOnline) return false;
+      if (_selectedConsultationMode == 'Online') {
+        // Strictly display ONLY doctors who have online consultation enabled AND are available
+        if (!d.onlineConsultationEnabled || !d.isAvailable) return false;
+      } else if (_selectedConsultationMode == 'Offline') {
+        // Strictly display ONLY doctors who provide in-person consultations AND are available (exclude Online-Only doctors)
+        if (!d.inPersonConsultationEnabled || !d.isAvailable) return false;
+      } else if (_onlineOnlyFilter && !d.isOnline) {
+        return false;
+      }
       final matchesSpec = _matchesSpecialty(d, _selectedSpecialty);
       if (!matchesSpec) return false;
       final matchesLang = _matchesLanguage(d);
       if (!matchesLang) return false;
+      if (!_matchesDateAndSlotFilter(d)) return false;
       if (useBackendFiltered) return true;
 
       final q = _searchQuery.trim().toLowerCase();
@@ -598,6 +693,10 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
                   const SizedBox(height: 14),
                   _buildHeaderBanner(filteredDocs.length, isSpecificSpecialty),
                   const SizedBox(height: 14),
+                  if (!widget.isAdminView) ...[
+                    _buildConsultationModeSelectionRow(),
+                    const SizedBox(height: 12),
+                  ],
                   if (!widget.isAdminView && !widget.isSpecialtyPage) ...[
                     _buildTabSelector(allDocs.length, myDocs.length),
                     const SizedBox(height: 12),
@@ -607,6 +706,8 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
                   _buildUseMyLocationRow(),
                   const SizedBox(height: 10),
                   _buildLocationFiltersRow(),
+                  const SizedBox(height: 10),
+                  _buildDateAndSlotFilterRow(),
                   const SizedBox(height: 12),
                   _buildAllSpecialtyDropdownAndFilterRow(),
                   const SizedBox(height: 10),
@@ -670,8 +771,301 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
               onPressed: () => BookVisitFlowDialog.show(
                 context,
                 initialSpecialtyFilter: isSpecificSpecialty ? _selectedSpecialty : null,
+                initialConsultationMode: _selectedConsultationMode == 'Online'
+                    ? 'Online'
+                    : 'In-Person',
               ),
             ),
+    );
+  }
+
+  Widget _buildConsultationModeSelectionRow() {
+    final isOnline = _selectedConsultationMode == 'Online';
+    final isOffline = _selectedConsultationMode == 'Offline';
+
+    return Container(
+      key: const Key('find_doctors_consultation_mode_section'),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.tune_rounded, size: 16, color: AppTheme.gsNavy),
+              const SizedBox(width: 6),
+              const Expanded(
+                child: Text(
+                  'Consultation Mode',
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.textDark,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (isOnline || isOffline)
+                InkWell(
+                  key: const Key('find_doctors_mode_all_chip'),
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => _selectConsultationMode('All'),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Text(
+                      'Show All Modes',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.gsNavy,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  key: const Key('find_doctors_mode_online_card'),
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: () => _selectConsultationMode('Online'),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                    decoration: BoxDecoration(
+                      color: isOnline ? const Color(0xFF0284C7) : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: isOnline ? const Color(0xFF0284C7) : const Color(0xFFCBD5E1),
+                        width: isOnline ? 1.5 : 1.1,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.videocam_rounded,
+                          size: 18,
+                          color: isOnline ? Colors.white : const Color(0xFF0284C7),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Online Consultation',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: isOnline ? Colors.white : AppTheme.textDark,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                'Video / Audio Call',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: isOnline ? Colors.white.withValues(alpha: 0.9) : const Color(0xFF64748B),
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: InkWell(
+                  key: const Key('find_doctors_mode_offline_card'),
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: () => _selectConsultationMode('Offline'),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                    decoration: BoxDecoration(
+                      color: isOffline ? const Color(0xFF059669) : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: isOffline ? const Color(0xFF059669) : const Color(0xFFCBD5E1),
+                        width: isOffline ? 1.5 : 1.1,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.local_hospital_rounded,
+                          size: 18,
+                          color: isOffline ? Colors.white : const Color(0xFF059669),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Offline Consultation (Visit Clinic)',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: isOffline ? Colors.white : AppTheme.textDark,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                'Visit Clinic In-Person',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: isOffline ? Colors.white.withValues(alpha: 0.9) : const Color(0xFF64748B),
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDateAndSlotFilterRow() {
+    final slotOptions = _availableSlotFilterOptions;
+    final dateLabel = _selectedDateFilter == null
+        ? 'Available Date: Any'
+        : 'Date: ${_selectedDateFilter!.day.toString().padLeft(2, '0')}/${_selectedDateFilter!.month.toString().padLeft(2, '0')}/${_selectedDateFilter!.year}';
+
+    return Row(
+      children: [
+        Expanded(
+          child: InkWell(
+            key: const Key('find_doctors_date_filter_button'),
+            borderRadius: BorderRadius.circular(12),
+            onTap: () async {
+              final now = DateTime.now();
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: _selectedDateFilter ?? now,
+                firstDate: DateTime(now.year, now.month, now.day),
+                lastDate: now.add(const Duration(days: 60)),
+              );
+              if (picked != null && mounted) {
+                setState(() {
+                  _selectedDateFilter = picked;
+                  _visibleCount = _pageSize;
+                });
+              }
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: _selectedDateFilter != null ? const Color(0xFFEFF6FF) : Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: _selectedDateFilter != null ? AppTheme.gsNavy : Colors.grey.shade200,
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.calendar_today_rounded, size: 16, color: AppTheme.gsNavy),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      dateLabel,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: _selectedDateFilter != null ? FontWeight.w700 : FontWeight.w500,
+                        color: _selectedDateFilter != null ? AppTheme.gsNavy : AppTheme.textDark,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (_selectedDateFilter != null)
+                    GestureDetector(
+                      key: const Key('find_doctors_clear_date_filter_btn'),
+                      onTap: () {
+                        setState(() {
+                          _selectedDateFilter = null;
+                          _visibleCount = _pageSize;
+                        });
+                      },
+                      child: const Icon(Icons.close_rounded, size: 16, color: AppTheme.gsRed),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: _selectedSlotFilter != 'Any Slot' ? const Color(0xFFEFF6FF) : Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: _selectedSlotFilter != 'Any Slot' ? AppTheme.gsNavy : Colors.grey.shade200,
+              ),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                key: const Key('find_doctors_slot_filter_dropdown'),
+                isExpanded: true,
+                value: slotOptions.contains(_selectedSlotFilter) ? _selectedSlotFilter : 'Any Slot',
+                icon: const Icon(Icons.access_time_rounded, size: 16, color: AppTheme.gsNavy),
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textDark,
+                ),
+                items: slotOptions.map((slot) {
+                  return DropdownMenuItem<String>(
+                    value: slot,
+                    child: Text(
+                      slot == 'Any Slot' ? 'Time Slot: Any' : 'Slot: $slot',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  );
+                }).toList(),
+                onChanged: (val) {
+                  if (val == null) return;
+                  setState(() {
+                    _selectedSlotFilter = val;
+                    _visibleCount = _pageSize;
+                  });
+                },
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -1541,25 +1935,39 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
   }
 
   Widget _buildEmptyState() {
+    final isOnlineConsultationMode = _selectedConsultationMode == 'Online';
+    final isOfflineConsultationMode = _selectedConsultationMode == 'Offline';
     final hasLanguageFilter = _doctorTabFilter != 1 && _selectedLanguages.isNotEmpty;
     final hasActiveFilters = _searchQuery.trim().isNotEmpty ||
         _cityFilter.trim().isNotEmpty ||
         _pincodeFilter.trim().isNotEmpty ||
         _onlineOnlyFilter ||
+        isOnlineConsultationMode ||
+        isOfflineConsultationMode ||
+        _selectedDateFilter != null ||
+        _selectedSlotFilter != 'Any Slot' ||
         (_selectedSpecialty.trim().isNotEmpty && _selectedSpecialty.trim().toLowerCase() != 'all') ||
         _selectedLanguages.isNotEmpty;
 
     final emptyTitle = _doctorTabFilter == 1
         ? 'No Favourite Doctors Yet'
-        : (hasLanguageFilter
-            ? 'No doctors available for the selected language.'
-            : (hasActiveFilters ? 'No Matching Doctors Found' : 'Search to find a doctor'));
+        : isOnlineConsultationMode
+            ? 'No doctors are currently available for online consultation in your selected location.'
+            : isOfflineConsultationMode
+                ? 'No doctors are currently available for offline clinic consultation in your selected location.'
+                : (hasLanguageFilter
+                    ? 'No doctors available for the selected language.'
+                    : (hasActiveFilters ? 'No Matching Doctors Found' : 'Search to find a doctor'));
 
     final emptySubtitle = _doctorTabFilter == 1
         ? 'Switch to "All Doctors" and open a doctor profile to add your preferred specialists.'
-        : (hasLanguageFilter
-            ? 'No doctors currently match ${_selectedLanguages.join(', ')}. Choose another language or reset the language filter.'
-            : 'Type a name, speciality, city or pincode, or tap "Use my location" to see doctors near you.');
+        : isOnlineConsultationMode
+            ? 'Only doctors with Online Consultation enabled are listed here. Try changing your location or switch to Offline Consultation (Visit Clinic).'
+            : isOfflineConsultationMode
+                ? 'Try clearing city/pincode or date/slot filters to view more clinic specialists.'
+                : (hasLanguageFilter
+                    ? 'No doctors currently match ${_selectedLanguages.join(', ')}. Choose another language or reset the language filter.'
+                    : 'Type a name, speciality, city or pincode, or tap "Use my location" to see doctors near you.');
 
     return Container(
       key: const Key('find_doctors_empty_state'),
@@ -2051,6 +2459,151 @@ class _FindDoctorsScreenState extends State<FindDoctorsScreen> {
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600,
                                     color: Color(0xFFB45309),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ],
+                        // Consultation Mode Badges, Available Slots & Direct Booking Action Buttons
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 5,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            if (doc.onlineConsultationEnabled && doc.isAvailable)
+                              Container(
+                                key: Key('doctor_online_consultation_badge_${doc.id}'),
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE0F2FE),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: const Color(0xFF0284C7).withValues(alpha: 0.35)),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.videocam_rounded, size: 12, color: Color(0xFF0284C7)),
+                                    SizedBox(width: 4),
+                                    Flexible(
+                                      child: Text(
+                                        'Online Consultation Available',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w800,
+                                          color: Color(0xFF0369A1),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            if (doc.inPersonConsultationEnabled && doc.isAvailable && _selectedConsultationMode != 'Online')
+                              Container(
+                                key: Key('doctor_in_person_consultation_badge_${doc.id}'),
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFECFDF5),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: const Color(0xFF059669).withValues(alpha: 0.35)),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.local_hospital_rounded, size: 12, color: Color(0xFF059669)),
+                                    SizedBox(width: 4),
+                                    Flexible(
+                                      child: Text(
+                                        'Clinic Visit Available',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w800,
+                                          color: Color(0xFF047857),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            Container(
+                              key: Key('doctor_available_slots_${doc.id}'),
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF8FAFC),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: const Color(0xFFE2E8F0)),
+                              ),
+                              child: Text(
+                                doc.nextAvailableSlots.isNotEmpty
+                                    ? 'Slots: ${doc.nextAvailableSlots.take(3).join(', ')}'
+                                    : (_selectedConsultationMode == 'Online'
+                                        ? 'Slots: Online Slots Available'
+                                        : 'Slots: Clinic Slots Available'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF334155),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (!widget.isAdminView && doc.isAvailable) ...[
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: [
+                              if (doc.onlineConsultationEnabled && _selectedConsultationMode != 'Offline')
+                                ElevatedButton.icon(
+                                  key: Key('doctor_book_online_btn_${doc.id}'),
+                                  onPressed: () => BookVisitFlowDialog.show(
+                                    context,
+                                    preselectedDoctor: doc,
+                                    initialConsultationMode: 'Online',
+                                  ),
+                                  icon: const Icon(Icons.videocam_rounded, size: 14),
+                                  label: const Text(
+                                    'Book Online',
+                                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF0284C7),
+                                    foregroundColor: Colors.white,
+                                    elevation: 0,
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                                    minimumSize: const Size(0, 32),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                  ),
+                                ),
+                              if (doc.inPersonConsultationEnabled && _selectedConsultationMode != 'Online')
+                                ElevatedButton.icon(
+                                  key: Key('doctor_book_offline_btn_${doc.id}'),
+                                  onPressed: () => BookVisitFlowDialog.show(
+                                    context,
+                                    preselectedDoctor: doc,
+                                    initialConsultationMode: 'In-Person',
+                                  ),
+                                  icon: const Icon(Icons.calendar_month_rounded, size: 14),
+                                  label: Text(
+                                    _selectedConsultationMode == 'Offline'
+                                        ? 'Book Clinic Appointment'
+                                        : 'Book Appointment',
+                                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppTheme.gsNavy,
+                                    foregroundColor: Colors.white,
+                                    elevation: 0,
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                                    minimumSize: const Size(0, 32),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                   ),
                                 ),
                             ],

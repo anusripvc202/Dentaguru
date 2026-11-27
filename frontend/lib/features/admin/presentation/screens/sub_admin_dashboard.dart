@@ -137,7 +137,8 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
   List<_NavModule> _getPermittedModules() {
     final List<_NavModule> list = [];
 
-    if (_service.hasPermission(AppPermissions.assignmentView)) {
+    if (_service.hasPermission(AppPermissions.assignmentView) ||
+        _service.hasPermission(AppPermissions.referralView)) {
       list.add(const _NavModule(
         key: 'assignments',
         label: 'Doctor Assignments',
@@ -163,7 +164,8 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
       ));
     }
 
-    if (_service.hasPermission(AppPermissions.dentistView)) {
+    if (_service.hasPermission(AppPermissions.dentistView) ||
+        _service.hasPermission(AppPermissions.clinicView)) {
       list.add(const _NavModule(
         key: 'dentists',
         label: 'Doctors & Clinics',
@@ -1284,44 +1286,45 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                           ],
                         ),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFFE3434), size: 20),
-                        tooltip: 'Delete Doctor',
-                        onPressed: () {
-                          showDialog(
-                            context: context,
-                            builder: (dialogCtx) => AlertDialog(
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                              title: Row(
-                                children: [
-                                  const Icon(Icons.delete_forever_rounded, color: Color(0xFFFE3434), size: 22),
-                                  const SizedBox(width: 8),
-                                  Expanded(child: Text('Delete ${d.name}?', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
+                      if (_service.hasPermission(AppPermissions.dentistManage))
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFFE3434), size: 20),
+                          tooltip: 'Delete Doctor',
+                          onPressed: () {
+                            showDialog(
+                              context: context,
+                              builder: (dialogCtx) => AlertDialog(
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                title: Row(
+                                  children: [
+                                    const Icon(Icons.delete_forever_rounded, color: Color(0xFFFE3434), size: 22),
+                                    const SizedBox(width: 8),
+                                    Expanded(child: Text('Delete ${d.name}?', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
+                                  ],
+                                ),
+                                content: Text('Are you sure you want to delete ${d.name} (${d.specialty}) from the platform?'),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.of(dialogCtx).pop(), child: const Text('Cancel')),
+                                  ElevatedButton.icon(
+                                    icon: const Icon(Icons.delete_forever_rounded, size: 16),
+                                    label: const Text('Delete Doctor', style: TextStyle(fontWeight: FontWeight.bold)),
+                                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFE3434), foregroundColor: Colors.white),
+                                    onPressed: () async {
+                                      Navigator.of(dialogCtx).pop();
+                                      await _service.deleteDoctor(d.id);
+                                      if (mounted) {
+                                        setState(() {});
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(content: Text('🗑️ ${d.name} deleted successfully.'), backgroundColor: const Color(0xFFFE3434)),
+                                        );
+                                      }
+                                    },
+                                  ),
                                 ],
                               ),
-                              content: Text('Are you sure you want to delete ${d.name} (${d.specialty}) from the platform?'),
-                              actions: [
-                                TextButton(onPressed: () => Navigator.of(dialogCtx).pop(), child: const Text('Cancel')),
-                                ElevatedButton.icon(
-                                  icon: const Icon(Icons.delete_forever_rounded, size: 16),
-                                  label: const Text('Delete Doctor', style: TextStyle(fontWeight: FontWeight.bold)),
-                                  style: ElevatedButton.styleFrom(backgroundColor: Color(0xFFFE3434), foregroundColor: Colors.white),
-                                  onPressed: () async {
-                                    Navigator.of(dialogCtx).pop();
-                                    await _service.deleteDoctor(d.id);
-                                    if (mounted) {
-                                      setState(() {});
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('🗑️ ${d.name} deleted successfully.'), backgroundColor: Color(0xFFFE3434)),
-                                      );
-                                    }
-                                  },
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
+                            );
+                          },
+                        ),
                     ],
                   ),
                 );

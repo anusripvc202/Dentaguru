@@ -172,7 +172,7 @@ exports.getMessages = async (req, res) => {
 
         const findQuery = resolvedConvId
             ? { conversation_id: resolvedConvId }
-            : { room_id: resolvedRoomId };
+            : { room_id: resolvedRoomId, roomIds: authCtx.scopeRoomIds };
 
         const messages = await ChatMessage.find(findQuery, { user });
 
@@ -183,6 +183,7 @@ exports.getMessages = async (req, res) => {
             await ChatMessage.markAsRead({
                 conversationId: resolvedConvId,
                 roomId: resolvedRoomId,
+                roomIds: authCtx.scopeRoomIds,
                 userId: user.id
             }).catch(() => { });
         }

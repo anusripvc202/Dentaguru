@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
+import '../../../../core/widgets/recent_updates_preview_section.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/services/api_service.dart';
 import '../../../../core/services/session_service.dart';
@@ -419,16 +420,41 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     );
   }
 
-  void _showDoctorChatModal(BuildContext context, String patientName, String roomId, {String? patientId}) {
-    final doctor = _patientService.currentDoctor;
+  void _showDoctorChatModal(BuildContext context, String patientName, String roomId, {String? patientId, String? doctorNameOverride, String? doctorIdOverride}) {
+    final doctor = _resolveCurrentDoctor() ?? _patientService.currentDoctor;
+    final resolvedDocName = (doctor?.name.trim().isNotEmpty == true)
+        ? doctor!.name.trim()
+        : ((doctorNameOverride != null && doctorNameOverride.trim().isNotEmpty)
+            ? doctorNameOverride.trim()
+            : (SessionService().currentSession?.name?.trim().isNotEmpty == true
+                ? SessionService().currentSession!.name!.trim()
+                : 'Doctor'));
+    final resolvedDocId = (doctor?.id.trim().isNotEmpty == true)
+        ? doctor!.id.trim()
+        : ((doctorIdOverride != null && doctorIdOverride.trim().isNotEmpty)
+            ? doctorIdOverride.trim()
+            : SessionService().currentSession?.userId);
+    String? resolvedPatientId = (patientId != null && patientId.trim().isNotEmpty) ? patientId.trim() : null;
+    if (resolvedPatientId == null && patientName.trim().isNotEmpty) {
+      final matchP = _patientService.allPatients
+          .where((p) => p.name.trim().toLowerCase() == patientName.trim().toLowerCase())
+          .firstOrNull;
+      if (matchP != null && matchP.id.trim().isNotEmpty) {
+        resolvedPatientId = matchP.id.trim();
+      }
+    }
+    final effectiveRoomId = roomId.trim().isNotEmpty
+        ? roomId.trim()
+        : ApiService.getChatRoomId(patientIdOrName: patientName, dentistIdOrName: resolvedDocName);
+
     WhatsAppChatModal.show(
       context,
       patientName: patientName,
-      doctorName: doctor?.name ?? 'Doctor',
+      doctorName: resolvedDocName,
       currentUserRole: 'Dentist',
-      patientId: patientId,
-      doctorId: doctor?.id,
-      roomIdOverride: roomId,
+      patientId: resolvedPatientId,
+      doctorId: resolvedDocId,
+      roomIdOverride: effectiveRoomId,
     );
   }
 
@@ -1494,7 +1520,55 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 ),
                 const SizedBox(height: 20),
 
-                // 5. Appointments for Selected Date OR All Upcoming Booked Appointments OR Empty State
+                // 5. Latest Appointments (Preview max 2 + View All -> Complete Appointments Calendar)
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Latest Appointments',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF0F172A),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    TextButton(
+                      key: const Key('doctor_view_all_appointments_btn'),
+                      onPressed: () => _openDoctorAppointmentsCalendar(
+                        context,
+                        currentDoc: currentDoc,
+                        docName: docName,
+                        initialDate: selectedDate,
+                        appointments: allMyRequests,
+                      ),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.gsNavy,
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        minimumSize: const Size(0, 32),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'View All',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                              color: AppTheme.gsNavy,
+                            ),
+                          ),
+                          SizedBox(width: 2),
+                          Icon(Icons.chevron_right_rounded, size: 18, color: AppTheme.gsNavy),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
                 if (appointmentsForSelectedDate.isEmpty &&
                     (_selectedDateIndex > 0 || allBookedAppointments.isEmpty))
                   Container(
@@ -1610,6 +1684,12 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                         );
                       }
 
+                      final previewAppointments = takeLatestPreviewRecords<PatientConsultationRequest>(
+                        filtered,
+                        limit: kDashboardRecentPreviewLimit,
+                        compareDesc: (a, b) => b.submittedAt.compareTo(a.submittedAt),
+                      );
+
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -1630,35 +1710,25 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                                   Expanded(
                                     child: Text(
                                       appointmentsForSelectedDate.isNotEmpty
-                                          ? 'Appointments (${filtered.length})'
-                                          : 'Scheduled Appointments (${filtered.length})',
+                                          ? 'Showing latest ${previewAppointments.length} of ${filtered.length} appointments'
+                                          : 'Showing latest ${previewAppointments.length} of ${filtered.length} scheduled appointments',
                                       style: const TextStyle(
-                                        fontSize: 16.5,
-                                        fontWeight: FontWeight.w800,
-                                        color: Color(0xFF0F172A),
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFF64748B),
                                       ),
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
-                                  const Text(
-                                    'Calendar',
-                                    style: TextStyle(
-                                      fontSize: 12.5,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppTheme.gsNavy,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 2),
-                                  const Icon(Icons.chevron_right_rounded, size: 18, color: AppTheme.gsNavy),
                                 ],
                               ),
                             ),
                           ),
-                          const SizedBox(height: 12),
-                          ...filtered.asMap().entries.map((entry) {
+                          const SizedBox(height: 10),
+                          ...previewAppointments.asMap().entries.map((entry) {
                             final idx = entry.key;
                             final req = entry.value;
-                            final nextUpcoming = idx + 1 < filtered.length ? filtered[idx + 1] : null;
+                            final nextUpcoming = idx + 1 < previewAppointments.length ? previewAppointments[idx + 1] : null;
                             final slot = (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.trim().isNotEmpty)
                                 ? req.confirmedTimeSlot!
                                 : '11:00 AM';
@@ -1670,13 +1740,16 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                   ),
                 ],
 
-                if (_patientService.doctorReceivedPatientReferrals.isNotEmpty) ...[
-                  const SizedBox(height: 24),
-                  _buildIncomingReferralsSection(
-                    _patientService.doctorReceivedPatientReferrals,
-                    keyPrefix: 'today',
-                  ),
-                ],
+                const SizedBox(height: 24),
+                _buildDoctorRecentPatientActivityPreviewSection(allMyRequests),
+
+                const SizedBox(height: 24),
+                _buildIncomingReferralsSection(
+                  _patientService.doctorReceivedPatientReferrals,
+                  keyPrefix: 'today',
+                  maxPreviewItems: kDashboardRecentPreviewLimit,
+                  onViewAll: () => setState(() => _currentIndex = 2),
+                ),
 
                 const SizedBox(height: 24),
 
@@ -2934,68 +3007,11 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                   ],
                 ),
               ),
-            // Lifecycle Controls: Start, Complete, Mark Delayed, No-Show, Cancel
+            // Lifecycle Controls: Cancel only (Start, Complete, Mark Delayed, and No-Show removed per workflow update)
             Wrap(
               spacing: 6,
               runSpacing: 6,
               children: [
-                if (!isInProgress)
-                  ElevatedButton.icon(
-                    key: Key('doctor_start_consultation_btn_${req.id}'),
-                    icon: const Icon(Icons.play_arrow_rounded, size: 15),
-                    label: const Text('Start Consultation', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF047857),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    ),
-                    onPressed: () => _handleLifecycleAction(
-                      () => _patientService.startConsultation(req.id),
-                      'Consultation started',
-                    ),
-                  ),
-                ElevatedButton.icon(
-                  key: Key('doctor_complete_consultation_btn_${req.id}'),
-                  icon: const Icon(Icons.task_alt_rounded, size: 14),
-                  label: const Text('Complete Consultation', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF012A58),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  ),
-                  onPressed: () => _handleLifecycleAction(
-                    () => _patientService.completeConsultationLifecycle(req.id),
-                    'Consultation completed',
-                  ),
-                ),
-                OutlinedButton.icon(
-                  key: Key('doctor_mark_delayed_btn_${req.id}'),
-                  icon: const Icon(Icons.more_time_rounded, size: 14),
-                  label: const Text('Mark Delayed (+15m)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFFB45309),
-                    side: const BorderSide(color: Color(0xFFF59E0B)),
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  ),
-                  onPressed: () => _handleLifecycleAction(
-                    () => _patientService.markConsultationDelayed(req.id, delayMinutes: 15),
-                    'Consultation marked delayed',
-                  ),
-                ),
-                OutlinedButton.icon(
-                  key: Key('doctor_mark_noshow_btn_${req.id}'),
-                  icon: const Icon(Icons.person_off_outlined, size: 14),
-                  label: const Text('No-Show', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF475569),
-                    side: const BorderSide(color: Color(0xFFCBD5E1)),
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  ),
-                  onPressed: () => _handleLifecycleAction(
-                    () => _patientService.markPatientNoShow(req.id),
-                    'Marked patient no-show',
-                  ),
-                ),
                 OutlinedButton.icon(
                   key: Key('doctor_cancel_consultation_btn_${req.id}'),
                   icon: const Icon(Icons.cancel_outlined, size: 14),
@@ -3022,6 +3038,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 child: SizedBox(
                   height: 38,
                   child: ElevatedButton.icon(
+                    key: Key('doctor_issue_eprescription_btn_${req.id}'),
                     icon: const Icon(Icons.receipt_long_rounded, size: 14),
                     label: const Text('Issue E-Prescription', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
                     style: ElevatedButton.styleFrom(
@@ -3031,7 +3048,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                       elevation: 0,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
-                    onPressed: () => _showPrescriptionModal(context, patientName),
+                    onPressed: () => _showPrescriptionModal(context, req),
                   ),
                 ),
               ),
@@ -3040,6 +3057,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                 child: SizedBox(
                   height: 38,
                   child: OutlinedButton.icon(
+                    key: Key('doctor_chat_btn_${req.id}'),
                     icon: const Icon(Icons.chat_bubble_outline_rounded, size: 14),
                     label: const Text('Chat', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
                     style: OutlinedButton.styleFrom(
@@ -3049,9 +3067,21 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                     onPressed: () {
-                      final docName = _patientService.currentDoctor?.name ?? 'DOCTOR';
+                      final resolvedDoc = _resolveCurrentDoctor() ?? _patientService.currentDoctor;
+                      final docName = (resolvedDoc?.name.trim().isNotEmpty == true)
+                          ? resolvedDoc!.name.trim()
+                          : ((req.assignedDoctorName?.trim().isNotEmpty == true)
+                              ? req.assignedDoctorName!.trim()
+                              : (req.displayDoctorName.trim().isNotEmpty ? req.displayDoctorName.trim() : 'DOCTOR'));
                       final rId = ApiService.getChatRoomId(patientIdOrName: patientName, dentistIdOrName: docName);
-                      _showDoctorChatModal(context, patientName, rId, patientId: req.patientId);
+                      _showDoctorChatModal(
+                        context,
+                        patientName,
+                        rId,
+                        patientId: req.patientId,
+                        doctorNameOverride: docName,
+                        doctorIdOverride: resolvedDoc?.id ?? req.assignedDoctorId,
+                      );
                     },
                   ),
                 ),
@@ -3659,10 +3689,60 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
     );
   }
 
+  Widget _buildDoctorRecentPatientActivityPreviewSection(
+    List<PatientConsultationRequest> allMyRequests,
+  ) {
+    final latestActivity = takeLatestPreviewRecords<PatientConsultationRequest>(
+      allMyRequests,
+      limit: kDashboardRecentPreviewLimit,
+      compareDesc: (a, b) => b.submittedAt.compareTo(a.submittedAt),
+    );
+    return RecentUpdatesPreviewSection(
+      sectionKey: const Key('doctor_recent_patient_activity_section'),
+      viewAllKey: const Key('doctor_view_all_patients_btn'),
+      emptyStateKey: const Key('doctor_recent_patient_activity_empty'),
+      title: 'Recent Patient Activity',
+      totalCount: allMyRequests.length,
+      icon: Icons.people_outline_rounded,
+      onViewAll: () => setState(() => _currentIndex = 1),
+      emptyIcon: Icons.people_outline_rounded,
+      emptyTitle: 'No recent patient activity yet.',
+      emptySubtitle: 'Patient consultations and updates will appear here.',
+      previewChildren: latestActivity.asMap().entries.map((entry) {
+        final idx = entry.key;
+        final req = entry.value;
+        final dt = req.submittedAt.toLocal();
+        final dateLabel = (req.confirmedDate != null && req.confirmedDate!.trim().isNotEmpty)
+            ? req.confirmedDate!.split('T').first
+            : '${dt.day}/${dt.month}/${dt.year}';
+        final slotLabel = (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.trim().isNotEmpty)
+            ? ' • ${req.confirmedTimeSlot}'
+            : '';
+        return RecentUpdatePreviewCard(
+          cardKey: Key('doctor_recent_patient_activity_card_$idx'),
+          leadingIcon: Icons.person_outline_rounded,
+          title: req.patientName.trim().isNotEmpty ? req.patientName.trim() : 'Patient',
+          subtitle: req.problemCategory.trim().isNotEmpty ? req.problemCategory.trim() : 'Consultation',
+          metaLine: '$dateLabel$slotLabel${req.patientPhone.trim().isNotEmpty ? " • ${req.patientPhone.trim()}" : ""}',
+          statusLabel: req.status.trim().isNotEmpty ? req.status.trim() : 'Pending',
+          onTap: () => setState(() => _currentIndex = 1),
+        );
+      }).toList(),
+    );
+  }
+
   Widget _buildIncomingReferralsSection(
     List<PatientReferral> referrals, {
     String keyPrefix = 'today',
+    int? maxPreviewItems,
+    VoidCallback? onViewAll,
   }) {
+    final sortedReferrals = List<PatientReferral>.from(referrals)
+      ..sort((a, b) => b.referralDate.compareTo(a.referralDate));
+    final visibleReferrals = (maxPreviewItems != null && sortedReferrals.length > maxPreviewItems)
+        ? sortedReferrals.sublist(0, maxPreviewItems)
+        : sortedReferrals;
+
     return Container(
       key: Key('doctor_${keyPrefix}_incoming_referrals_section'),
       child: Column(
@@ -3674,7 +3754,9 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Incoming Patient Referrals (${referrals.length})',
+                  maxPreviewItems != null
+                      ? 'Recent Referrals (${referrals.length})'
+                      : 'Incoming Patient Referrals (${referrals.length})',
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w800,
@@ -3684,10 +3766,64 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (onViewAll != null)
+                TextButton(
+                  key: const Key('doctor_view_all_referrals_btn'),
+                  onPressed: onViewAll,
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppTheme.gsNavy,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'View All',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.gsNavy,
+                        ),
+                      ),
+                      SizedBox(width: 2),
+                      Icon(Icons.chevron_right_rounded, size: 18, color: AppTheme.gsNavy),
+                    ],
+                  ),
+                ),
             ],
           ),
           const SizedBox(height: 12),
-          ...referrals.map((ref) => _buildDoctorReceivedReferralCard(ref, keyPrefix: keyPrefix)),
+          if (visibleReferrals.isEmpty)
+            Container(
+              key: Key('doctor_${keyPrefix}_referrals_empty'),
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.share_outlined, color: AppTheme.textMuted, size: 20),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'No recent referrals yet.',
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.textDark,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            ...visibleReferrals.map((ref) => _buildDoctorReceivedReferralCard(ref, keyPrefix: keyPrefix)),
         ],
       ),
     );

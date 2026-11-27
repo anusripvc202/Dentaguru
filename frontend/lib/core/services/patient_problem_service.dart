@@ -46,6 +46,8 @@ class DoctorModel {
   final double? latitude;
   final double? longitude;
   final Map<String, String> procedureFees;
+  final bool onlineConsultationEnabled;
+  final bool inPersonConsultationEnabled;
 
   DoctorModel({
     required this.id,
@@ -77,8 +79,119 @@ class DoctorModel {
     this.languages = const ['English'],
     this.latitude,
     this.longitude,
+    this.onlineConsultationEnabled = false,
+    this.inPersonConsultationEnabled = true,
     Map<String, String>? procedureFees,
   }) : procedureFees = procedureFees ?? const {};
+
+  static bool? _parseBoolFlag(dynamic val) {
+    if (val is bool) return val;
+    if (val is num) return val != 0;
+    if (val is String) {
+      final s = val.trim().toLowerCase();
+      if (s == 'true' || s == '1' || s == 'yes' || s == 'on' || s == 'enabled') return true;
+      if (s == 'false' || s == '0' || s == 'no' || s == 'off' || s == 'disabled') return false;
+    }
+    return null;
+  }
+
+  /// Resolves Online & In-Person consultation support from raw JSON.
+  /// CRITICAL: Doctors with unknown consultation availability default to
+  /// `onlineConsultationEnabled = false` and `inPersonConsultationEnabled = true`.
+  static ({bool online, bool inPerson}) parseConsultationModes(Map<dynamic, dynamic> json) {
+    Map<String, dynamic> uMeta = {};
+    final userObj = json['users'] is Map ? (json['users'] as Map) : (json['user'] is Map ? (json['user'] as Map) : const {});
+    final rawToken = (userObj['device_token'] ?? json['device_token'] ?? '').toString().trim();
+    if (rawToken.startsWith('{') && rawToken.endsWith('}')) {
+      try {
+        final decoded = jsonDecode(rawToken);
+        if (decoded is Map) {
+          uMeta = Map<String, dynamic>.from(decoded);
+        }
+      } catch (_) {}
+    }
+
+    final explicitOnline = _parseBoolFlag(
+      json['onlineConsultationEnabled'] ??
+          json['online_consultation_enabled'] ??
+          json['supportsOnlineConsultation'] ??
+          json['supports_online_consultation'] ??
+          json['supportsOnline'] ??
+          json['supports_online'] ??
+          uMeta['onlineConsultationEnabled'] ??
+          uMeta['online_consultation_enabled'] ??
+          uMeta['supportsOnlineConsultation'],
+    );
+    final explicitInPerson = _parseBoolFlag(
+      json['inPersonConsultationEnabled'] ??
+          json['in_person_consultation_enabled'] ??
+          json['offlineConsultationEnabled'] ??
+          json['offline_consultation_enabled'] ??
+          json['supportsInPersonConsultation'] ??
+          json['supports_in_person_consultation'] ??
+          uMeta['inPersonConsultationEnabled'] ??
+          uMeta['in_person_consultation_enabled'] ??
+          uMeta['supportsInPersonConsultation'],
+    );
+
+    bool? textOnline;
+    bool? textInPerson;
+    final rawMode = (json['consultationMode'] ??
+            json['consultation_mode'] ??
+            uMeta['consultationMode'] ??
+            uMeta['consultation_mode'] ??
+            '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    if (rawMode.isNotEmpty) {
+      if (rawMode == 'both' ||
+          rawMode == 'hybrid' ||
+          (rawMode.contains('online') &&
+              (rawMode.contains('offline') || rawMode.contains('in-person') || rawMode.contains('clinic')))) {
+        textOnline = true;
+        textInPerson = true;
+      } else if (rawMode == 'online' || rawMode == 'online only' || rawMode == 'online_only' || rawMode == 'online-only') {
+        textOnline = true;
+        textInPerson = false;
+      } else if (rawMode == 'offline' ||
+          rawMode == 'in-person' ||
+          rawMode == 'in_person' ||
+          rawMode == 'clinic' ||
+          rawMode == 'offline only' ||
+          rawMode == 'in-person only') {
+        textOnline = false;
+        textInPerson = true;
+      }
+    }
+
+    return (
+      online: explicitOnline ?? textOnline ?? false,
+      inPerson: explicitInPerson ?? textInPerson ?? true,
+    );
+  }
+
+  /// True when the doctor supports Online Consultation AND is available for bookings.
+  bool get supportsOnlineConsultation => isAvailable && onlineConsultationEnabled;
+
+  /// True when the doctor supports In-Person Clinic Consultation AND is available for bookings.
+  bool get supportsInPersonConsultation => isAvailable && inPersonConsultationEnabled;
+
+  /// True when the doctor provides ONLY Online consultations.
+  bool get isOnlineOnlyDoctor => onlineConsultationEnabled && !inPersonConsultationEnabled;
+
+  /// True when the doctor provides ONLY In-Person clinic consultations.
+  bool get isOfflineOnlyDoctor => inPersonConsultationEnabled && !onlineConsultationEnabled;
+
+  /// True when the doctor provides both Online and In-Person consultations.
+  bool get supportsBothConsultationModes => onlineConsultationEnabled && inPersonConsultationEnabled;
+
+  String get consultationModeSummaryLabel {
+    if (supportsBothConsultationModes) return 'Online & Clinic Consultation';
+    if (onlineConsultationEnabled) return 'Online Consultation Only';
+    if (inPersonConsultationEnabled) return 'Clinic (In-Person) Consultation';
+    return 'Consultation Mode Not Set';
+  }
 
   bool get hasCoordinates =>
       ClinicDirectionsHelper.hasValidCoordinates(latitude, longitude);
@@ -112,6 +225,8 @@ class DoctorModel {
     double? latitude,
     double? longitude,
     bool clearCoordinates = false,
+    bool? onlineConsultationEnabled,
+    bool? inPersonConsultationEnabled,
   }) {
     return DoctorModel(
       id: id,
@@ -142,6 +257,8 @@ class DoctorModel {
       languages: languages,
       latitude: clearCoordinates ? null : (latitude ?? this.latitude),
       longitude: clearCoordinates ? null : (longitude ?? this.longitude),
+      onlineConsultationEnabled: onlineConsultationEnabled ?? this.onlineConsultationEnabled,
+      inPersonConsultationEnabled: inPersonConsultationEnabled ?? this.inPersonConsultationEnabled,
       procedureFees: procedureFees,
     );
   }
@@ -238,6 +355,10 @@ class DoctorModel {
         'languages': languages,
         'latitude': latitude,
         'longitude': longitude,
+        'onlineConsultationEnabled': onlineConsultationEnabled,
+        'online_consultation_enabled': onlineConsultationEnabled,
+        'inPersonConsultationEnabled': inPersonConsultationEnabled,
+        'in_person_consultation_enabled': inPersonConsultationEnabled,
         'procedureFees': procedureFees,
         'photoBase64': photoBytes != null ? base64Encode(photoBytes!) : null,
         'profileImageUrl': profileImageUrl,
@@ -301,6 +422,7 @@ class DoctorModel {
 
     final parsedSpecialty = (json['specialty'] ?? json['speciality'] ?? '').toString();
     final parsedQual = (json['qualification'] ?? json['qualifications'] ?? '').toString().trim();
+    final parsedModes = parseConsultationModes(json);
 
     return DoctorModel(
       id: (json['id'] ?? json['_id'] ?? '').toString(),
@@ -356,6 +478,8 @@ class DoctorModel {
                   (json['users'] is Map ? json['users']['longitude'] : null))
               .toString())
           : null,
+      onlineConsultationEnabled: parsedModes.online,
+      inPersonConsultationEnabled: parsedModes.inPerson,
       procedureFees: pFees.isNotEmpty ? pFees : null,
     );
   }
@@ -2198,13 +2322,45 @@ class PatientProblemService extends ChangeNotifier {
   String get subAdminPhone => _subAdminPhone;
   String get subAdminId => _subAdminId;
 
+  static const Map<String, List<String>> _permissionAliases = {
+    'PATIENT_VIEW': ['PATIENTS', 'PATIENT_CREATE', 'PATIENT_ADD', 'PATIENT_EDIT', 'PATIENT_DELETE', 'MANAGE_PATIENTS', 'VIEW_PATIENTS'],
+    'PATIENT_CREATE': ['PATIENTS', 'PATIENT_ADD', 'MANAGE_PATIENTS'],
+    'PATIENT_EDIT': ['PATIENTS', 'MANAGE_PATIENTS'],
+    'PATIENT_DELETE': ['PATIENTS', 'MANAGE_PATIENTS'],
+    'DENTIST_VIEW': ['DOCTORS', 'DOCTOR_VIEW', 'DENTIST_VERIFY', 'DENTIST_MANAGE', 'DENTIST_CREATE', 'DENTIST_EDIT', 'VIEW_DENTISTS', 'MANAGE_DOCTORS'],
+    'DENTIST_VERIFY': ['DOCTORS', 'DENTIST_MANAGE', 'DENTIST_EDIT', 'MANAGE_DOCTORS'],
+    'DENTIST_MANAGE': ['DOCTORS', 'DENTIST_EDIT', 'MANAGE_DOCTORS'],
+    'CLINIC_VIEW': ['CLINICS', 'CLINIC_MANAGE', 'MANAGE_CLINICS', 'VIEW_CLINICS'],
+    'CLINIC_MANAGE': ['CLINICS', 'MANAGE_CLINICS'],
+    'REFERRAL_VIEW': ['REFERRALS', 'REFERRAL_MANAGE', 'MANAGE_REFERRALS', 'VIEW_REFERRALS'],
+    'REFERRAL_MANAGE': ['REFERRALS', 'MANAGE_REFERRALS'],
+    'APPOINTMENT_VIEW': ['APPOINTMENTS', 'APPOINTMENT_MANAGE', 'MANAGE_APPOINTMENTS', 'VIEW_APPOINTMENTS'],
+    'APPOINTMENT_MANAGE': ['APPOINTMENTS', 'MANAGE_APPOINTMENTS'],
+    'PROBLEM_VIEW': ['REQUESTS', 'PROBLEM_UPDATE', 'ASSIGNMENT_VIEW', 'ASSIGNMENT_CREATE', 'MANAGE_REQUESTS', 'VIEW_REQUESTS'],
+    'PROBLEM_UPDATE': ['REQUESTS', 'ASSIGNMENT_CREATE', 'MANAGE_REQUESTS'],
+    'ASSIGNMENT_VIEW': ['REQUESTS', 'ASSIGNMENTS', 'ASSIGNMENT_CREATE', 'ASSIGNMENT_HISTORY_VIEW', 'PROBLEM_VIEW', 'MANAGE_REQUESTS'],
+    'ASSIGNMENT_CREATE': ['REQUESTS', 'ASSIGNMENTS', 'PATIENT_ASSIGN', 'PATIENT_REASSIGN', 'MANAGE_REQUESTS'],
+    'REPORT_VIEW': ['REPORTS', 'REPORT_ASSIGNMENT_VIEW', 'REPORT_DISTRICT_VIEW', 'VIEW_REPORTS', 'MANAGE_REPORTS'],
+  };
+
   bool hasPermission(String permission) {
     if (!_isSubAdminMode) return true; // Primary admin has full access
     if (_subAdminStatus == 'INACTIVE' || _subAdminStatus == 'DEACTIVATED') return false;
     final pUpper = permission.trim().toUpperCase();
-    return _subAdminPermissions.contains('*') ||
-           _subAdminPermissions.contains('ALL') ||
-           _subAdminPermissions.contains(pUpper);
+    if (_subAdminPermissions.contains('*') ||
+        _subAdminPermissions.contains('ALL') ||
+        _subAdminPermissions.contains(pUpper)) {
+      return true;
+    }
+    final aliases = _permissionAliases[pUpper];
+    if (aliases != null) {
+      for (final alias in aliases) {
+        if (_subAdminPermissions.contains(alias)) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   /// Check whether the current user (Sub-Admin or Main Admin) has jurisdiction over a district
@@ -4008,6 +4164,7 @@ class PatientProblemService extends ChangeNotifier {
               : <String>[];
 
           final parsedQual = (dMap['qualifications'] ?? dMap['qualification'] ?? '').toString().trim();
+          final parsedModes = DoctorModel.parseConsultationModes(dMap);
 
           freshDoctors.add(DoctorModel(
             id: id.isNotEmpty ? id : 'DOC-${100 + freshDoctors.length + 1}',
@@ -4040,6 +4197,8 @@ class PatientProblemService extends ChangeNotifier {
             languages: doctorLangs,
             latitude: lat,
             longitude: lng,
+            onlineConsultationEnabled: parsedModes.online,
+            inPersonConsultationEnabled: parsedModes.inPerson,
           ));
         }
         _allDoctors
@@ -4152,6 +4311,7 @@ class PatientProblemService extends ChangeNotifier {
         final formattedName = name.startsWith('Dr.') ? name : 'Dr. $name';
         final resolvedClinicId = (dMap['clinic_id'] ?? dMap['clinicId'] ?? clinicObj['id'] ?? '').toString().trim();
         final parsedQual = (dMap['qualifications'] ?? dMap['qualification'] ?? '').toString().trim();
+        final parsedModes = DoctorModel.parseConsultationModes(dMap is Map ? dMap : <String, dynamic>{});
 
         filtered.add(DoctorModel(
           id: id.isNotEmpty ? id : 'DOC-${filtered.length + 1}',
@@ -4184,6 +4344,8 @@ class PatientProblemService extends ChangeNotifier {
           languages: doctorLangs,
           latitude: lat,
           longitude: lng,
+          onlineConsultationEnabled: parsedModes.online,
+          inPersonConsultationEnabled: parsedModes.inPerson,
         ));
       }
       return filtered;
@@ -8515,6 +8677,8 @@ class PatientProblemService extends ChangeNotifier {
     double? latitude,
     double? longitude,
     bool clearLocation = false,
+    bool? onlineConsultationEnabled,
+    bool? inPersonConsultationEnabled,
     List<String>? languages,
     Uint8List? photoBytes,
     String? profilePhotoDataUri,
@@ -8525,6 +8689,15 @@ class PatientProblemService extends ChangeNotifier {
     DoctorModel? baseDoc = idx != -1 ? _allDoctors[idx] : currentDoctor;
     if (baseDoc == null) {
       return {'success': false, 'message': 'Doctor profile not found.'};
+    }
+
+    final resolvedOnline = onlineConsultationEnabled ?? baseDoc.onlineConsultationEnabled;
+    final resolvedInPerson = inPersonConsultationEnabled ?? baseDoc.inPersonConsultationEnabled;
+    if (!resolvedOnline && !resolvedInPerson) {
+      return {
+        'success': false,
+        'message': 'At least one consultation mode (Online Consultation or In-Person Clinic Consultation) must be enabled.',
+      };
     }
 
     final payload = <String, dynamic>{
@@ -8549,6 +8722,8 @@ class PatientProblemService extends ChangeNotifier {
       if (bio != null) 'bio': bio,
       if (city != null) 'city': city,
       if (languages != null) 'languages': languages,
+      if (onlineConsultationEnabled != null) 'onlineConsultationEnabled': onlineConsultationEnabled,
+      if (inPersonConsultationEnabled != null) 'inPersonConsultationEnabled': inPersonConsultationEnabled,
       if (removeProfilePhoto) 'removeProfilePhoto': true,
       if (!removeProfilePhoto && profilePhotoDataUri != null && profilePhotoDataUri.trim().isNotEmpty)
         'profilePhoto': profilePhotoDataUri.trim()
@@ -8607,6 +8782,8 @@ class PatientProblemService extends ChangeNotifier {
       languages: languages ?? baseDoc.languages,
       latitude: clearLocation ? null : (latitude ?? baseDoc.latitude),
       longitude: clearLocation ? null : (longitude ?? baseDoc.longitude),
+      onlineConsultationEnabled: resolvedOnline,
+      inPersonConsultationEnabled: resolvedInPerson,
       procedureFees: baseDoc.procedureFees,
     );
 
@@ -8674,6 +8851,8 @@ class PatientProblemService extends ChangeNotifier {
         languages: previousDoc.languages,
         latitude: previousDoc.latitude,
         longitude: previousDoc.longitude,
+        onlineConsultationEnabled: previousDoc.onlineConsultationEnabled,
+        inPersonConsultationEnabled: previousDoc.inPersonConsultationEnabled,
         procedureFees: previousDoc.procedureFees,
       );
       if (idx != -1) {

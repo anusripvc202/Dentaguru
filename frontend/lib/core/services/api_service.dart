@@ -27,6 +27,10 @@ class ApiService {
 
   String? get currentToken {
     if (_authToken != null && _authToken!.isNotEmpty) return _authToken;
+    final sessionToken = SessionService().currentSession?.token;
+    if (sessionToken != null && sessionToken.trim().isNotEmpty) {
+      return sessionToken.trim();
+    }
     return SupabaseService.safeClient?.auth.currentSession?.accessToken;
   }
 
@@ -44,8 +48,11 @@ class ApiService {
         : (SessionService().currentSession?.userId.trim().isNotEmpty == true
             ? SessionService().currentSession!.userId.trim()
             : (SupabaseService.safeCurrentUser?.id ?? '').trim());
+    final base = _headers;
     return {
-      ..._headers,
+      ...base,
+      if (!base.containsKey('Authorization') && effectiveUserId.isNotEmpty)
+        'Authorization': 'Bearer sb_direct_$effectiveUserId',
       if (effectiveUserId.isNotEmpty) 'x-user-id': effectiveUserId,
     };
   }
@@ -493,16 +500,7 @@ class ApiService {
           } catch (_) {}
         } else if (role == 'Sub-Admin' || role.toLowerCase().contains('sub')) {
           try {
-            final perms = [
-              'ALL',
-              'MANAGE_PATIENTS',
-              'MANAGE_REQUESTS',
-              'VIEW_DENTISTS',
-              'MANAGE_CLINICS',
-              'MANAGE_REFERRALS',
-              'VIEW_RECORDS',
-              'APPOINTMENTS'
-            ];
+            final perms = ['PATIENT_VIEW'];
             final rows = perms.map((p) => {'user_id': newUserId, 'permission': p}).toList();
             await client.from('sub_admin_permissions').insert(rows);
           } catch (_) {}
@@ -815,9 +813,17 @@ class ApiService {
         final dRows = await client
             .from('sub_admin_districts')
             .select('districts(*)')
-            .eq('sub_admin_id', u['id']);
+            .eq('sub_admin_user_id', u['id']);
         assignedDistricts = dRows.map((r) => r['districts']).whereType<Map>().toList();
-      } catch (_) {}
+      } catch (_) {
+        try {
+          final dRows = await client
+              .from('sub_admin_districts')
+              .select('districts(*)')
+              .eq('sub_admin_id', u['id']);
+          assignedDistricts = dRows.map((r) => r['districts']).whereType<Map>().toList();
+        } catch (_) {}
+      }
     }
 
     final Map<String, dynamic> doctorExtra = {};
@@ -1009,6 +1015,7 @@ class ApiService {
             if (isOnScreenTestOtp && data['otp'] != null) 'otp': data['otp'].toString(),
             if (isOnScreenTestOtp) 'deliveryMode': 'on_screen',
             'isAdmin': data['isAdmin'] == true,
+            if (data['isSubAdmin'] == true) 'isSubAdmin': true,
           };
         } else {
           return {
@@ -1017,6 +1024,7 @@ class ApiService {
             if (data['code'] != null) 'code': data['code'],
             'message': data['message'] ?? 'Failed to send OTP SMS. Please check your mobile number.',
             'isAdmin': data['isAdmin'] == true,
+            if (data['isSubAdmin'] == true) 'isSubAdmin': true,
           };
         }
       } catch (e) {
@@ -1035,7 +1043,13 @@ class ApiService {
         }
         final u = await _findSupabaseUserByIdentifier(rawId, normKey);
         final roleLower = (u?['role'] ?? '').toString().trim().toLowerCase();
-        final statusUpper = (u?['status'] ?? 'ACTIVE').toString().trim().toUpperCase();
+        Map<String, dynamic> uMeta = {};
+        if (u?['device_token'] != null && u!['device_token'].toString().startsWith('{')) {
+          try {
+            uMeta = jsonDecode(u['device_token'].toString());
+          } catch (_) {}
+        }
+        final statusUpper = (u?['status'] ?? uMeta['status'] ?? 'ACTIVE').toString().trim().toUpperCase();
         final isActiveAccount = statusUpper != 'INACTIVE' &&
             statusUpper != 'DEACTIVATED' &&
             statusUpper != 'SUSPENDED' &&
@@ -1046,6 +1060,10 @@ class ApiService {
                 roleLower == 'primary_admin' ||
                 roleLower == 'superadmin' ||
                 roleLower == 'super_admin');
+        final isSubAdminAccount = isActiveAccount &&
+            (roleLower == 'sub-admin' ||
+                roleLower == 'subadmin' ||
+                roleLower == 'sub_admin');
         final otpCode = (Random.secure().nextInt(900000) + 100000).toString();
         _localTestingOtpChallenges[normKey] = (
           code: otpCode,
@@ -1059,6 +1077,7 @@ class ApiService {
           'otp': otpCode,
           'deliveryMode': 'on_screen',
           'isAdmin': isStrictAdmin,
+          if (isSubAdminAccount) 'isSubAdmin': true,
         };
       } catch (sbErr) {
         debugPrint('⚠️ Isolated testing Supabase OTP fallback notice: $sbErr');
@@ -1120,6 +1139,9 @@ class ApiService {
 
         final data = jsonDecode(response.body);
         if (response.statusCode == 200 && data['success'] == true) {
+          if (data['accessToken'] != null && data['accessToken'].toString().trim().isNotEmpty) {
+            setAuthToken(data['accessToken'].toString().trim());
+          }
           return {
             'success': true,
             'message': data['message'] ?? 'OTP verified successfully.',
@@ -2447,6 +2469,32 @@ class ApiService {
     return cleaned.startsWith('PATIENT_') ? cleaned : 'PATIENT_$cleaned';
   }
 
+  /// Returns all compatible room ID aliases (single/double underscore, legacy PATIENT_<NAME>, hyphenated)
+  /// so Patient, Doctor, Clinic, and Admin always read the same thread regardless of 'Dr.' prefix formatting.
+  static List<String> getCandidateRoomIds(String roomId, {String? patientName, String? doctorName}) {
+    final norm = normalizeRoomId(roomId);
+    final collapsed = norm.replaceAll(RegExp(r'_+'), '_');
+    final set = <String>{
+      norm,
+      collapsed,
+      norm.replaceAll('_', '-'),
+      collapsed.replaceAll('_', '-'),
+      if (roomId.trim().isNotEmpty) roomId.trim(),
+    };
+    if (patientName != null && patientName.trim().isNotEmpty) {
+      final pTok = patientName.trim().toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]+'), '_').replaceAll(RegExp(r'^_+|_+$'), '');
+      if (pTok.isNotEmpty) {
+        set.add('PATIENT_$pTok');
+        if (doctorName != null && doctorName.trim().isNotEmpty) {
+          set.add(getChatRoomId(patientIdOrName: patientName, dentistIdOrName: doctorName));
+          final bareDoc = doctorName.trim().replaceFirst(RegExp(r'^Dr\.?\s*', caseSensitive: false), '');
+          set.add(getChatRoomId(patientIdOrName: patientName, dentistIdOrName: bareDoc));
+        }
+      }
+    }
+    return set.where((s) => s.trim().isNotEmpty).toList();
+  }
+
   @visibleForTesting
   static Future<Map<String, dynamic>> Function({
     required String senderId,
@@ -2546,23 +2594,83 @@ class ApiService {
       try {
         authUserId = client.auth.currentUser?.id;
       } catch (_) {}
-      final effectiveUuid = validSenderUuid ??
+      final sessionUserId = SessionService().currentSession?.canonicalUserId ?? '';
+      String? effectiveSenderUuid = validSenderUuid ??
+          (uuidRegex.hasMatch(sessionUserId) ? sessionUserId : null) ??
           (authUserId != null && uuidRegex.hasMatch(authUserId) ? authUserId : null);
+
+      // Resolve dentist.id -> users.id for sender and receiver so FK constraints on chat_messages never fail
+      if (effectiveSenderUuid != null) {
+        try {
+          final dRow = await client
+              .from('dentists')
+              .select('user_id')
+              .eq('id', effectiveSenderUuid)
+              .maybeSingle();
+          if (dRow != null && dRow['user_id'] != null && uuidRegex.hasMatch(dRow['user_id'].toString())) {
+            effectiveSenderUuid = dRow['user_id'].toString();
+          }
+        } catch (_) {}
+      }
+
+      String? effectiveReceiverUuid = validReceiverUuid;
+      if (effectiveReceiverUuid != null) {
+        try {
+          final dRow = await client
+              .from('dentists')
+              .select('user_id')
+              .eq('id', effectiveReceiverUuid)
+              .maybeSingle();
+          if (dRow != null && dRow['user_id'] != null && uuidRegex.hasMatch(dRow['user_id'].toString())) {
+            effectiveReceiverUuid = dRow['user_id'].toString();
+          }
+        } catch (_) {}
+      }
 
       final payload = <String, dynamic>{
         'room_id': normRoom,
-        'sender_id': effectiveUuid,
-        if (validReceiverUuid != null) 'receiver_id': validReceiverUuid,
+        'sender_id': effectiveSenderUuid,
+        if (effectiveReceiverUuid != null) 'receiver_id': effectiveReceiverUuid,
         'message': trimmed,
         'type': type ?? 'text',
         'read': false,
       };
 
-      final inserted = await client
-          .from('chat_messages')
-          .insert(payload)
-          .select('*, sender:users!sender_id(id, name, email, role)')
-          .maybeSingle();
+      Map<String, dynamic>? inserted;
+      try {
+        inserted = await client
+            .from('chat_messages')
+            .insert(payload)
+            .select('*, sender:users!sender_id(id, name, email, role)')
+            .maybeSingle();
+      } catch (_) {
+        // Retry without foreign-key receiver_id/sender_id join if a reference isn't in public.users
+        final safePayload = <String, dynamic>{
+          'room_id': normRoom,
+          if (effectiveSenderUuid != null) 'sender_id': effectiveSenderUuid,
+          'message': trimmed,
+          'type': type ?? 'text',
+          'read': false,
+        };
+        try {
+          inserted = await client
+              .from('chat_messages')
+              .insert(safePayload)
+              .select()
+              .maybeSingle();
+        } catch (_) {
+          inserted = await client
+              .from('chat_messages')
+              .insert({
+                'room_id': normRoom,
+                'message': trimmed,
+                'type': type ?? 'text',
+                'read': false,
+              })
+              .select()
+              .maybeSingle();
+        }
+      }
       return {
         'success': true,
         'message': 'Chat message sent successfully.',
@@ -2584,7 +2692,8 @@ class ApiService {
     }
 
     final norm = normalizeRoomId(roomId);
-    final hyph = norm.replaceAll('_', '-');
+    final candidates = getCandidateRoomIds(roomId);
+    final orFilter = candidates.map((r) => 'room_id.eq.$r').join(',');
 
     // 1. Express Backend primary (handles RBAC + Sub-Admin 403 + Audit logging)
     try {
@@ -2613,7 +2722,7 @@ class ApiService {
       final res = await client
           .from('chat_messages')
           .select('*, sender:users!sender_id(id, name, email, role), receiver:users!receiver_id(id, name, email, role)')
-          .or('room_id.eq.$norm,room_id.eq.$hyph,room_id.eq.$roomId')
+          .or(orFilter)
           .order('created_at', ascending: true);
       return List<dynamic>.from(res);
     } catch (e) {
@@ -2622,11 +2731,21 @@ class ApiService {
         final res = await client
             .from('chat_messages')
             .select('*, sender:users!sender_id(id, name, email, role)')
-            .or('room_id.eq.$norm,room_id.eq.$hyph,room_id.eq.$roomId')
+            .or(orFilter)
             .order('created_at', ascending: true);
         return List<dynamic>.from(res);
       } catch (err) {
-        debugPrint('Supabase direct fetch chat messages notice: $err');
+        try {
+          final client = Supabase.instance.client;
+          final res = await client
+              .from('chat_messages')
+              .select('*')
+              .or(orFilter)
+              .order('created_at', ascending: true);
+          return List<dynamic>.from(res);
+        } catch (err2) {
+          debugPrint('Supabase direct fetch chat messages notice: $err2');
+        }
       }
     }
     return [];
@@ -4450,6 +4569,46 @@ class ApiService {
     return [];
   }
 
+  @visibleForTesting
+  static Future<Map<String, dynamic>> Function({
+    required String name,
+    required String phone,
+    String? email,
+    String? password,
+    String? city,
+    String? pincode,
+    List<String>? languages,
+    List<String>? permissions,
+    List<String>? districtIds,
+    String status,
+    String? profilePhoto,
+  })? debugCreateSubAdminOverride;
+
+  @visibleForTesting
+  static Future<Map<String, dynamic>> Function({
+    required String id,
+    String? name,
+    String? phone,
+    String? email,
+    String? city,
+    String? pincode,
+    List<String>? languages,
+    String? password,
+    String? status,
+    List<String>? permissions,
+    List<String>? districtIds,
+    String? profilePhoto,
+  })? debugUpdateSubAdminOverride;
+
+  String _canonicalPhone10(String raw) {
+    final digits = raw.trim().replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length == 14 && digits.startsWith('0091')) return digits.substring(4);
+    if (digits.length == 13 && digits.startsWith('910')) return digits.substring(3);
+    if (digits.length == 12 && digits.startsWith('91')) return digits.substring(2);
+    if (digits.length == 11 && digits.startsWith('0')) return digits.substring(1);
+    return digits;
+  }
+
   /// Create Sub-Admin (Primary Admin only)
   Future<Map<String, dynamic>> createSubAdmin({
     required String name,
@@ -4462,35 +4621,95 @@ class ApiService {
     List<String>? permissions,
     List<String>? districtIds,
     String status = 'ACTIVE',
+    String? profilePhoto,
   }) async {
-    final cleanPhone = phone.trim();
-    final cleanEmail = (email != null && email.trim().isNotEmpty) ? email.trim() : '';
-    final cleanPassword = (password != null && password.trim().isNotEmpty) ? password.trim() : 'Passwordless_${cleanPhone.replaceAll('+', '')}';
+    if (debugCreateSubAdminOverride != null) {
+      return debugCreateSubAdminOverride!(
+        name: name,
+        phone: phone,
+        email: email,
+        password: password,
+        city: city,
+        pincode: pincode,
+        languages: languages,
+        permissions: permissions,
+        districtIds: districtIds,
+        status: status,
+        profilePhoto: profilePhoto,
+      );
+    }
+
+    final cleanName = name.trim();
+    final cleanPhone10 = _canonicalPhone10(phone);
+    final cleanEmail = (email != null && email.trim().isNotEmpty) ? email.trim().toLowerCase() : '';
+    final customPassword = (password != null && password.trim().isNotEmpty) ? password.trim() : null;
     final userLanguages = (languages != null && languages.isNotEmpty) ? languages : ['English'];
 
-    final perms = permissions ?? [
-      'PATIENT_VIEW',
-    ];
+    if (cleanName.isEmpty) {
+      return {
+        'success': false,
+        'code': 'MISSING_NAME',
+        'message': 'Full name is required for Sub-Admin creation.',
+      };
+    }
+    if (cleanPhone10.length != 10 || !RegExp(r'^\d{10}$').hasMatch(cleanPhone10)) {
+      return {
+        'success': false,
+        'code': 'INVALID_PHONE',
+        'message': 'Please enter a valid 10-digit mobile phone number.',
+      };
+    }
+    if (cleanEmail.isNotEmpty && !cleanEmail.endsWith('@dentaguru.internal')) {
+      if (!RegExp(r'^\S+@\S+\.\S+$').hasMatch(cleanEmail)) {
+        return {
+          'success': false,
+          'code': 'INVALID_EMAIL',
+          'message': 'Please enter a valid email address.',
+        };
+      }
+    }
+    if (customPassword != null && customPassword.length < 6) {
+      return {
+        'success': false,
+        'code': 'INVALID_PASSWORD',
+        'message': 'Password must be at least 6 characters long.',
+      };
+    }
+
+    const forbiddenPerms = {'*', 'ALL', 'ADMIN_SUBADMIN_MANAGE', 'ADMIN_DISTRICT_MANAGE', 'ADMIN_SYSTEM_CONFIG'};
+    final rawPerms = (permissions != null && permissions.isNotEmpty)
+        ? permissions
+            .map((p) => p.trim().toUpperCase())
+            .where((p) => p.isNotEmpty && !forbiddenPerms.contains(p))
+            .toList()
+        : <String>['PATIENT_VIEW'];
+    final perms = rawPerms.isNotEmpty ? rawPerms : <String>['PATIENT_VIEW'];
 
     try {
       final url = Uri.parse('${ApiConstants.baseUrl}/admin/sub-admins');
       final response = await http.post(
         url,
-        headers: _headers,
+        headers: _headersWithUser(),
         body: jsonEncode({
-          'name': name,
-          'phone': cleanPhone,
+          'name': cleanName,
+          'phone': cleanPhone10,
           if (cleanEmail.isNotEmpty) 'email': cleanEmail,
-          'password': cleanPassword,
-          'status': status,
+          if (customPassword != null) 'password': customPassword,
+          'status': status.trim().toUpperCase(),
           'permissions': perms,
-          if (city != null) 'city': city,
-          if (pincode != null) 'pincode': pincode,
+          if (city != null && city.trim().isNotEmpty) 'city': city.trim(),
+          if (pincode != null && pincode.trim().isNotEmpty) 'pincode': pincode.trim(),
           'languages': userLanguages,
           if (districtIds != null && districtIds.isNotEmpty) 'districtIds': districtIds,
+          if (profilePhoto != null && profilePhoto.trim().isNotEmpty) 'profilePhoto': profilePhoto.trim(),
         }),
       ).timeout(const Duration(seconds: 35));
-      final data = jsonDecode(response.body);
+
+      if (response.statusCode >= 500) {
+        throw Exception('Sub-Admin server error (${response.statusCode})');
+      }
+
+      final data = response.body.isNotEmpty ? jsonDecode(response.body) : <String, dynamic>{};
       if (response.statusCode == 200 || response.statusCode == 201) {
         return {
           'success': true,
@@ -4498,49 +4717,128 @@ class ApiService {
           'subAdmin': data['subAdmin'],
         };
       }
+      if (response.statusCode == 400 ||
+          response.statusCode == 401 ||
+          response.statusCode == 403 ||
+          response.statusCode == 409) {
+        return {
+          'success': false,
+          'statusCode': response.statusCode,
+          if (data['code'] != null) 'code': data['code'],
+          'message': data['message'] ?? 'Failed to create Sub-Admin.',
+        };
+      }
     } catch (e) {
       debugPrint('Create Sub-Admin backend notice: $e');
     }
 
-    // Direct Supabase Cloud 24/7 Fallback
+    // Direct Supabase Cloud 24/7 Fallback (only when Express backend is unreachable)
     try {
+      final client = SupabaseService.safeClient;
+      if (client == null) {
+        return {'success': false, 'message': 'Failed to create Sub-Admin. Backend server unreachable.'};
+      }
+
+      final existingByPhone = await _findSupabaseUserByIdentifier(phone, cleanPhone10);
+      if (existingByPhone != null) {
+        return {
+          'success': false,
+          'code': 'MOBILE_ALREADY_REGISTERED',
+          'message': 'Phone number already registered.',
+        };
+      }
+
+      if (cleanEmail.isNotEmpty && !cleanEmail.endsWith('@dentaguru.internal')) {
+        final existingByEmail = await client
+            .from('users')
+            .select('id, email')
+            .ilike('email', cleanEmail)
+            .maybeSingle();
+        if (existingByEmail != null) {
+          return {
+            'success': false,
+            'code': 'EMAIL_ALREADY_REGISTERED',
+            'message': 'An account with this email already exists.',
+          };
+        }
+      }
+
+      final effectiveEmail = cleanEmail.isNotEmpty ? cleanEmail : 'user_$cleanPhone10@dentaguru.internal';
+      final normalizedStatus = status.trim().toUpperCase();
+      final fallbackPassword = customPassword ?? 'OTP_SUBADMIN_${Random.secure().nextInt(900000) + 100000}';
       final meta = jsonEncode({
         'permissions': perms,
-        'status': status,
-        if (city != null) 'city': city,
-        if (pincode != null) 'pincode': pincode,
+        'status': normalizedStatus,
+        if (city != null && city.trim().isNotEmpty) 'city': city.trim(),
+        if (pincode != null && pincode.trim().isNotEmpty) 'pincode': pincode.trim(),
         'languages': userLanguages,
         if (districtIds != null) 'districtIds': districtIds,
+        if (profilePhoto != null && profilePhoto.trim().isNotEmpty) 'profilePhoto': profilePhoto.trim(),
       });
-      final res = await Supabase.instance.client.from('users').insert({
-        'name': name,
-        'email': cleanEmail,
-        'password': cleanPassword,
-        'phone': cleanPhone,
-        'role': 'Sub-Admin',
-        'status': status.trim().toUpperCase(),
-        if (city != null) 'city': city,
-        if (pincode != null) 'pincode': pincode,
-        'languages': userLanguages,
-        'device_token': meta,
-      }).select().maybeSingle();
 
-      if (res != null && districtIds != null && districtIds.isNotEmpty) {
+      final coreInsert = <String, dynamic>{
+        'name': cleanName,
+        'email': effectiveEmail,
+        'password': fallbackPassword,
+        'phone': cleanPhone10,
+        'role': 'Sub-Admin',
+        'device_token': meta,
+        if (profilePhoto != null && profilePhoto.trim().isNotEmpty) 'biometric_token': profilePhoto.trim(),
+      };
+
+      Map<String, dynamic>? res;
+      try {
+        res = await client.from('users').insert({
+          ...coreInsert,
+          'status': normalizedStatus,
+          if (city != null && city.trim().isNotEmpty) 'city': city.trim(),
+          if (pincode != null && pincode.trim().isNotEmpty) 'pincode': pincode.trim(),
+        }).select().maybeSingle();
+      } catch (_) {
+        res = await client.from('users').insert(coreInsert).select().maybeSingle();
+      }
+
+      if (res != null) {
         final subAdminId = res['id'].toString();
-        for (final dId in districtIds) {
-          try {
-            await Supabase.instance.client.from('sub_admin_districts').upsert({
-              'sub_admin_id': subAdminId,
-              'district_id': dId,
-            });
-          } catch (_) {}
+        try {
+          final permRows = perms.map((p) => {'user_id': subAdminId, 'permission': p}).toList();
+          await client.from('sub_admin_permissions').insert(permRows);
+        } catch (_) {}
+
+        if (districtIds != null && districtIds.isNotEmpty) {
+          for (final dId in districtIds) {
+            try {
+              await client.from('sub_admin_districts').upsert({
+                'sub_admin_user_id': subAdminId,
+                'district_id': dId,
+              });
+            } catch (_) {
+              try {
+                await client.from('sub_admin_districts').upsert({
+                  'sub_admin_id': subAdminId,
+                  'district_id': dId,
+                });
+              } catch (_) {}
+            }
+          }
         }
       }
 
       return {
         'success': true,
         'message': 'Sub-Admin account created successfully.',
-        'subAdmin': res ?? {'name': name, 'email': cleanEmail, 'phone': cleanPhone, 'role': 'Sub-Admin', 'status': status, 'permissions': perms, 'assignedDistricts': districtIds ?? []},
+        'subAdmin': {
+          ...?res,
+          'name': cleanName,
+          'email': effectiveEmail,
+          'phone': cleanPhone10,
+          'role': 'Sub-Admin',
+          'status': normalizedStatus,
+          'permissions': perms,
+          'languages': userLanguages,
+          if (profilePhoto != null && profilePhoto.trim().isNotEmpty) 'profilePhoto': profilePhoto.trim(),
+          'assignedDistricts': districtIds ?? [],
+        },
       };
     } catch (e) {
       debugPrint('Create Sub-Admin Supabase error: $e');
@@ -4588,7 +4886,7 @@ class ApiService {
     try {
       final res = await Supabase.instance.client
           .from('users')
-          .select('id, name, email, phone, role, status, created_at, device_token')
+          .select('*')
           .or('role.ilike.%sub-admin%,role.ilike.%subadmin%')
           .order('created_at', ascending: false);
       _lastFetchSubAdminsSucceeded = true;
@@ -4604,11 +4902,35 @@ class ApiService {
               if (meta['permissions'] != null) map['permissions'] = meta['permissions'];
               if (meta['status'] != null) metaStatus = meta['status'].toString().trim().toUpperCase();
               if (meta['districtIds'] != null) map['assignedDistrictIds'] = meta['districtIds'];
+              if (meta['city'] != null && (map['city'] == null || map['city'].toString().isEmpty)) {
+                map['city'] = meta['city'];
+              }
+              if (meta['pincode'] != null && (map['pincode'] == null || map['pincode'].toString().isEmpty)) {
+                map['pincode'] = meta['pincode'];
+              }
+              if (meta['languages'] != null && map['languages'] == null) {
+                map['languages'] = meta['languages'];
+              }
+              if (meta['profilePhoto'] != null && map['profilePhoto'] == null) {
+                map['profilePhoto'] = meta['profilePhoto'];
+              }
             } catch (_) {}
+          }
+          if (map['profilePhoto'] == null && map['biometric_token'] != null) {
+            map['profilePhoto'] = map['biometric_token'];
           }
           map['status'] = colStatus.isNotEmpty ? colStatus : (metaStatus != null && metaStatus.isNotEmpty ? metaStatus : 'ACTIVE');
           if (map['permissions'] == null) {
-            map['permissions'] = ['PATIENT_VIEW'];
+            try {
+              final pRows = await Supabase.instance.client
+                  .from('sub_admin_permissions')
+                  .select('permission')
+                  .eq('user_id', map['id'].toString());
+              if (pRows.isNotEmpty) {
+                map['permissions'] = pRows.map((r) => (r['permission'] ?? '').toString()).where((s) => s.isNotEmpty).toList();
+              }
+            } catch (_) {}
+            map['permissions'] ??= ['PATIENT_VIEW'];
           }
 
           // Try fetching assigned districts for this subadmin
@@ -4616,10 +4938,18 @@ class ApiService {
             final saDistricts = await Supabase.instance.client
                 .from('sub_admin_districts')
                 .select('districts(*)')
-                .eq('sub_admin_id', map['id'].toString());
+                .eq('sub_admin_user_id', map['id'].toString());
             map['assignedDistricts'] = saDistricts.map((d) => d['districts']).whereType<Map>().toList();
           } catch (_) {
-            map['assignedDistricts'] = [];
+            try {
+              final saDistricts = await Supabase.instance.client
+                  .from('sub_admin_districts')
+                  .select('districts(*)')
+                  .eq('sub_admin_id', map['id'].toString());
+              map['assignedDistricts'] = saDistricts.map((d) => d['districts']).whereType<Map>().toList();
+            } catch (_) {
+              map['assignedDistricts'] = [];
+            }
           }
 
           subAdminList.add(map);
@@ -4638,20 +4968,63 @@ class ApiService {
     required String id,
     String? name,
     String? phone,
+    String? email,
+    String? city,
+    String? pincode,
+    List<String>? languages,
     String? password,
     String? status,
     List<String>? permissions,
     List<String>? districtIds,
+    String? profilePhoto,
   }) async {
+    if (debugUpdateSubAdminOverride != null) {
+      return debugUpdateSubAdminOverride!(
+        id: id,
+        name: name,
+        phone: phone,
+        email: email,
+        city: city,
+        pincode: pincode,
+        languages: languages,
+        password: password,
+        status: status,
+        permissions: permissions,
+        districtIds: districtIds,
+        profilePhoto: profilePhoto,
+      );
+    }
+
     final normalizedStatus = status?.trim().toUpperCase();
+    final cleanPhone10 = phone != null ? _canonicalPhone10(phone) : null;
+    if (cleanPhone10 != null && (cleanPhone10.length != 10 || !RegExp(r'^\d{10}$').hasMatch(cleanPhone10))) {
+      return {
+        'success': false,
+        'code': 'INVALID_PHONE',
+        'message': 'Please enter a valid 10-digit mobile number.',
+      };
+    }
+    final cleanEmail = (email != null && email.trim().isNotEmpty) ? email.trim().toLowerCase() : null;
+    if (cleanEmail != null && !cleanEmail.endsWith('@dentaguru.internal') && !RegExp(r'^\S+@\S+\.\S+$').hasMatch(cleanEmail)) {
+      return {
+        'success': false,
+        'code': 'INVALID_EMAIL',
+        'message': 'Please enter a valid email address.',
+      };
+    }
 
     // 1. Authoritative Express Backend Update first (persists users.status, permissions table, districts, audit log)
     try {
       final url = Uri.parse('${ApiConstants.baseUrl}/admin/sub-admins/$id');
       final payload = <String, dynamic>{};
-      if (name != null) payload['name'] = name;
-      if (phone != null) payload['phone'] = phone;
-      if (password != null && password.trim().isNotEmpty) payload['password'] = password;
+      if (name != null) payload['name'] = name.trim();
+      if (cleanPhone10 != null) payload['phone'] = cleanPhone10;
+      if (cleanEmail != null) payload['email'] = cleanEmail;
+      if (city != null) payload['city'] = city.trim();
+      if (pincode != null) payload['pincode'] = pincode.trim();
+      if (languages != null && languages.isNotEmpty) payload['languages'] = languages;
+      if (profilePhoto != null && profilePhoto.trim().isNotEmpty) payload['profilePhoto'] = profilePhoto.trim();
+      if (password != null && password.trim().isNotEmpty) payload['password'] = password.trim();
       if (normalizedStatus != null && normalizedStatus.isNotEmpty) payload['status'] = normalizedStatus;
       if (permissions != null) payload['permissions'] = permissions;
       if (districtIds != null) payload['districtIds'] = districtIds;
@@ -4674,7 +5047,11 @@ class ApiService {
       }
       if (response.statusCode == 400 || response.statusCode == 401 || response.statusCode == 403 || response.statusCode == 404) {
         final data = jsonDecode(response.body);
-        return {'success': false, 'message': data['message'] ?? 'Failed to update Sub-Admin.'};
+        return {
+          'success': false,
+          if (data['code'] != null) 'code': data['code'],
+          'message': data['message'] ?? 'Failed to update Sub-Admin.',
+        };
       }
     } catch (e) {
       debugPrint('Update Sub-Admin backend API notice ($e), trying direct Supabase fallback...');
@@ -4683,11 +5060,12 @@ class ApiService {
     // 2. Direct Supabase Cloud fallback
     try {
       final updateMap = <String, dynamic>{};
-      if (name != null) updateMap['name'] = name;
-      if (phone != null) updateMap['phone'] = phone;
-      if (password != null && password.trim().isNotEmpty) updateMap['password'] = password;
-      if (normalizedStatus != null && normalizedStatus.isNotEmpty) {
-        updateMap['status'] = normalizedStatus;
+      if (name != null) updateMap['name'] = name.trim();
+      if (cleanPhone10 != null) updateMap['phone'] = cleanPhone10;
+      if (cleanEmail != null) updateMap['email'] = cleanEmail;
+      if (password != null && password.trim().isNotEmpty) updateMap['password'] = password.trim();
+      if (profilePhoto != null && profilePhoto.trim().isNotEmpty) {
+        updateMap['biometric_token'] = profilePhoto.trim();
       }
 
       // Update meta in device_token
@@ -4699,20 +5077,43 @@ class ApiService {
       if (normalizedStatus != null && normalizedStatus.isNotEmpty) meta['status'] = normalizedStatus;
       if (permissions != null) meta['permissions'] = permissions;
       if (districtIds != null) meta['districtIds'] = districtIds;
+      if (city != null) meta['city'] = city.trim();
+      if (pincode != null) meta['pincode'] = pincode.trim();
+      if (languages != null && languages.isNotEmpty) meta['languages'] = languages;
+      if (profilePhoto != null && profilePhoto.trim().isNotEmpty) meta['profilePhoto'] = profilePhoto.trim();
       updateMap['device_token'] = jsonEncode(meta);
 
-      await Supabase.instance.client.from('users').update(updateMap).eq('id', id);
+      try {
+        await Supabase.instance.client.from('users').update({
+          ...updateMap,
+          if (normalizedStatus != null && normalizedStatus.isNotEmpty) 'status': normalizedStatus,
+          if (city != null) 'city': city.trim(),
+          if (pincode != null) 'pincode': pincode.trim(),
+        }).eq('id', id);
+      } catch (_) {
+        await Supabase.instance.client.from('users').update(updateMap).eq('id', id);
+      }
 
       if (districtIds != null) {
         try {
-          await Supabase.instance.client.from('sub_admin_districts').delete().eq('sub_admin_id', id);
+          await Supabase.instance.client.from('sub_admin_districts').delete().eq('sub_admin_user_id', id);
           for (final dId in districtIds) {
             await Supabase.instance.client.from('sub_admin_districts').insert({
-              'sub_admin_id': id,
+              'sub_admin_user_id': id,
               'district_id': dId,
             });
           }
-        } catch (_) {}
+        } catch (_) {
+          try {
+            await Supabase.instance.client.from('sub_admin_districts').delete().eq('sub_admin_id', id);
+            for (final dId in districtIds) {
+              await Supabase.instance.client.from('sub_admin_districts').insert({
+                'sub_admin_id': id,
+                'district_id': dId,
+              });
+            }
+          } catch (_) {}
+        }
       }
       return {'success': true, 'message': 'Sub-Admin updated successfully.'};
     } catch (e) {
@@ -4788,11 +5189,17 @@ class ApiService {
       } else {
         meta.remove('revokedBefore');
       }
-      await Supabase.instance.client.from('users').update({
-        'status': targetStatus,
-        'device_token': jsonEncode(meta),
-        if (targetStatus == 'INACTIVE') 'refresh_tokens': [],
-      }).eq('id', id);
+      try {
+        await Supabase.instance.client.from('users').update({
+          'status': targetStatus,
+          'device_token': jsonEncode(meta),
+          if (targetStatus == 'INACTIVE') 'refresh_tokens': [],
+        }).eq('id', id);
+      } catch (_) {
+        await Supabase.instance.client.from('users').update({
+          'device_token': jsonEncode(meta),
+        }).eq('id', id);
+      }
       _lastSubAdminConfirmedStatus = targetStatus;
       _lastSubAdminToggleError = null;
       return true;
@@ -4805,24 +5212,31 @@ class ApiService {
 
   /// Delete Sub-Admin
   Future<bool> deleteSubAdmin(String id) async {
-    // 1. Direct Supabase Delete FIRST
-    try {
-      await Supabase.instance.client.from('users').delete().eq('id', id);
-      try {
-        await Supabase.instance.client.from('sub_admin_districts').delete().eq('sub_admin_id', id);
-      } catch (_) {}
-    } catch (e) {
-      debugPrint('Delete sub-admin Supabase error: $e');
-    }
-
-    // 2. Asynchronous Express backend notification (Non-blocking)
+    // 1. Authoritative Express backend deletion first
     try {
       final url = Uri.parse('${ApiConstants.baseUrl}/admin/sub-admins/$id');
-      http.delete(url, headers: _headers).timeout(const Duration(seconds: 5)).catchError((_) => http.Response('{}', 200));
+      final response = await http.delete(url, headers: _headersWithUser()).timeout(const Duration(seconds: 35));
+      if (response.statusCode == 200) {
+        return true;
+      }
     } catch (e) {
       debugPrint('Delete Sub-Admin API notice: $e');
     }
-    return true;
+
+    // 2. Direct Supabase Delete Fallback
+    try {
+      await Supabase.instance.client.from('users').delete().eq('id', id);
+      try {
+        await Supabase.instance.client.from('sub_admin_districts').delete().eq('sub_admin_user_id', id);
+      } catch (_) {}
+      try {
+        await Supabase.instance.client.from('sub_admin_districts').delete().eq('sub_admin_id', id);
+      } catch (_) {}
+      return true;
+    } catch (e) {
+      debugPrint('Delete sub-admin Supabase error: $e');
+    }
+    return false;
   }
 
   // ==========================================
@@ -5096,7 +5510,7 @@ class ApiService {
   Future<Map<String, dynamic>> fetchSubAdminPermissions(String subAdminId) async {
     try {
       final url = Uri.parse('${ApiConstants.baseUrl}/admin/sub-admins/$subAdminId/permissions');
-      final response = await http.get(url, headers: _headers).timeout(const Duration(seconds: 5));
+      final response = await http.get(url, headers: _headersWithUser()).timeout(const Duration(seconds: 35));
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       }
@@ -5113,11 +5527,15 @@ class ApiService {
       final url = Uri.parse('${ApiConstants.baseUrl}/admin/sub-admins/$subAdminId/permissions');
       final response = await http.put(
         url,
-        headers: _headers,
+        headers: _headersWithUser(),
         body: jsonEncode({'permissions': permissions}),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 35));
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
+      }
+      if (response.statusCode == 400 || response.statusCode == 401 || response.statusCode == 403 || response.statusCode == 404) {
+        final data = jsonDecode(response.body);
+        return {'success': false, 'message': data['message'] ?? 'Failed to update permissions.'};
       }
     } catch (e) {
       debugPrint('Update Sub-Admin permissions API notice: $e');
@@ -5144,7 +5562,7 @@ class ApiService {
   Future<List<dynamic>> fetchSubAdminAssignmentHistory(String subAdminId) async {
     try {
       final url = Uri.parse('${ApiConstants.baseUrl}/admin/sub-admins/$subAdminId/assignment-history');
-      final response = await http.get(url, headers: _headers).timeout(const Duration(seconds: 5));
+      final response = await http.get(url, headers: _headersWithUser()).timeout(const Duration(seconds: 35));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['success'] == true && data['history'] is List) {
@@ -8501,6 +8919,10 @@ class ApiService {
           if (updates['longitude'] != null) 'longitude': updates['longitude'],
         },
         if (updates['languages'] != null) 'languages': updates['languages'],
+        if (updates['onlineConsultationEnabled'] != null)
+          'online_consultation_enabled': updates['onlineConsultationEnabled'],
+        if (updates['inPersonConsultationEnabled'] != null)
+          'in_person_consultation_enabled': updates['inPersonConsultationEnabled'],
       };
       if (dbUpdates.isNotEmpty) {
         try {
@@ -8508,7 +8930,9 @@ class ApiService {
         } catch (_) {
           final legacyUpdates = Map<String, dynamic>.from(dbUpdates)
             ..remove('clinic_name')
-            ..remove('clinic_address');
+            ..remove('clinic_address')
+            ..remove('online_consultation_enabled')
+            ..remove('in_person_consultation_enabled');
           if (legacyUpdates.isNotEmpty) {
             await client.from('dentists').update(legacyUpdates).or('id.eq.$doctorId,user_id.eq.$doctorId');
           }
@@ -9902,6 +10326,581 @@ class ApiService {
       }
     }
     return {'success': false, 'message': 'Unable to update clinic profile details.'};
+  }
+
+  @visibleForTesting
+  static Future<Map<String, dynamic>> Function({
+    required String clinicId,
+    required String clinicName,
+    required String name,
+    required String phone,
+    String? email,
+    required String specialty,
+    required String qualification,
+    required int experienceYears,
+    required String licenseNumber,
+    String? city,
+    String? state,
+    String? pincode,
+    String? clinicAddress,
+    double? latitude,
+    double? longitude,
+    List<String>? languages,
+    String? profilePhoto,
+  })? debugRegisterClinicDoctorOverride;
+
+  /// Option 2 in Clinic Dashboard -> Add Doctors:
+  /// Register a brand-new doctor account and automatically associate them with [clinicId].
+  /// Never creates duplicate doctor accounts: if [phone] already belongs to a registered doctor,
+  /// returns `code: 'MOBILE_ALREADY_REGISTERED'` with `existingDoctor` details so the clinic can attach
+  /// the existing account instead.
+  Future<Map<String, dynamic>> registerNewDoctorForClinic({
+    required String clinicId,
+    required String clinicName,
+    required String name,
+    required String phone,
+    String? email,
+    required String specialty,
+    required String qualification,
+    required int experienceYears,
+    required String licenseNumber,
+    String? city,
+    String? state,
+    String? pincode,
+    String? clinicAddress,
+    double? latitude,
+    double? longitude,
+    List<String>? languages,
+    String? profilePhoto,
+    http.Client? client,
+  }) async {
+    if (debugRegisterClinicDoctorOverride != null) {
+      return debugRegisterClinicDoctorOverride!(
+        clinicId: clinicId,
+        clinicName: clinicName,
+        name: name,
+        phone: phone,
+        email: email,
+        specialty: specialty,
+        qualification: qualification,
+        experienceYears: experienceYears,
+        licenseNumber: licenseNumber,
+        city: city,
+        state: state,
+        pincode: pincode,
+        clinicAddress: clinicAddress,
+        latitude: latitude,
+        longitude: longitude,
+        languages: languages,
+        profilePhoto: profilePhoto,
+      );
+    }
+
+    final rawDigits = phone.trim().replaceAll(RegExp(r'[^0-9]'), '');
+    final cleanPhone = (rawDigits.length == 12 && rawDigits.startsWith('91'))
+        ? rawDigits.substring(2)
+        : ((rawDigits.length == 11 && rawDigits.startsWith('0'))
+            ? rawDigits.substring(1)
+            : rawDigits);
+    if (cleanPhone.length != 10) {
+      return {
+        'success': false,
+        'message': 'Please enter a valid 10-digit mobile number.',
+      };
+    }
+
+    final effectiveLangs = (languages != null && languages.isNotEmpty)
+        ? languages
+        : const <String>['English'];
+
+    try {
+      final uri = Uri.parse('${ApiConstants.baseUrl}/clinics/$clinicId/doctors');
+      final body = jsonEncode({
+        'name': name.trim(),
+        'phone': cleanPhone,
+        if (email != null && email.trim().isNotEmpty) 'email': email.trim(),
+        'specialty': specialty.trim(),
+        'qualification': qualification.trim(),
+        'experienceYears': experienceYears,
+        'licenseNumber': licenseNumber.trim(),
+        'clinicId': clinicId.trim(),
+        'clinicName': clinicName.trim(),
+        if (clinicAddress != null && clinicAddress.trim().isNotEmpty) 'clinicAddress': clinicAddress.trim(),
+        if (city != null && city.trim().isNotEmpty) 'city': city.trim(),
+        if (state != null && state.trim().isNotEmpty) 'state': state.trim(),
+        if (pincode != null && pincode.trim().isNotEmpty) 'pincode': pincode.trim(),
+        if (latitude != null) 'latitude': latitude,
+        if (longitude != null) 'longitude': longitude,
+        'languages': effectiveLangs,
+        if (profilePhoto != null && profilePhoto.trim().isNotEmpty) 'profilePhoto': profilePhoto.trim(),
+        'rejectExistingAccount': true,
+      });
+
+      final response = await (client != null
+              ? client.post(uri, headers: _headersWithUser(), body: body)
+              : http.post(uri, headers: _headersWithUser(), body: body))
+          .timeout(const Duration(seconds: 35));
+
+      if (response.statusCode >= 500) {
+        throw Exception('Register clinic doctor backend HTTP ${response.statusCode}');
+      }
+
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) {
+        if ((response.statusCode == 201 || response.statusCode == 200) && decoded['success'] == true) {
+          return {
+            ...decoded,
+            'statusCode': response.statusCode,
+          };
+        }
+        return {
+          'success': false,
+          'statusCode': response.statusCode,
+          if (decoded['code'] != null) 'code': decoded['code'].toString(),
+          if (decoded['existingDoctor'] != null) 'existingDoctor': decoded['existingDoctor'],
+          if (decoded['alreadyInThisClinic'] != null) 'alreadyInThisClinic': decoded['alreadyInThisClinic'] == true,
+          'message': decoded['message'] ?? 'Unable to register doctor.',
+        };
+      }
+    } catch (e) {
+      debugPrint('registerNewDoctorForClinic notice ($e), attempting 24/7 Supabase fallback...');
+      final sb = SupabaseService.safeClient;
+      if (sb != null) {
+        try {
+          final existingUser = await _findSupabaseUserByIdentifier(phone, cleanPhone);
+          if (existingUser != null) {
+            Map<String, dynamic>? existingDocRow;
+            try {
+              existingDocRow = await sb
+                  .from('dentists')
+                  .select('*')
+                  .eq('user_id', existingUser['id'])
+                  .limit(1)
+                  .maybeSingle();
+            } catch (_) {}
+            final existingDocId = (existingDocRow?['id'] ?? existingUser['id']).toString();
+            final existingClinicId = (existingDocRow?['clinic_id'] ?? '').toString().trim();
+            final alreadyInThis = existingClinicId.isNotEmpty && existingClinicId == clinicId.trim();
+            return {
+              'success': false,
+              'statusCode': 409,
+              'code': 'MOBILE_ALREADY_REGISTERED',
+              'alreadyInThisClinic': alreadyInThis,
+              'existingDoctor': {
+                'id': existingDocId,
+                'userId': existingUser['id'].toString(),
+                'name': (existingUser['name'] ?? 'Doctor').toString(),
+                'phone': (existingUser['phone'] ?? cleanPhone).toString(),
+                'email': (existingUser['email'] ?? '').toString(),
+                'specialty': (existingDocRow?['speciality'] ?? specialty).toString(),
+                'qualification': (existingDocRow?['qualifications'] ?? qualification).toString(),
+                'experienceYears': existingDocRow?['experience_years'] ?? experienceYears,
+                'clinicId': existingClinicId,
+              },
+              'message': alreadyInThis
+                  ? 'This doctor ($cleanPhone) is already registered and associated with $clinicName.'
+                  : 'A registered doctor account already exists for mobile number $cleanPhone. You can attach the existing account to $clinicName instead of creating a duplicate.',
+            };
+          }
+
+          final regRes = await registerUser(
+            name: name.trim().startsWith('Dr.') ? name.trim() : 'Dr. ${name.trim()}',
+            phone: cleanPhone,
+            email: email,
+            role: 'Dentist',
+            specialty: specialty.trim(),
+            qualification: qualification.trim(),
+            experienceYears: experienceYears,
+            licenseNumber: licenseNumber.trim(),
+            clinicId: clinicId.trim(),
+            clinicName: clinicName.trim(),
+            clinicAddress: clinicAddress,
+            city: city,
+            state: state,
+            pincode: pincode,
+            latitude: latitude,
+            longitude: longitude,
+            languages: effectiveLangs,
+            profilePhoto: profilePhoto,
+          );
+          if (regRes['success'] == true) {
+            final regData = regRes['data'] is Map ? Map<String, dynamic>.from(regRes['data'] as Map) : <String, dynamic>{};
+            final regUser = regData['user'] is Map ? Map<String, dynamic>.from(regData['user'] as Map) : <String, dynamic>{};
+            final newDocId = (regUser['dentistId'] ?? regUser['id'] ?? '').toString();
+            return {
+              'success': true,
+              'statusCode': 201,
+              'message': 'Doctor registered and associated with $clinicName.',
+              'doctor': {
+                'id': newDocId,
+                'userId': (regUser['id'] ?? newDocId).toString(),
+                'name': (regUser['name'] ?? name).toString(),
+                'phone': cleanPhone,
+                'email': (regUser['email'] ?? email ?? '').toString(),
+                'specialty': specialty.trim(),
+                'qualification': qualification.trim(),
+                'experience_years': experienceYears,
+                'license_number': licenseNumber.trim(),
+                'clinic_id': clinicId.trim(),
+                'clinicName': clinicName.trim(),
+                'city': city ?? '',
+                'state': state ?? '',
+                'pincode': pincode ?? '',
+                'languages': effectiveLangs,
+                'profilePhoto': profilePhoto,
+              },
+            };
+          }
+          return regRes;
+        } catch (sbErr) {
+          debugPrint('registerNewDoctorForClinic Supabase fallback error: $sbErr');
+        }
+      }
+    }
+    return {'success': false, 'message': 'Unable to register doctor. Please try again.'};
+  }
+
+  /// Test override hook for Admin Requests & Referrals Calendar View widget tests.
+  static Future<Map<String, dynamic>> Function({
+    required String date,
+    required String month,
+    String? search,
+    String? requestStatus,
+    String? requestType,
+    String? referralStatus,
+    int page,
+    int pageSize,
+  })? debugRequestsReferralsCalendarOverride;
+
+  static String _normalizeCalendarYmdIst(dynamic rawValue) {
+    if (rawValue == null) return '';
+    final str = rawValue.toString().trim();
+    if (str.isEmpty) return '';
+    final ymdMatch = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$').firstMatch(str);
+    if (ymdMatch != null) return str;
+    final parsed = DateTime.tryParse(str);
+    if (parsed == null) {
+      if (str.length >= 10 && RegExp(r'^\d{4}-\d{2}-\d{2}').hasMatch(str)) {
+        return str.substring(0, 10);
+      }
+      return '';
+    }
+    final ist = parsed.toUtc().add(const Duration(hours: 5, minutes: 30));
+    final m = ist.month.toString().padLeft(2, '0');
+    final d = ist.day.toString().padLeft(2, '0');
+    return '${ist.year}-$m-$d';
+  }
+
+  static String _normalizeRequestBucket(dynamic rawStatus) {
+    final s = (rawStatus ?? '').toString().trim().toLowerCase();
+    if (s.isEmpty) return 'Pending';
+    if (s.contains('reject') || s.contains('cancel') || s.contains('declin')) {
+      return 'Rejected';
+    }
+    if (s.contains('approv') ||
+        s.contains('assign') ||
+        s.contains('confirm') ||
+        s.contains('complet') ||
+        s.contains('accept') ||
+        s.contains('resolv')) {
+      return 'Approved';
+    }
+    return 'Pending';
+  }
+
+  static String _normalizeReferralBucket(dynamic rawStatus) {
+    final s = (rawStatus ?? '').toString().trim().toLowerCase();
+    if (s.isEmpty) return 'Pending';
+    if (s.contains('complet') || s.contains('visited') || s.contains('checked')) {
+      return 'Completed';
+    }
+    if (s.contains('accept') ||
+        s.contains('approv') ||
+        s.contains('confirm') ||
+        s.contains('assign')) {
+      return 'Accepted';
+    }
+    if (s.contains('reject') || s.contains('cancel') || s.contains('declin')) {
+      return 'Rejected';
+    }
+    return 'Pending';
+  }
+
+  /// Fetches the Admin Requests & Referrals Calendar View payload for a month and selected date.
+  /// Includes a 24/7 direct Supabase Cloud fallback so the calendar remains online if Render sleeps.
+  Future<Map<String, dynamic>> fetchAdminRequestsReferralsCalendar({
+    required String date,
+    required String month,
+    String? search,
+    String? requestStatus,
+    String? requestType,
+    String? referralStatus,
+    int page = 1,
+    int pageSize = 20,
+  }) async {
+    final override = debugRequestsReferralsCalendarOverride;
+    if (override != null) {
+      return override(
+        date: date,
+        month: month,
+        search: search,
+        requestStatus: requestStatus,
+        requestType: requestType,
+        referralStatus: referralStatus,
+        page: page,
+        pageSize: pageSize,
+      );
+    }
+
+    try {
+      final queryParams = <String, String>{
+        'date': date,
+        'month': month,
+        'timezone': 'Asia/Kolkata',
+        'page': page.toString(),
+        'pageSize': pageSize.toString(),
+      };
+      if (search != null && search.trim().isNotEmpty) {
+        queryParams['search'] = search.trim();
+      }
+      if (requestStatus != null &&
+          requestStatus.trim().isNotEmpty &&
+          requestStatus.trim().toLowerCase() != 'all') {
+        queryParams['requestStatus'] = requestStatus.trim();
+      }
+      if (requestType != null &&
+          requestType.trim().isNotEmpty &&
+          requestType.trim().toLowerCase() != 'all') {
+        queryParams['requestType'] = requestType.trim();
+      }
+      if (referralStatus != null &&
+          referralStatus.trim().isNotEmpty &&
+          referralStatus.trim().toLowerCase() != 'all') {
+        queryParams['referralStatus'] = referralStatus.trim();
+      }
+
+      final uri = Uri.parse('${ApiConstants.baseUrl}/admin/requests-referrals-calendar')
+          .replace(queryParameters: queryParams);
+      final response = await http
+          .get(uri, headers: _headersWithUser())
+          .timeout(const Duration(seconds: 35));
+
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> && decoded['success'] == true) {
+          return decoded;
+        }
+      }
+    } catch (e) {
+      debugPrint('fetchAdminRequestsReferralsCalendar API warning: $e');
+    }
+
+    // 24/7 Direct Supabase Cloud Fallback
+    final sb = SupabaseService.safeClient;
+    if (sb != null) {
+      try {
+        final reqRowsRaw = await sb
+            .from('patient_problem_requests')
+            .select()
+            .order('created_at', ascending: false);
+        final refRowsRaw = await sb
+            .from('referrals')
+            .select()
+            .order('created_at', ascending: false);
+
+        final reqRows = List<Map<String, dynamic>>.from(reqRowsRaw as List);
+        final refRows = List<Map<String, dynamic>>.from(refRowsRaw as List);
+
+        final ymParts = month.split('-');
+        final yearNum = ymParts.length == 2 ? (int.tryParse(ymParts[0]) ?? DateTime.now().year) : DateTime.now().year;
+        final monthNum = ymParts.length == 2 ? (int.tryParse(ymParts[1]) ?? DateTime.now().month) : DateTime.now().month;
+        final daysInMonth = DateTime(yearNum, monthNum + 1, 0).day;
+
+        final Map<String, Map<String, dynamic>> monthlyCalendar = {};
+        for (int d = 1; d <= daysInMonth; d++) {
+          final ymd = '$yearNum-${monthNum.toString().padLeft(2, '0')}-${d.toString().padLeft(2, '0')}';
+          monthlyCalendar[ymd] = {
+            'date': ymd,
+            'requestsCount': 0,
+            'referralsCount': 0,
+            'totalActivityCount': 0,
+          };
+        }
+
+        final Set<String> seenReqs = {};
+        final List<Map<String, dynamic>> selectedDateRequests = [];
+        final Set<String> requestTypeSet = {};
+
+        for (final row in reqRows) {
+          final id = (row['id'] ?? '').toString().trim();
+          if (id.isEmpty || seenReqs.contains(id)) continue;
+          seenReqs.add(id);
+
+          final rawCreated = row['created_at'] ?? row['submitted_at'];
+          final ymd = _normalizeCalendarYmdIst(rawCreated);
+          if (ymd.isEmpty) continue;
+
+          final bucket = _normalizeRequestBucket(row['status']);
+          final reqType = (row['problem_category'] ?? row['consultation_type'] ?? 'General Consultation').toString().trim();
+          if (reqType.isNotEmpty) requestTypeSet.add(reqType);
+
+          if (monthlyCalendar.containsKey(ymd)) {
+            final cell = monthlyCalendar[ymd]!;
+            cell['requestsCount'] = (cell['requestsCount'] as int) + 1;
+            cell['totalActivityCount'] = (cell['totalActivityCount'] as int) + 1;
+          }
+
+          if (ymd == date) {
+            selectedDateRequests.add({
+              'id': id,
+              'requestId': id,
+              'patientName': (row['patient_name'] ?? 'Patient').toString(),
+              'patientMobile': (row['patient_mobile'] ?? '').toString(),
+              'doctorName': (row['assigned_doctor_name'] ?? 'Unassigned').toString(),
+              'doctorSpecialty': (row['assigned_doctor_specialty'] ?? '').toString(),
+              'doctorClinic': (row['assigned_doctor_clinic'] ?? '').toString(),
+              'requestType': reqType,
+              'symptoms': (row['symptoms'] ?? '').toString(),
+              'duration': (row['duration'] ?? '').toString(),
+              'severity': (row['severity'] ?? 'Normal').toString(),
+              'requestDate': ymd,
+              'requestDateTime': (rawCreated ?? '').toString(),
+              'requestTimeFormatted': '',
+              'rawStatus': (row['status'] ?? 'Pending Admin Review').toString(),
+              'status': bucket,
+              'city': (row['city'] ?? '').toString(),
+              'state': (row['state'] ?? '').toString(),
+              'pincode': (row['pincode'] ?? '').toString(),
+            });
+          }
+        }
+
+        final Set<String> seenRefs = {};
+        final List<Map<String, dynamic>> selectedDateReferrals = [];
+
+        for (final row in refRows) {
+          final id = (row['id'] ?? '').toString().trim();
+          if (id.isEmpty || seenRefs.contains(id)) continue;
+          seenRefs.add(id);
+
+          final rawCreated = row['referral_date'] ?? row['created_at'];
+          final ymd = _normalizeCalendarYmdIst(rawCreated);
+          if (ymd.isEmpty) continue;
+
+          final bucket = _normalizeReferralBucket(row['status']);
+          if (monthlyCalendar.containsKey(ymd)) {
+            final cell = monthlyCalendar[ymd]!;
+            cell['referralsCount'] = (cell['referralsCount'] as int) + 1;
+            cell['totalActivityCount'] = (cell['totalActivityCount'] as int) + 1;
+          }
+
+          if (ymd == date) {
+            selectedDateReferrals.add({
+              'id': id,
+              'referralId': id,
+              'patientName': (row['referred_patient_name'] ?? row['patient_name'] ?? 'Patient').toString(),
+              'patientMobile': (row['referred_patient_mobile'] ?? '').toString(),
+              'patientCity': (row['referred_patient_city'] ?? '').toString(),
+              'referringDoctorName': (row['referrer_name'] ?? 'Self / Direct').toString(),
+              'referredDoctorName': (row['doctor_name'] ?? 'Unassigned').toString(),
+              'referredDoctorSpecialty': (row['doctor_specialty'] ?? row['target_specialty'] ?? '').toString(),
+              'referredDoctorClinic': (row['doctor_clinic_name'] ?? '').toString(),
+              'clinicalComplaint': (row['clinical_complaint'] ?? row['reason'] ?? '').toString(),
+              'notes': (row['notes'] ?? '').toString(),
+              'urgency': (row['urgency'] ?? 'Routine').toString(),
+              'referralDate': ymd,
+              'referralDateTime': (rawCreated ?? '').toString(),
+              'referralTimeFormatted': '',
+              'rawStatus': (row['status'] ?? 'Pending').toString(),
+              'status': bucket,
+            });
+          }
+        }
+
+        final dailySummary = {
+          'totalRequests': selectedDateRequests.length,
+          'pendingRequests': selectedDateRequests.where((r) => r['status'] == 'Pending').length,
+          'approvedRequests': selectedDateRequests.where((r) => r['status'] == 'Approved').length,
+          'rejectedRequests': selectedDateRequests.where((r) => r['status'] == 'Rejected').length,
+          'totalReferrals': selectedDateReferrals.length,
+          'pendingReferrals': selectedDateReferrals.where((r) => r['status'] == 'Pending').length,
+          'acceptedReferrals': selectedDateReferrals.where((r) => r['status'] == 'Accepted').length,
+          'completedReferrals': selectedDateReferrals.where((r) => r['status'] == 'Completed').length,
+          'rejectedReferrals': selectedDateReferrals.where((r) => r['status'] == 'Rejected').length,
+        };
+
+        final searchLower = (search ?? '').trim().toLowerCase();
+        final reqStatusFilter = (requestStatus ?? 'All').trim().toLowerCase();
+        final reqTypeFilter = (requestType ?? 'All').trim().toLowerCase();
+        final refStatusFilter = (referralStatus ?? 'All').trim().toLowerCase();
+
+        final filteredReqs = selectedDateRequests.where((req) {
+          if (reqStatusFilter != 'all' && reqStatusFilter.isNotEmpty) {
+            if (req['status'].toString().toLowerCase() != reqStatusFilter &&
+                req['rawStatus'].toString().toLowerCase() != reqStatusFilter) {
+              return false;
+            }
+          }
+          if (reqTypeFilter != 'all' && reqTypeFilter.isNotEmpty) {
+            if (req['requestType'].toString().toLowerCase() != reqTypeFilter) {
+              return false;
+            }
+          }
+          if (searchLower.isNotEmpty) {
+            final hay = '${req['requestId']} ${req['patientName']} ${req['doctorName']} ${req['requestType']} ${req['symptoms']}'.toLowerCase();
+            if (!hay.contains(searchLower)) return false;
+          }
+          return true;
+        }).toList();
+
+        final filteredRefs = selectedDateReferrals.where((ref) {
+          if (refStatusFilter != 'all' && refStatusFilter.isNotEmpty) {
+            if (ref['status'].toString().toLowerCase() != refStatusFilter &&
+                ref['rawStatus'].toString().toLowerCase() != refStatusFilter) {
+              return false;
+            }
+          }
+          if (searchLower.isNotEmpty) {
+            final hay = '${ref['referralId']} ${ref['patientName']} ${ref['referringDoctorName']} ${ref['referredDoctorName']} ${ref['clinicalComplaint']}'.toLowerCase();
+            if (!hay.contains(searchLower)) return false;
+          }
+          return true;
+        }).toList();
+
+        final sortedTypes = requestTypeSet.toList()..sort();
+
+        return {
+          'success': true,
+          'selectedDate': date,
+          'month': month,
+          'timezone': 'Asia/Kolkata',
+          'monthlyCalendar': monthlyCalendar,
+          'dailySummary': dailySummary,
+          'filterOptions': {
+            'requestStatuses': ['All', 'Pending', 'Approved', 'Rejected'],
+            'requestTypes': ['All', ...sortedTypes],
+            'referralStatuses': ['All', 'Pending', 'Accepted', 'Completed', 'Rejected'],
+          },
+          'requests': filteredReqs,
+          'referrals': filteredRefs,
+          'pagination': {
+            'page': page,
+            'pageSize': pageSize,
+            'totalRequestsFiltered': filteredReqs.length,
+            'totalReferralsFiltered': filteredRefs.length,
+            'totalRequestPages': 1,
+            'totalReferralPages': 1,
+          },
+        };
+      } catch (sbErr) {
+        debugPrint('fetchAdminRequestsReferralsCalendar Supabase fallback error: $sbErr');
+      }
+    }
+
+    return {
+      'success': false,
+      'message': 'Unable to load Requests & Referrals Calendar data.',
+    };
   }
 }
 

@@ -12,6 +12,7 @@ const {
     getDefaultQualificationForSpecialty,
     isDoctorRecordAvailable,
     normalizeAvailabilityStatus,
+    resolveDoctorConsultationModes,
     normalizeLanguagesList,
     parseLanguageFilters,
     extractDoctorLanguages,
@@ -110,7 +111,7 @@ function formatDentistRecord(d) {
             if (parsedMeta && parsedMeta.onlineStatus) {
                 metaOnline = String(parsedMeta.onlineStatus).trim().toLowerCase();
             }
-        } catch (_) {}
+        } catch (_) { }
     }
     const explicitOnline = String(d.online_status || d.onlineStatus || metaOnline || '').trim();
     const explicitOnlineLower = explicitOnline.toLowerCase();
@@ -128,6 +129,7 @@ function formatDentistRecord(d) {
     const rawLng = d.longitude ?? cObj.longitude ?? uObj.longitude ?? uMeta.longitude ?? null;
     const resolvedLat = rawLat !== null && rawLat !== '' && Number.isFinite(Number(rawLat)) ? Number(rawLat) : null;
     const resolvedLng = rawLng !== null && rawLng !== '' && Number.isFinite(Number(rawLng)) ? Number(rawLng) : null;
+    const consultModes = resolveDoctorConsultationModes(d);
 
     return {
         id: d.id,
@@ -166,6 +168,14 @@ function formatDentistRecord(d) {
         liveStatus: resolvedOnlineStatus,
         isAvailable,
         isOnline,
+        online_consultation_enabled: consultModes.onlineConsultationEnabled,
+        onlineConsultationEnabled: consultModes.onlineConsultationEnabled,
+        in_person_consultation_enabled: consultModes.inPersonConsultationEnabled,
+        inPersonConsultationEnabled: consultModes.inPersonConsultationEnabled,
+        supportsOnlineConsultation: isAvailable && consultModes.onlineConsultationEnabled,
+        supportsInPersonConsultation: isAvailable && consultModes.inPersonConsultationEnabled,
+        consultationModes: consultModes.consultationModes,
+        consultationModeLabel: consultModes.consultationModeLabel,
         verificationStatus: d.verification_status || d.verificationStatus || 'VERIFIED',
         profilePhoto: uObj.biometric_token || d.profilePhoto || null,
         users: uObj,
@@ -554,6 +564,20 @@ exports.getClinicDentists = async (req, res) => {
             ? formattedDentists
             : formattedDentists.filter(d => d.isAvailable);
 
+        const rawConsultMode = String(req.query.consultationMode || req.query.consultationType || '').trim().toLowerCase();
+        if (rawConsultMode === 'online' || rawConsultMode === 'online consultation') {
+            visibleDentists = visibleDentists.filter(d => d.onlineConsultationEnabled === true);
+        } else if (
+            rawConsultMode === 'offline' ||
+            rawConsultMode === 'in-person' ||
+            rawConsultMode === 'in_person' ||
+            rawConsultMode === 'clinic' ||
+            rawConsultMode === 'visit clinic' ||
+            rawConsultMode === 'offline consultation'
+        ) {
+            visibleDentists = visibleDentists.filter(d => d.inPersonConsultationEnabled === true);
+        }
+
         // Apply dynamic Doctor Search, Specialization, and Department (existing field) filters
         const searchKw = String(req.query.search || req.query.q || '').trim().toLowerCase();
         const specFilter = String(req.query.specialty || req.query.speciality || '').trim();
@@ -692,7 +716,19 @@ exports.getAllDentists = async (req, res) => {
 
         // Enforce Availability ON/OFF & Online presence visibility on backend
         const onlineOnlyRequested = String(req.query.onlineOnly || '').trim().toLowerCase() === 'true';
-        if (onlineOnlyRequested) {
+        const rawConsultationMode = String(req.query.consultationMode || req.query.consultationType || '').trim().toLowerCase();
+        if (rawConsultationMode === 'online' || rawConsultationMode === 'online consultation') {
+            formattedDentists = formattedDentists.filter(d => d.onlineConsultationEnabled === true && (allowUnavailable || d.isAvailable));
+        } else if (
+            rawConsultationMode === 'offline' ||
+            rawConsultationMode === 'in-person' ||
+            rawConsultationMode === 'in_person' ||
+            rawConsultationMode === 'clinic' ||
+            rawConsultationMode === 'visit clinic' ||
+            rawConsultationMode === 'offline consultation'
+        ) {
+            formattedDentists = formattedDentists.filter(d => d.inPersonConsultationEnabled === true && (allowUnavailable || d.isAvailable));
+        } else if (onlineOnlyRequested) {
             formattedDentists = formattedDentists.filter(d => d.isOnline);
         } else if (availability && availability.trim()) {
             const rawAvailLower = availability.trim().toLowerCase();
@@ -762,6 +798,61 @@ exports.getAllDentists = async (req, res) => {
 
         if (selectedLangFilters.length > 0) {
             formattedDentists = formattedDentists.filter(d => doctorMatchesLanguages(d, selectedLangFilters));
+        }
+
+        // Optional date & timeSlot availability filtering
+        const filterDateRaw = String(req.query.date || req.query.appointmentDate || '').trim();
+        const filterTimeSlotRaw = String(req.query.timeSlot || req.query.slot || '').trim();
+        if (filterDateRaw || filterTimeSlotRaw) {
+            const { DoctorAvailability, Appointment } = require('../models/Schemas');
+            const { sanitizeSmartSchedule, generateDynamicSlots } = require('../services/smartSchedulingEngine');
+            const cleanDate = filterDateRaw ? DoctorAvailability.extractDateYmd(filterDateRaw) : DoctorAvailability.extractDateYmd(new Date());
+            const targetModeForSlots = (rawConsultationMode === 'online' || rawConsultationMode === 'online consultation')
+                ? 'Online'
+                : 'In-Person';
+            const filteredBySchedule = [];
+            for (const doc of formattedDentists) {
+                try {
+                    const [availRec, rawSched, allAppts, blockedSlots] = await Promise.all([
+                        DoctorAvailability.findOne({ dentist_id: doc.id, date: cleanDate }).catch(() => null),
+                        DoctorAvailability.getSchedule(doc.id).catch(() => null),
+                        Appointment.find({ dentistId: doc.id }).catch(() => []),
+                        DoctorAvailability.getBlockedSlotsForDate(doc.id, cleanDate).catch(() => []),
+                    ]);
+                    if (availRec && availRec.is_blocked) continue;
+                    const schedule = sanitizeSmartSchedule({
+                        ...(rawSched || {}),
+                        onlineEnabled: doc.onlineConsultationEnabled,
+                        inPersonEnabled: doc.inPersonConsultationEnabled,
+                    });
+                    const activeAppts = (allAppts || []).filter(a => {
+                        const st = String(a.status || '').toUpperCase();
+                        if (st === 'CANCELLED' || st === 'REJECTED' || st === 'NO_SHOW') return false;
+                        return DoctorAvailability.extractDateYmd(a.date || a.appointment_date) === cleanDate;
+                    });
+                    const dynamic = generateDynamicSlots({
+                        schedule,
+                        dateYmd: cleanDate,
+                        consultationType: targetModeForSlots,
+                        activeAppointments: activeAppts,
+                        blockedSlots,
+                        explicitDateRecord: availRec,
+                    });
+                    if (dynamic.isBlocked || !dynamic.isWorkingDay || (dynamic.availableSlots || []).length === 0) {
+                        continue;
+                    }
+                    if (filterTimeSlotRaw) {
+                        const slotGoal = filterTimeSlotRaw.toLowerCase();
+                        const hasSlot = (dynamic.availableSlots || []).some(s => String(s || '').trim().toLowerCase() === slotGoal);
+                        if (!hasSlot) continue;
+                    }
+                    doc.availableSlots = dynamic.availableSlots;
+                    filteredBySchedule.push(doc);
+                } catch (_) {
+                    filteredBySchedule.push(doc);
+                }
+            }
+            formattedDentists = filteredBySchedule;
         }
 
         const pCity = (req.query.patientCity || req.query.city || '').trim().toLowerCase();
@@ -958,11 +1049,11 @@ exports.updateDoctorAvailability = async (req, res) => {
                 const docUser = await User.findById(existingDoctor.user_id);
                 let meta = {};
                 if (docUser?.device_token && typeof docUser.device_token === 'string' && docUser.device_token.trim().startsWith('{')) {
-                    try { meta = JSON.parse(docUser.device_token); } catch (_) {}
+                    try { meta = JSON.parse(docUser.device_token); } catch (_) { }
                 }
                 meta.onlineStatus = resolvedOnlinePresence;
                 await User.findByIdAndUpdate(existingDoctor.user_id, { device_token: JSON.stringify(meta) });
-            } catch (_) {}
+            } catch (_) { }
         }
         const refreshed = await Dentist.findById(existingDoctor.id) || updatedDoctor || existingDoctor;
         const formatted = formatDentistRecord({
@@ -1120,16 +1211,68 @@ exports.updateDoctorProfile = async (req, res) => {
         languagesKnown,
         phone,
         profilePhoto,
-        removeProfilePhoto
+        removeProfilePhoto,
+        onlineConsultationEnabled,
+        online_consultation_enabled,
+        supportsOnlineConsultation,
+        inPersonConsultationEnabled,
+        in_person_consultation_enabled,
+        supportsInPersonConsultation,
+        consultationMode
     } = req.body;
     try {
         if (!id) {
             return res.status(400).json({ success: false, message: 'Doctor ID is required.' });
         }
 
-        const { User } = require('../models/Schemas');
+        const { User, DoctorAvailability } = require('../models/Schemas');
         const { _resolveAndUploadProfilePhoto } = require('./authController');
         const { validateCoordinates } = require('../utils/doctorClinicLocationHelper');
+
+        const parseBoolOpt = (v) => {
+            if (typeof v === 'boolean') return v;
+            if (typeof v === 'number') return v !== 0;
+            if (typeof v === 'string') {
+                const s = v.trim().toLowerCase();
+                if (s === 'true' || s === '1' || s === 'yes' || s === 'on') return true;
+                if (s === 'false' || s === '0' || s === 'no' || s === 'off') return false;
+            }
+            return undefined;
+        };
+        let requestedOnlineFlag = parseBoolOpt(
+            onlineConsultationEnabled ?? online_consultation_enabled ?? supportsOnlineConsultation
+        );
+        let requestedInPersonFlag = parseBoolOpt(
+            inPersonConsultationEnabled ?? in_person_consultation_enabled ?? supportsInPersonConsultation
+        );
+        if (consultationMode && typeof consultationMode === 'string') {
+            const cm = consultationMode.trim().toLowerCase();
+            if (cm === 'both' || cm === 'hybrid') {
+                if (requestedOnlineFlag === undefined) requestedOnlineFlag = true;
+                if (requestedInPersonFlag === undefined) requestedInPersonFlag = true;
+            } else if (cm === 'online' || cm === 'online only' || cm === 'online_only') {
+                if (requestedOnlineFlag === undefined) requestedOnlineFlag = true;
+                if (requestedInPersonFlag === undefined) requestedInPersonFlag = false;
+            } else if (cm === 'offline' || cm === 'in-person' || cm === 'in_person' || cm === 'offline only' || cm === 'in-person only') {
+                if (requestedOnlineFlag === undefined) requestedOnlineFlag = false;
+                if (requestedInPersonFlag === undefined) requestedInPersonFlag = true;
+            }
+        }
+        if (requestedOnlineFlag !== undefined || requestedInPersonFlag !== undefined) {
+            const existingDocForMode = await Dentist.findById(id).catch(() => null);
+            const currentModes = resolveDoctorConsultationModes(existingDocForMode || {});
+            const nextOnline = requestedOnlineFlag !== undefined ? requestedOnlineFlag : currentModes.onlineConsultationEnabled;
+            const nextInPerson = requestedInPersonFlag !== undefined ? requestedInPersonFlag : currentModes.inPersonConsultationEnabled;
+            if (!nextOnline && !nextInPerson) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'INVALID_CONSULTATION_MODES',
+                    message: 'At least one consultation mode (Online Consultation or In-Person Clinic Consultation) must be enabled.'
+                });
+            }
+            requestedOnlineFlag = nextOnline;
+            requestedInPersonFlag = nextInPerson;
+        }
 
         const cleanPincode = pincode !== undefined && pincode !== null ? String(pincode).trim() : undefined;
         if (cleanPincode !== undefined && cleanPincode.length > 0 && !/^\d{6}$/.test(cleanPincode)) {
@@ -1224,13 +1367,22 @@ exports.updateDoctorProfile = async (req, res) => {
             ...(cleanPincode !== undefined ? { pincode: cleanPincode } : {}),
             ...(coordValidation.hasUpdate ? { latitude: coordValidation.latitude, longitude: coordValidation.longitude } : {}),
             ...(cleanCity !== undefined ? { city: cleanCity } : {}),
-            ...(normalizedLanguages && normalizedLanguages.length > 0 ? { languages: normalizedLanguages } : {})
+            ...(normalizedLanguages && normalizedLanguages.length > 0 ? { languages: normalizedLanguages } : {}),
+            ...(requestedOnlineFlag !== undefined ? { online_consultation_enabled: requestedOnlineFlag } : {}),
+            ...(requestedInPersonFlag !== undefined ? { in_person_consultation_enabled: requestedInPersonFlag } : {})
         };
 
         const updatedDentist = await Dentist.findByIdAndUpdate(id, dentistUpdatePayload);
 
         const targetUserId = updatedDentist?.user_id || id;
-        const metaPatch = {};
+        let existingUserMeta = {};
+        try {
+            const existingUserRow = await User.findById(targetUserId).catch(() => null);
+            if (existingUserRow?.device_token && typeof existingUserRow.device_token === 'string' && existingUserRow.device_token.trim().startsWith('{')) {
+                existingUserMeta = JSON.parse(existingUserRow.device_token);
+            }
+        } catch (_) { }
+        const metaPatch = { ...existingUserMeta };
         if (cleanClinicName !== undefined) metaPatch.clinicName = cleanClinicName;
         if (cleanClinicAddress !== undefined) metaPatch.clinicAddress = cleanClinicAddress;
         if (cleanState !== undefined) metaPatch.state = cleanState;
@@ -1239,6 +1391,22 @@ exports.updateDoctorProfile = async (req, res) => {
             metaPatch.latitude = coordValidation.latitude;
             metaPatch.longitude = coordValidation.longitude;
         }
+        if (requestedOnlineFlag !== undefined) {
+            metaPatch.onlineConsultationEnabled = requestedOnlineFlag;
+            metaPatch.online_consultation_enabled = requestedOnlineFlag;
+        }
+        if (requestedInPersonFlag !== undefined) {
+            metaPatch.inPersonConsultationEnabled = requestedInPersonFlag;
+            metaPatch.in_person_consultation_enabled = requestedInPersonFlag;
+        }
+        const hasMetaChanges =
+            cleanClinicName !== undefined ||
+            cleanClinicAddress !== undefined ||
+            cleanState !== undefined ||
+            cleanPincode !== undefined ||
+            coordValidation.hasUpdate ||
+            requestedOnlineFlag !== undefined ||
+            requestedInPersonFlag !== undefined;
         const userUpdates = {
             ...(name ? { name } : {}),
             ...(phone ? { phone } : {}),
@@ -1248,11 +1416,24 @@ exports.updateDoctorProfile = async (req, res) => {
             ...(coordValidation.hasUpdate ? { latitude: coordValidation.latitude, longitude: coordValidation.longitude } : {}),
             ...(normalizedLanguages && normalizedLanguages.length > 0 ? { languages: normalizedLanguages } : {}),
             ...(uploadedPhotoUrl !== undefined ? { biometric_token: uploadedPhotoUrl } : {}),
-            ...(Object.keys(metaPatch).length > 0 ? { device_token: JSON.stringify(metaPatch) } : {})
+            ...(hasMetaChanges ? { device_token: JSON.stringify(metaPatch) } : {})
         };
         if (Object.keys(userUpdates).length > 0) {
             try {
                 await User.findByIdAndUpdate(targetUserId, userUpdates);
+            } catch (_) { }
+        }
+        if (requestedOnlineFlag !== undefined || requestedInPersonFlag !== undefined) {
+            try {
+                const targetDocId = updatedDentist?.id || id;
+                const currentSched = await DoctorAvailability.getSchedule(targetDocId).catch(() => null);
+                if (currentSched && currentSched.isConfigured) {
+                    await DoctorAvailability.saveSchedule(targetDocId, {
+                        ...currentSched,
+                        ...(requestedOnlineFlag !== undefined ? { onlineEnabled: requestedOnlineFlag } : {}),
+                        ...(requestedInPersonFlag !== undefined ? { inPersonEnabled: requestedInPersonFlag } : {}),
+                    });
+                }
             } catch (_) { }
         }
 
@@ -1267,6 +1448,16 @@ exports.updateDoctorProfile = async (req, res) => {
             if (coordValidation.hasUpdate) {
                 formattedDoctor.latitude = coordValidation.latitude;
                 formattedDoctor.longitude = coordValidation.longitude;
+            }
+            if (requestedOnlineFlag !== undefined) {
+                formattedDoctor.onlineConsultationEnabled = requestedOnlineFlag;
+                formattedDoctor.online_consultation_enabled = requestedOnlineFlag;
+                formattedDoctor.supportsOnlineConsultation = Boolean(formattedDoctor.isAvailable && requestedOnlineFlag);
+            }
+            if (requestedInPersonFlag !== undefined) {
+                formattedDoctor.inPersonConsultationEnabled = requestedInPersonFlag;
+                formattedDoctor.in_person_consultation_enabled = requestedInPersonFlag;
+                formattedDoctor.supportsInPersonConsultation = Boolean(formattedDoctor.isAvailable && requestedInPersonFlag);
             }
         }
         res.json({
@@ -1417,8 +1608,15 @@ exports.addClinicDoctor = async (req, res) => {
         city,
         pincode,
         state,
+        clinicAddress,
+        clinic_address,
+        latitude,
+        longitude,
+        profilePhoto,
         languages,
-        clinicName
+        clinicName,
+        rejectExistingAccount,
+        preventDuplicateAccount
     } = req.body;
     try {
         const cleanName = String(name || '').trim();
@@ -1469,6 +1667,76 @@ exports.addClinicDoctor = async (req, res) => {
             user = await User.findOne({ email: cleanEmailInput }).catch(() => null);
         }
 
+        // Also check dentists table directly in case a dentist row exists with this 10-digit mobile
+        let existingDentistByPhone = null;
+        if (user) {
+            existingDentistByPhone = await Dentist.findOne({ user_id: user.id }).catch(() => null);
+        }
+        if (!existingDentistByPhone) {
+            const allDentists = await Dentist.find({}).catch(() => []);
+            existingDentistByPhone = (allDentists || []).find((d) => {
+                const dDigits = String(d.phone || d.users?.phone || '').replace(/[^0-9]/g, '');
+                return dDigits.length >= 10 && dDigits.slice(-10) === cleanPhone.slice(-10);
+            }) || null;
+        }
+
+        const shouldRejectDuplicate = Boolean(rejectExistingAccount || preventDuplicateAccount);
+        if (shouldRejectDuplicate && (user || existingDentistByPhone)) {
+            const existingFormatted = existingDentistByPhone
+                ? formatDentistRecord({ ...existingDentistByPhone, users: existingDentistByPhone.users || user || {} })
+                : {
+                    id: user.id,
+                    user_id: user.id,
+                    userId: user.id,
+                    name: user.name || 'Doctor',
+                    phone: user.phone || cleanPhone,
+                    email: user.email || '',
+                    specialty: resolvedSpec,
+                    qualification: resolvedQual,
+                    experience_years: resolvedExp,
+                    clinic_id: null,
+                    clinicName: ''
+                };
+            const alreadyInThisClinic = Boolean(
+                canonicalClinicId &&
+                String(existingDentistByPhone?.clinic_id || existingFormatted.clinic_id || '').trim() === String(canonicalClinicId).trim()
+            );
+            return res.status(409).json({
+                success: false,
+                code: 'MOBILE_ALREADY_REGISTERED',
+                existingRole: user?.role || 'DOCTOR',
+                existingDoctor: existingFormatted,
+                alreadyInThisClinic,
+                message: alreadyInThisClinic
+                    ? `${existingFormatted.name} (${cleanPhone}) is already registered and associated with this clinic.`
+                    : `A registered doctor account (${existingFormatted.name}) already exists for mobile number ${cleanPhone}. You can attach the existing account to this clinic instead of creating a duplicate.`
+            });
+        }
+
+        const rawPhotoStr = (profilePhoto !== undefined && profilePhoto !== null && String(profilePhoto).trim() !== '' && String(profilePhoto).trim().toLowerCase() !== 'null')
+            ? String(profilePhoto).trim()
+            : null;
+        const effectiveAddress = String(clinicAddress || clinic_address || targetClinic?.clinic_address || targetClinic?.location || '').trim();
+        const effectiveCity = String(city || targetClinic?.city || '').trim();
+        const effectiveState = String(state || targetClinic?.state || '').trim();
+        const effectivePincode = String(pincode || targetClinic?.pincode || '').trim();
+        const effectiveLat = (latitude !== undefined && latitude !== null && Number.isFinite(Number(latitude)))
+            ? Number(latitude)
+            : (targetClinic?.latitude ?? null);
+        const effectiveLng = (longitude !== undefined && longitude !== null && Number.isFinite(Number(longitude)))
+            ? Number(longitude)
+            : (targetClinic?.longitude ?? null);
+
+        let licNum = String(licenseNumber || license_number || '').trim();
+        if (!licNum || licNum.toLowerCase() === 'med-lic-reg' || licNum.toLowerCase() === 'med-lic-registered') {
+            licNum = `MED-LIC-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+        } else {
+            const existingLic = await Dentist.findOne({ license_number: licNum }).catch(() => null);
+            if (existingLic && (!user || String(existingLic.user_id) !== String(user.id))) {
+                licNum = `${licNum}-${Date.now().toString().slice(-4)}`;
+            }
+        }
+
         if (!user) {
             const generatedEmail = (cleanEmailInput && cleanEmailInput.includes('@'))
                 ? cleanEmailInput
@@ -1476,9 +1744,14 @@ exports.addClinicDoctor = async (req, res) => {
             const effectivePassword = `OTP_SECURE_${require('crypto').randomBytes(12).toString('hex')}`;
             const formattedDocName = cleanName.startsWith('Dr.') ? cleanName : `Dr. ${cleanName}`;
             const metaObj = {
-                city: String(city || targetClinic?.city || '').trim(),
-                pincode: String(pincode || targetClinic?.pincode || '').trim(),
-                location: targetClinic?.location || '',
+                city: effectiveCity,
+                state: effectiveState,
+                pincode: effectivePincode,
+                location: effectiveAddress,
+                address: effectiveAddress,
+                clinicAddress: effectiveAddress,
+                latitude: effectiveLat,
+                longitude: effectiveLng,
                 languages: finalLangs,
                 specialty: resolvedSpec,
                 specialtyId: specResolution.specialty_id || null,
@@ -1487,7 +1760,8 @@ exports.addClinicDoctor = async (req, res) => {
                 experienceYears: resolvedExp,
                 clinicId: canonicalClinicId,
                 clinicName: resolvedClinicName,
-                licenseNumber: String(licenseNumber || license_number || '').trim()
+                licenseNumber: licNum,
+                ...(rawPhotoStr ? { profilePhoto: rawPhotoStr } : {})
             };
             user = await User.create({
                 name: formattedDocName,
@@ -1495,19 +1769,24 @@ exports.addClinicDoctor = async (req, res) => {
                 password: effectivePassword,
                 phone: cleanPhone,
                 role: 'DOCTOR',
-                state: String(state || '').trim(),
-                city: metaObj.city,
-                pincode: metaObj.pincode,
+                state: effectiveState,
+                city: effectiveCity,
+                pincode: effectivePincode,
+                latitude: effectiveLat,
+                longitude: effectiveLng,
                 languages: finalLangs,
-                device_token: JSON.stringify(metaObj)
+                device_token: JSON.stringify(metaObj),
+                ...(rawPhotoStr ? { biometric_token: rawPhotoStr } : {})
             });
         }
 
         // Check if this user already has a dentists row
-        let dentistRec = await Dentist.findOne({ user_id: user.id }).catch(() => null);
+        let dentistRec = existingDentistByPhone || await Dentist.findOne({ user_id: user.id }).catch(() => null);
         if (dentistRec) {
             dentistRec = await Dentist.findByIdAndUpdate(dentistRec.id, {
                 ...(canonicalClinicId ? { clinic_id: canonicalClinicId } : {}),
+                ...(resolvedClinicName ? { clinic_name: resolvedClinicName } : {}),
+                ...(effectiveAddress ? { clinic_address: effectiveAddress } : {}),
                 ...(rawSpecInput ? { speciality: resolvedSpec, specialty_id: specResolution.specialty_id, department: specResolution.department } : {}),
                 qualifications: resolvedQual,
                 experience_years: resolvedExp,
@@ -1519,22 +1798,30 @@ exports.addClinicDoctor = async (req, res) => {
             dentistRec = await Dentist.create({
                 user_id: user.id,
                 clinic_id: canonicalClinicId,
+                clinic_name: resolvedClinicName,
+                clinic_address: effectiveAddress,
                 speciality: resolvedSpec,
                 specialty_id: specResolution.specialty_id || null,
                 department: specResolution.department || '',
-                license_number: String(licenseNumber || license_number || '').trim(),
+                license_number: licNum,
                 experience_years: resolvedExp,
                 qualifications: resolvedQual,
                 availability_status: 'Available',
                 consultation_fee: String(consultationFee || consultation_fee || ''),
                 bio: String(bio || ''),
-                state: String(state || '').trim(),
-                city: String(city || targetClinic?.city || '').trim(),
-                pincode: String(pincode || targetClinic?.pincode || '').trim(),
+                state: effectiveState,
+                city: effectiveCity,
+                pincode: effectivePincode,
+                latitude: effectiveLat,
+                longitude: effectiveLng,
                 languages: finalLangs,
                 rating: 5.0,
                 reviews_count: 0
             });
+        }
+
+        if (canonicalClinicId && dentistRec?.id) {
+            await ClinicDoctor.associate(canonicalClinicId, dentistRec.id).catch(() => null);
         }
 
         if (targetClinic && resolvedSpec) {

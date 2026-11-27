@@ -140,6 +140,15 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       final chatBtn = find.widgetWithText(OutlinedButton, 'Chat').first;
+      // Verify the 4 removed buttons do not appear on accepted/confirmed appointment cards
+      expect(find.text('Start Consultation'), findsNothing);
+      expect(find.text('Complete Consultation'), findsNothing);
+      expect(find.text('Mark Delayed (+15m)'), findsNothing);
+      expect(find.text('No-Show'), findsNothing);
+      // Verify Issue E-Prescription and Chat remain visible
+      expect(find.text('Issue E-Prescription'), findsWidgets);
+      expect(chatBtn, findsOneWidget);
+
       await tester.ensureVisible(chatBtn);
       await tester.pump();
       await tester.tap(chatBtn);
@@ -169,6 +178,120 @@ void main() {
       expect(sentPayload!['receiverId'], 'pat-uuid-123');
       expect(sentPayload!['roomId'], expectedRoomId);
       expect(sentPayload!['senderRole'], 'Dentist');
+    },
+  );
+
+  testWidgets(
+    'Patient and Doctor bidirectional chat, history persistence across reopen, and network failure retry recovery',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 1200);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      final persistedMessages = <Map<String, dynamic>>[];
+      bool simulateNetworkError = false;
+
+      ApiService.debugFetchChatMessagesOverride = ({required String roomId}) async {
+        return List<Map<String, dynamic>>.from(persistedMessages);
+      };
+      ApiService.debugSendMessageOverride = ({
+        required String senderId,
+        required String message,
+        required String roomId,
+        String? receiverId,
+        String? type,
+        String? senderRole,
+      }) async {
+        if (simulateNetworkError) {
+          return {'success': false, 'message': 'Network timeout. Please retry.'};
+        }
+        final saved = <String, dynamic>{
+          'id': 'msg-${persistedMessages.length + 1}',
+          'room_id': roomId,
+          'sender_id': senderId,
+          'receiver_id': receiverId,
+          'message': message,
+          'type': type ?? 'text',
+          'read': false,
+          'created_at': '2026-11-27T09:30:00Z',
+          'sender': {
+            'id': senderId,
+            'name': (senderRole == 'Dentist') ? 'Dr. Priya Nair' : 'Ananya Verma',
+            'role': senderRole ?? 'Patient',
+          },
+        };
+        persistedMessages.add(saved);
+        return {'success': true, 'chat': saved};
+      };
+
+      // 1. Patient opens chat and sends a message to Doctor
+      await tester.pumpWidget(
+        const ProviderScope(
+          child: MaterialApp(
+            home: Scaffold(
+              body: WhatsAppChatModal(
+                patientName: 'Ananya Verma',
+                doctorName: 'Dr. Priya Nair',
+                currentUserRole: 'Patient',
+                patientId: 'pat-uuid-123',
+                doctorId: 'doc-chat-1',
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+
+      await tester.enterText(find.byType(TextField), 'Good morning Doctor, sharing my symptoms.');
+      await tester.tap(find.byIcon(Icons.send_rounded));
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.text('Good morning Doctor, sharing my symptoms.'), findsOneWidget);
+      expect(persistedMessages.length, 1);
+
+      // 2. Doctor opens the same conversation, sees patient history, and replies
+      await tester.pumpWidget(
+        const ProviderScope(
+          child: MaterialApp(
+            home: Scaffold(
+              body: WhatsAppChatModal(
+                patientName: 'Ananya Verma',
+                doctorName: 'Dr. Priya Nair',
+                currentUserRole: 'Dentist',
+                patientId: 'pat-uuid-123',
+                doctorId: 'doc-chat-1',
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.text('Good morning Doctor, sharing my symptoms.'), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField), 'Hello Ananya, I have reviewed your symptoms.');
+      await tester.tap(find.byIcon(Icons.send_rounded));
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.text('Hello Ananya, I have reviewed your symptoms.'), findsOneWidget);
+      expect(persistedMessages.length, 2);
+
+      // 3. Simulate network failure on send -> shows error banner & preserves message text for retry
+      simulateNetworkError = true;
+      await tester.enterText(find.byType(TextField), 'Retryable prescription note');
+      await tester.tap(find.byIcon(Icons.send_rounded));
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.text('Network timeout. Please retry.'), findsWidgets);
+      final textField = tester.widget<TextField>(find.byType(TextField));
+      expect(textField.controller?.text, 'Retryable prescription note');
+
+      // 4. Network recovers -> tapping send succeeds and persists 3rd message
+      simulateNetworkError = false;
+      await tester.tap(find.byIcon(Icons.send_rounded));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(persistedMessages.length, 3);
+      expect(find.text('Retryable prescription note'), findsOneWidget);
     },
   );
 }
