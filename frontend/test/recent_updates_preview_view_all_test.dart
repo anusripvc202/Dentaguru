@@ -28,13 +28,14 @@ void main() {
     });
 
     testWidgets(
-      '2. Admin Dashboard Overview displays only the latest 2 records for Appointments, Referrals, Doctors & Clinics, supports View All navigation, and renders empty states',
+      '2. Admin Dashboard Overview displays only the latest 2 records for Requests, Referrals, Appointments, Doctors & Clinics, supports View All navigation, and renders required fields',
       (WidgetTester tester) async {
-        tester.view.physicalSize = const Size(1024, 1400);
+        tester.view.physicalSize = const Size(1024, 1800);
         tester.view.devicePixelRatio = 1.0;
         addTearDown(tester.view.resetPhysicalSize);
 
         bool openedAllAppointments = false;
+        bool openedAllRequests = false;
         bool openedAllReferrals = false;
         bool openedAllDoctors = false;
         bool openedAllClinics = false;
@@ -56,12 +57,26 @@ void main() {
           ),
         );
 
+        final requests = List.generate(
+          4,
+          (i) => PatientConsultationRequest(
+            id: 'REQ-10$i',
+            patientName: 'Request Patient $i',
+            patientPhone: '985550000$i',
+            problemCategory: 'Dental Pain $i',
+            problemDescription: 'Molar discomfort $i',
+            severity: 'Moderate',
+            submittedAt: DateTime(2026, 11, 20 + i, 11, 30),
+            status: 'Pending Admin Review',
+          ),
+        );
+
         final referrals = List.generate(
           4,
           (i) => PatientReferral(
-            id: 'ref-$i',
+            id: 'REF-20$i',
             referrerPatientId: 'pat-$i',
-            referrerPatientName: 'Referrer $i',
+            referrerPatientName: 'Dr. Referrer $i',
             referredPatientName: 'Referred Patient $i',
             referredPatientMobile: '981110000$i',
             referredPatientAge: '30',
@@ -70,7 +85,8 @@ void main() {
             requiredSpecialist: 'Endodontics',
             doctorId: 'doc-$i',
             doctorName: 'Dr. Target $i',
-            referralDate: DateTime(2026, 11, 20 + i),
+            referralDate: DateTime(2026, 11, 20 + i, 14, 15),
+            createdAt: DateTime(2026, 11, 20 + i, 14, 15),
             status: 'Pending',
           ),
         );
@@ -138,6 +154,8 @@ void main() {
                   ads: const [],
                   appointments: appointments,
                   onViewAllAppointments: () => openedAllAppointments = true,
+                  recentRequests: requests,
+                  onViewAllRequests: () => openedAllRequests = true,
                   recentReferrals: referrals,
                   onViewAllReferrals: () => openedAllReferrals = true,
                   recentDoctors: doctors,
@@ -151,6 +169,9 @@ void main() {
         );
         await tester.pumpAndSettle();
 
+        // No Calendar View option on Overview
+        expect(find.text('Calendar View'), findsNothing);
+
         // Only 2 appointments shown initially (sorted descending: Patient 3 and Patient 2)
         expect(find.byKey(const Key('admin_appointment_card_0')), findsOneWidget);
         expect(find.byKey(const Key('admin_appointment_card_1')), findsOneWidget);
@@ -159,13 +180,31 @@ void main() {
         expect(find.text('Patient 2'), findsOneWidget);
         expect(find.text('Patient 0'), findsNothing);
 
+        // Only 2 requests shown initially (sorted descending: Request Patient 3 & 2)
+        // Displays Request ID, Patient Name, Request Type, Request Date and Status
+        expect(find.byKey(const Key('admin_recent_request_card_0')), findsOneWidget);
+        expect(find.byKey(const Key('admin_recent_request_card_1')), findsOneWidget);
+        expect(find.byKey(const Key('admin_recent_request_card_2')), findsNothing);
+        expect(find.textContaining('Request Patient 3'), findsOneWidget);
+        expect(find.textContaining('Request Patient 2'), findsOneWidget);
+        expect(find.textContaining('Request Patient 0'), findsNothing);
+        expect(find.textContaining('Request ID: REQ-103'), findsOneWidget);
+        expect(find.textContaining('Request ID: REQ-102'), findsOneWidget);
+        expect(find.textContaining('Dental Pain 3'), findsWidgets);
+        expect(find.textContaining('Dental Pain 2'), findsWidgets);
+
         // Only 2 referrals shown initially (sorted descending: Referred Patient 3 & 2)
+        // Displays Referral ID, Patient Name, Referring Doctor, Referred Doctor, Referral Date and Status
         expect(find.byKey(const Key('admin_recent_referral_card_0')), findsOneWidget);
         expect(find.byKey(const Key('admin_recent_referral_card_1')), findsOneWidget);
         expect(find.byKey(const Key('admin_recent_referral_card_2')), findsNothing);
         expect(find.textContaining('Referred Patient 3'), findsOneWidget);
         expect(find.textContaining('Referred Patient 2'), findsOneWidget);
         expect(find.textContaining('Referred Patient 0'), findsNothing);
+        expect(find.textContaining('Referral ID: REF-203'), findsOneWidget);
+        expect(find.textContaining('Referral ID: REF-202'), findsOneWidget);
+        expect(find.textContaining('Referring: Dr. Referrer 3'), findsOneWidget);
+        expect(find.textContaining('Referred: Dr. Target 3'), findsOneWidget);
 
         // Only 2 doctors shown initially
         expect(find.byKey(const Key('admin_recent_doctor_card_0')), findsOneWidget);
@@ -180,6 +219,8 @@ void main() {
         // Tap View All buttons and verify navigation callbacks fire
         await tester.ensureVisible(find.byKey(const Key('admin_view_all_appointments_btn')));
         await tester.tap(find.byKey(const Key('admin_view_all_appointments_btn')));
+        await tester.ensureVisible(find.byKey(const Key('admin_view_all_requests_btn')));
+        await tester.tap(find.byKey(const Key('admin_view_all_requests_btn')));
         await tester.ensureVisible(find.byKey(const Key('admin_view_all_referrals_btn')));
         await tester.tap(find.byKey(const Key('admin_view_all_referrals_btn')));
         await tester.ensureVisible(find.byKey(const Key('admin_view_all_doctors_btn')));
@@ -188,6 +229,7 @@ void main() {
         await tester.tap(find.byKey(const Key('admin_view_all_clinics_btn')));
 
         expect(openedAllAppointments, isTrue);
+        expect(openedAllRequests, isTrue);
         expect(openedAllReferrals, isTrue);
         expect(openedAllDoctors, isTrue);
         expect(openedAllClinics, isTrue);

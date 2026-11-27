@@ -1138,16 +1138,23 @@ class _AdminClinicDetailsDialogState extends State<_AdminClinicDetailsDialog> {
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Row(
+                                      Text(
+                                        doc.displayFullName,
+                                        key: Key('admin_clinic_doctor_name_${doc.id}'),
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 14.5,
+                                          height: 1.25,
+                                          color: AppTheme.textDark,
+                                        ),
+                                        softWrap: true,
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Wrap(
+                                        spacing: 6,
+                                        runSpacing: 4,
+                                        crossAxisAlignment: WrapCrossAlignment.center,
                                         children: [
-                                          Expanded(
-                                            child: Text(
-                                              doc.name,
-                                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
                                           Container(
                                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                             decoration: BoxDecoration(
@@ -1163,20 +1170,18 @@ class _AdminClinicDetailsDialogState extends State<_AdminClinicDetailsDialog> {
                                               ),
                                             ),
                                           ),
+                                          Text(
+                                            'Specialization: ${doc.specialty}${doc.department.isNotEmpty ? ' • Dept: ${doc.department}' : ''}',
+                                            style: const TextStyle(fontSize: 12, color: AppTheme.textMedium),
+                                            softWrap: true,
+                                          ),
                                         ],
                                       ),
                                       const SizedBox(height: 2),
                                       Text(
-                                        'Specialization: ${doc.specialty}${doc.department.isNotEmpty ? ' • Dept: ${doc.department}' : ''}',
-                                        style: const TextStyle(fontSize: 12, color: AppTheme.textMedium),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      Text(
                                         'Doctor ID: ${doc.id} • Mobile: ${doc.phone.isNotEmpty ? doc.phone : 'N/A'} • Clinic: ${clinic.clinicName}',
                                         style: const TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
+                                        softWrap: true,
                                       ),
                                       const SizedBox(height: 6),
                                       Wrap(

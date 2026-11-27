@@ -1,5 +1,21 @@
 const { PatientProblemRequest, DentistSuggestion, Dentist, User, Notification, PatientAssignmentHistory, District, SubAdminDistrict, ASSIGNMENT_SOURCES, isDoctorRecordAvailable } = require('../models/Schemas');
 const { sendPushNotification } = require('../services/notificationService');
+const { resolveCallerAccessContext } = require('../middleware/auth');
+
+/**
+ * Resolves a consultation request's patient district strictly from the PATIENT'S registered location
+ * (or the patient's own location fields on the request). NEVER falls back to doctor or clinic district!
+ */
+function buildRequestPatientLocationPayload(reqRow = {}, patientUser = null) {
+    return {
+        districtId: patientUser?.district_id || patientUser?.districtId || reqRow.district_id || reqRow.districtId || null,
+        district: patientUser?.district || reqRow.district || null,
+        city: (patientUser?.city && String(patientUser.city).trim()) ? patientUser.city : (reqRow.city || ''),
+        state: (patientUser?.state && String(patientUser.state).trim()) ? patientUser.state : (reqRow.state || ''),
+        pincode: (patientUser?.pincode && String(patientUser.pincode).trim()) ? patientUser.pincode : (reqRow.pincode || ''),
+        device_token: patientUser?.device_token || null
+    };
+}
 
 const COORDINATOR_STAGES = [
     'SUBMITTED',
@@ -309,24 +325,61 @@ exports.getPatientProblemRequests = async (req, res) => {
     }
 };
 
-// 3. ADMIN: GET ALL PROBLEM REQUESTS
+// 3. ADMIN: GET ALL PROBLEM REQUESTS (Enforces Strict Sub-Admin District Access Control)
 exports.getAdminProblemRequests = async (req, res) => {
     try {
+        const callerCtx = await resolveCallerAccessContext(req);
+        const reqDistrictId = String(req.query.districtId || req.query.district_id || '').trim();
+        const reqDistrictName = String(req.query.district || '').trim();
+
+        if (callerCtx.isSubAdmin && (reqDistrictId || reqDistrictName) && reqDistrictName.toLowerCase() !== 'all' && reqDistrictId.toLowerCase() !== 'all') {
+            let requestedIdLower = reqDistrictId.toLowerCase();
+            if (!requestedIdLower && reqDistrictName) {
+                const resolvedFilter = District.resolveDistrictFromLocation({ district: reqDistrictName });
+                requestedIdLower = resolvedFilter?.districtId ? String(resolvedFilter.districtId).toLowerCase() : '__unmatched__';
+            }
+            if (!callerCtx.assignedDistrictIds.has(requestedIdLower)) {
+                return res.status(403).json({
+                    success: false,
+                    code: 'DISTRICT_ACCESS_DENIED',
+                    message: 'Access Denied: You cannot view patient requests outside your assigned district.'
+                });
+            }
+        }
+
         const { status } = req.query;
         const query = status ? { status } : {};
         const rawRequests = await PatientProblemRequest.find(query);
 
-        // Fetch all patient users to populate real patient names & phone numbers
+        // Fetch all patient users to populate real patient names, phone numbers & registered location
         const patientUsers = await User.find({ role: 'Patient' });
         const userMap = new Map();
+        const phoneMap = new Map();
         for (const u of patientUsers) {
             userMap.set(u.id, u);
             if (u.email) userMap.set(u.email.toLowerCase(), u);
+            const digits10 = String(u.phone || '').replace(/\D/g, '').slice(-10);
+            if (digits10.length === 10) phoneMap.set(digits10, u);
         }
 
-        const requests = rawRequests.map(r => {
+        let requests = [];
+        for (const r of rawRequests) {
             const reqObj = r.toObject ? r.toObject() : { ...r };
-            const u = userMap.get(r.patient_id) || (r.patient_id ? userMap.get(String(r.patient_id).toLowerCase()) : null);
+            const rPhone10 = String(r.patient_phone || r.patientPhone || '').replace(/\D/g, '').slice(-10);
+            const u = userMap.get(r.patient_id)
+                || (r.patient_id ? userMap.get(String(r.patient_id).toLowerCase()) : null)
+                || (rPhone10.length === 10 ? phoneMap.get(rPhone10) : null);
+
+            const patientLocPayload = buildRequestPatientLocationPayload(r, u);
+            const distInfo = District.resolvePatientDistrictStrict(patientLocPayload);
+
+            // STRICT SUB-ADMIN DISTRICT ACCESS ENFORCEMENT:
+            if (callerCtx.isSubAdmin) {
+                const check = SubAdminDistrict.canSubAdminAccessPatientSync(callerCtx.assignedDistricts, patientLocPayload);
+                if (!check.allowed) {
+                    continue;
+                }
+            }
 
             let realName = r.patient_name || r.patientName;
             if ((!realName || realName.trim().toLowerCase() === 'patient') && u) {
@@ -341,9 +394,9 @@ exports.getAdminProblemRequests = async (req, res) => {
                 realPhone = u.phone || '';
             }
 
-            let realCity = r.city || (u ? u.city : '') || '';
-            let realPincode = r.pincode || (u ? u.pincode : '') || '';
-            let realState = r.state || (u ? u.state : '') || '';
+            let realCity = patientLocPayload.city || '';
+            let realPincode = patientLocPayload.pincode || '';
+            let realState = distInfo.state || patientLocPayload.state || '';
 
             const d = r.suggested_dentist || {};
             const dUser = d.users || {};
@@ -353,13 +406,17 @@ exports.getAdminProblemRequests = async (req, res) => {
             const docClinic = dClinic.clinic_name || r.assigned_doctor_clinic || 'GS HEALTH Care Center';
 
             const parsedCoord = parseCoordinatorMeta(r.admin_notes);
-            return {
+            requests.push({
                 ...reqObj,
                 patientName: realName,
                 patientPhone: realPhone || (u ? u.phone : ''),
                 city: realCity,
                 pincode: realPincode,
                 state: realState,
+                district: distInfo.districtName || '',
+                districtId: distInfo.districtId || null,
+                district_id: distInfo.districtId || null,
+                districtIdentificationStatus: distInfo.isVerified ? 'VERIFIED' : 'UNVERIFIED',
                 coordinatorStatus: COORDINATOR_STAGE_LABELS[String(r.status || '').toUpperCase()] || parsedCoord.meta?.coordinatorStatus || 'Submitted',
                 coordinatorMeta: parsedCoord.meta || {},
                 assigned_doctor_name: docName || reqObj.assigned_doctor_name,
@@ -381,11 +438,66 @@ exports.getAdminProblemRequests = async (req, res) => {
                     city: realCity,
                     pincode: realPincode,
                     state: realState,
+                    district: distInfo.districtName || '',
+                    districtId: distInfo.districtId || null,
+                    districtIdentificationStatus: distInfo.isVerified ? 'VERIFIED' : 'UNVERIFIED',
                 }
-            };
+            });
+        }
+
+        // Optional State, District, and Search Filters
+        const stateFilter = String(req.query.state || '').trim().toLowerCase();
+        if (stateFilter && stateFilter !== 'all') {
+            requests = requests.filter(r => String(r.state || '').trim().toLowerCase() === stateFilter);
+        }
+        if ((reqDistrictId && reqDistrictId.toLowerCase() !== 'all') || (reqDistrictName && reqDistrictName.toLowerCase() !== 'all')) {
+            const resolvedFilter = !reqDistrictId && reqDistrictName
+                ? District.resolveDistrictFromLocation({ district: reqDistrictName })
+                : null;
+            const effectiveIdLower = (reqDistrictId || resolvedFilter?.districtId || '').toString().toLowerCase();
+            const targetNameLower = reqDistrictName.toLowerCase();
+            requests = requests.filter(r => {
+                if (effectiveIdLower && r.districtId && String(r.districtId).toLowerCase() === effectiveIdLower) return true;
+                if (!effectiveIdLower && targetNameLower && String(r.district || '').toLowerCase() === targetNameLower) return true;
+                return false;
+            });
+        }
+        const searchQuery = String(req.query.search || req.query.q || '').trim().toLowerCase();
+        if (searchQuery) {
+            requests = requests.filter(r =>
+                String(r.patientName || '').toLowerCase().includes(searchQuery) ||
+                String(r.patientPhone || '').toLowerCase().includes(searchQuery) ||
+                String(r.problem_category || r.problemCategory || '').toLowerCase().includes(searchQuery) ||
+                String(r.problem_description || r.problemDescription || '').toLowerCase().includes(searchQuery) ||
+                String(r.city || '').toLowerCase().includes(searchQuery) ||
+                String(r.district || '').toLowerCase().includes(searchQuery) ||
+                String(r.pincode || '').toLowerCase().includes(searchQuery)
+            );
+        }
+
+        // Sort by actual creation timestamp descending (newest first)
+        requests.sort((a, b) => {
+            const tA = new Date(a.created_at || a.submitted_at || a.submittedAt || 0).getTime() || 0;
+            const tB = new Date(b.created_at || b.submitted_at || b.submittedAt || 0).getTime() || 0;
+            return tB - tA;
         });
 
-        res.json({ success: true, count: requests.length, requests });
+        const totalCount = requests.length;
+        const rawLimit = parseInt(req.query.limit, 10);
+        const rawPage = parseInt(req.query.page, 10);
+        let resultRequests = requests;
+        if (Number.isFinite(rawLimit) && rawLimit > 0) {
+            const page = (Number.isFinite(rawPage) && rawPage > 0) ? rawPage : 1;
+            const start = (page - 1) * rawLimit;
+            resultRequests = requests.slice(start, start + rawLimit);
+        }
+
+        res.json({
+            success: true,
+            count: resultRequests.length,
+            totalCount,
+            requests: resultRequests
+        });
     } catch (err) {
         console.error('Get Admin Problem Requests Error:', err.message);
         res.status(500).json({ success: false, message: 'Failed to fetch problem requests for admin.' });
@@ -400,6 +512,20 @@ exports.markAdminReviewed = async (req, res) => {
         const problemReq = await PatientProblemRequest.findById(id);
         if (!problemReq) {
             return res.status(404).json({ success: false, message: 'Problem request not found.' });
+        }
+
+        const callerCtx = await resolveCallerAccessContext(req);
+        if (callerCtx.isSubAdmin) {
+            const patientUserObj = problemReq.patient_id ? await User.findById(problemReq.patient_id).catch(() => null) : null;
+            const locPayload = buildRequestPatientLocationPayload(problemReq, patientUserObj);
+            const check = SubAdminDistrict.canSubAdminAccessPatientSync(callerCtx.assignedDistricts, locPayload);
+            if (!check.allowed) {
+                return res.status(403).json({
+                    success: false,
+                    code: 'DISTRICT_ACCESS_DENIED',
+                    message: 'Access Denied: You cannot review patient requests outside your assigned district.'
+                });
+            }
         }
 
         // Only move to ADMIN_REVIEWED if currently SUBMITTED or PENDING_ADMIN_REVIEW
@@ -460,33 +586,26 @@ exports.suggestDentist = async (req, res) => {
 
         const docName = doctorName || (dentist ? (dentist.users?.name || dentist.name) : 'Dr. Specialist');
 
-        // Resolve Patient District & Enforce Sub-Admin Access
-        const patientUserObj = await User.findById(problemReq.patient_id).catch(() => null);
-        const locRes = District.resolveDistrictFromLocation({
-            city: problemReq.city || patientUserObj?.city,
-            district: problemReq.district || patientUserObj?.district,
-            state: problemReq.state || patientUserObj?.state,
-            pincode: problemReq.pincode || patientUserObj?.pincode
-        });
+        // Resolve Patient District Strictly from Patient Location & Enforce Sub-Admin Access
+        const patientUserObj = problemReq.patient_id ? await User.findById(problemReq.patient_id).catch(() => null) : null;
+        const patientLocPayload = buildRequestPatientLocationPayload(problemReq, patientUserObj);
+        const locRes = District.resolvePatientDistrictStrict(patientLocPayload);
 
-        const userRoleLower = (req.user?.role || '').toLowerCase();
-        const isMainAdmin = userRoleLower === 'admin' || userRoleLower === 'primaryadmin' || userRoleLower === 'primary_admin' || userRoleLower === 'superadmin';
-        const isSubAdmin = userRoleLower === 'sub-admin' || userRoleLower === 'subadmin' || userRoleLower === 'sub_admin';
+        const callerCtx = await resolveCallerAccessContext(req);
+        const isMainAdmin = callerCtx.isMainAdmin;
+        const isSubAdmin = callerCtx.isSubAdmin;
 
-        const finalDistrictName = locRes.district || problemReq.district || patientUserObj?.district || problemReq.city || 'Unassigned / Review';
+        const finalDistrictName = locRes.districtName || 'Unassigned / Review';
         const finalDistrictId = locRes.districtId || null;
 
-        // Sub-Admin District Jurisdiction Enforcement
-        if (isSubAdmin && req.user?.id) {
-            const assignedDistricts = await SubAdminDistrict.getDistrictsForSubAdmin(req.user.id);
-            const isAuthorized = assignedDistricts.some(d =>
-                (finalDistrictId && d.id === finalDistrictId) ||
-                (finalDistrictName && d.name.toLowerCase() === finalDistrictName.toLowerCase())
-            );
-            if (!isAuthorized) {
+        // Sub-Admin District Jurisdiction Enforcement (Strict districtId match; rejects missing/unverified district)
+        if (isSubAdmin) {
+            const check = SubAdminDistrict.canSubAdminAccessPatientSync(callerCtx.assignedDistricts, patientLocPayload);
+            if (!check.allowed) {
                 return res.status(403).json({
                     success: false,
-                    message: `Access Denied: You cannot assign patients in '${finalDistrictName}'. This request is outside your assigned districts.`
+                    code: 'DISTRICT_ACCESS_DENIED',
+                    message: `Access Denied: You cannot assign patients in '${finalDistrictName}'. This patient request is outside your assigned district or has unverified district information.`
                 });
             }
         }
@@ -586,6 +705,22 @@ exports.getSuggestedDentists = async (req, res) => {
 exports.deleteProblemRequest = async (req, res) => {
     const { id } = req.params;
     try {
+        const existing = await PatientProblemRequest.findById(id);
+        if (existing) {
+            const callerCtx = await resolveCallerAccessContext(req);
+            if (callerCtx.isSubAdmin) {
+                const patientUserObj = existing.patient_id ? await User.findById(existing.patient_id).catch(() => null) : null;
+                const locPayload = buildRequestPatientLocationPayload(existing, patientUserObj);
+                const check = SubAdminDistrict.canSubAdminAccessPatientSync(callerCtx.assignedDistricts, locPayload);
+                if (!check.allowed) {
+                    return res.status(403).json({
+                        success: false,
+                        code: 'DISTRICT_ACCESS_DENIED',
+                        message: 'Access Denied: You cannot delete patient requests outside your assigned district.'
+                    });
+                }
+            }
+        }
         await PatientProblemRequest.findByIdAndDelete(id);
         res.json({ success: true, message: 'Problem request deleted successfully.' });
     } catch (err) {
@@ -783,27 +918,19 @@ exports.updateCoordinatorStatus = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Assistance request not found.' });
         }
 
-        const patientUserObj = await User.findById(problemReq.patient_id).catch(() => null);
-        const locRes = District.resolveDistrictFromLocation({
-            city: problemReq.city || patientUserObj?.city,
-            district: problemReq.district || patientUserObj?.district,
-            state: problemReq.state || patientUserObj?.state,
-            pincode: problemReq.pincode || patientUserObj?.pincode
-        });
-        const finalDistrictName = locRes.district || problemReq.district || problemReq.city || 'Unassigned / Review';
+        const patientUserObj = problemReq.patient_id ? await User.findById(problemReq.patient_id).catch(() => null) : null;
+        const patientLocPayload = buildRequestPatientLocationPayload(problemReq, patientUserObj);
+        const locRes = District.resolvePatientDistrictStrict(patientLocPayload);
+        const finalDistrictName = locRes.districtName || 'Unassigned / Review';
         const finalDistrictId = locRes.districtId || null;
 
-        const userRoleLower = (req.user?.role || '').toLowerCase();
-        const isSubAdmin = userRoleLower === 'sub-admin' || userRoleLower === 'subadmin' || userRoleLower === 'sub_admin';
-        if (isSubAdmin && req.user?.id) {
-            const assignedDistricts = await SubAdminDistrict.getDistrictsForSubAdmin(req.user.id);
-            const isAuthorized = assignedDistricts.some(d =>
-                (finalDistrictId && d.id === finalDistrictId) ||
-                (finalDistrictName && d.name && d.name.toLowerCase() === finalDistrictName.toLowerCase())
-            );
-            if (!isAuthorized) {
+        const callerCtx = await resolveCallerAccessContext(req);
+        if (callerCtx.isSubAdmin) {
+            const check = SubAdminDistrict.canSubAdminAccessPatientSync(callerCtx.assignedDistricts, patientLocPayload);
+            if (!check.allowed) {
                 return res.status(403).json({
                     success: false,
+                    code: 'DISTRICT_ACCESS_DENIED',
                     message: `Access Denied: You cannot manage assistance requests in '${finalDistrictName}'.`
                 });
             }

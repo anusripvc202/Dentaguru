@@ -201,6 +201,66 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
     return ListenableBuilder(
       listenable: _problemService,
       builder: (context, _) {
+        if (_problemService.isSubAdminMode &&
+            !_problemService.isPatientAllowedForCurrentRole(widget.patient)) {
+          return Scaffold(
+            key: const Key('patient_details_district_denied'),
+            backgroundColor: const Color(0xFFF8FAFC),
+            appBar: AppBar(
+              backgroundColor: Colors.white,
+              elevation: 0.5,
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded, color: AppTheme.textDark, size: 18),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+              title: const Text(
+                'District Access Restricted',
+                style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+              ),
+            ),
+            body: Center(
+              child: Container(
+                margin: const EdgeInsets.all(24),
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.gpp_bad_outlined, size: 44, color: Color(0xFFFE3434)),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Access Denied for This Patient',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Coordinators can only view and manage patients whose verified registered district belongs to their assigned district jurisdiction.',
+                      style: TextStyle(fontSize: 12.5, color: AppTheme.textMuted, height: 1.45),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton.icon(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.arrow_back_rounded, size: 16),
+                      label: const Text('Return to Dashboard', style: TextStyle(fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.gsNavy,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+
         final latestReq = _problemService.getLatestRequestForPatient(widget.patient);
         final assignedDoctor = _problemService.getAssignedDoctorForPatient(widget.patient);
         final bool isAssigned = assignedDoctor != null;
@@ -658,7 +718,7 @@ class _PatientDetailsScreenState extends State<PatientDetailsScreen> {
 
   String _formatAssignmentSource(String s) {
     if (s == 'PATIENT_DIRECT_BOOKING') return 'Direct Patient Booking';
-    if (s == 'SUB_ADMIN_ASSIGNMENT') return 'Sub-Admin Assignment';
+    if (s == 'SUB_ADMIN_ASSIGNMENT') return 'Coordinator Assignment';
     if (s == 'MAIN_ADMIN_ASSIGNMENT') return 'Main Admin Assignment';
     return s;
   }

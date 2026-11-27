@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/constants/booking_rules_config.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
 import '../../../../core/widgets/recent_updates_preview_section.dart';
 import '../../../../core/services/patient_problem_service.dart';
@@ -33,7 +34,8 @@ class DentistTimelineScreen extends StatefulWidget {
   State<DentistTimelineScreen> createState() => _DentistTimelineScreenState();
 }
 
-class _DentistTimelineScreenState extends State<DentistTimelineScreen> with TickerProviderStateMixin {
+class _DentistTimelineScreenState extends State<DentistTimelineScreen>
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   int _currentIndex = 0;
   final PatientProblemService _patientService = PatientProblemService();
 
@@ -85,6 +87,7 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _currentIndex = widget.initialTabIndex;
     _patientService.addListener(_onServiceUpdate);
     _patientService.setDentistMode(true);
@@ -329,7 +332,18 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      setState(() {});
+      _patientService.syncAppointmentsFromApi();
+      _patientService.syncProblemRequestsFromApi();
+      _patientService.syncDentistAssignedRequestsFromApi();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _autoSyncTimer?.cancel();
     _idleAvailabilityTimer?.cancel();
     _patientSearchCtrl.dispose();
@@ -1726,12 +1740,37 @@ class _DentistTimelineScreenState extends State<DentistTimelineScreen> with Tick
                           ),
                           const SizedBox(height: 10),
                           ...previewAppointments.asMap().entries.map((entry) {
-                            final idx = entry.key;
                             final req = entry.value;
-                            final nextUpcoming = idx + 1 < previewAppointments.length ? previewAppointments[idx + 1] : null;
                             final slot = (req.confirmedTimeSlot != null && req.confirmedTimeSlot!.trim().isNotEmpty)
                                 ? req.confirmedTimeSlot!
                                 : '11:00 AM';
+                            final nowIst = BookingRulesConfig.nowInIst();
+                            final todayIstYmd = BookingRulesConfig.formatYmd(nowIst);
+                            final nowMin = nowIst.hour * 60 + nowIst.minute;
+                            final reqStartMin = BookingRulesConfig.parseClockSlotMinutes(slot) ?? -1;
+                            final upcomingCandidates = filtered.where((cand) {
+                              if (cand.id == req.id) return false;
+                              if (cand.patientName.trim().toLowerCase() == req.patientName.trim().toLowerCase()) {
+                                return false;
+                              }
+                              if (!BookingRulesConfig.isEligibleForNextConsultation(
+                                cand.status,
+                                actualEndAt: cand.actualEndAt,
+                              )) {
+                                return false;
+                              }
+                              final candDate = BookingRulesConfig.normalizeDateToIstYmd(cand.confirmedDate);
+                              if (candDate.isNotEmpty && candDate != todayIstYmd) return false;
+                              final candStartMin = BookingRulesConfig.parseClockSlotMinutes(cand.confirmedTimeSlot ?? '');
+                              if (candStartMin == null) return false;
+                              return candStartMin > nowMin && candStartMin > reqStartMin;
+                            }).toList()
+                              ..sort((a, b) {
+                                final ma = BookingRulesConfig.parseClockSlotMinutes(a.confirmedTimeSlot ?? '') ?? 9999;
+                                final mb = BookingRulesConfig.parseClockSlotMinutes(b.confirmedTimeSlot ?? '') ?? 9999;
+                                return ma.compareTo(mb);
+                              });
+                            final nextUpcoming = upcomingCandidates.isNotEmpty ? upcomingCandidates.first : null;
                             return _buildTimelineNode(req: req, time: slot, nextAppointment: nextUpcoming);
                           }),
                         ],

@@ -602,11 +602,15 @@ const DEFAULT_DISTRICTS = [
     { id: 'dist-thane', name: 'Thane', state: 'Maharashtra', country: 'India', is_active: true },
     { id: 'dist-bengaluru', name: 'Bengaluru Urban', state: 'Karnataka', country: 'India', is_active: true },
     { id: 'dist-chennai', name: 'Chennai', state: 'Tamil Nadu', country: 'India', is_active: true },
-    { id: 'dist-delhi', name: 'Delhi', state: 'Delhi', country: 'India', is_active: true }
+    { id: 'dist-delhi', name: 'Delhi', state: 'Delhi', country: 'India', is_active: true },
+    { id: 'dist-visakhapatnam', name: 'Visakhapatnam', state: 'Andhra Pradesh', country: 'India', is_active: true },
+    { id: 'dist-vijayawada', name: 'Vijayawada', state: 'Andhra Pradesh', country: 'India', is_active: true },
+    { id: 'dist-guntur', name: 'Guntur', state: 'Andhra Pradesh', country: 'India', is_active: true }
 ];
 
 const _inMemoryDistricts = DEFAULT_DISTRICTS.map(d => ({
     ...d,
+    legacy_id: d.id,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
 }));
@@ -614,12 +618,13 @@ const _inMemoryDistricts = DEFAULT_DISTRICTS.map(d => ({
 function _syncDistrictToMemory(row) {
     if (!row || !row.name) return row;
     const idx = _inMemoryDistricts.findIndex(
-        d => d.id === row.id || d.name.toLowerCase() === String(row.name).toLowerCase()
+        d => d.id === row.id || d.legacy_id === row.id || d.name.toLowerCase() === String(row.name).toLowerCase()
     );
     if (idx !== -1) {
-        _inMemoryDistricts[idx] = { ..._inMemoryDistricts[idx], ...row };
+        const legacyId = _inMemoryDistricts[idx].legacy_id || _inMemoryDistricts[idx].id;
+        _inMemoryDistricts[idx] = { ..._inMemoryDistricts[idx], ...row, legacy_id: legacyId };
     } else {
-        _inMemoryDistricts.push(row);
+        _inMemoryDistricts.push({ ...row, legacy_id: row.legacy_id || row.id });
     }
     return row;
 }
@@ -656,7 +661,7 @@ const District = {
             const { data, error } = await supabaseAdmin.from('districts').select('*').eq('id', id).maybeSingle();
             if (!error && data) return _syncDistrictToMemory(data);
         } catch (_) { }
-        return _inMemoryDistricts.find(d => d.id === id) || null;
+        return _inMemoryDistricts.find(d => d.id === id || d.legacy_id === id) || null;
     },
 
     async findOne(query = {}) {
@@ -719,120 +724,229 @@ const District = {
         return null;
     },
 
-    resolveDistrictFromLocation({ city, district, state, pincode }) {
-        const cLower = (city || '').trim().toLowerCase();
-        const dLower = (district || '').trim().toLowerCase();
-        const pin = (pincode || '').toString().trim();
+    resolveDistrictFromLocation(rawInput = {}) {
+        const input = rawInput && typeof rawInput === 'object' ? rawInput : {};
+        let meta = {};
+        if (input.device_token && typeof input.device_token === 'string' && input.device_token.trim().startsWith('{')) {
+            try {
+                meta = JSON.parse(input.device_token);
+            } catch (_) {
+                meta = {};
+            }
+        }
 
-        // 1. Direct district name match
+        const pickClean = (...vals) => {
+            for (const v of vals) {
+                if (v === undefined || v === null) continue;
+                const s = String(v).trim();
+                if (s && s.toLowerCase() !== 'null' && s.toLowerCase() !== 'undefined' && s !== '--' && s.toLowerCase() !== 'not provided' && s.toLowerCase() !== 'not available') {
+                    return s;
+                }
+            }
+            return '';
+        };
+
+        const rawDistrictId = pickClean(input.districtId, input.district_id, meta.districtId, meta.district_id);
+        const rawDistrict = pickClean(input.district, input.district_name, input.districtName, meta.district, meta.district_name, meta.districtName);
+        const rawCity = pickClean(input.city, meta.city);
+        const rawState = pickClean(input.state, meta.state);
+        const rawPin = pickClean(input.pincode, input.postal_code, meta.pincode, meta.postal_code);
+
+        const dIdLower = rawDistrictId.toLowerCase();
+        const dLower = rawDistrict.toLowerCase();
+        const cLower = rawCity.toLowerCase();
+        const sLower = rawState.toLowerCase();
+        const pin = rawPin;
+
+        const activeDistricts = _inMemoryDistricts.filter(d => d && d.is_active !== false);
+
+        const buildResult = (matched) => {
+            if (!matched || matched.is_active === false) {
+                return {
+                    district: null,
+                    districtName: null,
+                    districtId: null,
+                    state: rawState || null,
+                    status: 'PENDING_ADMIN_REVIEW',
+                    isVerified: false
+                };
+            }
+            // If state was explicitly provided and conflicts with the matched district's state, reject mismatch
+            if (sLower && matched.state && matched.state.toLowerCase() !== sLower) {
+                return {
+                    district: null,
+                    districtName: null,
+                    districtId: null,
+                    state: rawState || null,
+                    status: 'PENDING_ADMIN_REVIEW',
+                    isVerified: false
+                };
+            }
+            return {
+                district: matched.name,
+                districtName: matched.name,
+                districtId: matched.id,
+                state: matched.state || rawState || '',
+                status: 'IDENTIFIED',
+                isVerified: true
+            };
+        };
+
+        // 0. Explicit districtId match (strict: if an explicit districtId was given and doesn't exist, do not guess!)
+        if (dIdLower) {
+            const byId = activeDistricts.find(d =>
+                String(d.id || '').toLowerCase() === dIdLower ||
+                String(d.legacy_id || '').toLowerCase() === dIdLower ||
+                String(d.name || '').toLowerCase() === dIdLower
+            );
+            return buildResult(byId || null);
+        }
+
+        // 1. Direct district name match (strict: if an explicit district was given and doesn't match any active district, do not guess!)
         if (dLower) {
-            const matched = _inMemoryDistricts.find(d => d.name.toLowerCase() === dLower || d.name.toLowerCase().includes(dLower));
-            if (matched) return { district: matched.name, districtId: matched.id, status: 'IDENTIFIED' };
+            const exactByName = activeDistricts.find(d =>
+                String(d.name || '').toLowerCase() === dLower ||
+                String(d.id || '').toLowerCase() === dLower ||
+                String(d.legacy_id || '').toLowerCase() === dLower
+            );
+            if (exactByName) return buildResult(exactByName);
+            return buildResult(null);
         }
 
         // 2. City name match
         if (cLower) {
+            const directCityMatch = activeDistricts.find(d =>
+                String(d.name || '').toLowerCase() === cLower ||
+                String(d.id || '').toLowerCase() === cLower
+            );
+            if (directCityMatch) return buildResult(directCityMatch);
+
             if (cLower.includes('hyderabad')) {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Hyderabad');
-                return { district: matched?.name || 'Hyderabad', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Hyderabad'));
             }
             if (cLower.includes('secunderabad') || cLower.includes('medchal') || cLower.includes('malkajgiri')) {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Medchal-Malkajgiri');
-                return { district: matched?.name || 'Medchal-Malkajgiri', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Medchal-Malkajgiri'));
             }
             if (cLower.includes('rangareddy') || cLower.includes('cyberabad') || cLower.includes('gachibowli') || cLower.includes('madhapur')) {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Rangareddy');
-                return { district: matched?.name || 'Rangareddy', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Rangareddy'));
             }
             if (cLower.includes('warangal') || cLower.includes('hanamkonda') || cLower.includes('kazipet')) {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Warangal');
-                return { district: matched?.name || 'Warangal', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Warangal'));
             }
             if (cLower.includes('karimnagar')) {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Karimnagar');
-                return { district: matched?.name || 'Karimnagar', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Karimnagar'));
             }
             if (cLower.includes('nizamabad')) {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Nizamabad');
-                return { district: matched?.name || 'Nizamabad', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Nizamabad'));
             }
             if (cLower.includes('adilabad')) {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Adilabad');
-                return { district: matched?.name || 'Adilabad', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Adilabad'));
+            }
+            if (cLower.includes('visakhapatnam') || cLower.includes('vizag')) {
+                return buildResult(activeDistricts.find(d => d.name === 'Visakhapatnam'));
+            }
+            if (cLower.includes('vijayawada')) {
+                return buildResult(activeDistricts.find(d => d.name === 'Vijayawada'));
+            }
+            if (cLower.includes('guntur')) {
+                return buildResult(activeDistricts.find(d => d.name === 'Guntur'));
             }
             if (cLower.includes('mumbai') || cLower.includes('bandra') || cLower.includes('andheri') || cLower.includes('juhu') || cLower.includes('borivali')) {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Mumbai Suburban');
-                return { district: matched?.name || 'Mumbai Suburban', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Mumbai Suburban'));
             }
             if (cLower.includes('colaba') || cLower.includes('dadar') || cLower.includes('nariman')) {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Mumbai City');
-                return { district: matched?.name || 'Mumbai City', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Mumbai City'));
             }
             if (cLower.includes('pune')) {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Pune');
-                return { district: matched?.name || 'Pune', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Pune'));
             }
             if (cLower.includes('thane')) {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Thane');
-                return { district: matched?.name || 'Thane', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Thane'));
             }
             if (cLower.includes('bengaluru') || cLower.includes('bangalore')) {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Bengaluru Urban');
-                return { district: matched?.name || 'Bengaluru Urban', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Bengaluru Urban'));
             }
             if (cLower.includes('chennai') || cLower.includes('madras')) {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Chennai');
-                return { district: matched?.name || 'Chennai', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Chennai'));
             }
             if (cLower.includes('delhi')) {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Delhi');
-                return { district: matched?.name || 'Delhi', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Delhi'));
             }
+            // City was provided but did not match any known district -> do NOT guess from pincode if city is unknown/invalid
+            return buildResult(null);
         }
 
-        // 3. Indian Postal Pincode prefix match
-        if (pin.length >= 3) {
+        // 3. Valid 6-digit Indian Postal Pincode prefix match (only when city/district was not set to an unknown value)
+        if (/^\d{6}$/.test(pin)) {
             const prefix = pin.substring(0, 3);
             if (prefix === '500') {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Hyderabad');
-                return { district: matched?.name || 'Hyderabad', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Hyderabad'));
             }
             if (prefix === '506') {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Warangal');
-                return { district: matched?.name || 'Warangal', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Warangal'));
             }
             if (prefix === '505') {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Karimnagar');
-                return { district: matched?.name || 'Karimnagar', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Karimnagar'));
             }
             if (prefix === '503') {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Nizamabad');
-                return { district: matched?.name || 'Nizamabad', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Nizamabad'));
             }
             if (prefix === '504') {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Adilabad');
-                return { district: matched?.name || 'Adilabad', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Adilabad'));
+            }
+            if (prefix === '530') {
+                return buildResult(activeDistricts.find(d => d.name === 'Visakhapatnam'));
+            }
+            if (prefix === '520') {
+                return buildResult(activeDistricts.find(d => d.name === 'Vijayawada'));
+            }
+            if (prefix === '522') {
+                return buildResult(activeDistricts.find(d => d.name === 'Guntur'));
             }
             if (prefix === '400') {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Mumbai Suburban');
-                return { district: matched?.name || 'Mumbai Suburban', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Mumbai Suburban'));
             }
             if (prefix === '411') {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Pune');
-                return { district: matched?.name || 'Pune', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Pune'));
             }
             if (prefix === '560') {
-                const matched = _inMemoryDistricts.find(d => d.name === 'Bengaluru Urban');
-                return { district: matched?.name || 'Bengaluru Urban', districtId: matched?.id, status: 'IDENTIFIED' };
+                return buildResult(activeDistricts.find(d => d.name === 'Bengaluru Urban'));
+            }
+            if (prefix === '600') {
+                return buildResult(activeDistricts.find(d => d.name === 'Chennai'));
+            }
+            if (prefix === '110') {
+                return buildResult(activeDistricts.find(d => d.name === 'Delhi'));
             }
         }
 
-        // 4. District unidentifiable -> Requires admin review
-        return {
-            district: null,
-            districtId: null,
-            status: 'PENDING_ADMIN_REVIEW'
-        };
+        // 4. District unidentifiable -> Requires admin review (never exposed to Sub-Admins)
+        return buildResult(null);
+    },
+
+    /**
+     * Resolves a patient's district strictly from the patient's own location fields.
+     * NEVER uses doctor or clinic district as a substitute, and NEVER guesses missing districts.
+     */
+    resolvePatientDistrictStrict(patientOrRecord = {}) {
+        if (!patientOrRecord || typeof patientOrRecord !== 'object') {
+            return {
+                district: null,
+                districtName: null,
+                districtId: null,
+                state: null,
+                status: 'PENDING_ADMIN_REVIEW',
+                isVerified: false
+            };
+        }
+        return this.resolveDistrictFromLocation({
+            districtId: patientOrRecord.districtId || patientOrRecord.district_id || patientOrRecord.patientDistrictId || patientOrRecord.patient_district_id,
+            district: patientOrRecord.district || patientOrRecord.district_name || patientOrRecord.districtName || patientOrRecord.patientDistrict || patientOrRecord.patient_district,
+            city: patientOrRecord.city || patientOrRecord.patientCity || patientOrRecord.patient_city,
+            state: patientOrRecord.state || patientOrRecord.patientState || patientOrRecord.patient_state,
+            pincode: patientOrRecord.pincode || patientOrRecord.postal_code || patientOrRecord.patientPincode || patientOrRecord.patient_pincode,
+            device_token: patientOrRecord.device_token
+        });
     }
 };
 
@@ -842,24 +956,66 @@ const _inMemorySubAdminDistricts = [];
 const SubAdminDistrict = {
     async getDistrictsForSubAdmin(userId) {
         if (!userId) return [];
+        const cleanUserId = String(userId).trim();
         try {
             const { data, error } = await supabaseAdmin
                 .from('sub_admin_districts')
                 .select('district_id, districts(*)')
-                .eq('sub_admin_user_id', userId);
+                .eq('sub_admin_user_id', cleanUserId);
             if (!error && data && data.length > 0) {
-                return data.map(d => d.districts).filter(Boolean);
+                const dbDistricts = data.map(d => d.districts).filter(d => d && d.is_active !== false);
+                if (dbDistricts.length > 0) {
+                    return dbDistricts;
+                }
             }
         } catch (_) { }
 
         // In-memory fallback (resolves against synced _inMemoryDistricts and Supabase District.findById)
-        const mappings = _inMemorySubAdminDistricts.filter(m => m.sub_admin_user_id === userId);
+        const mappings = _inMemorySubAdminDistricts.filter(m => String(m.sub_admin_user_id) === cleanUserId);
         const resolved = [];
+        const seenIds = new Set();
         for (const m of mappings) {
             const dist = _inMemoryDistricts.find(d => d.id === m.district_id)
                 || await District.findById(m.district_id);
-            if (dist) resolved.push(dist);
+            if (dist && dist.is_active !== false && !seenIds.has(dist.id)) {
+                seenIds.add(dist.id);
+                resolved.push(dist);
+            }
         }
+        if (resolved.length > 0) {
+            return resolved;
+        }
+
+        // Device token metadata fallback on Sub-Admin user row
+        try {
+            const saUser = await User.findById(cleanUserId);
+            if (saUser && saUser.device_token && typeof saUser.device_token === 'string' && saUser.device_token.trim().startsWith('{')) {
+                const meta = JSON.parse(saUser.device_token);
+                const metaIds = Array.isArray(meta.districtIds)
+                    ? meta.districtIds
+                    : (Array.isArray(meta.assignedDistricts)
+                        ? meta.assignedDistricts.map(d => (d && typeof d === 'object') ? (d.id || d.district_id) : d)
+                        : []);
+                for (const rawId of metaIds) {
+                    const dId = String(rawId || '').trim();
+                    if (!dId) continue;
+                    const dist = _inMemoryDistricts.find(d => d.id === dId || d.name.toLowerCase() === dId.toLowerCase())
+                        || await District.findById(dId);
+                    if (dist && dist.is_active !== false && !seenIds.has(dist.id)) {
+                        seenIds.add(dist.id);
+                        resolved.push(dist);
+                        _inMemorySubAdminDistricts.push({
+                            id: `sad-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                            sub_admin_user_id: cleanUserId,
+                            district_id: dist.id,
+                            assigned_by: null,
+                            created_at: new Date().toISOString()
+                        });
+                    }
+                }
+            }
+        } catch (_) { }
+
         return resolved;
     },
 
@@ -886,14 +1042,31 @@ const SubAdminDistrict = {
 
     async assignDistrictsToSubAdmin(userId, districtIds = [], assignedBy = null) {
         if (!userId) return [];
-        // Deduplicate district IDs
-        const uniqueDistrictIds = [...new Set(districtIds.filter(Boolean))];
+        const cleanUserId = String(userId).trim();
+        // Resolve & deduplicate valid district IDs
+        const canonicalIds = [];
+        const seen = new Set();
+        for (const raw of (Array.isArray(districtIds) ? districtIds : [])) {
+            const token = (raw && typeof raw === 'object')
+                ? String(raw.id || raw.district_id || raw.name || '').trim()
+                : String(raw || '').trim();
+            if (!token) continue;
+            const matched = _inMemoryDistricts.find(d =>
+                String(d.id).toLowerCase() === token.toLowerCase() ||
+                String(d.name).toLowerCase() === token.toLowerCase()
+            ) || await District.findById(token);
+            const finalId = matched ? matched.id : token;
+            if (finalId && !seen.has(finalId)) {
+                seen.add(finalId);
+                canonicalIds.push(finalId);
+            }
+        }
 
         try {
-            await supabaseAdmin.from('sub_admin_districts').delete().eq('sub_admin_user_id', userId);
-            if (uniqueDistrictIds.length > 0) {
-                const rows = uniqueDistrictIds.map(dId => ({
-                    sub_admin_user_id: userId,
+            await supabaseAdmin.from('sub_admin_districts').delete().eq('sub_admin_user_id', cleanUserId);
+            if (canonicalIds.length > 0) {
+                const rows = canonicalIds.map(dId => ({
+                    sub_admin_user_id: cleanUserId,
                     district_id: dId,
                     assigned_by: assignedBy,
                     created_at: new Date().toISOString()
@@ -904,40 +1077,136 @@ const SubAdminDistrict = {
 
         // In-memory update
         for (let i = _inMemorySubAdminDistricts.length - 1; i >= 0; i--) {
-            if (_inMemorySubAdminDistricts[i].sub_admin_user_id === userId) {
+            if (String(_inMemorySubAdminDistricts[i].sub_admin_user_id) === cleanUserId) {
                 _inMemorySubAdminDistricts.splice(i, 1);
             }
         }
-        for (const dId of uniqueDistrictIds) {
+        for (const dId of canonicalIds) {
             _inMemorySubAdminDistricts.push({
                 id: `sad-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-                sub_admin_user_id: userId,
+                sub_admin_user_id: cleanUserId,
                 district_id: dId,
                 assigned_by: assignedBy,
                 created_at: new Date().toISOString()
             });
         }
 
-        return this.getDistrictsForSubAdmin(userId);
+        // Persist districtIds inside Sub-Admin user's device_token metadata for cloud/restart durability
+        try {
+            const saUser = await User.findById(cleanUserId);
+            if (saUser) {
+                let meta = {};
+                if (saUser.device_token && typeof saUser.device_token === 'string' && saUser.device_token.trim().startsWith('{')) {
+                    try {
+                        meta = JSON.parse(saUser.device_token);
+                    } catch (_) {
+                        meta = {};
+                    }
+                }
+                meta.districtIds = canonicalIds;
+                meta.districtsUpdatedAt = new Date().toISOString();
+                if (assignedBy) meta.districtsAssignedBy = assignedBy;
+                await User.findByIdAndUpdate(cleanUserId, {
+                    device_token: JSON.stringify(meta)
+                });
+            }
+        } catch (_) { }
+
+        return this.getDistrictsForSubAdmin(cleanUserId);
     },
 
     async removeDistrictFromSubAdmin(userId, districtId) {
         if (!userId || !districtId) return false;
+        const cleanUserId = String(userId).trim();
         try {
             await supabaseAdmin.from('sub_admin_districts')
                 .delete()
-                .eq('sub_admin_user_id', userId)
+                .eq('sub_admin_user_id', cleanUserId)
                 .eq('district_id', districtId);
         } catch (_) { }
 
-        const idx = _inMemorySubAdminDistricts.findIndex(
-            m => m.sub_admin_user_id === userId && m.district_id === districtId
-        );
-        if (idx !== -1) {
-            _inMemorySubAdminDistricts.splice(idx, 1);
-            return true;
+        let removed = false;
+        for (let i = _inMemorySubAdminDistricts.length - 1; i >= 0; i--) {
+            if (String(_inMemorySubAdminDistricts[i].sub_admin_user_id) === cleanUserId &&
+                String(_inMemorySubAdminDistricts[i].district_id) === String(districtId)) {
+                _inMemorySubAdminDistricts.splice(i, 1);
+                removed = true;
+            }
         }
-        return false;
+
+        try {
+            const saUser = await User.findById(cleanUserId);
+            if (saUser && saUser.device_token && typeof saUser.device_token === 'string' && saUser.device_token.trim().startsWith('{')) {
+                const meta = JSON.parse(saUser.device_token);
+                if (Array.isArray(meta.districtIds)) {
+                    const beforeLen = meta.districtIds.length;
+                    meta.districtIds = meta.districtIds.filter(id => String(id) !== String(districtId));
+                    if (meta.districtIds.length !== beforeLen) removed = true;
+                    await User.findByIdAndUpdate(cleanUserId, {
+                        device_token: JSON.stringify(meta)
+                    });
+                }
+            }
+        } catch (_) { }
+
+        return removed;
+    },
+
+    /**
+     * Strictly evaluates whether a Sub-Admin with [assignedDistrictsOrIds] can access [patientOrLocation].
+     * - Returns false if the Sub-Admin has no assigned districts.
+     * - Returns false if the patient's district is missing, invalid, or unverified.
+     * - Matches strictly by canonical districtId.
+     */
+    canSubAdminAccessPatientSync(assignedDistrictsOrIds, patientOrLocation) {
+        const list = Array.isArray(assignedDistrictsOrIds)
+            ? assignedDistrictsOrIds
+            : (assignedDistrictsOrIds instanceof Set ? Array.from(assignedDistrictsOrIds) : []);
+        const allowedIds = new Set();
+        for (const d of list) {
+            const rawId = (d && typeof d === 'object') ? (d.id || d.district_id || d.legacy_id) : d;
+            const rawName = (d && typeof d === 'object') ? (d.name || d.district_name) : null;
+            if (rawId) {
+                allowedIds.add(String(rawId).trim().toLowerCase());
+                const canonical = District.resolveDistrictFromLocation({ districtId: rawId, district: rawName });
+                if (canonical && canonical.districtId && canonical.isVerified) {
+                    allowedIds.add(String(canonical.districtId).trim().toLowerCase());
+                }
+            } else if (rawName) {
+                const canonical = District.resolveDistrictFromLocation({ district: rawName });
+                if (canonical && canonical.districtId && canonical.isVerified) {
+                    allowedIds.add(String(canonical.districtId).trim().toLowerCase());
+                }
+            }
+        }
+        const resolved = District.resolvePatientDistrictStrict(patientOrLocation);
+        if (allowedIds.size === 0) {
+            return {
+                allowed: false,
+                reason: 'NO_ASSIGNED_DISTRICTS',
+                patientDistrict: resolved
+            };
+        }
+        if (!resolved || !resolved.districtId || !resolved.isVerified) {
+            return {
+                allowed: false,
+                reason: 'PATIENT_DISTRICT_UNVERIFIED',
+                patientDistrict: resolved
+            };
+        }
+        const targetId = String(resolved.districtId).trim().toLowerCase();
+        if (!allowedIds.has(targetId)) {
+            return {
+                allowed: false,
+                reason: 'OUTSIDE_ASSIGNED_DISTRICT',
+                patientDistrict: resolved
+            };
+        }
+        return {
+            allowed: true,
+            reason: 'AUTHORIZED',
+            patientDistrict: resolved
+        };
     }
 };
 
@@ -1964,7 +2233,7 @@ const Dentist = {
     async findOne(query) {
         if (!query) return null;
         try {
-            let req = supabaseAdmin.from('dentists').select('*');
+            let req = supabaseAdmin.from('dentists').select('*, users(id, name, email, phone, state, city, pincode, latitude, longitude, device_token, biometric_token), clinics(id, clinic_name, location, latitude, longitude)');
             if (query.$or && Array.isArray(query.$or)) {
                 const conds = [];
                 for (const item of query.$or) {
@@ -1986,9 +2255,32 @@ const Dentist = {
                     }
                 }
             }
-            const { data, error } = await req.maybeSingle();
+            let { data, error } = await req.maybeSingle();
             if (error) {
-                return null;
+                let simpleReq = supabaseAdmin.from('dentists').select('*');
+                if (query.$or && Array.isArray(query.$or)) {
+                    const conds = [];
+                    for (const item of query.$or) {
+                        if (item.user_id && isUUID(item.user_id)) conds.push(`user_id.eq.${item.user_id}`);
+                        if (item.id && isUUID(item.id)) conds.push(`id.eq.${item.id}`);
+                        if (item._id && isUUID(item._id)) conds.push(`id.eq.${item._id}`);
+                    }
+                    if (conds.length > 0) simpleReq = simpleReq.or(conds.join(','));
+                } else {
+                    for (const [key, val] of Object.entries(query)) {
+                        if (key === '_id' || key === 'id') {
+                            if (isUUID(val)) simpleReq = simpleReq.eq('id', val);
+                        } else if (val !== undefined && val !== null) {
+                            simpleReq = simpleReq.eq(key, val);
+                        }
+                    }
+                }
+                const simple = await simpleReq.maybeSingle();
+                data = simple.data || null;
+                if (data && data.user_id && !data.users) {
+                    const u = await User.findById(data.user_id).catch(() => null);
+                    if (u) data.users = u;
+                }
             }
             return _hydrateDentistConsultationModes(data);
         } catch (_) {
@@ -1998,7 +2290,7 @@ const Dentist = {
 
     async find(query = {}) {
         try {
-            let req = supabaseAdmin.from('dentists').select('*, users(name, email, phone, state, city, pincode, latitude, longitude, device_token, biometric_token), clinics(clinic_name, location, latitude, longitude)');
+            let req = supabaseAdmin.from('dentists').select('*, users(id, name, email, phone, state, city, pincode, latitude, longitude, device_token, biometric_token), clinics(id, clinic_name, location, latitude, longitude)');
             // Apply direct dentists table filters
             if (query.state) {
                 req = req.ilike('state', `%${query.state}%`);
@@ -2021,8 +2313,16 @@ const Dentist = {
             let list = [];
             if (error) {
                 console.warn('⚠️ Dentist query join failed, falling back to simple select:', error.message);
-                const simple = await supabaseAdmin.from('dentists').select('*');
+                let simpleReq = supabaseAdmin.from('dentists').select('*');
+                if (query.clinic_id) simpleReq = simpleReq.eq('clinic_id', query.clinic_id);
+                const simple = await simpleReq;
                 list = simple.data || [];
+                const missingUserIds = list.filter(d => d.user_id && !d.users).map(d => d.user_id);
+                if (missingUserIds.length > 0) {
+                    const matchedUsers = await User.find({ role: { $in: ['DOCTOR', 'Doctor', 'Dentist'] } }).catch(() => []);
+                    const userById = new Map((matchedUsers || []).map(u => [String(u.id), u]));
+                    list = list.map(d => (d.user_id && !d.users && userById.has(String(d.user_id))) ? { ...d, users: userById.get(String(d.user_id)) } : d);
+                }
             } else {
                 list = data || [];
             }
@@ -2254,13 +2554,18 @@ const Dentist = {
         payload.updated_at = new Date().toISOString();
 
         try {
+            const dentistJoinSelect = '*, users(id, name, email, phone, state, city, pincode, latitude, longitude, device_token, biometric_token), clinics(id, clinic_name, location, latitude, longitude)';
             const { data, error } = await supabaseAdmin
                 .from('dentists')
                 .update(payload)
                 .or(`id.eq.${str},user_id.eq.${str}`)
-                .select()
+                .select(dentistJoinSelect)
                 .maybeSingle();
             if (!error && data) {
+                if (!data.users && data.user_id) {
+                    const u = await User.findById(data.user_id).catch(() => null);
+                    if (u) data.users = u;
+                }
                 _recordInMemoryDoctorConsultationModes([data.id, data.user_id, str], explicitOnline, explicitInPerson);
                 return _hydrateDentistConsultationModes(data);
             }
@@ -2271,7 +2576,8 @@ const Dentist = {
                     errMsg.includes('clinic_address') ||
                     errMsg.includes('online_consultation_enabled') ||
                     errMsg.includes('in_person_consultation_enabled') ||
-                    errMsg.includes('column')
+                    errMsg.includes('column') ||
+                    errMsg.includes('relationship')
                 ) {
                     const fallbackPayload = { ...payload };
                     delete fallbackPayload.clinic_name;
@@ -2285,6 +2591,10 @@ const Dentist = {
                         .select()
                         .maybeSingle();
                     if (!retry.error && retry.data) {
+                        if (!retry.data.users && retry.data.user_id) {
+                            const u = await User.findById(retry.data.user_id).catch(() => null);
+                            if (u) retry.data.users = u;
+                        }
                         _recordInMemoryDoctorConsultationModes([retry.data.id, retry.data.user_id, str], explicitOnline, explicitInPerson);
                         return _hydrateDentistConsultationModes(retry.data);
                     }
@@ -4798,6 +5108,16 @@ const DoctorSchedulingSettings = {
         const targetDentistId = dentistTableId || (isUUID(canonicalId) ? canonicalId : null);
         if (targetDentistId && isUUID(targetDentistId)) {
             try {
+                const blockedRangesWithMeta = {
+                    ...(nextSchedule.blockedTimeRanges || {}),
+                    _scheduleMeta: {
+                        useSeparateOnlineHours: Boolean(nextSchedule.useSeparateOnlineHours),
+                        onlineBreaks: nextSchedule.onlineBreaks,
+                        onlineHasBreak: Boolean(nextSchedule.onlineHasBreak),
+                        onlineBreakStartTime: nextSchedule.onlineBreakStartTime || null,
+                        onlineBreakEndTime: nextSchedule.onlineBreakEndTime || null,
+                    },
+                };
                 const dbPayload = {
                     dentist_id: targetDentistId,
                     working_days: nextSchedule.workingDays,
@@ -4817,7 +5137,7 @@ const DoctorSchedulingSettings = {
                     in_person_buffer_minutes: nextSchedule.inPersonBufferMinutes,
                     max_appointments_per_day: nextSchedule.maxAppointmentsPerDay,
                     allow_simultaneous_online_and_in_person: nextSchedule.allowSimultaneousOnlineAndInPerson,
-                    blocked_time_ranges: nextSchedule.blockedTimeRanges || {},
+                    blocked_time_ranges: blockedRangesWithMeta,
                     updated_at: new Date().toISOString(),
                 };
                 const { data, error } = await supabaseAdmin

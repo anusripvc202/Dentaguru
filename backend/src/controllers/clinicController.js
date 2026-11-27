@@ -91,11 +91,68 @@ function isPrivilegedDoctorViewer(req, targetDoctor = null) {
     return false;
 }
 
+function combineNameParts(obj = {}) {
+    if (!obj || typeof obj !== 'object') return '';
+    const first = String(obj.first_name ?? obj.firstName ?? '').trim();
+    const middle = String(obj.middle_name ?? obj.middleName ?? '').trim();
+    const last = String(obj.last_name ?? obj.lastName ?? '').trim();
+    return [first, middle, last].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeDoctorDisplayName(raw) {
+    const cleaned = String(raw || '').replace(/\s+/g, ' ').trim();
+    if (!cleaned) return 'Doctor';
+    const withoutPrefix = cleaned.replace(/^(dr\.?\s+)+/i, '').trim();
+    if (!withoutPrefix) return 'Doctor';
+    if (withoutPrefix.toLowerCase() === 'doctor') return 'Doctor';
+    return `Dr. ${withoutPrefix}`;
+}
+
+function resolveDoctorFullName(d = {}, uObjInput = null) {
+    const uObj = uObjInput || (Array.isArray(d.users) ? (d.users[0] || {}) : (d.users || d.user || {}));
+    const uMeta = parseUserDeviceMeta(uObj.device_token);
+    const isGeneric = (v) => {
+        const s = String(v || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        return !s || s === 'doctor' || s === 'dr.' || s === 'dr. doctor' || s === 'dentist' || s === 'dr. dentist' || s === 'specialist';
+    };
+
+    const candidates = [
+        d.full_name,
+        d.fullName,
+        d.doctor_name,
+        d.doctorName,
+        d.dentist_name,
+        combineNameParts(d),
+        d.name,
+        uObj.full_name,
+        uObj.fullName,
+        combineNameParts(uObj),
+        uObj.name,
+        uMeta.fullName,
+        uMeta.full_name,
+        combineNameParts(uMeta),
+        uMeta.name
+    ];
+
+    let best = '';
+    for (const c of candidates) {
+        const trimmed = String(c || '').replace(/\s+/g, ' ').trim();
+        if (!trimmed) continue;
+        if (!isGeneric(trimmed)) {
+            // Prefer the most complete (longest) non-generic full name if a candidate has more words than a partial one
+            if (!best || trimmed.split(' ').length > best.split(' ').length) {
+                best = trimmed;
+            }
+        }
+    }
+
+    return normalizeDoctorDisplayName(best || 'Doctor');
+}
+
 function formatDentistRecord(d) {
-    const uObj = d.users || {};
-    const cObj = d.clinics || {};
-    const name = d.name || uObj.name || 'Doctor';
-    const formattedName = name.startsWith('Dr.') ? name : `Dr. ${name}`;
+    const uObj = Array.isArray(d.users) ? (d.users[0] || {}) : (d.users || d.user || {});
+    const cObj = Array.isArray(d.clinics) ? (d.clinics[0] || {}) : (d.clinics || d.clinic || {});
+    const formattedName = resolveDoctorFullName(d, uObj);
 
     const doctorLangs = extractDoctorLanguages(d);
 
@@ -137,6 +194,8 @@ function formatDentistRecord(d) {
         clinic_id: d.clinic_id || cObj.id || null,
         clinicId: d.clinic_id || cObj.id || null,
         name: formattedName,
+        fullName: formattedName,
+        full_name: formattedName,
         email: d.email || uObj.email || '',
         phone: d.phone || uObj.phone || '',
         speciality: resolvedSpec,
@@ -555,6 +614,28 @@ exports.getClinicDentists = async (req, res) => {
                     });
                     seenIds.add(uid);
                     seenUserIds.add(uid);
+                }
+            }
+        }
+
+        // Ensure every clinic dentist record has hydrated user full name (never drops to 'Doctor')
+        const missingNameUserIds = new Set();
+        for (const d of rawDentists) {
+            const uObj = Array.isArray(d.users) ? (d.users[0] || {}) : (d.users || {});
+            if (!d.name && !uObj.name && d.user_id) {
+                missingNameUserIds.add(String(d.user_id));
+            }
+        }
+        if (missingNameUserIds.size > 0) {
+            const fallbackUsers = await User.find({ role: { $in: ['DOCTOR', 'Doctor', 'Dentist'] } }).catch(() => []);
+            const userMap = new Map((fallbackUsers || []).map(u => [String(u.id), u]));
+            for (const d of rawDentists) {
+                const uid = String(d.user_id || '');
+                if (uid && userMap.has(uid)) {
+                    const uObj = Array.isArray(d.users) ? (d.users[0] || {}) : (d.users || {});
+                    if (!uObj.name) {
+                        d.users = { ...uObj, ...userMap.get(uid) };
+                    }
                 }
             }
         }
@@ -1590,6 +1671,14 @@ exports.addClinicDoctor = async (req, res) => {
     const { clinicId } = req.params;
     const {
         name,
+        fullName,
+        full_name,
+        firstName,
+        first_name,
+        middleName,
+        middle_name,
+        lastName,
+        last_name,
         phone,
         email,
         specialty,
@@ -1619,7 +1708,18 @@ exports.addClinicDoctor = async (req, res) => {
         preventDuplicateAccount
     } = req.body;
     try {
-        const cleanName = String(name || '').trim();
+        const combinedPartsName = combineNameParts({
+            firstName,
+            first_name,
+            middleName,
+            middle_name,
+            lastName,
+            last_name
+        });
+        const rawCandidateName = String(fullName || full_name || name || combinedPartsName || '').replace(/\s+/g, ' ').trim();
+        const cleanName = (combinedPartsName && combinedPartsName.split(' ').length > rawCandidateName.split(' ').length)
+            ? combinedPartsName
+            : rawCandidateName;
         const rawPhone = String(phone || '').trim();
         const phoneDigits = rawPhone.replace(/[^0-9]/g, '');
         const cleanPhone = phoneDigits.length === 12 && phoneDigits.startsWith('91')
@@ -1742,8 +1842,9 @@ exports.addClinicDoctor = async (req, res) => {
                 ? cleanEmailInput
                 : `user_${cleanPhone}@dentaguru.internal`;
             const effectivePassword = `OTP_SECURE_${require('crypto').randomBytes(12).toString('hex')}`;
-            const formattedDocName = cleanName.startsWith('Dr.') ? cleanName : `Dr. ${cleanName}`;
+            const formattedDocName = normalizeDoctorDisplayName(cleanName);
             const metaObj = {
+                fullName: formattedDocName,
                 city: effectiveCity,
                 state: effectiveState,
                 pincode: effectivePincode,
@@ -1840,14 +1941,28 @@ exports.addClinicDoctor = async (req, res) => {
             type: 'doctor_registered'
         }).catch(() => null);
 
-        const refreshedDoctor = (dentistRec?.id ? await Dentist.findById(dentistRec.id).catch(() => null) : null) || {
-            ...dentistRec,
-            users: user,
-            clinics: targetClinic || {}
+        const fetchedAfterSave = dentistRec?.id ? await Dentist.findById(dentistRec.id).catch(() => null) : null;
+        const fetchedUserObj = fetchedAfterSave
+            ? (Array.isArray(fetchedAfterSave.users) ? (fetchedAfterSave.users[0] || {}) : (fetchedAfterSave.users || {}))
+            : {};
+        const refreshedDoctor = {
+            ...(dentistRec || {}),
+            ...(fetchedAfterSave || {}),
+            name: fetchedUserObj.name || user?.name || normalizeDoctorDisplayName(cleanName),
+            users: fetchedUserObj.name ? fetchedAfterSave.users : user,
+            clinics: (fetchedAfterSave && fetchedAfterSave.clinics && Object.keys(fetchedAfterSave.clinics).length > 0)
+                ? fetchedAfterSave.clinics
+                : (targetClinic || {})
         };
         const formatted = formatDentistRecord(refreshedDoctor);
         const allClinicDoctors = canonicalClinicId
-            ? (await Dentist.find({ clinic_id: canonicalClinicId }).catch(() => [])).map(formatDentistRecord)
+            ? (await Dentist.find({ clinic_id: canonicalClinicId }).catch(() => [])).map((d) => {
+                const du = Array.isArray(d.users) ? (d.users[0] || {}) : (d.users || {});
+                if (!du.name && String(d.user_id || '') === String(user?.id || '')) {
+                    return formatDentistRecord({ ...d, users: user, clinics: d.clinics || targetClinic || {} });
+                }
+                return formatDentistRecord(d);
+            })
             : [formatted];
 
         res.status(201).json({
@@ -1964,7 +2079,20 @@ exports.associateClinicDoctor = async (req, res) => {
                 ...(resolvedClinic?.clinic_name ? { clinic_name: resolvedClinic.clinic_name } : {}),
             });
             existingAssocIds.add(canonicalDocId);
-            associatedDoctors.push(formatDentistRecord(updated || { ...targetDoctor, clinic_id: resolvedClinicId }));
+            const updatedUserObj = updated
+                ? (Array.isArray(updated.users) ? (updated.users[0] || {}) : (updated.users || {}))
+                : {};
+            const hydratedAssocRecord = {
+                ...targetDoctor,
+                ...(updated || {}),
+                clinic_id: resolvedClinicId,
+                ...(resolvedClinic?.clinic_name ? { clinic_name: resolvedClinic.clinic_name } : {}),
+                users: updatedUserObj.name ? updated.users : (targetDoctor.users || {}),
+                clinics: (updated?.clinics && Object.keys(updated.clinics).length > 0)
+                    ? updated.clinics
+                    : (resolvedClinic || targetDoctor.clinics || {}),
+            };
+            associatedDoctors.push(formatDentistRecord(hydratedAssocRecord));
         }
 
         if (associatedDoctors.length === 0 && alreadyAssociated.length > 0 && notFound.length === 0) {
@@ -2055,4 +2183,7 @@ exports.deleteClinic = async (req, res) => {
         res.status(500).json({ success: false, message: 'Failed to delete clinic.' });
     }
 };
+
+exports._resolveDoctorFullName = resolveDoctorFullName;
+exports._formatDentistRecord = formatDentistRecord;
 

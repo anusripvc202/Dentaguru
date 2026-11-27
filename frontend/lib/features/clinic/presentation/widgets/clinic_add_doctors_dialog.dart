@@ -225,6 +225,13 @@ class _ClinicAddDoctorsDialogState extends State<ClinicAddDoctorsDialog> {
     setState(() => _isSubmitting = false);
 
     if (res['success'] == true) {
+      for (final docId in idsToAssociate) {
+        PatientProblemService().assignDoctorToClinic(
+          doctorId: docId,
+          clinicId: widget.clinicId,
+          clinicName: widget.clinicName,
+        );
+      }
       widget.onDoctorsAssociated?.call();
       Navigator.of(context).pop(true);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -442,7 +449,13 @@ class _ClinicAddDoctorsDialogState extends State<ClinicAddDoctorsDialog> {
           : <String, dynamic>{};
       final newDocId = (docMap['id'] ?? 'doc_${DateTime.now().millisecondsSinceEpoch}').toString();
       final newUserId = (docMap['userId'] ?? docMap['user_id'] ?? newDocId).toString();
-      final displayDocName = (docMap['name'] ?? docName).toString();
+      final resolvedDocName = DoctorModel.resolveFullName(
+        docMap,
+        fallback: docName,
+      );
+      final displayDocName = resolvedDocName.isNotEmpty
+          ? resolvedDocName
+          : DoctorModel.formatDoctorDisplayName(docName);
 
       PatientProblemService().registerDoctor(
         id: newDocId,
@@ -891,6 +904,7 @@ class _ClinicAddDoctorsDialogState extends State<ClinicAddDoctorsDialog> {
                           ),
                         ),
                         child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Checkbox(
                               value: alreadyAssoc ? true : isSelected,
@@ -922,43 +936,51 @@ class _ClinicAddDoctorsDialogState extends State<ClinicAddDoctorsDialog> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    doc.name,
-                                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  Text(
-                                    '${doc.specialty} • ID: ${doc.id}',
-                                    style: const TextStyle(fontSize: 11.5, color: AppTheme.textMedium),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  if (doc.phone.trim().isNotEmpty)
-                                    Text(
-                                      'Mobile: ${doc.phone}',
-                                      style: const TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
+                                    doc.displayFullName,
+                                    key: Key('clinic_add_doctor_name_${doc.id}'),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 14,
+                                      height: 1.25,
                                     ),
+                                    softWrap: true,
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Wrap(
+                                    spacing: 6,
+                                    runSpacing: 4,
+                                    crossAxisAlignment: WrapCrossAlignment.center,
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                                        decoration: BoxDecoration(
+                                          color: alreadyAssoc
+                                              ? const Color(0xFF059669).withValues(alpha: 0.12)
+                                              : const Color(0xFF64748B).withValues(alpha: 0.1),
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
+                                        child: Text(
+                                          alreadyAssoc ? 'Associated' : 'Available',
+                                          style: TextStyle(
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.w700,
+                                            color: alreadyAssoc ? const Color(0xFF059669) : const Color(0xFF475569),
+                                          ),
+                                        ),
+                                      ),
+                                      Text(
+                                        doc.specialty,
+                                        style: const TextStyle(fontSize: 11.5, color: AppTheme.textMedium),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'ID: ${doc.id}${doc.phone.trim().isNotEmpty ? ' • Mobile: ${doc.phone}' : ''}',
+                                    style: const TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
+                                    softWrap: true,
+                                  ),
                                 ],
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: alreadyAssoc
-                                    ? const Color(0xFF059669).withValues(alpha: 0.12)
-                                    : const Color(0xFF64748B).withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Text(
-                                alreadyAssoc ? 'Associated' : 'Available',
-                                style: TextStyle(
-                                  fontSize: 10.5,
-                                  fontWeight: FontWeight.w700,
-                                  color: alreadyAssoc ? const Color(0xFF059669) : const Color(0xFF475569),
-                                ),
                               ),
                             ),
                           ],
@@ -969,20 +991,22 @@ class _ClinicAddDoctorsDialogState extends State<ClinicAddDoctorsDialog> {
                 ),
         ),
         const SizedBox(height: 12),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
+        Wrap(
+          alignment: WrapAlignment.end,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 10,
+          runSpacing: 8,
           children: [
             TextButton(
               onPressed: _isSubmitting ? null : () => Navigator.of(context).pop(false),
               child: const Text('Cancel'),
             ),
-            const SizedBox(width: 10),
             ElevatedButton.icon(
               key: const Key('clinic_add_doctors_confirm_btn'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.gsNavy,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
               onPressed: (_selectedDoctorIds.isEmpty || _isSubmitting) ? null : _submitAssociation,
@@ -1155,14 +1179,14 @@ class _ClinicAddDoctorsDialogState extends State<ClinicAddDoctorsDialog> {
                         controller: _docNameController,
                         textCapitalization: TextCapitalization.words,
                         decoration: InputDecoration(
-                          labelText: 'Doctor Name *',
-                          hintText: 'e.g. Dr. Riya Sharma',
+                          labelText: 'Doctor Full Name *',
+                          hintText: 'e.g. Dr. Riya Kumar Sharma',
                           prefixIcon: const Icon(Icons.person_outline_rounded, size: 18),
                           isDense: true,
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                         ),
                         validator: (val) =>
-                            (val == null || val.trim().isEmpty) ? 'Please enter doctor name' : null,
+                            (val == null || val.trim().isEmpty) ? 'Please enter doctor full name' : null,
                       );
 
                       final phoneField = TextFormField(

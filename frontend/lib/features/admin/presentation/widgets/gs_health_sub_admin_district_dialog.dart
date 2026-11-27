@@ -33,6 +33,7 @@ class GsHealthSubAdminDistrictDialog extends StatefulWidget {
 
 class _GsHealthSubAdminDistrictDialogState extends State<GsHealthSubAdminDistrictDialog> {
   final Set<String> _selectedDistrictIds = {};
+  String _selectedState = 'All States';
   String _searchQuery = '';
   bool _isSaving = false;
 
@@ -54,13 +55,26 @@ class _GsHealthSubAdminDistrictDialogState extends State<GsHealthSubAdminDistric
 
   @override
   Widget build(BuildContext context) {
-    final subAdminName = (widget.subAdmin['name'] ?? 'Sub-Admin').toString();
+    final subAdminName = (widget.subAdmin['name'] ?? 'Coordinator').toString();
     final allDistricts = widget.problemService.districts;
+    final availableStates = <String>{
+      for (final d in allDistricts)
+        if ((d['state'] ?? '').toString().trim().isNotEmpty)
+          (d['state'] ?? '').toString().trim(),
+    }.toList()
+      ..sort();
+    final stateOptions = <String>['All States', ...availableStates];
+    final effectiveState = stateOptions.contains(_selectedState) ? _selectedState : 'All States';
 
     final filteredDistricts = allDistricts.where((d) {
       final name = (d['name'] ?? '').toString().toLowerCase();
-      final state = (d['state'] ?? '').toString().toLowerCase();
+      final stateRaw = (d['state'] ?? '').toString().trim();
+      final state = stateRaw.toLowerCase();
       final code = (d['code'] ?? '').toString().toLowerCase();
+      if (effectiveState != 'All States' &&
+          stateRaw.toLowerCase() != effectiveState.toLowerCase()) {
+        return false;
+      }
       final q = _searchQuery.trim().toLowerCase();
       return q.isEmpty || name.contains(q) || state.contains(q) || code.contains(q);
     }).toList();
@@ -86,12 +100,12 @@ class _GsHealthSubAdminDistrictDialogState extends State<GsHealthSubAdminDistric
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Assign Districts',
+                  'Assigned District',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16.5, color: Color(0xFF0F172A)),
                   overflow: TextOverflow.ellipsis,
                 ),
                 Text(
-                  'Jurisdiction for $subAdminName',
+                  'Jurisdiction for Coordinator $subAdminName',
                   style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -103,15 +117,52 @@ class _GsHealthSubAdminDistrictDialogState extends State<GsHealthSubAdminDistric
       content: Container(
         width: double.maxFinite,
         constraints: const BoxConstraints(maxWidth: 480),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
             const Text(
-              'Select one or multiple districts. Sub-Admin will have access strictly restricted to patient inquiries and clinics in these verified territories.',
+              'Select State and one or multiple Districts. Coordinator access will be strictly restricted to verified patients belonging to these assigned districts.',
               style: TextStyle(fontSize: 12, color: Color(0xFF475569), height: 1.4),
             ),
             const SizedBox(height: 12),
+
+            // State Filter Dropdown
+            DropdownButtonFormField<String>(
+              key: const Key('sub_admin_district_dialog_state_dropdown'),
+              initialValue: effectiveState,
+              isExpanded: true,
+              dropdownColor: Colors.white,
+              decoration: InputDecoration(
+                labelText: 'Filter by State',
+                labelStyle: const TextStyle(fontSize: 12, color: Color(0xFF012A58), fontWeight: FontWeight.w600),
+                prefixIcon: const Icon(Icons.map_outlined, size: 18, color: Color(0xFF012A58)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                filled: true,
+                fillColor: const Color(0xFFF8FAFC),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+              ),
+              items: stateOptions
+                  .map(
+                    (st) => DropdownMenuItem<String>(
+                      value: st,
+                      child: Text(
+                        st,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
+                      ),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (val) {
+                if (val != null) {
+                  setState(() => _selectedState = val);
+                }
+              },
+            ),
+            const SizedBox(height: 10),
 
             // Search Bar
             TextField(
@@ -210,7 +261,8 @@ class _GsHealthSubAdminDistrictDialogState extends State<GsHealthSubAdminDistric
                       ),
                     ),
             ),
-          ],
+            ],
+          ),
         ),
       ),
       actions: [

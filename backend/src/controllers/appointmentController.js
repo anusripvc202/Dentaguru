@@ -1,5 +1,6 @@
 const { supabaseAdmin } = require('../config/supabase');
 const { isCloudEnv } = require('../config/secrets');
+const { resolveCallerAccessContext } = require('../middleware/auth');
 const {
     Appointment,
     AppointmentSlotLock,
@@ -866,18 +867,58 @@ exports.getAppointments = async (req, res) => {
             query.clinic_dentist_ids = resolvedClinic.doctorIds;
         }
 
-        const isAdmin = req.user && (callerRoleLower === 'admin' || callerRoleLower === 'sub-admin' || callerRoleLower === 'subadmin' || callerRoleLower === 'superadmin' || callerRoleLower === 'primaryadmin');
+        const callerCtx = await resolveCallerAccessContext(req);
+        const isAdmin = callerCtx.isMainAdmin || callerCtx.isSubAdmin || (req.user && (callerRoleLower === 'admin' || callerRoleLower === 'sub-admin' || callerRoleLower === 'subadmin' || callerRoleLower === 'superadmin' || callerRoleLower === 'primaryadmin'));
         if (!isAdmin && !patientId && !dentistId && !clinicId && !req.user) {
             return res.json({ success: true, count: 0, appointments: [] });
         }
 
+        // If Sub-Admin explicitly queries ?patientId= for a patient outside their assigned district, reject with 403
+        if (callerCtx.isSubAdmin && patientId) {
+            const targetPatient = await User.findById(patientId).catch(() => null);
+            if (!targetPatient) {
+                return res.status(404).json({ success: false, message: 'Patient record not found.' });
+            }
+            const check = SubAdminDistrict.canSubAdminAccessPatientSync(callerCtx.assignedDistricts, targetPatient);
+            if (!check.allowed) {
+                return res.status(403).json({
+                    success: false,
+                    code: 'DISTRICT_ACCESS_DENIED',
+                    message: 'Access Denied: You cannot view appointments for patients outside your assigned district.'
+                });
+            }
+        }
+
         const rawList = await Appointment.find(query);
-        // Deduplicate appointment records by primary id so clients never receive duplicate visits
+        let subAdminPatientMap = null;
+        if (callerCtx.isSubAdmin) {
+            const allPatients = await User.find({ role: 'Patient' }).catch(() => []);
+            subAdminPatientMap = new Map();
+            for (const p of (allPatients || [])) {
+                if (p?.id) subAdminPatientMap.set(String(p.id).trim(), p);
+                if (p?.email) subAdminPatientMap.set(String(p.email).trim().toLowerCase(), p);
+            }
+        }
+
+        // Deduplicate appointment records by primary id (and enforce strict Sub-Admin patient district scoping)
         const seenAppointmentIds = new Set();
         const uniqueRawList = [];
         for (const row of (rawList || [])) {
             const key = row && row.id != null ? String(row.id).trim() : '';
             if (key && seenAppointmentIds.has(key)) continue;
+            if (callerCtx.isSubAdmin) {
+                const pObj = (row.patient && typeof row.patient === 'object' && Object.keys(row.patient).length > 0)
+                    ? row.patient
+                    : (subAdminPatientMap?.get(String(row.patient_id || '').trim()) || subAdminPatientMap?.get(String(row.patient_id || '').trim().toLowerCase()) || null);
+                const locPayload = pObj || {
+                    city: row.patient_city || '',
+                    pincode: row.patient_pincode || '',
+                    state: row.patient_state || ''
+                };
+                if (!SubAdminDistrict.canSubAdminAccessPatientSync(callerCtx.assignedDistricts, locPayload).allowed) {
+                    continue;
+                }
+            }
             if (key) seenAppointmentIds.add(key);
             uniqueRawList.push(row);
         }
@@ -1951,9 +1992,12 @@ exports.submitPatientDelayResponse = async (req, res) => {
 exports.getLiveSchedulingStatus = async (req, res) => {
     try {
         const rules = getBookingRulesConfig();
-        const now = new Date();
+        const now = req.query.now ? new Date(req.query.now) : new Date();
         const nowParts = getNowPartsInTimezone(now, rules.timezone);
-        const filterDate = req.query.date ? DoctorAvailability.extractDateYmd(req.query.date) : null;
+        const targetDateYmd = req.query.date
+            ? DoctorAvailability.extractDateYmd(req.query.date)
+            : nowParts.ymd;
+        const isTargetToday = targetDateYmd === nowParts.ymd;
 
         const [allDoctors, rawAppts] = await Promise.all([
             Dentist.find({}).catch(() => []),
@@ -1977,46 +2021,175 @@ exports.getLiveSchedulingStatus = async (req, res) => {
                 requestedAt: a.reschedule_request.requestedAt || null,
             }));
 
+        const isEligibleConfirmedOrActiveStatus = (rawStatus, actualEndAt) => {
+            if (actualEndAt && String(actualEndAt).trim()) return false;
+            const st = String(rawStatus || '').trim().toUpperCase();
+            if ([
+                'COMPLETED',
+                'CANCELLED',
+                'CANCELED',
+                'REJECTED',
+                'DECLINED',
+                'NO_SHOW',
+                'NOSHOW',
+                'NO-SHOW',
+                'PENDING',
+                'PENDING_ADMIN_REVIEW',
+                'PENDING ADMIN REVIEW',
+                'SUBMITTED',
+                'ADMIN REVIEW',
+                'UNCONFIRMED',
+                'EXPIRED',
+            ].includes(st)) {
+                return false;
+            }
+            return [
+                'CONFIRMED',
+                'ACCEPTED',
+                'DENTIST_ACCEPTED',
+                'APPROVED',
+                'SCHEDULED',
+                'DOCTOR_ASSIGNED',
+                'IN_PROGRESS',
+                'IN PROGRESS',
+                'STARTED',
+                'DELAYED',
+                'RESCHEDULED',
+            ].includes(st);
+        };
+
+        const isEligibleUpcomingNextStatus = (rawStatus, actualEndAt) => {
+            if (!isEligibleConfirmedOrActiveStatus(rawStatus, actualEndAt)) return false;
+            const st = String(rawStatus || '').trim().toUpperCase();
+            return st !== 'IN_PROGRESS' && st !== 'IN PROGRESS' && st !== 'STARTED';
+        };
+
+        const patientIdentityKey = (a) => {
+            const pid = String(a.patient_id || a.patient?.id || '').trim().toLowerCase();
+            const pname = String(a.patient_name || a.patient?.name || '').trim().toLowerCase();
+            const pphone = String(a.patient_phone || a.patient?.phone || '').replace(/\D/g, '');
+            return pid || `${pname}|${pphone}`;
+        };
+
         const doctorsSummary = (allDoctors || []).map(doc => {
-            const docAppts = enrichedAppts.filter(a => {
+            // Collect only appointments for this doctor on the target date (defaulting to today in Asia/Kolkata)
+            const seenSlotPatientKeys = new Set();
+            const docAppts = [];
+            for (const a of enrichedAppts) {
                 const st = String(a.status || '').toUpperCase();
-                if (st === 'CANCELLED' || st === 'REJECTED' || st === 'NO_SHOW') return false;
+                if (st === 'CANCELLED' || st === 'CANCELED' || st === 'REJECTED' || st === 'NO_SHOW' || st === 'NOSHOW') {
+                    continue;
+                }
                 const dId = String(a.dentist_id || '');
                 const matches = dId === String(doc.id) || (doc.user_id && dId === String(doc.user_id));
-                if (!matches) return false;
-                if (filterDate) {
-                    return (a.date || '').split('T')[0] === filterDate;
-                }
-                return true;
-            });
+                if (!matches) continue;
 
-            docAppts.sort((a, b) => {
-                const da = (a.date || '').split('T')[0];
-                const db = (b.date || '').split('T')[0];
-                if (da !== db) return da.localeCompare(db);
-                const ma = parseClockSlotMinutes(a.time_slot || '') ?? 9999;
-                const mb = parseClockSlotMinutes(b.time_slot || '') ?? 9999;
-                return ma - mb;
-            });
+                const apptDateYmd = normalizeDateToTimezoneYmd(a.date || a.appointment_date, rules.timezone);
+                if (apptDateYmd !== targetDateYmd) continue;
 
-            const activeCurrent = docAppts.find(a => ['IN_PROGRESS', 'DELAYED'].includes(String(a.status || '').toUpperCase())) ||
-                docAppts.find(a => ['CONFIRMED', 'PENDING', 'RESCHEDULED'].includes(String(a.status || '').toUpperCase())) ||
-                docAppts.find(a => String(a.status || '').toUpperCase() === 'COMPLETED') ||
-                null;
+                const startMin = parseClockSlotMinutes(a.scheduled_start_time || a.time_slot || '');
+                if (startMin === null) continue;
 
-            let nextAppt = null;
-            if (activeCurrent) {
-                const curIdx = docAppts.findIndex(a => a.id === activeCurrent.id);
-                nextAppt = docAppts.slice(curIdx + 1).find(a => !['COMPLETED'].includes(String(a.status || '').toUpperCase())) || null;
+                const cType = normalizeConsultationType(a.consultationMode || a.consultation_type, a.treatment || '');
+                const timing = getConsultationTimingForType(cType, rules);
+                const parsedEndMin = parseClockSlotMinutes(a.scheduled_end_time || '');
+                const durationMin = (parsedEndMin !== null && parsedEndMin > startMin)
+                    ? (parsedEndMin - startMin)
+                    : (Number(a.duration_minutes) > 0 ? Number(a.duration_minutes) : timing.durationMinutes);
+                const endMin = startMin + durationMin;
+
+                const dedupKey = `${patientIdentityKey(a)}|${apptDateYmd}|${startMin}`;
+                if (seenSlotPatientKeys.has(dedupKey)) continue;
+                seenSlotPatientKeys.add(dedupKey);
+
+                docAppts.push({
+                    ...a,
+                    _apptDateYmd: apptDateYmd,
+                    _startMin: startMin,
+                    _endMin: endMin,
+                    _durationMin: durationMin,
+                    _consultationType: cType,
+                    _patientKey: patientIdentityKey(a),
+                });
             }
 
-            let delayDuration = Number(activeCurrent?.delay_minutes || 0) || 0;
-            if (activeCurrent && !['COMPLETED'].includes(String(activeCurrent.status || '').toUpperCase())) {
-                const apptDate = (activeCurrent.date || '').split('T')[0];
-                const endMin = parseClockSlotMinutes(activeCurrent.scheduled_end_time || '');
-                if (apptDate === nowParts.ymd && endMin !== null && nowParts.totalMinutes > endMin) {
-                    delayDuration = Math.max(delayDuration, nowParts.totalMinutes - endMin);
+            docAppts.sort((a, b) => a._startMin - b._startMin);
+
+            // Prevent consecutive appointments on the same doctor schedule from overlapping their consultation intervals
+            for (let i = 0; i < docAppts.length - 1; i++) {
+                const cur = docAppts[i];
+                const nxt = docAppts[i + 1];
+                if (cur._startMin < nxt._startMin && cur._endMin > nxt._startMin) {
+                    cur._endMin = nxt._startMin;
                 }
+            }
+
+            // Current Patient: ONLY when target date is today in Asia/Kolkata and current time falls within [startMin, endMin)
+            let activeCurrent = null;
+            if (isTargetToday) {
+                const currentCandidates = docAppts.filter(a =>
+                    isEligibleConfirmedOrActiveStatus(a.status, a.actual_end_at) &&
+                    a._startMin <= nowParts.totalMinutes &&
+                    nowParts.totalMinutes < a._endMin
+                );
+                if (currentCandidates.length > 0) {
+                    activeCurrent =
+                        currentCandidates.find(a => ['IN_PROGRESS', 'DELAYED'].includes(String(a.status || '').toUpperCase())) ||
+                        currentCandidates[currentCandidates.length - 1];
+                }
+            }
+
+            // Next Patient: Next eligible confirmed appointment with start time strictly greater than current time
+            let nextAppt = null;
+            if (isTargetToday) {
+                const nextCandidates = docAppts.filter(a => {
+                    if (!isEligibleUpcomingNextStatus(a.status, a.actual_end_at)) return false;
+                    if (a._startMin <= nowParts.totalMinutes) return false;
+                    if (activeCurrent) {
+                        if (String(a.id) === String(activeCurrent.id)) return false;
+                        if (a._patientKey && a._patientKey === activeCurrent._patientKey) return false;
+                        if (a._startMin < activeCurrent._endMin) return false;
+                    }
+                    return true;
+                });
+                nextCandidates.sort((a, b) => a._startMin - b._startMin);
+                if (nextCandidates.length > 0) {
+                    nextAppt = nextCandidates[0];
+                }
+            } else if (targetDateYmd > nowParts.ymd) {
+                const futureCandidates = docAppts.filter(a =>
+                    isEligibleUpcomingNextStatus(a.status, a.actual_end_at)
+                );
+                futureCandidates.sort((a, b) => a._startMin - b._startMin);
+                if (futureCandidates.length > 0) {
+                    nextAppt = futureCandidates[0];
+                }
+            }
+
+            const explicitDelayedAppt = docAppts.find(a =>
+                String(a.status || '').toUpperCase() === 'DELAYED' &&
+                !a.actual_end_at
+            );
+            let delayDuration = Number(
+                (activeCurrent && activeCurrent.delay_minutes) ||
+                (explicitDelayedAppt && explicitDelayedAppt.delay_minutes) ||
+                0
+            ) || 0;
+
+            let liveAvailability = doc.availability_status || 'Available';
+            if (activeCurrent) {
+                const curSt = String(activeCurrent.status || '').toUpperCase();
+                if (curSt === 'DELAYED' || delayDuration > 0) {
+                    liveAvailability = 'Delayed';
+                } else {
+                    liveAvailability = activeCurrent._consultationType === 'Online'
+                        ? 'Busy – Online Consultation'
+                        : 'Busy – In-Person Consultation';
+                }
+            } else if (explicitDelayedAppt && (!isTargetToday || explicitDelayedAppt._endMin > nowParts.totalMinutes)) {
+                liveAvailability = 'Delayed';
+            } else if (String(liveAvailability).startsWith('Busy')) {
+                liveAvailability = 'Available';
             }
 
             const docNameRaw = (doc.users?.name || doc.name || 'Doctor').toString().trim();
@@ -2025,17 +2198,23 @@ exports.getLiveSchedulingStatus = async (req, res) => {
                 doctorId: doc.id,
                 doctorName: docName,
                 specialty: doc.speciality || doc.specialty || 'General Medicine',
-                currentAvailability: doc.availability_status || 'Available',
+                currentAvailability: liveAvailability,
                 isAvailable: isDoctorRecordAvailable(doc),
                 delayDurationMinutes: delayDuration,
                 currentAppointment: activeCurrent ? {
                     id: activeCurrent.id,
+                    patientId: activeCurrent.patient_id || null,
                     patientName: activeCurrent.patient_name || 'Patient',
-                    consultationType: activeCurrent.consultationMode || 'In-Person',
+                    consultationType: activeCurrent._consultationType,
                     status: activeCurrent.status,
-                    date: (activeCurrent.date || '').split('T')[0],
-                    scheduledStartTime: activeCurrent.scheduled_start_time || activeCurrent.time_slot || '',
-                    scheduledEndTime: activeCurrent.scheduled_end_time || '',
+                    liveStatus: (String(activeCurrent.status || '').toUpperCase() === 'DELAYED' || delayDuration > 0)
+                        ? 'Delayed'
+                        : (String(activeCurrent.status || '').toUpperCase() === 'IN_PROGRESS' || activeCurrent.actual_start_at)
+                            ? 'In Progress'
+                            : 'Ongoing',
+                    date: activeCurrent._apptDateYmd,
+                    scheduledStartTime: minutesToClockSlot(activeCurrent._startMin),
+                    scheduledEndTime: minutesToClockSlot(activeCurrent._endMin),
                     bufferEndTime: activeCurrent.buffer_end_time || '',
                     actualStartAt: activeCurrent.actual_start_at || null,
                     actualEndAt: activeCurrent.actual_end_at || null,
@@ -2043,12 +2222,13 @@ exports.getLiveSchedulingStatus = async (req, res) => {
                 } : null,
                 nextAppointment: nextAppt ? {
                     id: nextAppt.id,
+                    patientId: nextAppt.patient_id || null,
                     patientName: nextAppt.patient_name || 'Patient',
-                    consultationType: nextAppt.consultationMode || 'In-Person',
+                    consultationType: nextAppt._consultationType,
                     status: nextAppt.status,
-                    date: (nextAppt.date || '').split('T')[0],
-                    scheduledStartTime: nextAppt.scheduled_start_time || nextAppt.time_slot || '',
-                    scheduledEndTime: nextAppt.scheduled_end_time || '',
+                    date: nextAppt._apptDateYmd,
+                    scheduledStartTime: minutesToClockSlot(nextAppt._startMin),
+                    scheduledEndTime: minutesToClockSlot(nextAppt._endMin),
                     estimatedStartTime: nextAppt.estimated_start_time || null,
                 } : null,
                 pendingRescheduleCount: docAppts.filter(a => a.reschedule_request?.status === 'PENDING').length,
@@ -2059,6 +2239,7 @@ exports.getLiveSchedulingStatus = async (req, res) => {
             success: true,
             timezone: rules.timezone,
             serverNowYmd: nowParts.ymd,
+            serverNowMinutes: nowParts.totalMinutes,
             rules,
             doctors: doctorsSummary,
             pendingRescheduleRequests,
@@ -2885,7 +3066,7 @@ exports.getAdminGlobalVisitsCalendar = async (req, res) => {
         if (caller && !isMainAdmin && !isSubAdmin) {
             return res.status(403).json({
                 success: false,
-                message: 'Access Denied: Only Administrators and authorized Sub-Administrators can access the Global Visits Calendar.',
+                message: 'Access Denied: Only Administrators and authorized Coordinators can access the Global Visits Calendar.',
             });
         }
 
@@ -2902,7 +3083,7 @@ exports.getAdminGlobalVisitsCalendar = async (req, res) => {
             if (!hasCalendarPerm) {
                 return res.status(403).json({
                     success: false,
-                    message: "Access Denied: Your Sub-Admin account lacks 'APPOINTMENT_VIEW' or 'REPORT_VIEW' permission.",
+                    message: "Access Denied: Your Coordinator account lacks 'APPOINTMENT_VIEW' or 'REPORT_VIEW' permission.",
                 });
             }
             canViewPatientContact = permsUpper.includes('*') || permsUpper.includes('ALL') || permsUpper.includes('PATIENT_VIEW');
@@ -2943,7 +3124,7 @@ exports.getAdminGlobalVisitsCalendar = async (req, res) => {
             if (!permitted) {
                 return res.status(403).json({
                     success: false,
-                    message: `Access Denied: District '${reqDistrictFilter}' is outside your assigned Sub-Admin jurisdiction.`,
+                    message: `Access Denied: District '${reqDistrictFilter}' is outside your assigned Coordinator jurisdiction.`,
                 });
             }
         }
@@ -3016,7 +3197,7 @@ exports.getAdminGlobalVisitsCalendar = async (req, res) => {
             }
         }
 
-        // Enrich and scope appointments
+        // Enrich and scope appointments (Strictly by PATIENT's verified districtId for Sub-Admins; never doctor/clinic district!)
         const allPermittedAppts = (rawAppts || [])
             .map(a => {
                 const enriched = enrichAppointmentRecord(a);
@@ -3025,15 +3206,14 @@ exports.getAdminGlobalVisitsCalendar = async (req, res) => {
             })
             .filter(a => {
                 if (!isSubAdmin) return true;
-                const dId = String(a.dentist_id || a.selectedDoctor?.id || '').trim();
-                const cId = String(a.clinic_id || a.clinic?.id || '').trim();
-                if (cId && permittedClinicIds.has(cId)) return true;
-                if (dId && permittedDoctorIds.has(dId)) return true;
-                return isLocationPermittedForSubAdmin({
-                    city: a.patient_city || a.patient?.city,
-                    pincode: a.patient_pincode || a.patient?.pincode,
-                    location: a.clinic?.location || a.clinic_name,
-                });
+                const pUser = (a.patient_id && usersById.get(String(a.patient_id).trim())) ||
+                    (a.patient && typeof a.patient === 'object' ? a.patient : null);
+                const patientLocPayload = pUser || {
+                    city: a.patient_city || a.patient?.city || '',
+                    pincode: a.patient_pincode || a.patient?.pincode || '',
+                    state: a.patient_state || a.patient?.state || '',
+                };
+                return SubAdminDistrict.canSubAdminAccessPatientSync(assignedDistricts, patientLocPayload).allowed;
             });
 
         // Apply optional query filters (hospital/clinic, doctor, specialty, consultationType, district)
@@ -3061,28 +3241,41 @@ exports.getAdminGlobalVisitsCalendar = async (req, res) => {
                 if (cls.consultType !== wantType) return false;
             }
             if (reqDistrictFilter && reqDistrictFilter.toLowerCase() !== 'all') {
-                const fLower = reqDistrictFilter.toLowerCase();
-                const pCity = String(a.patient_city || '').toLowerCase();
-                const cLoc = String(a.clinic?.location || '').toLowerCase();
-                if (!pCity.includes(fLower) && !cLoc.includes(fLower)) return false;
+                const resolvedFilter = District.resolveDistrictFromLocation({ districtId: reqDistrictFilter, district: reqDistrictFilter });
+                const wantIdLower = String(resolvedFilter?.districtId || reqDistrictFilter).toLowerCase();
+                const pUser = (a.patient_id && usersById.get(String(a.patient_id).trim())) ||
+                    (a.patient && typeof a.patient === 'object' ? a.patient : null);
+                const pResolved = District.resolvePatientDistrictStrict(pUser || {
+                    city: a.patient_city || '',
+                    pincode: a.patient_pincode || ''
+                });
+                if (!pResolved.districtId || String(pResolved.districtId).toLowerCase() !== wantIdLower) {
+                    return false;
+                }
             }
             return true;
         };
 
         const filteredAppts = allPermittedAppts.filter(matchesQueryFilters);
 
-        // Scope referrals & map to tracking entries
+        // Scope referrals & map to tracking entries (Strictly by PATIENT's verified districtId for Sub-Admins; never doctor/clinic district!)
         const permittedReferralsRaw = (rawReferrals || []).filter(r => {
             if (!isSubAdmin) return true;
-            const rDocId = String(r.doctor_id || r.assigned_doctor_id || '').trim();
-            const rClinicId = String(r.clinic_id || '').trim();
-            if (rDocId && permittedDoctorIds.has(rDocId)) return true;
-            if (rClinicId && permittedClinicIds.has(rClinicId)) return true;
-            return isLocationPermittedForSubAdmin({
-                city: r.referred_patient_city || r.doctor_city,
-                pincode: r.referred_patient_pincode || r.doctor_pincode,
-                location: r.referred_patient_location || r.doctor_location,
-            });
+            const refPatientId = r.referred_patient_id || r.referred_user_id;
+            const refPhone10 = String(r.referred_patient_mobile || '').replace(/\D/g, '').slice(-10);
+            const refPatientUser = (refPatientId && usersById.get(String(refPatientId).trim())) ||
+                (refPhone10.length === 10 ? usersByPhone.get(refPhone10) : null);
+            const patientLoc = (refPatientUser || r.referred_patient_city || r.referred_patient_pincode)
+                ? {
+                    districtId: refPatientUser?.district_id || refPatientUser?.districtId || r.referred_patient_district_id || null,
+                    district: refPatientUser?.district || r.referred_patient_district || null,
+                    city: refPatientUser?.city || r.referred_patient_city || '',
+                    state: refPatientUser?.state || r.referred_patient_state || '',
+                    pincode: refPatientUser?.pincode || r.referred_patient_pincode || '',
+                    device_token: refPatientUser?.device_token || null,
+                }
+                : ((r.referrer_patient_id || r.referrer_id) ? usersById.get(String(r.referrer_patient_id || r.referrer_id).trim()) : null);
+            return SubAdminDistrict.canSubAdminAccessPatientSync(assignedDistricts, patientLoc || {}).allowed;
         });
 
         const allReferralEntries = permittedReferralsRaw
@@ -3100,18 +3293,12 @@ exports.getAdminGlobalVisitsCalendar = async (req, res) => {
                 return true;
             });
 
-        // Scope patient users for new registration counts
+        // Scope patient users for new registration counts (Strictly by verified districtId for Sub-Admins)
         const permittedPatients = (rawUsers || []).filter(u => {
             const rLower = String(u?.role || 'Patient').trim().toLowerCase();
             if (rLower !== 'patient') return false;
             if (!isSubAdmin) return true;
-            return isLocationPermittedForSubAdmin({
-                districtId: u.district_id,
-                districtName: u.district,
-                city: u.city,
-                state: u.state,
-                pincode: u.pincode,
-            });
+            return SubAdminDistrict.canSubAdminAccessPatientSync(assignedDistricts, u).allowed;
         });
 
         // Build Monthly Calendar Aggregation for `selectedMonth`

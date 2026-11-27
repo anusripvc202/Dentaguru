@@ -1,7 +1,8 @@
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { supabase, supabaseAdmin } = require('../config/supabase');
-const { User, Dentist, Clinic, ClinicDoctor, Referral, Notification, PatientProblemRequest, comparePassword, getDefaultQualificationForSpecialty, resolveMedicalSpecialtyRecord, isDoctorRecordAvailable, extractDoctorLanguages, canonicalPhone10 } = require('../models/Schemas');
+const { User, Dentist, Clinic, ClinicDoctor, Referral, Notification, PatientProblemRequest, District, SubAdminDistrict, comparePassword, getDefaultQualificationForSpecialty, resolveMedicalSpecialtyRecord, isDoctorRecordAvailable, extractDoctorLanguages, canonicalPhone10 } = require('../models/Schemas');
+const { resolveCallerAccessContext } = require('../middleware/auth');
 const admin = require('firebase-admin');
 const { sendOtpEmail } = require('../services/emailService');
 const { sendRealSmsOtp, normalizePhoneNumber } = require('../services/smsService');
@@ -176,6 +177,15 @@ const buildPatientUserPayload = (user, overrideMeta = null) => {
         ? user.languages
         : (Array.isArray(tokenMeta.languages) && tokenMeta.languages.length > 0 ? tokenMeta.languages : ['English']);
 
+    const distInfo = District.resolvePatientDistrictStrict({
+        ...user,
+        districtId: user.district_id || user.districtId || tokenMeta.districtId || tokenMeta.district_id,
+        district: user.district || tokenMeta.district,
+        city: user.city || tokenMeta.city,
+        state: user.state || tokenMeta.state,
+        pincode: rawPincode
+    });
+
     return {
         id: user.id,
         name: user.name || 'Patient',
@@ -184,7 +194,11 @@ const buildPatientUserPayload = (user, overrideMeta = null) => {
         phone: user.phone || '',
         city: user.city || tokenMeta.city || '',
         pincode: String(rawPincode || ''),
-        state: user.state || tokenMeta.state || '',
+        state: distInfo.state || user.state || tokenMeta.state || '',
+        district: distInfo.districtName || user.district || tokenMeta.district || '',
+        districtId: distInfo.districtId || null,
+        district_id: distInfo.districtId || null,
+        districtIdentificationStatus: distInfo.isVerified ? 'VERIFIED' : 'UNVERIFIED',
         address: user.address || tokenMeta.address || '',
         age: String(rawAge || ''),
         gender: String(rawGender || ''),
@@ -208,7 +222,9 @@ const MAIN_ADMIN_ROLES = new Set([
 const SUB_ADMIN_ROLES = new Set([
     'sub-admin',
     'subadmin',
-    'sub_admin'
+    'sub_admin',
+    'coordinator',
+    'district_coordinator'
 ]);
 
 const INACTIVE_ACCOUNT_STATUSES = new Set([
@@ -503,7 +519,21 @@ exports.register = async (req, res) => {
         const resolvedProfilePhotoUrl = photoResolution.photoUrl || null;
 
         let user;
-        const effectiveState = normalizedState;
+        const incomingDistrictId = (req.body.districtId || req.body.district_id || '').toString().trim();
+        const incomingDistrictName = (req.body.district || req.body.districtName || '').toString().trim();
+        const patientDistResolution = (!isDoctorReg && !isClinicReg)
+            ? District.resolveDistrictFromLocation({
+                districtId: incomingDistrictId,
+                district: incomingDistrictName,
+                city: normalizedCity,
+                state: normalizedState,
+                pincode: normalizedPincode
+            })
+            : { districtId: null, districtName: null, state: normalizedState, isVerified: false };
+
+        const effectiveState = patientDistResolution.state || normalizedState;
+        const effectiveDistrictId = patientDistResolution.districtId || null;
+        const effectiveDistrictName = patientDistResolution.districtName || incomingDistrictName || '';
         const effectivePincode = normalizedPincode;
         const profileMetaObj = {
             age: normalizedAge,
@@ -512,6 +542,10 @@ exports.register = async (req, res) => {
             emergencyContact: emergencyContact || '',
             city: normalizedCity,
             state: effectiveState,
+            district: effectiveDistrictName,
+            districtId: effectiveDistrictId,
+            district_id: effectiveDistrictId,
+            districtIdentificationStatus: patientDistResolution.isVerified ? 'VERIFIED' : 'UNVERIFIED',
             pincode: effectivePincode,
             location: normalizedLocation,
             address: normalizedClinicAddress || normalizedLocation,
@@ -544,6 +578,8 @@ exports.register = async (req, res) => {
                 phone: normalizedPhone,
                 role: effectiveAssignedRole,
                 state: effectiveState,
+                district: effectiveDistrictName || undefined,
+                district_id: effectiveDistrictId || undefined,
                 city: normalizedCity,
                 pincode: effectivePincode,
                 age: normalizedAge,
@@ -558,7 +594,7 @@ exports.register = async (req, res) => {
                 biometric_token: resolvedProfilePhotoUrl
             });
         } catch (createErr) {
-            // Schema fallback: if DB table lacks age/gender/blood_group/languages columns
+            // Schema fallback: if DB table lacks age/gender/blood_group/languages/district_id columns
             user = await User.create({
                 name: name || (isDoctorReg ? 'Dr. Specialist' : (effectiveAssignedRole === 'Sub-Admin' ? 'Sub-Admin' : 'Patient')),
                 email: effectiveEmail,
@@ -858,6 +894,11 @@ exports.register = async (req, res) => {
                 bloodGroup: bloodGroup || user.blood_group || '',
                 emergencyContact: emergencyContact || user.emergency_contact || '',
                 city: user.city || '',
+                state: effectiveState || user.state || '',
+                district: effectiveDistrictName || '',
+                districtId: effectiveDistrictId || null,
+                district_id: effectiveDistrictId || null,
+                districtIdentificationStatus: patientDistResolution.isVerified ? 'VERIFIED' : 'UNVERIFIED',
                 pincode: user.pincode || '',
                 languages: finalLanguages,
                 referralCode: userReferralCode,
@@ -986,7 +1027,7 @@ exports.login = async (req, res) => {
                 success: false,
                 code: 'ACCOUNT_DEACTIVATED',
                 message: isSubAdminUser
-                    ? 'Access Denied: Your Sub-Admin account has been deactivated by the Main Admin. Please contact the administrator.'
+                    ? 'Access Denied: Your Coordinator account has been deactivated by the Main Admin. Please contact the administrator.'
                     : 'Access Denied: Your Admin account is currently inactive or deactivated.'
             });
         }
@@ -1207,7 +1248,7 @@ exports.refreshToken = async (req, res) => {
             return res.status(403).json({
                 success: false,
                 code: 'ACCOUNT_DEACTIVATED',
-                message: 'Access Denied: Your Sub-Admin account has been deactivated by the Main Admin.'
+                message: 'Access Denied: Your Coordinator account has been deactivated by the Main Admin.'
             });
         }
         if (isSubAdmin && user.device_token && typeof user.device_token === 'string' && user.device_token.trim().startsWith('{')) {
@@ -1257,7 +1298,7 @@ exports.getRealtimeToken = async (req, res) => {
             return res.status(403).json({
                 success: false,
                 code: 'CHAT_FORBIDDEN_FOR_ROLE',
-                message: 'Access Denied: Sub-Admins are strictly prohibited from chat and Realtime chat subscriptions.'
+                message: 'Access Denied: Coordinators are strictly prohibited from chat and Realtime chat subscriptions.'
             });
         }
 
@@ -1306,12 +1347,78 @@ exports.resetDatabase = async (req, res) => {
     }
 };
 
-// 9. GET ALL PATIENTS / USERS FROM SUPABASE DB
+// Helper: Build canonical enriched patient object with strict patient-only district resolution
+const buildEnrichedPatientRecord = (p) => {
+    const tokenMeta = parseUserTokenMeta(p);
+    const pName = p.name && String(p.name).trim().length > 0
+        ? String(p.name).trim()
+        : (p.email ? String(p.email).split('@')[0] : 'Patient');
+
+    let userLanguages = Array.isArray(p.languages) && p.languages.length > 0
+        ? p.languages
+        : (Array.isArray(tokenMeta.languages) && tokenMeta.languages.length > 0 ? tokenMeta.languages : ['English']);
+
+    const distInfo = District.resolvePatientDistrictStrict(p);
+    const resolvedState = distInfo.state || p.state || tokenMeta.state || '';
+    const resolvedDistrictName = distInfo.districtName || '';
+    const resolvedDistrictId = distInfo.districtId || null;
+    const resolvedCity = p.city || tokenMeta.city || '';
+    const resolvedPincode = p.pincode || tokenMeta.pincode || '';
+
+    return {
+        id: p.id,
+        name: pName,
+        email: p.email || '',
+        phone: p.phone || '',
+        role: 'Patient',
+        age: String(p.age || p.patient_age || tokenMeta.age || ''),
+        gender: String(p.gender || tokenMeta.gender || ''),
+        bloodGroup: String(p.blood_group || tokenMeta.bloodGroup || ''),
+        emergencyContact: String(p.emergency_contact || tokenMeta.emergencyContact || ''),
+        state: resolvedState,
+        district: resolvedDistrictName,
+        districtId: resolvedDistrictId,
+        district_id: resolvedDistrictId,
+        district_identification_status: distInfo.isVerified ? 'VERIFIED' : 'UNVERIFIED',
+        districtIdentificationStatus: distInfo.isVerified ? 'VERIFIED' : 'UNVERIFIED',
+        city: resolvedCity,
+        pincode: resolvedPincode,
+        address: p.address || p.location || tokenMeta.address || tokenMeta.location || '',
+        languages: userLanguages,
+        profilePhoto: p.biometric_token || tokenMeta.profilePhoto || null,
+        created_at: p.created_at
+    };
+};
+
+// 9. GET ALL PATIENTS / USERS FROM SUPABASE DB (Enforces Strict Sub-Admin District Access Control)
 exports.getPatients = async (req, res) => {
     try {
-        // Fetch admin emails to strictly exclude admin accounts from patient list
+        const callerCtx = await resolveCallerAccessContext(req);
+        if (isCloudEnv() && !callerCtx.user) {
+            return res.status(401).json({ success: false, message: 'Authentication required to fetch patient records.' });
+        }
+
+        // If caller is a Sub-Admin and explicitly queries another district, reject with 403
+        const reqDistrictId = String(req.query.districtId || req.query.district_id || '').trim();
+        const reqDistrictName = String(req.query.district || '').trim();
+        if (callerCtx.isSubAdmin && (reqDistrictId || reqDistrictName) && reqDistrictName.toLowerCase() !== 'all' && reqDistrictId.toLowerCase() !== 'all') {
+            let requestedIdLower = reqDistrictId.toLowerCase();
+            if (!requestedIdLower && reqDistrictName) {
+                const resolvedFilter = District.resolveDistrictFromLocation({ district: reqDistrictName });
+                requestedIdLower = resolvedFilter?.districtId ? String(resolvedFilter.districtId).toLowerCase() : '__unmatched__';
+            }
+            if (!callerCtx.assignedDistrictIds.has(requestedIdLower)) {
+                return res.status(403).json({
+                    success: false,
+                    code: 'DISTRICT_ACCESS_DENIED',
+                    message: 'Access Denied: You cannot view or search patients outside your assigned district.'
+                });
+            }
+        }
+
+        // Fetch admin & non-patient emails to strictly exclude non-patient accounts from patient list
         const adminUsers = await User.find({ role: { $in: ['Admin', 'ADMIN', 'Sub-Admin', 'SUB_ADMIN'] } });
-        const adminEmails = new Set(adminUsers.map(u => (u.email || '').trim().toLowerCase()));
+        const adminEmails = new Set(adminUsers.map(u => (u.email || '').trim().toLowerCase()).filter(Boolean));
 
         const dbPatients = await User.find({ role: 'Patient' });
         const patientMap = new Map();
@@ -1319,7 +1426,6 @@ exports.getPatients = async (req, res) => {
         const seenEmails = new Set();
         const seenPhones = new Set();
         const nonPatientUsers = await User.find({ role: { $in: ['Admin', 'ADMIN', 'Sub-Admin', 'SUB_ADMIN', 'Dentist', 'Doctor', 'DOCTOR', 'Clinic'] } }).catch(() => []);
-        const nonPatientIds = new Set(nonPatientUsers.map(u => String(u.id || '').trim()).filter(Boolean));
         const nonPatientEmails = new Set(nonPatientUsers.map(u => (u.email || '').trim().toLowerCase()).filter(Boolean));
         const normalizePhone10 = (raw) => {
             const digits = (raw || '').toString().replace(/\D/g, '');
@@ -1336,44 +1442,211 @@ exports.getPatients = async (req, res) => {
             if (pEmail && seenEmails.has(pEmail)) continue;
             if (pPhone10.length >= 10 && seenPhones.has(pPhone10)) continue;
 
-            const pName = p.name && p.name.trim().length > 0
-                ? p.name.trim()
-                : (p.email ? p.email.split('@')[0] : 'Patient');
+            const enriched = buildEnrichedPatientRecord(p);
 
-            let userLanguages = p.languages || ['English'];
-            if (p.device_token && typeof p.device_token === 'string' && p.device_token.startsWith('{')) {
-                try {
-                    const meta = JSON.parse(p.device_token);
-                    if (meta.languages && Array.isArray(meta.languages) && meta.languages.length > 0) {
-                        userLanguages = meta.languages;
-                    }
-                } catch (_) { }
+            // STRICT SUB-ADMIN DISTRICT ACCESS ENFORCEMENT:
+            // - Uses ONLY the patient's verified districtId (never doctor/clinic district)
+            // - Rejects patients with missing/invalid/unverified district
+            if (callerCtx.isSubAdmin) {
+                const check = SubAdminDistrict.canSubAdminAccessPatientSync(callerCtx.assignedDistricts, p);
+                if (!check.allowed) {
+                    continue;
+                }
             }
 
             if (pEmail) seenEmails.add(pEmail);
             if (pPhone10.length >= 10) seenPhones.add(pPhone10);
-
-            patientMap.set(p.id, {
-                id: p.id,
-                name: pName,
-                email: p.email || '',
-                phone: p.phone || '',
-                role: 'Patient',
-                state: p.state || '',
-                city: p.city || '',
-                pincode: p.pincode || '',
-                address: p.address || p.location || '',
-                languages: userLanguages,
-                profilePhoto: p.biometric_token || null,
-                created_at: p.created_at
-            });
+            patientMap.set(p.id, enriched);
         }
 
-        const resultList = Array.from(patientMap.values());
-        res.json({ success: true, count: resultList.length, patients: resultList });
+        let resultList = Array.from(patientMap.values());
+
+        // Apply State filter (Main Admin & Sub-Admin)
+        const stateFilter = String(req.query.state || '').trim().toLowerCase();
+        if (stateFilter && stateFilter !== 'all') {
+            resultList = resultList.filter(p => String(p.state || '').trim().toLowerCase() === stateFilter);
+        }
+
+        // Apply District filter (Main Admin & Sub-Admin)
+        if ((reqDistrictId && reqDistrictId.toLowerCase() !== 'all') || (reqDistrictName && reqDistrictName.toLowerCase() !== 'all')) {
+            const targetIdLower = reqDistrictId.toLowerCase();
+            const targetNameLower = reqDistrictName.toLowerCase();
+            if (targetNameLower === 'unverified' || targetIdLower === 'unverified') {
+                resultList = resultList.filter(p => !p.districtId);
+            } else {
+                const resolvedFilter = !targetIdLower && targetNameLower
+                    ? District.resolveDistrictFromLocation({ district: reqDistrictName })
+                    : null;
+                const effectiveIdLower = targetIdLower || (resolvedFilter?.districtId ? String(resolvedFilter.districtId).toLowerCase() : '');
+                resultList = resultList.filter(p => {
+                    if (effectiveIdLower && p.districtId && String(p.districtId).toLowerCase() === effectiveIdLower) return true;
+                    if (!effectiveIdLower && targetNameLower && String(p.district || '').toLowerCase() === targetNameLower) return true;
+                    return false;
+                });
+            }
+        }
+
+        // Apply Search filter (?search= or ?q=) AFTER district restriction
+        const searchQuery = String(req.query.search || req.query.q || '').trim().toLowerCase();
+        if (searchQuery) {
+            resultList = resultList.filter(p =>
+                String(p.name || '').toLowerCase().includes(searchQuery) ||
+                String(p.phone || '').toLowerCase().includes(searchQuery) ||
+                String(p.email || '').toLowerCase().includes(searchQuery) ||
+                String(p.city || '').toLowerCase().includes(searchQuery) ||
+                String(p.district || '').toLowerCase().includes(searchQuery) ||
+                String(p.state || '').toLowerCase().includes(searchQuery) ||
+                String(p.pincode || '').toLowerCase().includes(searchQuery)
+            );
+        }
+
+        // Sort newest first by created_at
+        resultList.sort((a, b) => {
+            const tA = new Date(a.created_at || 0).getTime() || 0;
+            const tB = new Date(b.created_at || 0).getTime() || 0;
+            return tB - tA;
+        });
+
+        const totalCount = resultList.length;
+        const rawLimit = parseInt(req.query.limit, 10);
+        const rawPage = parseInt(req.query.page, 10);
+        let pagedPatients = resultList;
+        if (Number.isFinite(rawLimit) && rawLimit > 0) {
+            const page = (Number.isFinite(rawPage) && rawPage > 0) ? rawPage : 1;
+            const start = (page - 1) * rawLimit;
+            pagedPatients = resultList.slice(start, start + rawLimit);
+        }
+
+        res.json({
+            success: true,
+            count: pagedPatients.length,
+            totalCount,
+            patients: pagedPatients
+        });
     } catch (err) {
         console.error('Get Patients Error:', err.message);
         res.status(500).json({ success: false, message: 'Failed to fetch patients.' });
+    }
+};
+
+// 9b. GET SINGLE PATIENT DETAILS BY ID (Enforces Strict Sub-Admin District Access Control)
+exports.getPatientById = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const callerCtx = await resolveCallerAccessContext(req);
+        if (!callerCtx.user && isCloudEnv()) {
+            return res.status(401).json({ success: false, message: 'Authentication required.' });
+        }
+
+        const target = await User.findById(id);
+        if (!target) {
+            return res.status(404).json({ success: false, message: 'Patient record not found.' });
+        }
+
+        const targetRoleLower = String(target.role || 'Patient').trim().toLowerCase();
+        if (targetRoleLower !== 'patient') {
+            return res.status(404).json({ success: false, message: 'Patient record not found.' });
+        }
+
+        if (callerCtx.roleLower === 'patient' && callerCtx.userId && String(callerCtx.userId) !== String(target.id)) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access Denied: You can only view your own patient profile.'
+            });
+        }
+
+        if (callerCtx.isSubAdmin) {
+            const check = SubAdminDistrict.canSubAdminAccessPatientSync(callerCtx.assignedDistricts, target);
+            if (!check.allowed) {
+                return res.status(403).json({
+                    success: false,
+                    code: 'DISTRICT_ACCESS_DENIED',
+                    reason: check.reason,
+                    message: check.reason === 'PATIENT_DISTRICT_UNVERIFIED'
+                        ? 'Access Denied: This patient record has missing or unverified district information and cannot be accessed by a Coordinator until verified by Main Admin.'
+                        : 'Access Denied: You do not have permission to access patient records outside your assigned district.'
+                });
+            }
+        }
+
+        const enriched = buildEnrichedPatientRecord(target);
+        return res.json({
+            success: true,
+            patient: enriched
+        });
+    } catch (err) {
+        console.error('Get Patient By ID Error:', err.message);
+        return res.status(500).json({ success: false, message: 'Failed to retrieve patient details.' });
+    }
+};
+
+// 9c. MAIN ADMIN: VERIFY / UPDATE PATIENT DISTRICT ASSIGNMENT
+exports.updatePatientDistrictByAdmin = async (req, res) => {
+    const { id } = req.params;
+    const { state, districtId, district, city, pincode } = req.body || {};
+    try {
+        const target = await User.findById(id);
+        if (!target || String(target.role || 'Patient').trim().toLowerCase() !== 'patient') {
+            return res.status(404).json({ success: false, message: 'Patient record not found.' });
+        }
+
+        const existingMeta = parseUserTokenMeta(target);
+        const nextCity = city !== undefined ? String(city || '').trim() : (target.city || existingMeta.city || '');
+        const nextState = state !== undefined ? String(state || '').trim() : (target.state || existingMeta.state || '');
+        const nextPincode = pincode !== undefined ? String(pincode || '').trim() : (target.pincode || existingMeta.pincode || '');
+
+        const resolved = District.resolveDistrictFromLocation({
+            districtId: districtId || req.body?.district_id,
+            district,
+            city: nextCity,
+            state: nextState,
+            pincode: nextPincode
+        });
+        if (!resolved.isVerified || !resolved.districtId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Please select a valid active district to verify this patient record.'
+            });
+        }
+
+        const nextMeta = {
+            ...existingMeta,
+            city: nextCity || resolved.districtName,
+            state: resolved.state || nextState,
+            district: resolved.districtName,
+            districtId: resolved.districtId,
+            district_id: resolved.districtId,
+            pincode: nextPincode,
+            districtIdentificationStatus: 'VERIFIED'
+        };
+
+        let updated = null;
+        try {
+            updated = await User.findByIdAndUpdate(id, {
+                city: nextCity || resolved.districtName,
+                state: resolved.state || nextState,
+                district: resolved.districtName,
+                district_id: resolved.districtId,
+                pincode: nextPincode,
+                device_token: JSON.stringify(nextMeta)
+            });
+        } catch (_) {
+            updated = await User.findByIdAndUpdate(id, {
+                city: nextCity || resolved.districtName,
+                state: resolved.state || nextState,
+                pincode: nextPincode,
+                device_token: JSON.stringify(nextMeta)
+            });
+        }
+
+        return res.json({
+            success: true,
+            message: `Patient district verified as ${resolved.districtName} (${resolved.state}).`,
+            patient: buildEnrichedPatientRecord(updated || { ...target, city: nextCity, state: resolved.state, pincode: nextPincode, device_token: JSON.stringify(nextMeta) })
+        });
+    } catch (err) {
+        console.error('Update Patient District Error:', err.message);
+        return res.status(500).json({ success: false, message: 'Failed to update patient district.' });
     }
 };
 
@@ -1425,7 +1698,7 @@ exports.createSubAdmin = async (req, res) => {
             return res.status(400).json({
                 success: false,
                 code: 'MISSING_NAME',
-                message: 'Full name is required for Sub-Admin creation.'
+                message: 'Full name is required for Coordinator creation.'
             });
         }
 
@@ -1433,7 +1706,7 @@ exports.createSubAdmin = async (req, res) => {
             return res.status(400).json({
                 success: false,
                 code: 'INVALID_PHONE',
-                message: 'Please enter a valid 10-digit mobile phone number for Sub-Admin registration.'
+                message: 'Please enter a valid 10-digit mobile phone number for Coordinator registration.'
             });
         }
 
@@ -1580,7 +1853,7 @@ exports.createSubAdmin = async (req, res) => {
 
         res.status(201).json({
             success: true,
-            message: 'Sub-Admin created successfully in central database.',
+            message: 'Coordinator created successfully in central database.',
             subAdmin: {
                 id: subAdmin.id,
                 name: subAdmin.name,
@@ -1599,7 +1872,7 @@ exports.createSubAdmin = async (req, res) => {
         });
     } catch (err) {
         console.error('Create Sub-Admin Error:', err.message);
-        res.status(500).json({ success: false, message: err.message || 'Failed to create Sub-Admin.' });
+        res.status(500).json({ success: false, message: err.message || 'Failed to create Coordinator.' });
     }
 };
 
@@ -1670,7 +1943,7 @@ exports.getSubAdmins = async (req, res) => {
         res.json({ success: true, count: cleanList.length, subAdmins: cleanList });
     } catch (err) {
         console.error('Get Sub-Admins Error:', err.message);
-        res.status(500).json({ success: false, message: 'Failed to fetch sub-admins.' });
+        res.status(500).json({ success: false, message: 'Failed to fetch coordinators.' });
     }
 };
 
@@ -1682,10 +1955,10 @@ exports.updateSubAdmin = async (req, res) => {
         const { SubAdminDistrict, SubAdminPermission, PermissionChangeHistory } = require('../models/Schemas');
         const target = await User.findById(id);
         if (!target) {
-            return res.status(404).json({ success: false, message: 'Sub-Admin not found.' });
+            return res.status(404).json({ success: false, message: 'Coordinator not found.' });
         }
         if (isMainAdminRole(target.role)) {
-            return res.status(403).json({ success: false, message: 'Cannot modify Primary Admin through Sub-Admin endpoints.' });
+            return res.status(403).json({ success: false, message: 'Cannot modify Main Admin through Coordinator endpoints.' });
         }
 
         const updatePayload = {};
@@ -1810,7 +2083,7 @@ exports.updateSubAdmin = async (req, res) => {
 
         res.json({
             success: true,
-            message: 'Sub-Admin updated successfully.',
+            message: 'Coordinator updated successfully.',
             subAdmin: {
                 id: updated.id,
                 name: updated.name,
@@ -1829,7 +2102,7 @@ exports.updateSubAdmin = async (req, res) => {
         });
     } catch (err) {
         console.error('Update Sub-Admin Error:', err.message);
-        res.status(500).json({ success: false, message: err.message || 'Failed to update sub-admin.' });
+        res.status(500).json({ success: false, message: err.message || 'Failed to update coordinator.' });
     }
 };
 
@@ -1840,7 +2113,7 @@ exports.toggleSubAdminStatus = async (req, res) => {
     try {
         const target = await User.findById(id);
         if (!target) {
-            return res.status(404).json({ success: false, message: 'Sub-Admin not found.' });
+            return res.status(404).json({ success: false, message: 'Coordinator not found.' });
         }
         const targetRoleLower = (target.role || '').toString().trim().toLowerCase();
         if (targetRoleLower === 'admin' || targetRoleLower === 'primaryadmin' || targetRoleLower === 'superadmin') {
@@ -1902,8 +2175,8 @@ exports.toggleSubAdminStatus = async (req, res) => {
         res.json({
             success: true,
             message: newStatus === 'INACTIVE'
-                ? `Sub-Admin '${target.name}' has been deactivated and active sessions invalidated.`
-                : `Sub-Admin '${target.name}' has been reactivated.`,
+                ? `Coordinator '${target.name}' has been deactivated and active sessions invalidated.`
+                : `Coordinator '${target.name}' has been reactivated.`,
             subAdmin: {
                 id: updated?.id || id,
                 name: updated?.name || target.name,
@@ -1917,7 +2190,7 @@ exports.toggleSubAdminStatus = async (req, res) => {
         });
     } catch (err) {
         console.error('Toggle Sub-Admin Status Error:', err.message);
-        res.status(500).json({ success: false, message: 'Failed to update Sub-Admin status.' });
+        res.status(500).json({ success: false, message: 'Failed to update Coordinator status.' });
     }
 };
 
@@ -1927,7 +2200,7 @@ exports.deleteSubAdmin = async (req, res) => {
     try {
         const target = await User.findById(id);
         if (!target) {
-            return res.status(404).json({ success: false, message: 'Sub-Admin not found.' });
+            return res.status(404).json({ success: false, message: 'Coordinator not found.' });
         }
         if (target && isMainAdminRole(target.role)) {
             return res.status(403).json({ success: false, message: 'Cannot delete the Primary Admin.' });
@@ -1944,10 +2217,10 @@ exports.deleteSubAdmin = async (req, res) => {
             await supabaseAdmin.auth.admin.deleteUser(id);
         } catch (_) { }
 
-        res.json({ success: true, message: 'Sub-Admin deleted successfully.' });
+        res.json({ success: true, message: 'Coordinator deleted successfully.' });
     } catch (err) {
         console.error('Delete Sub-Admin Error:', err.message);
-        res.status(500).json({ success: false, message: 'Failed to delete sub-admin.' });
+        res.status(500).json({ success: false, message: 'Failed to delete coordinator.' });
     }
 };
 
@@ -1958,7 +2231,7 @@ exports.getSubAdminPermissions = async (req, res) => {
         const { SubAdminPermission, PermissionChangeHistory } = require('../models/Schemas');
         const target = await User.findById(id);
         if (!target) {
-            return res.status(404).json({ success: false, message: 'Sub-Admin not found.' });
+            return res.status(404).json({ success: false, message: 'Coordinator not found.' });
         }
 
         const permissions = target.permissions || (await SubAdminPermission.getPermissionsForUser(id));
@@ -1990,7 +2263,7 @@ exports.updateSubAdminPermissions = async (req, res) => {
 
         const target = await User.findById(id);
         if (!target) {
-            return res.status(404).json({ success: false, message: 'Sub-Admin not found.' });
+            return res.status(404).json({ success: false, message: 'Coordinator not found.' });
         }
         if (target && isMainAdminRole(target.role)) {
             return res.status(403).json({ success: false, message: 'Cannot modify permissions for Primary Admin.' });
@@ -2000,7 +2273,7 @@ exports.updateSubAdminPermissions = async (req, res) => {
         if (req.user && req.user.id === id) {
             return res.status(403).json({
                 success: false,
-                message: 'Access Denied: Sub-Admins cannot modify their own permissions.'
+                message: 'Access Denied: Coordinators cannot modify their own permissions.'
             });
         }
 
@@ -2267,7 +2540,7 @@ exports.verifyOTP = async (req, res) => {
                 return res.status(403).json({
                     success: false,
                     code: 'ACCOUNT_DEACTIVATED',
-                    message: 'Access Denied: Your Sub-Admin account has been deactivated by the Main Admin. Please contact the administrator.'
+                    message: 'Access Denied: Your Coordinator account has been deactivated by the Main Admin. Please contact the administrator.'
                 });
             }
 
@@ -2619,10 +2892,46 @@ exports.updatePatientProfile = async (req, res) => {
             }
         }
 
+        const nextCity = city !== undefined && city !== null && String(city).trim().length > 0
+            ? String(city).trim()
+            : String(existingUser.city || existingMeta.city || '').trim();
+        const nextState = req.body?.state !== undefined && req.body?.state !== null && String(req.body.state).trim().length > 0
+            ? String(req.body.state).trim()
+            : String(existingUser.state || existingMeta.state || '').trim();
+        const incomingDistrictId = (req.body?.districtId || req.body?.district_id || '').toString().trim();
+        const incomingDistrict = (req.body?.district || '').toString().trim();
+
+        const resolvedDist = District.resolveDistrictFromLocation({
+            districtId: incomingDistrictId || (city === undefined && pincode === undefined && !incomingDistrict ? (existingUser.district_id || existingMeta.districtId) : ''),
+            district: incomingDistrict || (city === undefined && pincode === undefined && !incomingDistrictId ? (existingUser.district || existingMeta.district) : ''),
+            city: nextCity,
+            state: nextState,
+            pincode: nextPincode
+        });
+
+        const nextMeta = {
+            ...existingMeta,
+            name: nextName || existingUser.name,
+            age: nextAge,
+            gender: nextGender,
+            pincode: nextPincode,
+            city: nextCity,
+            state: resolvedDist.state || nextState,
+            district: resolvedDist.districtName || incomingDistrict || '',
+            districtId: resolvedDist.districtId || null,
+            district_id: resolvedDist.districtId || null,
+            districtIdentificationStatus: resolvedDist.isVerified ? 'VERIFIED' : 'UNVERIFIED',
+            address: nextAddress,
+            bloodGroup: nextBloodGroup,
+            languages: nextLanguages,
+            ...(nextPhoto ? { profilePhoto: nextPhoto } : {})
+        };
+
         const updatePayload = {
             pincode: nextPincode,
             age: nextAge,
             gender: nextGender,
+            device_token: JSON.stringify(nextMeta)
         };
         if (nextPhoto.length > 0) {
             updatePayload.biometric_token = nextPhoto;
@@ -2630,8 +2939,11 @@ exports.updatePatientProfile = async (req, res) => {
         if (name !== undefined && String(name).trim().length > 0) {
             updatePayload.name = String(name).trim();
         }
-        if (city !== undefined && city !== null && String(city).trim().length > 0) {
-            updatePayload.city = String(city).trim();
+        if (nextCity.length > 0) {
+            updatePayload.city = nextCity;
+        }
+        if ((resolvedDist.state || nextState).length > 0) {
+            updatePayload.state = resolvedDist.state || nextState;
         }
         if (address !== undefined && address !== null && String(address).trim().length > 0) {
             updatePayload.address = String(address).trim();
@@ -2646,7 +2958,15 @@ exports.updatePatientProfile = async (req, res) => {
             updatePayload.languages = languages.map(l => String(l || '').trim()).filter(Boolean);
         }
 
-        const updatedUser = await User.findByIdAndUpdate(existingUser.id, updatePayload);
+        let updatedUser = null;
+        try {
+            updatedUser = await User.findByIdAndUpdate(existingUser.id, {
+                ...updatePayload,
+                ...(resolvedDist.districtId ? { district_id: resolvedDist.districtId, district: resolvedDist.districtName } : {})
+            });
+        } catch (_) {
+            updatedUser = await User.findByIdAndUpdate(existingUser.id, updatePayload);
+        }
         return res.json({
             success: true,
             message: 'Patient profile saved successfully.',

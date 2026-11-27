@@ -267,7 +267,7 @@ class _GsHealthAssignmentTimelineDialogState extends State<GsHealthAssignmentTim
 
   String _formatSource(String s) {
     if (s == 'PATIENT_DIRECT_BOOKING') return 'Direct Patient Booking';
-    if (s == 'SUB_ADMIN_ASSIGNMENT') return 'Sub-Admin Assignment';
+    if (s == 'SUB_ADMIN_ASSIGNMENT') return 'Coordinator Assignment';
     return 'Main Admin Assignment';
   }
 

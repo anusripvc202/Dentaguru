@@ -942,8 +942,15 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ),
           );
           context.go('/dentist');
-        } else if (registeredRole.contains('admin') || registeredRole.contains('sub-admin') || registeredRole.contains('subadmin') || registeredRole.contains('sub_admin')) {
-          final isSubAdmin = registeredRole.contains('sub-admin') || registeredRole.contains('subadmin') || registeredRole.contains('sub_admin');
+        } else if (registeredRole.contains('admin') ||
+            registeredRole.contains('sub-admin') ||
+            registeredRole.contains('subadmin') ||
+            registeredRole.contains('sub_admin') ||
+            registeredRole.contains('coordinator')) {
+          final isSubAdmin = registeredRole.contains('sub-admin') ||
+              registeredRole.contains('subadmin') ||
+              registeredRole.contains('sub_admin') ||
+              registeredRole.contains('coordinator');
 
           if (isSubAdmin) {
             List<String> perms = [];
@@ -955,7 +962,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                 : (userData['districts'] is List ? List<dynamic>.from(userData['districts'] as List) : null);
             PatientProblemService().setSubAdminSession(
               id: userData['id']?.toString() ?? '',
-              name: userData['name']?.toString() ?? 'Sub-Admin',
+              name: userData['name']?.toString() ?? 'Coordinator',
               email: userData['email']?.toString() ?? (identifier.contains('@') ? identifier : ''),
               phone: userData['phone']?.toString() ?? userPhone,
               permissions: perms,
@@ -986,7 +993,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           setState(() => _isLoggingIn = false);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('🎉 Welcome back, ${userData['name'] ?? (isSubAdmin ? 'Sub-Admin' : 'Admin')}! Opening ${isSubAdmin ? 'Sub-Admin Workspace' : 'Admin Dashboard'}...'),
+              content: Text('🎉 Welcome back, ${userData['name'] ?? (isSubAdmin ? 'Coordinator' : 'Admin')}! Opening ${isSubAdmin ? 'Coordinator Dashboard' : 'Admin Dashboard'}...'),
               backgroundColor: const Color(0xFF012A58),
             ),
           );
@@ -1371,6 +1378,13 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         final String regUserId = (regUser['id'] ?? SupabaseService.safeCurrentUser?.id ?? 'user_${DateTime.now().millisecondsSinceEpoch}').toString();
 
         if (_selectedRole == UserRole.patient) {
+          final resolvedRegDist = PatientProblemService().resolvePatientDistrictStrict(
+            districtId: (regUser['districtId'] ?? regUser['district_id'] ?? '').toString(),
+            district: (regUser['district'] ?? '').toString(),
+            city: city,
+            state: stateValue,
+            pincode: pincode,
+          );
           PatientProblemService().updatePatientProfile(
             id: regUserId,
             name: name,
@@ -1382,12 +1396,16 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             emergencyContact: _emergencyContactController.text.trim().isEmpty ? phone : _emergencyContactController.text.trim(),
             address: location,
             city: city,
+            state: resolvedRegDist.state ?? stateValue,
             pincode: pincode,
             languages: selectedLangs,
             photoBytes: _pickedImageBytes,
             preserveExistingPhoto: false,
             syncRemote: false,
           );
+          PatientProblemService().currentPatient.districtId = resolvedRegDist.districtId;
+          PatientProblemService().currentPatient.district = resolvedRegDist.districtName;
+          PatientProblemService().currentPatient.districtIdentificationStatus = resolvedRegDist.status;
           await SessionService().saveSession(
             token: regToken,
             role: 'Patient',
@@ -1404,6 +1422,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
               'bloodGroup': _selectedBloodGroup ?? '',
               'emergencyContact': _emergencyContactController.text.trim().isEmpty ? phone : _emergencyContactController.text.trim(),
               'city': city,
+              'state': resolvedRegDist.state ?? stateValue,
+              if (resolvedRegDist.districtId != null) 'districtId': resolvedRegDist.districtId,
+              if (resolvedRegDist.districtName != null) 'district': resolvedRegDist.districtName,
               'pincode': pincode,
               'address': location,
               'languages': selectedLangs,

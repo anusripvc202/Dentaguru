@@ -253,8 +253,11 @@ class SessionService {
         );
       }
     }
-    // 2. Restore Sub-Admin or Admin State
-    else if (normalizedRole.contains('sub-admin') || normalizedRole.contains('subadmin') || normalizedRole.contains('sub_admin')) {
+    // 2. Restore Coordinator (Sub-Admin) or Admin State
+    else if (normalizedRole.contains('sub-admin') ||
+        normalizedRole.contains('subadmin') ||
+        normalizedRole.contains('sub_admin') ||
+        normalizedRole.contains('coordinator')) {
       final meta = session.metadata;
       List<String> perms = [];
       if (meta['permissions'] is List) {
@@ -263,7 +266,7 @@ class SessionService {
       final districts = meta['assignedDistricts'] ?? meta['districts'] ?? meta['districtIds'];
       PatientProblemService().setSubAdminSession(
         id: session.userId,
-        name: session.name ?? 'Sub-Admin',
+        name: session.name ?? 'Coordinator',
         email: session.email ?? '',
         phone: session.phone ?? '',
         permissions: perms,

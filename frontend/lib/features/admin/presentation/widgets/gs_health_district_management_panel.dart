@@ -196,7 +196,7 @@ class _GsHealthDistrictManagementPanelState extends State<GsHealthDistrictManage
                   ),
                   const SizedBox(height: 6),
                   const Text(
-                    'Add Indian districts to enforce granular district-level patient access, multi-district sub-admin assignment, and automated clinic routing.',
+                    'Add Indian districts to enforce granular district-level patient access, multi-district coordinator assignment, and automated clinic routing.',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 12, color: AppTheme.textMuted, height: 1.4),
                   ),
@@ -398,7 +398,7 @@ class _GsHealthDistrictManagementPanelState extends State<GsHealthDistrictManage
             spacing: 8,
             runSpacing: 6,
             children: [
-              _buildMetricChip(Icons.supervisor_account_rounded, '$subAdminsCount Sub-Admins', const Color(0xFFFE3434)),
+              _buildMetricChip(Icons.supervisor_account_rounded, '$subAdminsCount Coordinators', const Color(0xFFFE3434)),
               _buildMetricChip(Icons.medical_services_rounded, '$doctorsCount Doctors', const Color(0xFF012A58)),
               _buildMetricChip(Icons.people_alt_rounded, '$patientsCount Patients', const Color(0xFF012A58)),
             ],
@@ -415,7 +415,7 @@ class _GsHealthDistrictManagementPanelState extends State<GsHealthDistrictManage
                     spacing: 6,
                     runSpacing: 4,
                     children: subAdmins.map((sa) {
-                      final saName = sa is Map ? (sa['name'] ?? 'Sub-Admin').toString() : sa.toString();
+                      final saName = sa is Map ? (sa['name'] ?? 'Coordinator').toString() : sa.toString();
                       return Container(
                         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                         decoration: BoxDecoration(

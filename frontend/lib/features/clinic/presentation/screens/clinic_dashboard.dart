@@ -803,16 +803,23 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
+                          Text(
+                            doc.displayFullName,
+                            key: Key('clinic_doctors_tab_name_${doc.id}'),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                              height: 1.25,
+                              color: AppTheme.textDark,
+                            ),
+                            softWrap: true,
+                          ),
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
-                              Expanded(
-                                child: Text(
-                                  doc.name,
-                                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
                                 decoration: BoxDecoration(
@@ -828,14 +835,18 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                                   ),
                                 ),
                               ),
+                              if (doc.qualification.trim().isNotEmpty)
+                                Text(
+                                  doc.qualification,
+                                  style: const TextStyle(fontSize: 11.5, color: AppTheme.textMuted),
+                                ),
                             ],
                           ),
-                          const SizedBox(height: 2),
+                          const SizedBox(height: 4),
                           Text(
                             '${doc.specialty} • Doctor ID: ${doc.id}',
                             style: const TextStyle(fontSize: 12, color: AppTheme.textMedium),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                            softWrap: true,
                           ),
                           if (doc.phone.trim().isNotEmpty)
                             Text(
@@ -1626,9 +1637,9 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                           key: Key('clinic_doctor_name_${doc.id}'),
                           onTap: () => _openClinicDoctorProfile(doc),
                           child: Text(
-                            doc.name,
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5),
-                            overflow: TextOverflow.ellipsis,
+                            doc.displayFullName,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14.5, height: 1.25),
+                            softWrap: true,
                           ),
                         ),
                         const SizedBox(height: 2),
@@ -1659,7 +1670,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
                       setState(() {});
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Dr. ${doc.name} status updated to $newStatus')),
+                          SnackBar(content: Text('${doc.displayFullName} status updated to $newStatus')),
                         );
                       }
                     },
@@ -3004,7 +3015,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
           ],
         ),
         content: Text(
-          'Are you sure you want to remove Dr. ${doc.name} from $_currentClinicName?\n\nThis will disassociate the doctor from this clinic without deleting the doctor\'s global GS HEALTH account or patient consultation records.',
+          'Are you sure you want to remove ${doc.displayFullName} from $_currentClinicName?\n\nThis will disassociate the doctor from this clinic without deleting the doctor\'s global GS HEALTH account or patient consultation records.',
           style: const TextStyle(fontSize: 13, height: 1.4),
         ),
         actions: [
@@ -3027,7 +3038,7 @@ class _ClinicDashboardScreenState extends State<ClinicDashboardScreen> {
               setState(() {});
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text('Dr. ${doc.name} was removed from $_currentClinicName. Global account preserved.'),
+                  content: Text('${doc.displayFullName} was removed from $_currentClinicName. Global account preserved.'),
                   backgroundColor: Color(0xFFFE3434),
                 ),
               );

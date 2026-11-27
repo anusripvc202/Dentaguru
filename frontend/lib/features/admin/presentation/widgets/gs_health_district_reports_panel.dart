@@ -231,7 +231,7 @@ class _GsHealthDistrictReportsPanelState extends State<GsHealthDistrictReportsPa
                           Expanded(child: _buildReportMetric('Doctors', '$docCount', const Color(0xFFFE3434))),
                           Expanded(child: _buildReportMetric('Clinics', '$clinicCount', const Color(0xFF012A58))),
                           Expanded(child: _buildReportMetric('Assignments', '$assignmentCount', const Color(0xFFFE3434))),
-                          Expanded(child: _buildReportMetric('Sub-Admins', '$saCount', const Color(0xFFFE3434))),
+                          Expanded(child: _buildReportMetric('Coordinators', '$saCount', const Color(0xFFFE3434))),
                         ],
                       ),
                     ],

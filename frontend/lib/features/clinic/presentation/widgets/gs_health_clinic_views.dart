@@ -1293,40 +1293,33 @@ class _ClinicDoctorCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
+                    Text(
+                      doc.displayFullName,
+                      key: Key('clinic_doctor_name_${doc.id}'),
+                      softWrap: true,
+                      style: const TextStyle(
+                        fontSize: 15.5,
+                        height: 1.25,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.gsNavy,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Expanded(
-                          child: Row(
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  doc.name,
-                                  key: Key('clinic_doctor_name_${doc.id}'),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 15.5,
-                                    fontWeight: FontWeight.w800,
-                                    color: AppTheme.gsNavy,
-                                  ),
-                                ),
-                              ),
-                              if (isVerified) ...[
-                                const SizedBox(width: 5),
-                                const Icon(
-                                  Icons.check_circle_rounded,
-                                  size: 16,
-                                  color: AppTheme.gsNavy,
-                                ),
-                              ],
-                            ],
+                        if (isVerified)
+                          const Icon(
+                            Icons.check_circle_rounded,
+                            size: 15,
+                            color: AppTheme.gsNavy,
                           ),
-                        ),
-                        const SizedBox(width: 6),
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 8,
-                            vertical: 3,
+                            vertical: 2.5,
                           ),
                           decoration: BoxDecoration(
                             color: isVerified ? _kSoftNavy : _kSoftRedBg,

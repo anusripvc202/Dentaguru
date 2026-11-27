@@ -716,7 +716,7 @@ exports.getDoctorActivityCalendar = async (req, res) => {
         if (caller && !isMainAdmin && !isSubAdmin) {
             return res.status(403).json({
                 success: false,
-                message: 'Access Denied: Only Administrators and authorized Sub-Administrators can access the Doctor Activity Calendar.',
+                message: 'Access Denied: Only Administrators and authorized Coordinators can access the Doctor Activity Calendar.',
             });
         }
 
@@ -733,7 +733,7 @@ exports.getDoctorActivityCalendar = async (req, res) => {
             if (!hasCalendarPerm) {
                 return res.status(403).json({
                     success: false,
-                    message: "Access Denied: Your Sub-Admin account lacks 'APPOINTMENT_VIEW' or 'REPORT_VIEW' permission.",
+                    message: "Access Denied: Your Coordinator account lacks 'APPOINTMENT_VIEW' or 'REPORT_VIEW' permission.",
                 });
             }
             canViewPatientContact = permsUpper.includes('*') || permsUpper.includes('ALL') || permsUpper.includes('PATIENT_VIEW');

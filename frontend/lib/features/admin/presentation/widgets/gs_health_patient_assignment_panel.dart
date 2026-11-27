@@ -144,7 +144,7 @@ class _GsHealthPatientAssignmentPanelState extends State<GsHealthPatientAssignme
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: _buildKpiCard('Sub-Admin Assigned', '$subAdminCount', Icons.supervisor_account_rounded, const Color(0xFFFE3434)),
+                child: _buildKpiCard('Coordinator Assigned', '$subAdminCount', Icons.supervisor_account_rounded, const Color(0xFFFE3434)),
               ),
             ],
           ),
@@ -182,7 +182,7 @@ class _GsHealthPatientAssignmentPanelState extends State<GsHealthPatientAssignme
                 const SizedBox(width: 8),
                 _buildSourceFilterChip('🛡️ Main Admin', 'MAIN_ADMIN_ASSIGNMENT'),
                 const SizedBox(width: 8),
-                _buildSourceFilterChip('👤 Sub-Admin', 'SUB_ADMIN_ASSIGNMENT'),
+                _buildSourceFilterChip('👤 Coordinator', 'SUB_ADMIN_ASSIGNMENT'),
                 const SizedBox(width: 14),
                 Container(height: 18, width: 1, color: const Color(0xFFCBD5E1)),
                 const SizedBox(width: 14),
@@ -371,7 +371,7 @@ class _GsHealthPatientAssignmentPanelState extends State<GsHealthPatientAssignme
       sourceLabel = 'Direct Booking';
     } else if (source == 'SUB_ADMIN_ASSIGNMENT') {
       sourceColor = const Color(0xFFFE3434);
-      sourceLabel = 'Sub-Admin ($assignedBy)';
+      sourceLabel = 'Coordinator ($assignedBy)';
     }
 
     return Container(

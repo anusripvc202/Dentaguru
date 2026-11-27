@@ -163,7 +163,7 @@ exports.getSubAdminDistricts = async (req, res) => {
         });
     } catch (err) {
         console.error('Get Sub-Admin Districts Error:', err.message);
-        res.status(500).json({ success: false, message: 'Failed to retrieve sub-admin districts.' });
+        res.status(500).json({ success: false, message: 'Failed to retrieve coordinator districts.' });
     }
 };
 
@@ -179,7 +179,7 @@ exports.assignSubAdminDistricts = async (req, res) => {
 
         const targetUser = await User.findById(id);
         if (!targetUser) {
-            return res.status(404).json({ success: false, message: 'Sub-Admin user not found.' });
+            return res.status(404).json({ success: false, message: 'Coordinator user not found.' });
         }
 
         const assignedBy = req.user ? req.user.id : null;
@@ -192,7 +192,7 @@ exports.assignSubAdminDistricts = async (req, res) => {
         });
     } catch (err) {
         console.error('Assign Sub-Admin Districts Error:', err.message);
-        res.status(500).json({ success: false, message: 'Failed to assign districts to sub-admin.' });
+        res.status(500).json({ success: false, message: 'Failed to assign districts to coordinator.' });
     }
 };
 
@@ -202,15 +202,15 @@ exports.removeSubAdminDistrict = async (req, res) => {
         const { id, districtId } = req.params;
         const removed = await SubAdminDistrict.removeDistrictFromSubAdmin(id, districtId);
         if (!removed) {
-            return res.status(404).json({ success: false, message: 'District mapping not found for this sub-admin.' });
+            return res.status(404).json({ success: false, message: 'District mapping not found for this coordinator.' });
         }
 
         res.json({
             success: true,
-            message: 'District removed successfully from Sub-Admin.'
+            message: 'District removed successfully from Coordinator.'
         });
     } catch (err) {
         console.error('Remove Sub-Admin District Error:', err.message);
-        res.status(500).json({ success: false, message: 'Failed to remove district from sub-admin.' });
+        res.status(500).json({ success: false, message: 'Failed to remove district from coordinator.' });
     }
 };

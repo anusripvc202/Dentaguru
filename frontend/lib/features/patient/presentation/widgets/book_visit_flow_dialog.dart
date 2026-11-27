@@ -1125,7 +1125,10 @@ class _BookVisitFlowDialogState extends State<BookVisitFlowDialog> {
                       final buf = modeMatches
                           ? avail.bufferMinutes
                           : BookingRulesConfig.bufferForMode(_selectedConsultationMode);
-                      return '$_selectedConsultationMode duration: $dur mins (+${buf}m buffer)';
+                      final hoursPart = (modeMatches && avail.startTime.isNotEmpty && avail.endTime.isNotEmpty)
+                          ? ' • Hours: ${avail.startTime}–${avail.endTime}'
+                          : '';
+                      return '$_selectedConsultationMode duration: $dur mins (+${buf}m buffer)$hoursPart';
                     }(),
                     style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
                     overflow: TextOverflow.ellipsis,

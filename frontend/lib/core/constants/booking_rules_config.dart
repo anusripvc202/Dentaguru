@@ -147,12 +147,65 @@ class BookingRulesConfig {
   static bool intervalsOverlap(int startA, int endA, int startB, int endB) =>
       startA < endB && endA > startB;
 
+  /// Generates non-overlapping base time slots for a consultation mode given start/end times,
+  /// duration, optional buffer step, and multiple breaks.
+  static List<String> generateSlotsWithBreaks({
+    required String startTime,
+    required String endTime,
+    required int durationMinutes,
+    int bufferMinutes = 0,
+    int? stepMinutes,
+    List<Map<String, dynamic>> breaks = const [],
+  }) {
+    final startMin = parseClockSlotMinutes(startTime);
+    final endMin = parseClockSlotMinutes(endTime);
+    final dur = durationMinutes >= 5 ? durationMinutes : 30;
+    final buf = bufferMinutes >= 0 ? bufferMinutes : 0;
+    final step = (stepMinutes != null && stepMinutes > 0) ? stepMinutes : (buf > 0 ? dur + buf : dur);
+    if (startMin == null || endMin == null || startMin >= endMin) return const [];
+
+    final parsedBreaks = <({int startMin, int endMin})>[];
+    for (final b in breaks) {
+      final s = int.tryParse(b['startMin']?.toString() ?? '') ??
+          parseClockSlotMinutes((b['startTime'] ?? b['start_time'] ?? '').toString());
+      final e = int.tryParse(b['endMin']?.toString() ?? '') ??
+          parseClockSlotMinutes((b['endTime'] ?? b['end_time'] ?? '').toString());
+      if (s != null && e != null && e > s) {
+        parsedBreaks.add((startMin: s, endMin: e));
+      }
+    }
+    parsedBreaks.sort((a, b) => a.startMin.compareTo(b.startMin));
+
+    final slots = <String>[];
+    int current = startMin;
+    while (current + dur <= endMin) {
+      final slotEnd = current + dur;
+      ({int startMin, int endMin})? hitBreak;
+      for (final br in parsedBreaks) {
+        if (intervalsOverlap(current, slotEnd, br.startMin, br.endMin)) {
+          hitBreak = br;
+          break;
+        }
+      }
+      if (hitBreak != null) {
+        current = hitBreak.endMin > (current + 5) ? hitBreak.endMin : (current + 5);
+        continue;
+      }
+      slots.add(minutesToClockSlot(current));
+      current += step;
+    }
+    return slots;
+  }
+
   /// Filters candidate [slots] on [date] considering advance booking, maximum window,
   /// [occupiedIntervals] (each `{startMin, occupiedEndMin}` or similar), and [blockedIntervals].
   static List<String> computeHybridAvailableSlots({
     required DateTime date,
     required Iterable<String> slots,
     String consultationMode = 'In-Person',
+    int? durationMinutesOverride,
+    int? bufferMinutesOverride,
+    List<Map<String, dynamic>> breaks = const [],
     List<Map<String, dynamic>> occupiedIntervals = const [],
     List<Map<String, dynamic>> blockedIntervals = const [],
     DateTime? nowOverride,
@@ -161,13 +214,28 @@ class BookingRulesConfig {
     String? breakStartTime,
     String? breakEndTime,
   }) {
-    final duration = durationForMode(consultationMode);
-    final buffer = bufferForMode(consultationMode);
+    final duration = (durationMinutesOverride != null && durationMinutesOverride > 0)
+        ? durationMinutesOverride
+        : durationForMode(consultationMode);
+    final buffer = (bufferMinutesOverride != null && bufferMinutesOverride >= 0)
+        ? bufferMinutesOverride
+        : bufferForMode(consultationMode);
     final totalNeeded = duration + buffer;
     final workEndMin = workingEndTime != null ? parseClockSlotMinutes(workingEndTime) : null;
     final brStartMin = breakStartTime != null ? parseClockSlotMinutes(breakStartTime) : null;
     final brEndMin = breakEndTime != null ? parseClockSlotMinutes(breakEndTime) : null;
     final hasBreak = brStartMin != null && brEndMin != null && brEndMin > brStartMin;
+
+    final parsedBreaks = <({int startMin, int endMin})>[];
+    for (final b in breaks) {
+      final s = int.tryParse(b['startMin']?.toString() ?? '') ??
+          parseClockSlotMinutes((b['startTime'] ?? b['start_time'] ?? '').toString());
+      final e = int.tryParse(b['endMin']?.toString() ?? '') ??
+          parseClockSlotMinutes((b['endTime'] ?? b['end_time'] ?? '').toString());
+      if (s != null && e != null && e > s) {
+        parsedBreaks.add((startMin: s, endMin: e));
+      }
+    }
 
     return slots.where((slot) {
       if (!isSlotBookableForDate(
@@ -184,7 +252,13 @@ class BookingRulesConfig {
       final candOccupiedEnd = candStart + totalNeeded;
 
       if (workEndMin != null && candConsultEnd > workEndMin) return false;
-      if (hasBreak && intervalsOverlap(candStart, candConsultEnd, brStartMin, brEndMin)) return false;
+      if (parsedBreaks.isNotEmpty) {
+        if (parsedBreaks.any((br) => intervalsOverlap(candStart, candConsultEnd, br.startMin, br.endMin))) {
+          return false;
+        }
+      } else if (hasBreak && intervalsOverlap(candStart, candConsultEnd, brStartMin, brEndMin)) {
+        return false;
+      }
 
       for (final b in blockedIntervals) {
         final bStart = int.tryParse(b['startMin']?.toString() ?? '') ??
@@ -303,5 +377,388 @@ class BookingRulesConfig {
     if (s == 'REJECTED' || s == 'DECLINED') return 'Rejected';
     if (s == 'RESCHEDULED') return 'Rescheduled';
     return 'Pending';
+  }
+
+  /// Returns the current wall-clock [DateTime] in `Asia/Kolkata` (IST, UTC+05:30).
+  /// When [nowOverride] or [debugNowOverride] is set:
+  /// - If it is a UTC [DateTime], converts to IST (`UTC + 5h30m`).
+  /// - If it is a non-UTC [DateTime], treats its wall-clock year/month/day/hour/minute directly as `Asia/Kolkata`.
+  /// When using the real system clock, converts `DateTime.now().toUtc()` to `Asia/Kolkata` (`UTC + 5h30m`).
+  static DateTime nowInIst({DateTime? nowOverride}) {
+    final override = nowOverride ?? debugNowOverride;
+    if (override != null) {
+      if (override.isUtc) {
+        final ist = override.add(const Duration(hours: 5, minutes: 30));
+        return DateTime(ist.year, ist.month, ist.day, ist.hour, ist.minute, ist.second);
+      }
+      return DateTime(
+        override.year,
+        override.month,
+        override.day,
+        override.hour,
+        override.minute,
+        override.second,
+      );
+    }
+    final utcNow = DateTime.now().toUtc();
+    final ist = utcNow.add(const Duration(hours: 5, minutes: 30));
+    return DateTime(ist.year, ist.month, ist.day, ist.hour, ist.minute, ist.second);
+  }
+
+  /// Formats a [DateTime] into `YYYY-MM-DD`.
+  static String formatYmd(DateTime d) {
+    final y = d.year.toString().padLeft(4, '0');
+    final m = d.month.toString().padLeft(2, '0');
+    final day = d.day.toString().padLeft(2, '0');
+    return '$y-$m-$day';
+  }
+
+  /// Normalizes a raw date string (`YYYY-MM-DD` or ISO timestamp) into an `Asia/Kolkata` `YYYY-MM-DD` string.
+  static String normalizeDateToIstYmd(String? rawDate) {
+    final str = (rawDate ?? '').trim();
+    if (str.isEmpty || str == 'null') return '';
+    if (RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(str)) {
+      return str;
+    }
+    if (RegExp(r'^\d{4}-\d{2}-\d{2}T00:00:00(?:\.000)?Z?$', caseSensitive: false).hasMatch(str)) {
+      return str.substring(0, 10);
+    }
+    final parsed = DateTime.tryParse(str);
+    if (parsed != null) {
+      if (parsed.isUtc) {
+        final ist = parsed.add(const Duration(hours: 5, minutes: 30));
+        return formatYmd(ist);
+      }
+      return formatYmd(parsed);
+    }
+    if (RegExp(r'^\d{4}-\d{2}-\d{2}').hasMatch(str)) {
+      return str.substring(0, 10);
+    }
+    return '';
+  }
+
+  /// Returns `true` only if [rawStatus] is an eligible confirmed/accepted or active status for Current Consultation,
+  /// and [actualEndAt] is not populated.
+  /// Excludes Completed, Cancelled, No-Show, Rejected, and Pending/unconfirmed statuses.
+  static bool isEligibleForCurrentConsultation(
+    String? rawStatus, {
+    String? actualEndAt,
+  }) {
+    if (actualEndAt != null && actualEndAt.trim().isNotEmpty && actualEndAt.trim() != 'null') {
+      return false;
+    }
+    final s = (rawStatus ?? '').trim().toUpperCase();
+    if (s.isEmpty) return false;
+    const excluded = <String>{
+      'COMPLETED',
+      'CANCELLED',
+      'CANCELED',
+      'REJECTED',
+      'DECLINED',
+      'NO_SHOW',
+      'NOSHOW',
+      'NO-SHOW',
+      'PENDING',
+      'PENDING_ADMIN_REVIEW',
+      'PENDING ADMIN REVIEW',
+      'SUBMITTED',
+      'ADMIN REVIEW',
+      'UNCONFIRMED',
+      'AWAITING',
+      'EXPIRED',
+    };
+    if (excluded.contains(s)) return false;
+    const allowed = <String>{
+      'CONFIRMED',
+      'ACCEPTED',
+      'DENTIST_ACCEPTED',
+      'DOCTOR_ASSIGNED',
+      'DOCTOR ASSIGNED',
+      'APPROVED',
+      'SCHEDULED',
+      'IN_PROGRESS',
+      'IN PROGRESS',
+      'STARTED',
+      'DELAYED',
+      'RESCHEDULED',
+    };
+    return allowed.contains(s);
+  }
+
+  /// Returns `true` only if [rawStatus] is an eligible upcoming confirmed status for Next Patient,
+  /// and [actualEndAt] is not populated.
+  /// Excludes Completed, Cancelled, No-Show, Rejected, Pending/unconfirmed, and already-started In-Progress statuses.
+  static bool isEligibleForNextConsultation(
+    String? rawStatus, {
+    String? actualEndAt,
+  }) {
+    if (!isEligibleForCurrentConsultation(rawStatus, actualEndAt: actualEndAt)) {
+      return false;
+    }
+    final s = (rawStatus ?? '').trim().toUpperCase();
+    return s != 'IN_PROGRESS' && s != 'IN PROGRESS' && s != 'STARTED';
+  }
+
+  /// Evaluates the live Current Patient and Next Patient for a single doctor on [targetDateYmd]
+  /// (defaults to today in `Asia/Kolkata`) using the actual current time in `Asia/Kolkata`.
+  ///
+  /// Rules enforced:
+  /// - **Current Patient**: Only when `startMin <= currentMinutes < endMin` on today's date in `Asia/Kolkata`,
+  ///   with an eligible confirmed/accepted/ongoing status. Immediately removed once `currentMinutes >= endMin`
+  ///   or when marked Completed / Cancelled / No-Show.
+  /// - **Next Patient**: Next eligible upcoming confirmed appointment on today's date whose `startMin > currentMinutes`,
+  ///   sorted by actual start time ascending, excluding the current appointment and preventing duplicate patients.
+  static Map<String, dynamic> evaluateDoctorLiveSchedule({
+    required String doctorId,
+    required String doctorName,
+    String specialty = '',
+    String initialAvailability = 'Available',
+    int initialDelayMinutes = 0,
+    required List<Map<String, dynamic>> appointments,
+    DateTime? nowOverride,
+    String? targetDateYmd,
+  }) {
+    final nowIst = nowInIst(nowOverride: nowOverride);
+    final todayIstYmd = formatYmd(nowIst);
+    final effectiveDateYmd = (targetDateYmd != null && targetDateYmd.trim().isNotEmpty)
+        ? targetDateYmd.trim()
+        : todayIstYmd;
+    final isTargetToday = effectiveDateYmd == todayIstYmd;
+    final nowMinutes = nowIst.hour * 60 + nowIst.minute;
+
+    String patientKeyFor(Map<String, dynamic> a) {
+      final pid = (a['patientId'] ?? a['patient_id'] ?? '').toString().trim().toLowerCase();
+      final pname = (a['patientName'] ?? a['patient_name'] ?? '').toString().trim().toLowerCase();
+      final pphone = (a['phone'] ?? a['patient_phone'] ?? '').toString().replaceAll(RegExp(r'\D'), '');
+      if (pid.isNotEmpty && pid != 'null') return pid;
+      return '$pname|$pphone';
+    }
+
+    final seenSlotPatientKeys = <String>{};
+    final validTodayAppts = <Map<String, dynamic>>[];
+    int maxExplicitDelayMinutes = initialDelayMinutes;
+
+    for (final raw in appointments) {
+      final statusRaw = (raw['status'] ?? '').toString().trim();
+      final statusUpper = statusRaw.toUpperCase();
+      final actualEndAt = (raw['actualEndAt'] ?? raw['actual_end_at'] ?? '').toString().trim();
+      final rawDelay = int.tryParse((raw['delayMinutes'] ?? raw['delay_minutes'] ?? '0').toString()) ?? 0;
+      if (statusUpper == 'DELAYED' && actualEndAt.isEmpty && rawDelay > maxExplicitDelayMinutes) {
+        maxExplicitDelayMinutes = rawDelay;
+      }
+
+      if (statusUpper == 'CANCELLED' ||
+          statusUpper == 'CANCELED' ||
+          statusUpper == 'REJECTED' ||
+          statusUpper == 'DECLINED' ||
+          statusUpper == 'NO_SHOW' ||
+          statusUpper == 'NOSHOW' ||
+          statusUpper == 'NO-SHOW') {
+        continue;
+      }
+
+      // Strictly use appointment date (never booking creation timestamp)
+      final rawDateStr = (raw['date'] ?? raw['dateRaw'] ?? raw['appointment_date'] ?? '').toString().trim();
+      final apptDateYmd = normalizeDateToIstYmd(rawDateStr);
+      if (apptDateYmd.isEmpty || apptDateYmd != effectiveDateYmd) {
+        continue;
+      }
+
+      // Strictly use scheduled appointment start time slot (never booking creation timestamp)
+      final rawStartSlot = (raw['scheduledStartTime'] ??
+              raw['scheduled_start_time'] ??
+              raw['timeSlot'] ??
+              raw['time_slot'] ??
+              '')
+          .toString()
+          .trim();
+      final startMin = parseClockSlotMinutes(rawStartSlot);
+      if (startMin == null) continue;
+
+      final rawMode = (raw['consultationType'] ??
+              raw['consultationMode'] ??
+              raw['consultation_type'] ??
+              raw['mode'] ??
+              raw['treatment'] ??
+              '')
+          .toString();
+      final consultationType = normalizeConsultationMode(rawMode);
+
+      final rawEndSlot = (raw['scheduledEndTime'] ?? raw['scheduled_end_time'] ?? '').toString().trim();
+      final parsedEndMin = parseClockSlotMinutes(rawEndSlot);
+      final explicitDuration = int.tryParse((raw['durationMinutes'] ?? raw['duration_minutes'] ?? '').toString());
+      final durationMin = (parsedEndMin != null && parsedEndMin > startMin)
+          ? (parsedEndMin - startMin)
+          : ((explicitDuration != null && explicitDuration > 0)
+              ? explicitDuration
+              : durationForMode(consultationType));
+      final endMin = startMin + durationMin;
+
+      final pKey = patientKeyFor(raw);
+      final dedupKey = '$pKey|$apptDateYmd|$startMin';
+      if (!seenSlotPatientKeys.add(dedupKey)) {
+        continue;
+      }
+
+      validTodayAppts.add({
+        ...raw,
+        '_apptDateYmd': apptDateYmd,
+        '_startMin': startMin,
+        '_endMin': endMin,
+        '_durationMin': durationMin,
+        '_consultationType': consultationType,
+        '_patientKey': pKey,
+      });
+    }
+
+    validTodayAppts.sort((a, b) => (a['_startMin'] as int).compareTo(b['_startMin'] as int));
+
+    // Clamp consecutive appointments on the same doctor's schedule so intervals do not overlap
+    for (int i = 0; i < validTodayAppts.length - 1; i++) {
+      final cur = validTodayAppts[i];
+      final nxt = validTodayAppts[i + 1];
+      final curStart = cur['_startMin'] as int;
+      final curEnd = cur['_endMin'] as int;
+      final nxtStart = nxt['_startMin'] as int;
+      if (curStart < nxtStart && curEnd > nxtStart) {
+        cur['_endMin'] = nxtStart;
+      }
+    }
+
+    // 1. Identify Current Patient: ONLY when target date is today in Asia/Kolkata AND startMin <= nowMinutes < endMin
+    Map<String, dynamic>? activeCurrent;
+    if (isTargetToday) {
+      final currentCandidates = validTodayAppts.where((a) {
+        final st = (a['status'] ?? '').toString();
+        final actualEnd = (a['actualEndAt'] ?? a['actual_end_at'] ?? '').toString();
+        if (!isEligibleForCurrentConsultation(st, actualEndAt: actualEnd)) {
+          return false;
+        }
+        final sMin = a['_startMin'] as int;
+        final eMin = a['_endMin'] as int;
+        return sMin <= nowMinutes && nowMinutes < eMin;
+      }).toList();
+
+      if (currentCandidates.isNotEmpty) {
+        activeCurrent = currentCandidates.firstWhere(
+          (a) {
+            final st = (a['status'] ?? '').toString().trim().toUpperCase();
+            return st == 'IN_PROGRESS' || st == 'IN PROGRESS' || st == 'STARTED' || st == 'DELAYED';
+          },
+          orElse: () => currentCandidates.last,
+        );
+      }
+    }
+
+    // 2. Identify Next Patient: strictly startMin > nowMinutes, eligible confirmed status, not current patient
+    Map<String, dynamic>? nextAppt;
+    if (isTargetToday) {
+      final nextCandidates = validTodayAppts.where((a) {
+        final st = (a['status'] ?? '').toString();
+        final actualEnd = (a['actualEndAt'] ?? a['actual_end_at'] ?? '').toString();
+        if (!isEligibleForNextConsultation(st, actualEndAt: actualEnd)) {
+          return false;
+        }
+        final sMin = a['_startMin'] as int;
+        if (sMin <= nowMinutes) return false;
+        if (activeCurrent != null) {
+          final curId = (activeCurrent['id'] ?? '').toString().trim();
+          final candId = (a['id'] ?? '').toString().trim();
+          if (curId.isNotEmpty && curId == candId) return false;
+          final curPKey = (activeCurrent['_patientKey'] ?? '').toString();
+          final candPKey = (a['_patientKey'] ?? '').toString();
+          if (curPKey.isNotEmpty && curPKey == candPKey) return false;
+          final curEndMin = activeCurrent['_endMin'] as int;
+          if (sMin < curEndMin) return false;
+        }
+        return true;
+      }).toList();
+
+      nextCandidates.sort((a, b) => (a['_startMin'] as int).compareTo(b['_startMin'] as int));
+      if (nextCandidates.isNotEmpty) {
+        nextAppt = nextCandidates.first;
+      }
+    }
+
+    final currentDelay = activeCurrent != null
+        ? (int.tryParse((activeCurrent['delayMinutes'] ?? activeCurrent['delay_minutes'] ?? '0').toString()) ?? 0)
+        : 0;
+    final delayDuration = currentDelay > 0 ? currentDelay : maxExplicitDelayMinutes;
+
+    String liveAvailability = initialAvailability.trim().isNotEmpty ? initialAvailability.trim() : 'Available';
+    if (activeCurrent != null) {
+      final curSt = (activeCurrent['status'] ?? '').toString().trim().toUpperCase();
+      if (curSt == 'DELAYED' || currentDelay > 0) {
+        liveAvailability = 'Delayed';
+      } else {
+        final cType = (activeCurrent['_consultationType'] ?? 'In-Person').toString();
+        liveAvailability = cType == 'Online'
+            ? 'Busy – Online Consultation'
+            : 'Busy – In-Person Consultation';
+      }
+    } else if (delayDuration > 0) {
+      liveAvailability = 'Delayed';
+    } else if (liveAvailability.startsWith('Busy')) {
+      liveAvailability = 'Available';
+    }
+
+    Map<String, dynamic>? formattedCurrent;
+    if (activeCurrent != null) {
+      final sMin = activeCurrent['_startMin'] as int;
+      final eMin = activeCurrent['_endMin'] as int;
+      final curSt = (activeCurrent['status'] ?? '').toString().trim().toUpperCase();
+      final actualStart = (activeCurrent['actualStartAt'] ?? activeCurrent['actual_start_at'] ?? '').toString().trim();
+      final String liveStatusLabel = (curSt == 'DELAYED' || currentDelay > 0)
+          ? 'Delayed'
+          : (curSt == 'IN_PROGRESS' || curSt == 'IN PROGRESS' || curSt == 'STARTED' || actualStart.isNotEmpty)
+              ? 'In Progress'
+              : 'Ongoing';
+      formattedCurrent = <String, dynamic>{
+        'id': (activeCurrent['id'] ?? '').toString(),
+        'patientId': (activeCurrent['patientId'] ?? activeCurrent['patient_id'] ?? '').toString(),
+        'patientName': (activeCurrent['patientName'] ?? activeCurrent['patient_name'] ?? 'Patient').toString().trim(),
+        'consultationType': (activeCurrent['_consultationType'] ?? 'In-Person').toString(),
+        'consultationMode': (activeCurrent['_consultationType'] ?? 'In-Person').toString(),
+        'scheduledStartTime': minutesToClockSlot(sMin),
+        'scheduledEndTime': minutesToClockSlot(eMin),
+        'startMin': sMin,
+        'endMin': eMin,
+        'status': (activeCurrent['status'] ?? 'CONFIRMED').toString(),
+        'liveStatus': liveStatusLabel,
+        'actualStartAt': actualStart.isNotEmpty ? actualStart : null,
+        'actualEndAt': null,
+        'delayMinutes': currentDelay,
+      };
+    }
+
+    Map<String, dynamic>? formattedNext;
+    if (nextAppt != null) {
+      final sMin = nextAppt['_startMin'] as int;
+      final eMin = nextAppt['_endMin'] as int;
+      final estStart = (nextAppt['estimatedStartTime'] ?? nextAppt['estimated_start_time'] ?? '').toString().trim();
+      formattedNext = <String, dynamic>{
+        'id': (nextAppt['id'] ?? '').toString(),
+        'patientId': (nextAppt['patientId'] ?? nextAppt['patient_id'] ?? '').toString(),
+        'patientName': (nextAppt['patientName'] ?? nextAppt['patient_name'] ?? 'Patient').toString().trim(),
+        'consultationType': (nextAppt['_consultationType'] ?? 'In-Person').toString(),
+        'consultationMode': (nextAppt['_consultationType'] ?? 'In-Person').toString(),
+        'scheduledStartTime': minutesToClockSlot(sMin),
+        'scheduledEndTime': minutesToClockSlot(eMin),
+        'startMin': sMin,
+        'endMin': eMin,
+        'status': (nextAppt['status'] ?? 'CONFIRMED').toString(),
+        'estimatedStartTime': estStart.isNotEmpty ? estStart : null,
+      };
+    }
+
+    return <String, dynamic>{
+      'doctorId': doctorId,
+      'doctorName': doctorName,
+      'specialty': specialty,
+      'currentAvailability': liveAvailability,
+      'delayDurationMinutes': delayDuration,
+      'currentAppointment': formattedCurrent,
+      'nextAppointment': formattedNext,
+    };
   }
 }

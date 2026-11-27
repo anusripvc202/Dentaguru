@@ -65,7 +65,8 @@ class _DentaGuruAppState extends State<DentaGuruApp>
         final roleLower = session.role.trim().toLowerCase();
         final isSubAdmin = roleLower.contains('sub-admin') ||
             roleLower.contains('subadmin') ||
-            roleLower.contains('sub_admin');
+            roleLower.contains('sub_admin') ||
+            roleLower.contains('coordinator');
         if (!isSubAdmin) {
           unawaited(SessionService().bindRealtimeSession(session));
         }

@@ -95,8 +95,8 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
 
-      // Open Create Sub-Admin modal
-      final createBtn = find.text('+ Add Sub-Admin');
+      // Open Create Coordinator modal
+      final createBtn = find.text('+ Create Coordinator');
       expect(createBtn, findsOneWidget);
       await tester.tap(createBtn);
       await tester.pump();
@@ -104,7 +104,7 @@ void main() {
 
       expect(find.byKey(const Key('create_sub_admin_dialog')), findsOneWidget);
       expect(find.byKey(const Key('subadmin_create_role_field')), findsOneWidget);
-      expect(find.text('Role: Sub-Admin'), findsOneWidget);
+      expect(find.text('Role: Coordinator'), findsOneWidget);
 
       // 1. Validate empty Full Name
       final submitBtn = find.byKey(const Key('subadmin_create_submit_btn'));
@@ -194,7 +194,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
-      expect(find.text('Sub-Admin console'), findsOneWidget);
+      expect(find.text('Coordinator Dashboard'), findsOneWidget);
       expect(find.text('Overview & Reports'), findsWidgets);
       // Unpermitted tabs like Appointments and Doctor Assignments should not be in the module tab bar
       expect(find.text('Doctor Assignments'), findsNothing);

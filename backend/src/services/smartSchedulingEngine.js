@@ -54,9 +54,14 @@ const DEFAULT_SMART_SCHEDULE = {
     inPersonDurationMinutes: 30,
     onlineEnabled: true,
     onlineDurationMinutes: 20,
+    useSeparateOnlineHours: false,
     onlineWorkingDays: null,
     onlineStartTime: null,
     onlineEndTime: null,
+    onlineBreaks: null,
+    onlineHasBreak: false,
+    onlineBreakStartTime: null,
+    onlineBreakEndTime: null,
     bufferMinutes: 5,
     onlineBufferMinutes: 5,
     inPersonBufferMinutes: 10,
@@ -186,12 +191,81 @@ function sanitizeBreaksList(raw = {}, fallback = DEFAULT_SMART_SCHEDULE) {
     return [];
 }
 
+function sanitizeOnlineBreaksList(raw = {}, fallback = DEFAULT_SMART_SCHEDULE) {
+    const rawOnlineBreaks = raw.onlineBreaks !== undefined ? raw.onlineBreaks : raw.online_breaks;
+    if (rawOnlineBreaks === null) {
+        return null;
+    }
+    if (Array.isArray(rawOnlineBreaks)) {
+        const cleaned = [];
+        for (const item of rawOnlineBreaks) {
+            if (!item || typeof item !== 'object') continue;
+            const sStr = String(item.startTime || item.start_time || '').trim();
+            const eStr = String(item.endTime || item.end_time || '').trim();
+            const sMin = parseClockSlotMinutes(sStr);
+            const eMin = parseClockSlotMinutes(eStr);
+            if (sMin !== null && eMin !== null && eMin > sMin) {
+                cleaned.push({
+                    startTime: minutesToClockSlot(sMin),
+                    endTime: minutesToClockSlot(eMin),
+                    startMin: sMin,
+                    endMin: eMin,
+                    label: String(item.label || item.name || 'Online Break').trim(),
+                });
+            }
+        }
+        cleaned.sort((a, b) => a.startMin - b.startMin);
+        return cleaned;
+    }
+
+    const explicitOnlineHasBreak = raw.onlineHasBreak !== undefined
+        ? Boolean(raw.onlineHasBreak)
+        : (raw.online_has_break !== undefined ? Boolean(raw.online_has_break) : undefined);
+
+    if (explicitOnlineHasBreak === false) {
+        return [];
+    }
+
+    const onlineStart = String(raw.onlineBreakStartTime || raw.online_break_start_time || '').trim();
+    const onlineEnd = String(raw.onlineBreakEndTime || raw.online_break_end_time || '').trim();
+    if (onlineStart && onlineEnd) {
+        const sMin = parseClockSlotMinutes(onlineStart);
+        const eMin = parseClockSlotMinutes(onlineEnd);
+        if (sMin !== null && eMin !== null && eMin > sMin) {
+            return [{
+                startTime: minutesToClockSlot(sMin),
+                endTime: minutesToClockSlot(eMin),
+                startMin: sMin,
+                endMin: eMin,
+                label: 'Online Break',
+            }];
+        }
+    }
+
+    if (Array.isArray(fallback.onlineBreaks)) {
+        return fallback.onlineBreaks.map(b => {
+            const sMin = b.startMin ?? parseClockSlotMinutes(b.startTime) ?? 660;
+            const eMin = b.endMin ?? parseClockSlotMinutes(b.endTime) ?? 690;
+            return {
+                startTime: minutesToClockSlot(sMin),
+                endTime: minutesToClockSlot(eMin),
+                startMin: sMin,
+                endMin: eMin,
+                label: b.label || 'Online Break',
+            };
+        }).filter(b => b.endMin > b.startMin);
+    }
+
+    return null;
+}
+
 function sanitizeBlockedTimeRanges(rawRanges, fallbackRanges = {}) {
     const src = (rawRanges && typeof rawRanges === 'object' && !Array.isArray(rawRanges))
         ? rawRanges
         : ((fallbackRanges && typeof fallbackRanges === 'object') ? fallbackRanges : {});
     const out = {};
     for (const [dateKey, list] of Object.entries(src)) {
+        if (dateKey === '_scheduleMeta') continue;
         const cleanDate = normalizeDateToTimezoneYmd(dateKey);
         if (!cleanDate || !Array.isArray(list)) continue;
         const cleanList = [];
@@ -226,15 +300,32 @@ function sanitizeBlockedTimeRanges(rawRanges, fallbackRanges = {}) {
 /**
  * Normalizes any camelCase or snake_case schedule object into the canonical Smart Schedule shape.
  */
-function sanitizeSmartSchedule(raw = {}, fallback = DEFAULT_SMART_SCHEDULE) {
+function sanitizeSmartSchedule(rawInput = {}, fallback = DEFAULT_SMART_SCHEDULE) {
+    const rawRangesObj = (rawInput && typeof rawInput === 'object')
+        ? (rawInput.blockedTimeRanges ?? rawInput.blocked_time_ranges)
+        : null;
+    const embeddedMeta = (rawRangesObj && typeof rawRangesObj === 'object' && rawRangesObj._scheduleMeta && typeof rawRangesObj._scheduleMeta === 'object')
+        ? rawRangesObj._scheduleMeta
+        : {};
+    const raw = { ...embeddedMeta, ...(rawInput || {}) };
+
     const fb = { ...DEFAULT_SMART_SCHEDULE, ...(fallback || {}) };
-    const workingDays = normalizeWorkingDaysList(raw.workingDays ?? raw.working_days);
+    const workingDays = normalizeWorkingDaysList(
+        raw.inPersonWorkingDays ?? raw.in_person_working_days ?? raw.workingDays ?? raw.working_days
+    );
     const effectiveWorkingDays = workingDays.length > 0 ? workingDays : [...fb.workingDays];
 
-    const startTime = String(raw.startTime || raw.start_time || fb.startTime || '09:00 AM').trim();
-    const endTime = String(raw.endTime || raw.end_time || fb.endTime || '05:00 PM').trim();
+    const startTime = String(
+        raw.inPersonStartTime || raw.in_person_start_time || raw.startTime || raw.start_time || fb.startTime || '09:00 AM'
+    ).trim();
+    const endTime = String(
+        raw.inPersonEndTime || raw.in_person_end_time || raw.endTime || raw.end_time || fb.endTime || '05:00 PM'
+    ).trim();
 
-    const breaks = sanitizeBreaksList(raw, fb);
+    const breaksSource = (raw.inPersonBreaks !== undefined || raw.in_person_breaks !== undefined)
+        ? { ...raw, breaks: raw.inPersonBreaks ?? raw.in_person_breaks }
+        : raw;
+    const breaks = sanitizeBreaksList(breaksSource, fb);
     const primaryBreak = breaks[0] || null;
 
     const legacyDurRaw = raw.slotDurationMinutes ?? raw.slot_duration_minutes ?? raw.defaultDurationMinutes ?? raw.default_duration_minutes;
@@ -269,12 +360,49 @@ function sanitizeSmartSchedule(raw = {}, fallback = DEFAULT_SMART_SCHEDULE) {
 
     const rawOnlineStart = raw.onlineStartTime !== undefined ? raw.onlineStartTime : raw.online_start_time;
     const rawOnlineEnd = raw.onlineEndTime !== undefined ? raw.onlineEndTime : raw.online_end_time;
-    const onlineStartTime = rawOnlineStart === null || rawOnlineStart === ''
+    let onlineStartTime = rawOnlineStart === null || rawOnlineStart === ''
         ? null
         : (rawOnlineStart !== undefined ? String(rawOnlineStart).trim() : (fb.onlineStartTime || null));
-    const onlineEndTime = rawOnlineEnd === null || rawOnlineEnd === ''
+    let onlineEndTime = rawOnlineEnd === null || rawOnlineEnd === ''
         ? null
         : (rawOnlineEnd !== undefined ? String(rawOnlineEnd).trim() : (fb.onlineEndTime || null));
+
+    const onlineBreaks = sanitizeOnlineBreaksList(raw, fb);
+    const primaryOnlineBreak = Array.isArray(onlineBreaks) && onlineBreaks.length > 0 ? onlineBreaks[0] : null;
+
+    let useSeparateOnlineHours = false;
+    if (raw.useSeparateOnlineHours !== undefined || raw.use_separate_online_hours !== undefined) {
+        useSeparateOnlineHours = Boolean(raw.useSeparateOnlineHours ?? raw.use_separate_online_hours);
+    } else if (rawOnlineStart === null || rawOnlineEnd === null) {
+        useSeparateOnlineHours = false;
+    } else if (
+        raw.onlineBreaks !== undefined ||
+        raw.online_breaks !== undefined ||
+        raw.onlineHasBreak !== undefined ||
+        raw.online_has_break !== undefined
+    ) {
+        useSeparateOnlineHours = Boolean(onlineStartTime && onlineEndTime);
+    } else if (onlineStartTime && onlineEndTime) {
+        if (onlineStartTime !== startTime) {
+            useSeparateOnlineHours = true;
+        } else {
+            useSeparateOnlineHours = Boolean(fb.useSeparateOnlineHours);
+        }
+    } else {
+        useSeparateOnlineHours = Boolean(fb.useSeparateOnlineHours && onlineStartTime && onlineEndTime);
+    }
+
+    if (useSeparateOnlineHours) {
+        onlineStartTime = onlineStartTime || startTime;
+        onlineEndTime = onlineEndTime || endTime;
+    } else if (
+        (raw.useSeparateOnlineHours === false || raw.use_separate_online_hours === false) &&
+        rawOnlineStart === undefined &&
+        rawOnlineEnd === undefined
+    ) {
+        onlineStartTime = null;
+        onlineEndTime = null;
+    }
 
     const bufferMinutes = sanitizeBufferMinutes(raw.bufferMinutes ?? raw.buffer_minutes, fb.bufferMinutes ?? 5);
     const onlineBufferMinutes = sanitizeBufferMinutes(raw.onlineBufferMinutes ?? raw.online_buffer_minutes, fb.onlineBufferMinutes ?? 5);
@@ -319,9 +447,14 @@ function sanitizeSmartSchedule(raw = {}, fallback = DEFAULT_SMART_SCHEDULE) {
         inPersonDurationMinutes,
         onlineEnabled,
         onlineDurationMinutes,
+        useSeparateOnlineHours,
         onlineWorkingDays,
         onlineStartTime,
         onlineEndTime,
+        onlineBreaks,
+        onlineHasBreak: Array.isArray(onlineBreaks) ? onlineBreaks.length > 0 : false,
+        onlineBreakStartTime: primaryOnlineBreak ? primaryOnlineBreak.startTime : null,
+        onlineBreakEndTime: primaryOnlineBreak ? primaryOnlineBreak.endTime : null,
         bufferMinutes,
         onlineBufferMinutes,
         inPersonBufferMinutes,
@@ -342,14 +475,20 @@ function getModeScheduleWindow(scheduleInput, consultationType = 'In-Person', ru
     const rules = { ...getBookingRulesConfig(), ...(rulesOverride || {}) };
     const mode = normalizeConsultationType(consultationType);
     const isOnline = mode === 'Online';
+    const useSeparate = Boolean(schedule.useSeparateOnlineHours);
 
     const enabled = isOnline ? Boolean(schedule.onlineEnabled) : Boolean(schedule.inPersonEnabled);
     const workingDays = (isOnline && Array.isArray(schedule.onlineWorkingDays) && schedule.onlineWorkingDays.length > 0)
         ? schedule.onlineWorkingDays
         : schedule.workingDays;
 
-    const startTime = (isOnline && schedule.onlineStartTime) ? schedule.onlineStartTime : schedule.startTime;
-    const endTime = (isOnline && schedule.onlineEndTime) ? schedule.onlineEndTime : schedule.endTime;
+    const hasOnlineHours = Boolean(schedule.onlineStartTime && schedule.onlineEndTime);
+    const startTime = (isOnline && (useSeparate || hasOnlineHours) && schedule.onlineStartTime)
+        ? schedule.onlineStartTime
+        : schedule.startTime;
+    const endTime = (isOnline && (useSeparate || hasOnlineHours) && schedule.onlineEndTime)
+        ? schedule.onlineEndTime
+        : schedule.endTime;
     const startMin = parseClockSlotMinutes(startTime);
     const endMin = parseClockSlotMinutes(endTime);
 
@@ -361,10 +500,21 @@ function getModeScheduleWindow(scheduleInput, consultationType = 'In-Person', ru
         ? sanitizeBufferMinutes(schedule.onlineBufferMinutes, rules.onlineBufferMinutes ?? 5)
         : sanitizeBufferMinutes(schedule.inPersonBufferMinutes, rules.inPersonBufferMinutes ?? 10);
 
+    const breaks = isOnline
+        ? (useSeparate
+            ? (Array.isArray(schedule.onlineBreaks) ? schedule.onlineBreaks : [])
+            : (Array.isArray(schedule.onlineBreaks) ? schedule.onlineBreaks : (schedule.breaks || [])))
+        : (schedule.breaks || []);
+
+    const stepMinutes = useSeparate
+        ? (durationMinutes + bufferMinutes)
+        : durationMinutes;
+
     const capacityLane = schedule.allowSimultaneousOnlineAndInPerson ? mode.toUpperCase() : 'SHARED';
 
     return {
         consultationType: mode,
+        useSeparateOnlineHours: useSeparate,
         enabled,
         workingDays,
         startTime,
@@ -373,8 +523,9 @@ function getModeScheduleWindow(scheduleInput, consultationType = 'In-Person', ru
         endMin,
         durationMinutes,
         bufferMinutes,
+        stepMinutes,
         totalOccupiedMinutes: durationMinutes + bufferMinutes,
-        breaks: schedule.breaks || [],
+        breaks,
         maxAppointmentsPerDay: schedule.maxAppointmentsPerDay,
         allowSimultaneousOnlineAndInPerson: Boolean(schedule.allowSimultaneousOnlineAndInPerson),
         capacityLane,
@@ -383,17 +534,23 @@ function getModeScheduleWindow(scheduleInput, consultationType = 'In-Person', ru
 }
 
 /**
- * Generates non-overlapping base time slots honoring start/end hours and multiple breaks.
+ * Generates non-overlapping base time slots honoring start/end hours, optional buffer step, and multiple breaks.
  */
 function generateBaseSlotsWithBreaks({
     startTime = '09:00 AM',
     endTime = '05:00 PM',
     durationMinutes = 30,
+    bufferMinutes = 0,
+    stepMinutes = null,
     breaks = [],
 }) {
     const startMin = parseClockSlotMinutes(startTime);
     const endMin = parseClockSlotMinutes(endTime);
-    const dur = Math.max(15, parseInt(String(durationMinutes), 10) || 30);
+    const dur = Math.max(5, parseInt(String(durationMinutes), 10) || 30);
+    const buf = Math.max(0, parseInt(String(bufferMinutes), 10) || 0);
+    const step = (stepMinutes !== null && stepMinutes !== undefined && Number(stepMinutes) > 0)
+        ? Number(stepMinutes)
+        : (buf > 0 ? dur + buf : dur);
     if (startMin === null || endMin === null || startMin >= endMin) return [];
 
     const normalizedBreaks = (Array.isArray(breaks) ? breaks : [])
@@ -411,12 +568,12 @@ function generateBaseSlotsWithBreaks({
         const slotEnd = current + dur;
         const overlappingBreak = normalizedBreaks.find(b => intervalsOverlap(current, slotEnd, b.startMin, b.endMin));
         if (overlappingBreak) {
-            // Advance cleanly to the end of the break (or next step if break ends earlier) so post-break slots align neatly!
-            current = Math.max(current + dur, overlappingBreak.endMin);
+            // Advance cleanly to the end of the break so post-break slots align neatly!
+            current = Math.max(current + 5, overlappingBreak.endMin);
             continue;
         }
         slots.push(minutesToClockSlot(current));
-        current += dur;
+        current += step;
     }
     return slots;
 }
@@ -500,6 +657,9 @@ function getEffectiveOccupiedIntervals(activeAppointments = [], schedule = DEFAU
         .map(a => getAppointmentOccupiedInterval(a, rulesWithSchedule, now))
         .filter(Boolean)
         .filter(occ => {
+            if (modeWin.useSeparateOnlineHours) {
+                return occ.consultationType.toUpperCase() === modeWin.consultationType.toUpperCase();
+            }
             if (modeWin.capacityLane === 'SHARED') return true;
             return occ.consultationType.toUpperCase() === modeWin.capacityLane;
         });
@@ -585,17 +745,22 @@ function generateDynamicSlots({
         activeApptsForDate.length >= schedule.maxAppointmentsPerDay
     );
 
-    const useExplicitSlotsForMode = hasExplicitDateSlots && (
+    const useExplicitSlotsForMode = hasExplicitDateSlots &&
+        !modeWin.useSeparateOnlineHours && (
         modeWin.consultationType !== 'Online' ||
         Number(explicitDateRecord?.slot_duration_minutes || 0) === Number(modeWin.durationMinutes)
     ) && !(schedule.breaks && schedule.breaks.length > 1);
 
-    const workingStartTime = (modeWin.consultationType === 'Online' && schedule.onlineStartTime)
-        ? schedule.onlineStartTime
-        : (explicitDateRecord?.start_time || modeWin.startTime);
-    const workingEndTime = (modeWin.consultationType === 'Online' && schedule.onlineEndTime)
-        ? schedule.onlineEndTime
-        : (explicitDateRecord?.end_time || modeWin.endTime);
+    const workingStartTime = modeWin.useSeparateOnlineHours
+        ? modeWin.startTime
+        : ((modeWin.consultationType === 'Online' && schedule.onlineStartTime)
+            ? schedule.onlineStartTime
+            : (explicitDateRecord?.start_time || modeWin.startTime));
+    const workingEndTime = modeWin.useSeparateOnlineHours
+        ? modeWin.endTime
+        : ((modeWin.consultationType === 'Online' && schedule.onlineEndTime)
+            ? schedule.onlineEndTime
+            : (explicitDateRecord?.end_time || modeWin.endTime));
 
     let allBaseSlots = [];
     if (!isBlockedDate && isWorkingDay) {
@@ -606,6 +771,8 @@ function generateDynamicSlots({
                 startTime: workingStartTime,
                 endTime: workingEndTime,
                 durationMinutes: modeWin.durationMinutes,
+                bufferMinutes: modeWin.bufferMinutes,
+                stepMinutes: modeWin.stepMinutes,
                 breaks: modeWin.breaks,
             });
         }
@@ -992,7 +1159,11 @@ function validateSlotAgainstSchedule({
     }
 
     const hasCustomDateSlots = Boolean(
-        explicitDateRecord && !explicitDateRecord.is_blocked && Array.isArray(explicitDateRecord.slots) && explicitDateRecord.slots.length > 0
+        !modeWin.useSeparateOnlineHours &&
+        explicitDateRecord &&
+        !explicitDateRecord.is_blocked &&
+        Array.isArray(explicitDateRecord.slots) &&
+        explicitDateRecord.slots.length > 0
     );
 
     if (schedule.isConfigured && !hasCustomDateSlots && modeWin.workingDays.length > 0 && weekdayName && !modeWin.workingDays.includes(weekdayName)) {
@@ -1037,16 +1208,20 @@ function validateSlotAgainstSchedule({
     const candOccupiedEndMin = candStartMin + effectiveDur + effectiveBuf;
 
     // Working hours boundary check
-    const workingStartTime = (modeWin.consultationType === 'Online' && schedule.onlineStartTime)
-        ? schedule.onlineStartTime
-        : (explicitDateRecord?.start_time || modeWin.startTime);
-    const workingEndTime = (modeWin.consultationType === 'Online' && schedule.onlineEndTime)
-        ? schedule.onlineEndTime
-        : (explicitDateRecord?.end_time || modeWin.endTime);
+    const workingStartTime = modeWin.useSeparateOnlineHours
+        ? modeWin.startTime
+        : ((modeWin.consultationType === 'Online' && schedule.onlineStartTime)
+            ? schedule.onlineStartTime
+            : (explicitDateRecord?.start_time || modeWin.startTime));
+    const workingEndTime = modeWin.useSeparateOnlineHours
+        ? modeWin.endTime
+        : ((modeWin.consultationType === 'Online' && schedule.onlineEndTime)
+            ? schedule.onlineEndTime
+            : (explicitDateRecord?.end_time || modeWin.endTime));
     const workStartMin = parseClockSlotMinutes(workingStartTime);
     const workEndMin = parseClockSlotMinutes(workingEndTime);
 
-    if (schedule.isConfigured && !hasCustomDateSlots && workStartMin !== null && workEndMin !== null) {
+    if ((schedule.isConfigured || modeWin.useSeparateOnlineHours) && !hasCustomDateSlots && workStartMin !== null && workEndMin !== null) {
         if (candStartMin < workStartMin || candConsultEndMin > workEndMin) {
             return {
                 valid: false,
@@ -1066,6 +1241,27 @@ function validateSlotAgainstSchedule({
             reason: 'OVERLAPS_BREAK',
             message: `The time slot (${timeSlot}) overlaps with the doctor's break period (${hitBreak.startTime} - ${hitBreak.endTime}).`,
         };
+    }
+
+    // When separate Online and In-Person schedules are enabled, enforce that regular bookings match a generated slot for that mode
+    if (modeWin.useSeparateOnlineHours && !releasedSlot && !hasCustomDateSlots && workStartMin !== null && workEndMin !== null) {
+        const modeSlots = generateBaseSlotsWithBreaks({
+            startTime: workingStartTime,
+            endTime: workingEndTime,
+            durationMinutes: modeWin.durationMinutes,
+            bufferMinutes: modeWin.bufferMinutes,
+            stepMinutes: modeWin.stepMinutes,
+            breaks: modeWin.breaks,
+        });
+        const canonicalCandidate = minutesToClockSlot(candStartMin);
+        if (!modeSlots.includes(canonicalCandidate)) {
+            return {
+                valid: false,
+                status: 400,
+                reason: 'INVALID_MODE_SLOT',
+                message: `The time slot (${timeSlot}) is not a valid ${modeWin.consultationType} slot for the configured schedule (${workingStartTime} - ${workingEndTime}).`,
+            };
+        }
     }
 
     // Blocked time ranges check

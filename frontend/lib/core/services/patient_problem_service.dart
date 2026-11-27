@@ -388,13 +388,111 @@ class DoctorModel {
       (photoBytes != null && photoBytes!.isNotEmpty) ||
       (profileImageUrl != null && profileImageUrl!.trim().isNotEmpty);
 
+  /// Clean full display name with normalized `Dr. ` prefix (never duplicates `Dr. Dr.` or truncates).
+  String get displayFullName => formatDoctorDisplayName(name);
+
+  static String _combineNameParts(Map<dynamic, dynamic> map) {
+    final first = (map['first_name'] ?? map['firstName'] ?? '').toString().trim();
+    final middle = (map['middle_name'] ?? map['middleName'] ?? '').toString().trim();
+    final last = (map['last_name'] ?? map['lastName'] ?? '').toString().trim();
+    return [first, middle, last].where((p) => p.isNotEmpty).join(' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  static String formatDoctorDisplayName(String raw) {
+    final collapsed = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (collapsed.isEmpty) return 'Doctor';
+    final withoutPrefix = collapsed.replaceFirst(RegExp(r'^(dr\.?\s+)+', caseSensitive: false), '').trim();
+    if (withoutPrefix.isEmpty || withoutPrefix.toLowerCase() == 'doctor') return 'Doctor';
+    return 'Dr. $withoutPrefix';
+  }
+
+  static bool _isGenericDoctorName(String v) {
+    final lower = v.replaceAll(RegExp(r'\s+'), ' ').trim().toLowerCase();
+    return lower.isEmpty ||
+        lower == 'doctor' ||
+        lower == 'dr.' ||
+        lower == 'dr. doctor' ||
+        lower == 'dentist' ||
+        lower == 'dr. dentist' ||
+        lower == 'specialist' ||
+        lower == 'medical doctor';
+  }
+
+  /// Resolves the most complete doctor full name from API/Supabase payloads,
+  /// combining first/middle/last names when present and never falling back to a single partial word.
+  static String resolveFullName(Map<dynamic, dynamic> json, {String fallback = ''}) {
+    final rawUsers = json['users'] ?? json['user'];
+    final Map<dynamic, dynamic> uMap = rawUsers is Map
+        ? rawUsers
+        : (rawUsers is List && rawUsers.isNotEmpty && rawUsers.first is Map
+            ? rawUsers.first as Map
+            : const {});
+
+    Map<dynamic, dynamic> metaMap = const {};
+    final devToken = uMap['device_token'] ?? json['device_token'];
+    if (devToken is String && devToken.trim().startsWith('{')) {
+      try {
+        final decoded = jsonDecode(devToken);
+        if (decoded is Map) metaMap = decoded;
+      } catch (_) {}
+    }
+
+    final candidates = <String>[
+      (json['full_name'] ?? json['fullName'] ?? '').toString(),
+      (json['doctor_name'] ?? json['doctorName'] ?? json['dentist_name'] ?? '').toString(),
+      _combineNameParts(json),
+      (json['name'] ?? '').toString(),
+      (uMap['full_name'] ?? uMap['fullName'] ?? '').toString(),
+      _combineNameParts(uMap),
+      (uMap['name'] ?? '').toString(),
+      (metaMap['fullName'] ?? metaMap['full_name'] ?? '').toString(),
+      _combineNameParts(metaMap),
+      (metaMap['name'] ?? '').toString(),
+      fallback,
+    ];
+
+    String best = '';
+    for (final raw in candidates) {
+      final clean = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
+      if (clean.isEmpty || _isGenericDoctorName(clean)) continue;
+      if (best.isEmpty) {
+        best = clean;
+      } else {
+        final cleanWords = clean.replaceFirst(RegExp(r'^dr\.?\s+', caseSensitive: false), '').split(' ').where((w) => w.isNotEmpty).length;
+        final bestWords = best.replaceFirst(RegExp(r'^dr\.?\s+', caseSensitive: false), '').split(' ').where((w) => w.isNotEmpty).length;
+        if (cleanWords > bestWords || (cleanWords == bestWords && clean.length > best.length)) {
+          best = clean;
+        }
+      }
+    }
+
+    if (best.isEmpty) {
+      final rawFallback = (json['name'] ?? uMap['name'] ?? fallback).toString().trim();
+      return rawFallback.isNotEmpty ? formatDoctorDisplayName(rawFallback) : '';
+    }
+    return formatDoctorDisplayName(best);
+  }
+
   factory DoctorModel.fromJson(Map<String, dynamic> json) {
+    final rawUsers = json['users'] ?? json['user'];
+    final Map<dynamic, dynamic> uMap = rawUsers is Map
+        ? rawUsers
+        : (rawUsers is List && rawUsers.isNotEmpty && rawUsers.first is Map
+            ? rawUsers.first as Map
+            : const {});
+    final rawClinics = json['clinics'] ?? json['clinic'];
+    final Map<dynamic, dynamic> cMap = rawClinics is Map
+        ? rawClinics
+        : (rawClinics is List && rawClinics.isNotEmpty && rawClinics.first is Map
+            ? rawClinics.first as Map
+            : const {});
+
     final parsedPhoto = parseProfilePhoto(
       json['photoBase64'] ??
           json['profileImageUrl'] ??
           json['profilePhoto'] ??
           json['profile_photo'] ??
-          (json['users'] is Map ? json['users']['biometric_token'] : null) ??
+          uMap['biometric_token'] ??
           '',
     );
     final Uint8List? bytes = parsedPhoto.bytes;
@@ -408,7 +506,7 @@ class DoctorModel {
     }
 
     List<String> parsedLanguages = ['English'];
-    final rawLangs = json['languages'] ?? (json['users'] is Map ? json['users']['languages'] : null);
+    final rawLangs = json['languages'] ?? uMap['languages'];
     if (rawLangs != null) {
       if (rawLangs is List) {
         parsedLanguages = rawLangs.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
@@ -426,9 +524,9 @@ class DoctorModel {
 
     return DoctorModel(
       id: (json['id'] ?? json['_id'] ?? '').toString(),
-      userId: (json['userId'] ?? json['user_id'] ?? (json['users'] != null ? json['users']['id'] : '') ?? '').toString(),
-      clinicId: (json['clinicId'] ?? json['clinic_id'] ?? (json['clinics'] != null ? json['clinics']['id'] : '') ?? '').toString(),
-      name: json['name'] ?? (json['users'] is Map ? (json['users']['name'] ?? '') : '') ?? '',
+      userId: (json['userId'] ?? json['user_id'] ?? uMap['id'] ?? '').toString(),
+      clinicId: (json['clinicId'] ?? json['clinic_id'] ?? cMap['id'] ?? '').toString(),
+      name: DoctorModel.resolveFullName(json),
       specialty: parsedSpecialty,
       department: (json['department'] ?? '').toString().trim(),
       qualification: parsedQual.isNotEmpty
@@ -439,44 +537,28 @@ class DoctorModel {
           ? ((json['rating'] ?? 0.0) as num).toDouble()
           : 0.0,
       reviewCount: int.tryParse((json['reviewCount'] ?? json['reviews_count'] ?? '0').toString()) ?? 0,
-      clinicName: (json['clinicName'] ?? json['clinic_name'] ?? (json['clinics'] != null ? json['clinics']['clinic_name'] : '') ?? '').toString(),
-      phone: json['phone'] ?? (json['users'] != null ? json['users']['phone'] : '') ?? '',
-      email: json['email'] ?? (json['users'] != null ? json['users']['email'] : '') ?? '',
-      status: json['status'] ?? json['availability_status'] ?? 'Available',
+      clinicName: (json['clinicName'] ?? json['clinic_name'] ?? cMap['clinic_name'] ?? '').toString(),
+      phone: (json['phone'] ?? uMap['phone'] ?? '').toString(),
+      email: (json['email'] ?? uMap['email'] ?? '').toString(),
+      status: (json['status'] ?? json['availability_status'] ?? 'Available').toString(),
       onlineStatus: (json['onlineStatus'] ?? json['online_status'] ?? '').toString(),
-      verificationStatus: json['verification_status'] ?? json['verificationStatus'] ?? 'VERIFIED',
+      verificationStatus: (json['verification_status'] ?? json['verificationStatus'] ?? 'VERIFIED').toString(),
       nextAvailableSlots: List<String>.from(json['nextAvailableSlots'] ?? []),
       consultationFee: (json['consultationFee'] ?? json['consultation_fee'] ?? '').toString(),
       licenseNumber: (json['licenseNumber'] ?? json['license_number'] ?? '').toString(),
       photoBytes: bytes,
       profileImageUrl: photoUrl,
-      clinicAddress: (json['clinicAddress'] ?? json['clinic_address'] ?? json['location'] ?? (json['clinics'] != null ? json['clinics']['location'] : '') ?? '').toString(),
-      pincode: json['pincode'] ?? json['postal_code'] ?? (json['users'] != null ? (json['users']['pincode'] ?? '') : '') ?? '',
-      city: json['city'] ?? (json['users'] != null ? (json['users']['city'] ?? '') : '') ?? '',
-      state: json['state'] ?? (json['users'] != null ? (json['users']['state'] ?? '') : '') ?? '',
-      bio: (json['bio'] ?? json['about'] ?? json['description'] ?? (json['users'] is Map ? (json['users']['bio'] ?? '') : '') ?? '').toString(),
+      clinicAddress: (json['clinicAddress'] ?? json['clinic_address'] ?? json['location'] ?? cMap['location'] ?? '').toString(),
+      pincode: (json['pincode'] ?? json['postal_code'] ?? uMap['pincode'] ?? '').toString(),
+      city: (json['city'] ?? uMap['city'] ?? '').toString(),
+      state: (json['state'] ?? uMap['state'] ?? '').toString(),
+      bio: (json['bio'] ?? json['about'] ?? json['description'] ?? uMap['bio'] ?? '').toString(),
       languages: parsedLanguages,
-      latitude: (json['latitude'] ??
-                  json['lat'] ??
-                  (json['clinics'] is Map ? json['clinics']['latitude'] : null) ??
-                  (json['users'] is Map ? json['users']['latitude'] : null)) !=
-              null
-          ? double.tryParse((json['latitude'] ??
-                  json['lat'] ??
-                  (json['clinics'] is Map ? json['clinics']['latitude'] : null) ??
-                  (json['users'] is Map ? json['users']['latitude'] : null))
-              .toString())
+      latitude: (json['latitude'] ?? json['lat'] ?? cMap['latitude'] ?? uMap['latitude']) != null
+          ? double.tryParse((json['latitude'] ?? json['lat'] ?? cMap['latitude'] ?? uMap['latitude']).toString())
           : null,
-      longitude: (json['longitude'] ??
-                  json['lng'] ??
-                  (json['clinics'] is Map ? json['clinics']['longitude'] : null) ??
-                  (json['users'] is Map ? json['users']['longitude'] : null)) !=
-              null
-          ? double.tryParse((json['longitude'] ??
-                  json['lng'] ??
-                  (json['clinics'] is Map ? json['clinics']['longitude'] : null) ??
-                  (json['users'] is Map ? json['users']['longitude'] : null))
-              .toString())
+      longitude: (json['longitude'] ?? json['lng'] ?? cMap['longitude'] ?? uMap['longitude']) != null
+          ? double.tryParse((json['longitude'] ?? json['lng'] ?? cMap['longitude'] ?? uMap['longitude']).toString())
           : null,
       onlineConsultationEnabled: parsedModes.online,
       inPersonConsultationEnabled: parsedModes.inPerson,
@@ -541,6 +623,7 @@ class PatientProfile {
   String city;
   String state;
   String pincode;
+  String? districtId;
   String? district;
   String? districtIdentificationStatus;
   List<String> languages;
@@ -560,6 +643,7 @@ class PatientProfile {
     this.city = '',
     this.state = '',
     this.pincode = '',
+    this.districtId,
     this.district,
     this.districtIdentificationStatus,
     this.languages = const ['English'],
@@ -690,6 +774,8 @@ class PatientProfile {
         'city': city,
         'state': state,
         'pincode': pincode,
+        'districtId': districtId,
+        'district_id': districtId,
         'district': district,
         'district_identification_status': districtIdentificationStatus,
         'languages': languages,
@@ -716,6 +802,12 @@ class PatientProfile {
       parsedLangs = ['English'];
     }
 
+    final rawDistrictId = _cleanString(json['districtId'] ?? json['district_id']);
+    final rawDistrict = _cleanString(json['district'] ?? json['district_name']);
+    final rawDistStatus = _cleanString(
+      json['districtIdentificationStatus'] ?? json['district_identification_status'],
+    );
+
     return PatientProfile(
       id: _cleanString(json['id']),
       name: _cleanString(json['name']),
@@ -729,8 +821,9 @@ class PatientProfile {
       city: _cleanString(json['city']),
       state: _cleanString(json['state']),
       pincode: _cleanString(json['pincode'] ?? json['postal_code']),
-      district: json['district'] ?? json['district_name'] ?? json['city'],
-      districtIdentificationStatus: json['district_identification_status'] ?? 'VERIFIED',
+      districtId: rawDistrictId.isNotEmpty ? rawDistrictId : null,
+      district: rawDistrict.isNotEmpty ? rawDistrict : null,
+      districtIdentificationStatus: rawDistStatus.isNotEmpty ? rawDistStatus : null,
       languages: parsedLangs,
       photoBytes: parsedPhoto.bytes,
       profileImageUrl: explicitUrl.isNotEmpty ? explicitUrl : parsedPhoto.url,
@@ -766,6 +859,8 @@ class PatientConsultationRequest {
   String? adminNotes;
   bool whatsappNotificationSent;
   final String state;
+  final String district;
+  final String? districtId;
   final String city;
   final String pincode;
   final double? latitude;
@@ -796,6 +891,8 @@ class PatientConsultationRequest {
     this.symptoms = '',
     this.preferredLocation = '',
     this.state = '',
+    this.district = '',
+    this.districtId,
     this.city = '',
     this.pincode = '',
     this.latitude,
@@ -1204,6 +1301,9 @@ class PatientConsultationRequest {
         'symptoms': symptoms,
         'preferredLocation': preferredLocation,
         'state': state,
+        'district': district,
+        'districtId': districtId,
+        'district_id': districtId,
         'city': city,
         'pincode': pincode,
         'latitude': latitude,
@@ -1278,9 +1378,25 @@ class PatientConsultationRequest {
       problemDescription: json['problemDescription'] ?? json['problem_description'] ?? '',
       symptoms: json['symptoms'] ?? '',
       preferredLocation: json['preferredLocation'] ?? json['preferred_location'] ?? '',
-      state: json['state'] ?? (patientObj['state'] ?? ''),
-      city: json['city'] ?? (patientObj['city'] ?? ''),
-      pincode: json['pincode'] ?? (patientObj['pincode'] ?? ''),
+      state: (json['state'] ?? json['patientState'] ?? patientObj['state'] ?? '').toString(),
+      district: (json['district'] ?? json['patientDistrict'] ?? patientObj['district'] ?? '').toString(),
+      districtId: PatientProfile.cleanString(
+        json['districtId'] ??
+            json['district_id'] ??
+            json['patientDistrictId'] ??
+            patientObj['districtId'] ??
+            patientObj['district_id'],
+      ).isNotEmpty
+          ? PatientProfile.cleanString(
+              json['districtId'] ??
+                  json['district_id'] ??
+                  json['patientDistrictId'] ??
+                  patientObj['districtId'] ??
+                  patientObj['district_id'],
+            )
+          : null,
+      city: (json['city'] ?? json['patientCity'] ?? patientObj['city'] ?? '').toString(),
+      pincode: (json['pincode'] ?? json['patientPincode'] ?? patientObj['pincode'] ?? '').toString(),
       latitude: (json['latitude'] ?? patientObj['latitude']) != null ? double.tryParse((json['latitude'] ?? patientObj['latitude']).toString()) : null,
       longitude: (json['longitude'] ?? patientObj['longitude']) != null ? double.tryParse((json['longitude'] ?? patientObj['longitude']).toString()) : null,
       attachments: List<String>.from(json['attachments'] ?? []),
@@ -2289,8 +2405,32 @@ class PatientProblemService extends ChangeNotifier {
   List<Map<String, dynamic>> get subAdmins => List.unmodifiable(_subAdmins);
 
   // District Management & Jurisdiction State
+  static const List<Map<String, dynamic>> defaultDistrictsCatalog = [
+    {'id': 'dist-hyd', 'name': 'Hyderabad', 'state': 'Telangana', 'country': 'India', 'is_active': true},
+    {'id': 'dist-medchal', 'name': 'Medchal-Malkajgiri', 'state': 'Telangana', 'country': 'India', 'is_active': true},
+    {'id': 'dist-rangareddy', 'name': 'Rangareddy', 'state': 'Telangana', 'country': 'India', 'is_active': true},
+    {'id': 'dist-warangal', 'name': 'Warangal', 'state': 'Telangana', 'country': 'India', 'is_active': true},
+    {'id': 'dist-karimnagar', 'name': 'Karimnagar', 'state': 'Telangana', 'country': 'India', 'is_active': true},
+    {'id': 'dist-nizamabad', 'name': 'Nizamabad', 'state': 'Telangana', 'country': 'India', 'is_active': true},
+    {'id': 'dist-adilabad', 'name': 'Adilabad', 'state': 'Telangana', 'country': 'India', 'is_active': true},
+    {'id': 'dist-khammam', 'name': 'Khammam', 'state': 'Telangana', 'country': 'India', 'is_active': true},
+    {'id': 'dist-nalgonda', 'name': 'Nalgonda', 'state': 'Telangana', 'country': 'India', 'is_active': true},
+    {'id': 'dist-mahabubnagar', 'name': 'Mahabubnagar', 'state': 'Telangana', 'country': 'India', 'is_active': true},
+    {'id': 'dist-mumbai-city', 'name': 'Mumbai City', 'state': 'Maharashtra', 'country': 'India', 'is_active': true},
+    {'id': 'dist-mumbai-sub', 'name': 'Mumbai Suburban', 'state': 'Maharashtra', 'country': 'India', 'is_active': true},
+    {'id': 'dist-pune', 'name': 'Pune', 'state': 'Maharashtra', 'country': 'India', 'is_active': true},
+    {'id': 'dist-thane', 'name': 'Thane', 'state': 'Maharashtra', 'country': 'India', 'is_active': true},
+    {'id': 'dist-bengaluru', 'name': 'Bengaluru Urban', 'state': 'Karnataka', 'country': 'India', 'is_active': true},
+    {'id': 'dist-chennai', 'name': 'Chennai', 'state': 'Tamil Nadu', 'country': 'India', 'is_active': true},
+    {'id': 'dist-delhi', 'name': 'Delhi', 'state': 'Delhi', 'country': 'India', 'is_active': true},
+    {'id': 'dist-visakhapatnam', 'name': 'Visakhapatnam', 'state': 'Andhra Pradesh', 'country': 'India', 'is_active': true},
+    {'id': 'dist-vijayawada', 'name': 'Vijayawada', 'state': 'Andhra Pradesh', 'country': 'India', 'is_active': true},
+    {'id': 'dist-guntur', 'name': 'Guntur', 'state': 'Andhra Pradesh', 'country': 'India', 'is_active': true},
+  ];
+
   final List<Map<String, dynamic>> _districts = [];
-  List<Map<String, dynamic>> get districts => List.unmodifiable(_districts);
+  List<Map<String, dynamic>> get districts =>
+      List.unmodifiable(_districts.isNotEmpty ? _districts : defaultDistrictsCatalog);
 
   final List<Map<String, dynamic>> _subAdminDistricts = [];
   List<Map<String, dynamic>> get subAdminDistricts => List.unmodifiable(_subAdminDistricts);
@@ -2363,65 +2503,440 @@ class PatientProblemService extends ChangeNotifier {
     return false;
   }
 
-  /// Check whether the current user (Sub-Admin or Main Admin) has jurisdiction over a district
+  static String _cleanLocationVal(String? raw) {
+    final s = (raw ?? '').trim();
+    if (s.isEmpty) return '';
+    final lower = s.toLowerCase();
+    if (lower == 'null' ||
+        lower == 'undefined' ||
+        lower == '--' ||
+        lower == 'not provided' ||
+        lower == 'not available') {
+      return '';
+    }
+    return s;
+  }
+
+  /// Resolves a patient's canonical district strictly from the patient's own location fields
+  /// (districtId, district, city, state, pincode).
+  /// Never uses doctor or clinic district as a substitute, and never guesses missing/unknown districts.
+  ({
+    String? districtId,
+    String? districtName,
+    String? state,
+    String status,
+    bool isVerified,
+  }) resolvePatientDistrictStrict({
+    String? districtId,
+    String? district,
+    String? city,
+    String? state,
+    String? pincode,
+  }) {
+    final rawDistrictId = _cleanLocationVal(districtId);
+    final rawDistrict = _cleanLocationVal(district);
+    final rawCity = _cleanLocationVal(city);
+    final rawState = _cleanLocationVal(state);
+    final rawPin = _cleanLocationVal(pincode);
+
+    final dIdLower = rawDistrictId.toLowerCase();
+    final dLower = rawDistrict.toLowerCase();
+    final cLower = rawCity.toLowerCase();
+    final sLower = rawState.toLowerCase();
+
+    final activeDistricts = districts.where((d) => d['is_active'] != false).toList();
+
+    ({
+      String? districtId,
+      String? districtName,
+      String? state,
+      String status,
+      bool isVerified,
+    }) buildResult(Map<String, dynamic>? matched) {
+      if (matched == null || matched['is_active'] == false) {
+        return (
+          districtId: null,
+          districtName: null,
+          state: rawState.isNotEmpty ? rawState : null,
+          status: 'PENDING_ADMIN_REVIEW',
+          isVerified: false,
+        );
+      }
+      final mState = _cleanLocationVal((matched['state'] ?? '').toString());
+      if (sLower.isNotEmpty && mState.isNotEmpty && mState.toLowerCase() != sLower) {
+        return (
+          districtId: null,
+          districtName: null,
+          state: rawState.isNotEmpty ? rawState : null,
+          status: 'PENDING_ADMIN_REVIEW',
+          isVerified: false,
+        );
+      }
+      final mId = _cleanLocationVal((matched['id'] ?? '').toString());
+      final mName = _cleanLocationVal((matched['name'] ?? matched['district_name'] ?? '').toString());
+      if (mId.isEmpty || mName.isEmpty) {
+        return (
+          districtId: null,
+          districtName: null,
+          state: rawState.isNotEmpty ? rawState : null,
+          status: 'PENDING_ADMIN_REVIEW',
+          isVerified: false,
+        );
+      }
+      return (
+        districtId: mId,
+        districtName: mName,
+        state: mState.isNotEmpty ? mState : (rawState.isNotEmpty ? rawState : null),
+        status: 'IDENTIFIED',
+        isVerified: true,
+      );
+    }
+
+    Map<String, dynamic>? findByName(String targetName) {
+      final t = targetName.toLowerCase();
+      for (final d in activeDistricts) {
+        if ((d['name'] ?? d['district_name'] ?? '').toString().trim().toLowerCase() == t) {
+          return d;
+        }
+      }
+      return null;
+    }
+
+    // 0. Explicit districtId match (strict: never guess if invalid)
+    if (dIdLower.isNotEmpty) {
+      for (final d in activeDistricts) {
+        final id = (d['id'] ?? '').toString().trim().toLowerCase();
+        final name = (d['name'] ?? d['district_name'] ?? '').toString().trim().toLowerCase();
+        if (id == dIdLower || name == dIdLower) {
+          return buildResult(d);
+        }
+      }
+      return buildResult(null);
+    }
+
+    // 1. Explicit district name match (strict: never guess if unknown)
+    if (dLower.isNotEmpty) {
+      for (final d in activeDistricts) {
+        final id = (d['id'] ?? '').toString().trim().toLowerCase();
+        final name = (d['name'] ?? d['district_name'] ?? '').toString().trim().toLowerCase();
+        if (name == dLower || id == dLower) {
+          return buildResult(d);
+        }
+      }
+      return buildResult(null);
+    }
+
+    // 2. City name match
+    if (cLower.isNotEmpty) {
+      for (final d in activeDistricts) {
+        final id = (d['id'] ?? '').toString().trim().toLowerCase();
+        final name = (d['name'] ?? d['district_name'] ?? '').toString().trim().toLowerCase();
+        if (name == cLower || id == cLower) {
+          return buildResult(d);
+        }
+      }
+      if (cLower.contains('hyderabad')) return buildResult(findByName('Hyderabad'));
+      if (cLower.contains('secunderabad') || cLower.contains('medchal') || cLower.contains('malkajgiri')) {
+        return buildResult(findByName('Medchal-Malkajgiri'));
+      }
+      if (cLower.contains('rangareddy') || cLower.contains('cyberabad') || cLower.contains('gachibowli') || cLower.contains('madhapur')) {
+        return buildResult(findByName('Rangareddy'));
+      }
+      if (cLower.contains('warangal') || cLower.contains('hanamkonda') || cLower.contains('kazipet')) {
+        return buildResult(findByName('Warangal'));
+      }
+      if (cLower.contains('karimnagar')) return buildResult(findByName('Karimnagar'));
+      if (cLower.contains('nizamabad')) return buildResult(findByName('Nizamabad'));
+      if (cLower.contains('adilabad')) return buildResult(findByName('Adilabad'));
+      if (cLower.contains('visakhapatnam') || cLower.contains('vizag')) {
+        return buildResult(findByName('Visakhapatnam'));
+      }
+      if (cLower.contains('vijayawada')) return buildResult(findByName('Vijayawada'));
+      if (cLower.contains('guntur')) return buildResult(findByName('Guntur'));
+      if (cLower.contains('mumbai') || cLower.contains('bandra') || cLower.contains('andheri') || cLower.contains('juhu') || cLower.contains('borivali')) {
+        return buildResult(findByName('Mumbai Suburban'));
+      }
+      if (cLower.contains('colaba') || cLower.contains('dadar') || cLower.contains('nariman')) {
+        return buildResult(findByName('Mumbai City'));
+      }
+      if (cLower.contains('pune')) return buildResult(findByName('Pune'));
+      if (cLower.contains('thane')) return buildResult(findByName('Thane'));
+      if (cLower.contains('bengaluru') || cLower.contains('bangalore')) {
+        return buildResult(findByName('Bengaluru Urban'));
+      }
+      if (cLower.contains('chennai') || cLower.contains('madras')) {
+        return buildResult(findByName('Chennai'));
+      }
+      if (cLower.contains('delhi')) return buildResult(findByName('Delhi'));
+      // City was provided as an unrecognized location -> do not guess from pincode
+      return buildResult(null);
+    }
+
+    // 3. Valid 6-digit Indian Pincode prefix match
+    if (RegExp(r'^\d{6}$').hasMatch(rawPin)) {
+      final prefix = rawPin.substring(0, 3);
+      switch (prefix) {
+        case '500':
+          return buildResult(findByName('Hyderabad'));
+        case '506':
+          return buildResult(findByName('Warangal'));
+        case '505':
+          return buildResult(findByName('Karimnagar'));
+        case '503':
+          return buildResult(findByName('Nizamabad'));
+        case '504':
+          return buildResult(findByName('Adilabad'));
+        case '530':
+          return buildResult(findByName('Visakhapatnam'));
+        case '520':
+          return buildResult(findByName('Vijayawada'));
+        case '522':
+          return buildResult(findByName('Guntur'));
+        case '400':
+          return buildResult(findByName('Mumbai Suburban'));
+        case '411':
+          return buildResult(findByName('Pune'));
+        case '560':
+          return buildResult(findByName('Bengaluru Urban'));
+        case '600':
+          return buildResult(findByName('Chennai'));
+        case '110':
+          return buildResult(findByName('Delhi'));
+      }
+    }
+
+    return buildResult(null);
+  }
+
+  /// Canonical lowercase district IDs assigned to the active Sub-Admin session.
+  Set<String> get subAdminAssignedDistrictIds {
+    final ids = <String>{};
+    for (final d in _subAdminDistricts) {
+      final rawId = _cleanLocationVal((d['id'] ?? d['district_id'] ?? d['districtId'] ?? '').toString());
+      final rawName = _cleanLocationVal((d['name'] ?? d['district_name'] ?? d['districtName'] ?? '').toString());
+      if (rawId.isNotEmpty) {
+        final resolved = resolvePatientDistrictStrict(districtId: rawId);
+        ids.add((resolved.districtId ?? rawId).toLowerCase());
+      } else if (rawName.isNotEmpty) {
+        final resolved = resolvePatientDistrictStrict(district: rawName);
+        if (resolved.districtId != null && resolved.districtId!.isNotEmpty) {
+          ids.add(resolved.districtId!.toLowerCase());
+        }
+      }
+    }
+    return ids;
+  }
+
+  /// Check whether the current user (Sub-Admin or Main Admin) has jurisdiction over a district.
+  /// Strict rule: Sub-Admin with 0 assigned districts OR missing/unverified district is ALWAYS denied.
   bool canAccessDistrict(String? districtIdOrName) {
     if (!_isSubAdminMode) return true; // Main Admin has global jurisdiction
-    if (_subAdminDistricts.isEmpty) return true; // If no districts assigned, fallback
-    if (districtIdOrName == null || districtIdOrName.trim().isEmpty) return true;
-    final target = districtIdOrName.trim().toLowerCase();
-    for (final d in _subAdminDistricts) {
-      final dId = (d['id'] ?? d['district_id'] ?? '').toString().toLowerCase();
-      final dName = (d['name'] ?? d['district_name'] ?? '').toString().toLowerCase();
-      if (dId == target || dName == target || target.contains(dName) || dName.contains(target)) {
-        return true;
-      }
+    final assignedIds = subAdminAssignedDistrictIds;
+    if (assignedIds.isEmpty) return false;
+    final clean = _cleanLocationVal(districtIdOrName);
+    if (clean.isEmpty) return false;
+    final byId = resolvePatientDistrictStrict(districtId: clean);
+    if (byId.isVerified && byId.districtId != null) {
+      return assignedIds.contains(byId.districtId!.toLowerCase());
+    }
+    final byName = resolvePatientDistrictStrict(district: clean);
+    if (byName.isVerified && byName.districtId != null) {
+      return assignedIds.contains(byName.districtId!.toLowerCase());
     }
     return false;
   }
 
-  /// Get patients filtered strictly by Sub-Admin assigned districts
+  /// Strictly checks if the signed-in role can view/access a patient record.
+  /// Uses ONLY the patient's own location fields; rejects missing/invalid district for Sub-Admins.
+  bool isPatientAllowedForCurrentRole(PatientProfile p) {
+    if (!_isSubAdminMode) return true;
+    final assignedIds = subAdminAssignedDistrictIds;
+    if (assignedIds.isEmpty) return false;
+    if ((p.districtIdentificationStatus ?? '').trim().toUpperCase() == 'PENDING_ADMIN_REVIEW' &&
+        _cleanLocationVal(p.districtId).isEmpty &&
+        _cleanLocationVal(p.district).isEmpty) {
+      return false;
+    }
+    final resolved = resolvePatientDistrictStrict(
+      districtId: p.districtId,
+      district: p.district,
+      city: p.city,
+      state: p.state,
+      pincode: p.pincode,
+    );
+    if (!resolved.isVerified || resolved.districtId == null) return false;
+    return assignedIds.contains(resolved.districtId!.toLowerCase());
+  }
+
+  /// Get patients filtered strictly by Sub-Admin assigned district IDs.
   List<PatientProfile> getPatientsForCurrentRole() {
-    if (!_isSubAdminMode || _subAdminDistricts.isEmpty) {
+    if (!_isSubAdminMode) {
       return allPatients;
     }
-    return allPatients.where((p) {
-      final pDistrict = (p.district ?? '').trim().toLowerCase();
-      final pCity = p.city.trim().toLowerCase();
-      return _subAdminDistricts.any((d) {
-        final dId = (d['id'] ?? '').toString().toLowerCase();
-        final dName = (d['name'] ?? '').toString().toLowerCase();
-        return (pDistrict.isNotEmpty && (pDistrict == dName || pDistrict == dId)) ||
-               (pCity.isNotEmpty && (pCity == dName || pCity.contains(dName) || dName.contains(pCity)));
-      });
-    }).toList();
+    return allPatients.where(isPatientAllowedForCurrentRole).toList();
   }
 
-  /// Get dentists filtered strictly by Sub-Admin assigned districts
+  /// Get dentists filtered by Sub-Admin assigned districts (for dentist directory views).
   List<DoctorModel> getDentistsForCurrentRole() {
-    if (!_isSubAdminMode || _subAdminDistricts.isEmpty) {
+    if (!_isSubAdminMode) {
       return allDoctors;
     }
+    final assignedIds = subAdminAssignedDistrictIds;
+    if (assignedIds.isEmpty) return const <DoctorModel>[];
     return allDoctors.where((d) {
-      final docCity = d.city.trim().toLowerCase();
-      return _subAdminDistricts.any((dist) {
-        final distName = (dist['name'] ?? '').toString().toLowerCase();
-        return docCity.isNotEmpty && (docCity == distName || docCity.contains(distName) || distName.contains(docCity));
-      });
+      final resolved = resolvePatientDistrictStrict(
+        city: d.city,
+        state: d.state,
+        pincode: d.pincode,
+      );
+      return resolved.isVerified &&
+          resolved.districtId != null &&
+          assignedIds.contains(resolved.districtId!.toLowerCase());
     }).toList();
   }
 
-  /// Get patient problem requests filtered strictly by Sub-Admin assigned districts
+  PatientProfile? _findMatchingPatientForRecord({String? patientId, String? patientPhone}) {
+    final cleanId = _cleanLocationVal(patientId);
+    final rawDigits = (patientPhone ?? '').replaceAll(RegExp(r'\D'), '');
+    final phone10 = rawDigits.length >= 10 ? rawDigits.substring(rawDigits.length - 10) : rawDigits;
+    for (final p in allPatients) {
+      if (cleanId.isNotEmpty && p.id.trim() == cleanId) return p;
+      if (phone10.length == 10) {
+        final pDigits = p.phone.replaceAll(RegExp(r'\D'), '');
+        final p10 = pDigits.length >= 10 ? pDigits.substring(pDigits.length - 10) : pDigits;
+        if (p10 == phone10) return p;
+      }
+    }
+    return null;
+  }
+
+  /// Checks whether a patient consultation request belongs to an authorized patient district.
+  /// Never substitutes doctor or clinic district!
+  bool isRequestAllowedForCurrentRole(PatientConsultationRequest r) {
+    if (!_isSubAdminMode) return true;
+    final assignedIds = subAdminAssignedDistrictIds;
+    if (assignedIds.isEmpty) return false;
+
+    final matchedPatient = _findMatchingPatientForRecord(
+      patientId: r.patientId,
+      patientPhone: r.patientPhone,
+    );
+    final resolved = resolvePatientDistrictStrict(
+      districtId: _cleanLocationVal(r.districtId).isNotEmpty ? r.districtId : matchedPatient?.districtId,
+      district: _cleanLocationVal(r.district).isNotEmpty ? r.district : matchedPatient?.district,
+      city: _cleanLocationVal(r.city).isNotEmpty ? r.city : matchedPatient?.city,
+      state: _cleanLocationVal(r.state).isNotEmpty ? r.state : matchedPatient?.state,
+      pincode: _cleanLocationVal(r.pincode).isNotEmpty ? r.pincode : matchedPatient?.pincode,
+    );
+    if (!resolved.isVerified || resolved.districtId == null) return false;
+    return assignedIds.contains(resolved.districtId!.toLowerCase());
+  }
+
+  /// Get patient problem requests filtered strictly by Sub-Admin assigned district IDs.
   List<PatientConsultationRequest> getRequestsForCurrentRole() {
-    if (!_isSubAdminMode || _subAdminDistricts.isEmpty) {
+    if (!_isSubAdminMode) {
       return requests;
     }
-    return requests.where((r) {
-      final rCity = r.city.trim().toLowerCase();
-      return _subAdminDistricts.any((dist) {
-        final distName = (dist['name'] ?? '').toString().toLowerCase();
-        return rCity.isNotEmpty && (rCity == distName || rCity.contains(distName) || distName.contains(rCity));
-      });
-    }).toList();
+    return requests.where(isRequestAllowedForCurrentRole).toList();
+  }
+
+  /// Checks whether a patient referral involves a patient in the Sub-Admin's assigned district(s).
+  /// Never uses referring/referred doctor or clinic district as a substitute!
+  bool isReferralAllowedForCurrentRole(PatientReferral ref) {
+    if (!_isSubAdminMode) return true;
+    final assignedIds = subAdminAssignedDistrictIds;
+    if (assignedIds.isEmpty) return false;
+
+    final matchedReferred = _findMatchingPatientForRecord(
+      patientId: ref.referredPatientId,
+      patientPhone: ref.referredPatientMobile,
+    );
+    final resolved = resolvePatientDistrictStrict(
+      districtId: _cleanLocationVal(ref.patientDistrictId).isNotEmpty
+          ? ref.patientDistrictId
+          : matchedReferred?.districtId,
+      district: _cleanLocationVal(ref.referredPatientDistrict).isNotEmpty
+          ? ref.referredPatientDistrict
+          : matchedReferred?.district,
+      city: _cleanLocationVal(ref.referredPatientCity).isNotEmpty
+          ? ref.referredPatientCity
+          : matchedReferred?.city,
+      state: _cleanLocationVal(ref.referredPatientState).isNotEmpty
+          ? ref.referredPatientState
+          : matchedReferred?.state,
+      pincode: _cleanLocationVal(ref.referredPatientPincode).isNotEmpty
+          ? ref.referredPatientPincode
+          : matchedReferred?.pincode,
+    );
+    if (!resolved.isVerified || resolved.districtId == null) return false;
+    return assignedIds.contains(resolved.districtId!.toLowerCase());
+  }
+
+  /// Get referrals filtered strictly by Sub-Admin assigned district IDs.
+  List<PatientReferral> getReferralsForCurrentRole() {
+    if (!_isSubAdminMode) {
+      return adminPatientReferrals;
+    }
+    return adminPatientReferrals.where(isReferralAllowedForCurrentRole).toList();
+  }
+
+  /// Generic strict check for appointments / records associated with a patient.
+  bool isPatientRecordOrAppointmentAllowed({
+    String? patientId,
+    String? patientPhone,
+    String? districtId,
+    String? district,
+    String? city,
+    String? state,
+    String? pincode,
+  }) {
+    if (!_isSubAdminMode) return true;
+    final assignedIds = subAdminAssignedDistrictIds;
+    if (assignedIds.isEmpty) return false;
+
+    final matchedPatient = _findMatchingPatientForRecord(
+      patientId: patientId,
+      patientPhone: patientPhone,
+    );
+    final resolved = resolvePatientDistrictStrict(
+      districtId: _cleanLocationVal(districtId).isNotEmpty ? districtId : matchedPatient?.districtId,
+      district: _cleanLocationVal(district).isNotEmpty ? district : matchedPatient?.district,
+      city: _cleanLocationVal(city).isNotEmpty ? city : matchedPatient?.city,
+      state: _cleanLocationVal(state).isNotEmpty ? state : matchedPatient?.state,
+      pincode: _cleanLocationVal(pincode).isNotEmpty ? pincode : matchedPatient?.pincode,
+    );
+    if (!resolved.isVerified || resolved.districtId == null) return false;
+    return assignedIds.contains(resolved.districtId!.toLowerCase());
+  }
+
+  Map<String, dynamic> _normalizeSubAdminDistrictEntry(dynamic raw) {
+    if (raw is Map) {
+      final map = Map<String, dynamic>.from(raw);
+      final rawId = _cleanLocationVal((map['id'] ?? map['district_id'] ?? map['districtId'] ?? '').toString());
+      final rawName = _cleanLocationVal((map['name'] ?? map['district_name'] ?? map['districtName'] ?? '').toString());
+      final resolved = rawId.isNotEmpty
+          ? resolvePatientDistrictStrict(districtId: rawId)
+          : resolvePatientDistrictStrict(district: rawName);
+      if (resolved.isVerified && resolved.districtId != null) {
+        return {
+          ...map,
+          'id': resolved.districtId,
+          'name': resolved.districtName ?? rawName,
+          if ((resolved.state ?? '').isNotEmpty) 'state': resolved.state,
+        };
+      }
+      return map;
+    }
+    final rawStr = _cleanLocationVal(raw?.toString());
+    final resolved = resolvePatientDistrictStrict(districtId: rawStr);
+    if (resolved.isVerified && resolved.districtId != null) {
+      return {
+        'id': resolved.districtId,
+        'name': resolved.districtName ?? rawStr,
+        if ((resolved.state ?? '').isNotEmpty) 'state': resolved.state,
+      };
+    }
+    return {'id': rawStr, 'name': rawStr};
   }
 
   void setSubAdminSession({
@@ -2434,6 +2949,7 @@ class PatientProblemService extends ChangeNotifier {
     String status = 'ACTIVE',
   }) {
     _isSubAdminMode = true;
+    _isAdminMode = false;
     _subAdminId = id.trim();
     _subAdminName = name.trim();
     _subAdminEmail = email.trim();
@@ -2447,13 +2963,13 @@ class PatientProblemService extends ChangeNotifier {
     }
     _subAdminDistricts.clear();
     if (assignedDistricts != null) {
+      final seenIds = <String>{};
       for (final d in assignedDistricts) {
-        if (d is Map<String, dynamic>) {
-          _subAdminDistricts.add(d);
-        } else if (d is Map) {
-          _subAdminDistricts.add(Map<String, dynamic>.from(d));
-        } else if (d != null) {
-          _subAdminDistricts.add({'id': d.toString(), 'name': d.toString()});
+        if (d == null) continue;
+        final norm = _normalizeSubAdminDistrictEntry(d);
+        final normId = (norm['id'] ?? '').toString().trim().toLowerCase();
+        if (normId.isNotEmpty && seenIds.add(normId)) {
+          _subAdminDistricts.add(norm);
         }
       }
     }
@@ -3135,6 +3651,15 @@ class PatientProblemService extends ChangeNotifier {
           final pincode = (item['pincode'] ?? tokenMeta['pincode'] ?? item['postal_code'] ?? '').toString();
           final state = (item['state'] ?? tokenMeta['state'] ?? '').toString();
           final address = (item['address'] ?? tokenMeta['address'] ?? item['location'] ?? '').toString();
+          final rawDistrictId = (item['districtId'] ?? item['district_id'] ?? tokenMeta['districtId'] ?? tokenMeta['district_id'] ?? '').toString();
+          final rawDistrict = (item['district'] ?? item['district_name'] ?? tokenMeta['district'] ?? tokenMeta['district_name'] ?? '').toString();
+          final resolvedDist = resolvePatientDistrictStrict(
+            districtId: rawDistrictId,
+            district: rawDistrict,
+            city: city,
+            state: state,
+            pincode: pincode,
+          );
 
           if (name.isEmpty && email.isNotEmpty) {
             name = email.split('@').first;
@@ -3168,7 +3693,10 @@ class PatientProblemService extends ChangeNotifier {
             emergencyContact: emergencyContact,
             city: city,
             pincode: pincode,
-            state: state,
+            state: resolvedDist.state ?? state,
+            districtId: resolvedDist.districtId,
+            district: resolvedDist.districtName,
+            districtIdentificationStatus: resolvedDist.status,
             address: address,
             languages: userLangs,
             photoBytes: parsedPhoto.bytes,
@@ -3382,6 +3910,7 @@ class PatientProblemService extends ChangeNotifier {
       final currentPName = currentPatient.name;
 
       final isAdmin = _isAdminMode ||
+                      _isSubAdminMode ||
                       (authUser?.email != null && authUser!.email!.toLowerCase().contains('admin')) ||
                       currentPatient.email.toLowerCase().contains('admin') ||
                       currentPatient.id.toLowerCase().contains('admin');
@@ -3460,8 +3989,23 @@ class PatientProblemService extends ChangeNotifier {
             .toString();
         final state = (pr['state'] != null && pr['state'].toString().isNotEmpty
                 ? pr['state']
-                : (patientObj['state'] ?? ''))
+                : (pr['patientState'] ?? patientObj['state'] ?? ''))
             .toString();
+        final reqDistrict = (pr['district'] != null && pr['district'].toString().isNotEmpty
+                ? pr['district']
+                : (pr['patientDistrict'] ?? patientObj['district'] ?? ''))
+            .toString();
+        final reqDistrictIdRaw = (pr['district_id'] ??
+                pr['districtId'] ??
+                pr['patientDistrictId'] ??
+                patientObj['district_id'] ??
+                patientObj['districtId'] ??
+                '')
+            .toString()
+            .trim();
+        final reqDistrictId = reqDistrictIdRaw.isNotEmpty && reqDistrictIdRaw.toLowerCase() != 'null'
+            ? reqDistrictIdRaw
+            : null;
 
         final assignedDocId = (pr['assigned_doctor_id'] ?? pr['suggested_dentist_id'] ?? dentistObj['id'])?.toString();
         String? assignedDocName = (pr['assigned_doctor_name'] ?? pr['assignedDoctorName'] ?? dentistObj['name'])?.toString();
@@ -3568,6 +4112,8 @@ class PatientProblemService extends ChangeNotifier {
           city: city,
           pincode: pincode,
           state: state,
+          district: reqDistrict,
+          districtId: reqDistrictId,
         );
 
         final existingIdx = _requests.indexWhere((r) =>
@@ -3910,14 +4456,21 @@ class PatientProblemService extends ChangeNotifier {
               map['clinicName'] = clinic.clinicName;
             }
             final parsed = DoctorModel.fromJson(map);
-            fetchedDocs.add(parsed);
             final idx = _allDoctors.indexWhere((d) =>
                 (d.id.isNotEmpty && d.id == parsed.id) ||
                 (d.userId.isNotEmpty && d.userId == parsed.userId));
+            // Preserve existing non-generic full name if partial API payload lacked users.name
+            final effectiveDoc = (idx >= 0 &&
+                    (parsed.name.trim().isEmpty || parsed.name.trim().toLowerCase() == 'doctor') &&
+                    _allDoctors[idx].name.trim().isNotEmpty &&
+                    _allDoctors[idx].name.trim().toLowerCase() != 'doctor')
+                ? DoctorModel.fromJson({...map, 'name': _allDoctors[idx].name})
+                : parsed;
+            fetchedDocs.add(effectiveDoc);
             if (idx >= 0) {
-              _allDoctors[idx] = parsed;
+              _allDoctors[idx] = effectiveDoc;
             } else {
-              _allDoctors.add(parsed);
+              _allDoctors.add(effectiveDoc);
             }
           }
         }
@@ -3929,6 +4482,60 @@ class PatientProblemService extends ChangeNotifier {
       debugPrint('Fetch clinic doctors error: $e');
     }
     return getDoctorsForClinic(clinic);
+  }
+
+  /// Immediately reflect a clinic association in local state while preserving complete doctor profile & full name.
+  void assignDoctorToClinic({
+    required String doctorId,
+    required String clinicId,
+    required String clinicName,
+    String? clinicAddress,
+  }) {
+    final cleanDocId = doctorId.trim();
+    if (cleanDocId.isEmpty) return;
+    final idx = _allDoctors.indexWhere(
+      (d) => d.id.trim() == cleanDocId || d.userId.trim() == cleanDocId,
+    );
+    if (idx < 0) return;
+    final existing = _allDoctors[idx];
+    _allDoctors[idx] = DoctorModel(
+      id: existing.id,
+      userId: existing.userId,
+      clinicId: clinicId.trim(),
+      name: existing.displayFullName,
+      specialty: existing.specialty,
+      department: existing.department,
+      qualification: existing.qualification,
+      experienceYears: existing.experienceYears,
+      rating: existing.rating,
+      reviewCount: existing.reviewCount,
+      clinicName: clinicName.trim().isNotEmpty ? clinicName.trim() : existing.clinicName,
+      phone: existing.phone,
+      email: existing.email,
+      status: existing.status,
+      onlineStatus: existing.onlineStatus,
+      verificationStatus: existing.verificationStatus,
+      nextAvailableSlots: existing.nextAvailableSlots,
+      consultationFee: existing.consultationFee,
+      licenseNumber: existing.licenseNumber,
+      photoBytes: existing.photoBytes,
+      profileImageUrl: existing.profileImageUrl,
+      clinicAddress: (clinicAddress != null && clinicAddress.trim().isNotEmpty)
+          ? clinicAddress.trim()
+          : existing.clinicAddress,
+      pincode: existing.pincode,
+      city: existing.city,
+      state: existing.state,
+      bio: existing.bio,
+      languages: existing.languages,
+      latitude: existing.latitude,
+      longitude: existing.longitude,
+      onlineConsultationEnabled: existing.onlineConsultationEnabled,
+      inPersonConsultationEnabled: existing.inPersonConsultationEnabled,
+      procedureFees: existing.procedureFees,
+    );
+    _saveToStorage();
+    notifyListeners();
   }
 
   /// Associate an existing registered doctor to a clinic without deleting or duplicating accounts.
@@ -4102,16 +4709,14 @@ class PatientProblemService extends ChangeNotifier {
           final userObj = dMap['users'] ?? dMap['user'] ?? {};
           final clinicObj = dMap['clinics'] ?? dMap['clinic'] ?? {};
           
-          var rawName = (userObj['name'] ?? dMap['name'] ?? dMap['dentist_name'] ?? '').toString().trim();
-          if (rawName.isEmpty || rawName.toLowerCase() == 'dentist' || rawName == 'Dr.') {
+          var resolvedFullName = DoctorModel.resolveFullName(dMap);
+          if (resolvedFullName.isEmpty || resolvedFullName.toLowerCase() == 'doctor') {
             final cNameStr = (clinicObj['clinic_name'] ?? clinicObj['name'] ?? dMap['clinicName'] ?? '').toString().trim();
-            if (cNameStr.isNotEmpty) {
-              rawName = cNameStr;
-            } else {
-              rawName = 'Medical Doctor';
-            }
+            resolvedFullName = cNameStr.isNotEmpty
+                ? DoctorModel.formatDoctorDisplayName(cNameStr)
+                : 'Medical Doctor';
           }
-          final formattedName = rawName.startsWith('Dr.') ? rawName : 'Dr. $rawName';
+          final formattedName = resolvedFullName;
           final email = (userObj['email'] ?? dMap['email'] ?? '').toString().trim();
           final phone = (userObj['phone'] ?? dMap['phone'] ?? '').toString().trim();
           final rawSpec = (dMap['speciality'] ?? dMap['specialty'] ?? '').toString().trim();
@@ -5392,6 +5997,11 @@ class PatientProblemService extends ChangeNotifier {
 
   Future<void> clearAllData() async {
     try {
+      _syncAllInFlight = null;
+      _isAdminMode = false;
+      _isSubAdminMode = false;
+      _subAdminDistricts.clear();
+      _subAdminPermissions.clear();
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
       currentPatient = PatientProfile();
@@ -7835,6 +8445,20 @@ class PatientProblemService extends ChangeNotifier {
   /// Fetch persisted weekly schedule + blocked dates for a doctor
   Future<DoctorScheduleModel> getDoctorSchedule(String doctorId) async {
     if (doctorId.trim().isEmpty) return const DoctorScheduleModel();
+    if (!_doctorScheduleCache.containsKey(doctorId)) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final raw = prefs.getString('dentaguru_doctor_schedules_v2');
+        if (raw != null && raw.startsWith('{')) {
+          final decoded = jsonDecode(raw);
+          if (decoded is Map && decoded[doctorId] is Map) {
+            _doctorScheduleCache[doctorId] = DoctorScheduleModel.fromJson(
+              Map<String, dynamic>.from(decoded[doctorId] as Map),
+            );
+          }
+        }
+      } catch (_) {}
+    }
     try {
       final res = await _api.fetchDoctorSchedule(dentistId: doctorId);
       if (res['success'] == true) {
@@ -7857,6 +8481,7 @@ class PatientProblemService extends ChangeNotifier {
         if (res['schedule'] is Map) {
           final schedule = DoctorScheduleModel.fromJson(Map<String, dynamic>.from(res['schedule'] as Map));
           _doctorScheduleCache[doctorId] = schedule;
+          _persistDoctorSchedulesToPrefs();
           notifyListeners();
           return schedule;
         }
@@ -8014,6 +8639,7 @@ class PatientProblemService extends ChangeNotifier {
       );
       if (res['schedule'] is Map) {
         _doctorScheduleCache[doctorId] = DoctorScheduleModel.fromJson(Map<String, dynamic>.from(res['schedule'] as Map));
+        _persistDoctorSchedulesToPrefs();
       }
       if (res['success'] == true && res['availability'] != null) {
         final apiModel = DoctorAvailabilityModel.fromJson(Map<String, dynamic>.from(res['availability']));
@@ -8026,34 +8652,52 @@ class PatientProblemService extends ChangeNotifier {
         }
 
         // Database is the source of truth when API responds cleanly:
-        // If blocked OR non-working day, slots are strictly empty.
-        // If unblocked working day with custom or generated slots, compute availableSlots.
+        // If mode disabled, blocked, OR non-working day, slots are strictly empty.
+        if (!apiModel.modeEnabled || apiModel.isBlocked || !apiModel.isWorkingDay) {
+          final emptyModel = apiModel.copyWith(
+            allSlots: const [],
+            bookedSlots: mergedBooked,
+            availableSlots: const [],
+          );
+          _availabilityCache[cacheKey] = emptyModel;
+          notifyListeners();
+          return emptyModel;
+        }
+
         List<String> resolvedAll = List<String>.from(apiModel.allSlots);
-        if (!apiModel.isBlocked && apiModel.isWorkingDay && resolvedAll.isEmpty && res['hasCustomRecord'] != true) {
-          // Direct Supabase fallback without record: generate using saved schedule if available
+        if (resolvedAll.isEmpty && res['hasCustomRecord'] != true) {
           final sched = _doctorScheduleCache[doctorId];
-          final bStart = apiModel.breakStartTime ?? sched?.breakStartTime;
-          final bEnd = apiModel.breakEndTime ?? sched?.breakEndTime;
-          resolvedAll = generateTimeSlots(
+          final useSep = sched?.useSeparateOnlineHours == true;
+          final dur = apiModel.consultationDurationMinutes > 0
+              ? apiModel.consultationDurationMinutes
+              : apiModel.slotDurationMinutes;
+          final buf = apiModel.bufferMinutes;
+          resolvedAll = BookingRulesConfig.generateSlotsWithBreaks(
             startTime: apiModel.startTime,
             endTime: apiModel.endTime,
-            durationMinutes: apiModel.slotDurationMinutes,
-            breakStartTime: apiModel.hasBreak ? bStart : null,
-            breakEndTime: apiModel.hasBreak ? bEnd : null,
+            durationMinutes: dur,
+            bufferMinutes: buf,
+            stepMinutes: useSep ? (dur + buf) : dur,
+            breaks: apiModel.breaks,
           );
         }
 
-        final available = (apiModel.isBlocked || !apiModel.isWorkingDay)
+        final available = apiModel.dailyLimitReached
             ? <String>[]
             : BookingRulesConfig.computeHybridAvailableSlots(
                 date: date,
                 slots: resolvedAll,
                 consultationMode: normMode,
+                durationMinutesOverride: apiModel.consultationDurationMinutes > 0
+                    ? apiModel.consultationDurationMinutes
+                    : apiModel.slotDurationMinutes,
+                bufferMinutesOverride: apiModel.bufferMinutes,
+                breaks: apiModel.breaks,
                 occupiedIntervals: apiModel.occupiedIntervals,
                 blockedIntervals: apiModel.blockedSlots,
                 workingEndTime: apiModel.endTime,
-                breakStartTime: apiModel.hasBreak ? (apiModel.breakStartTime ?? _doctorScheduleCache[doctorId]?.breakStartTime) : null,
-                breakEndTime: apiModel.hasBreak ? (apiModel.breakEndTime ?? _doctorScheduleCache[doctorId]?.breakEndTime) : null,
+                breakStartTime: apiModel.hasBreak ? apiModel.breakStartTime : null,
+                breakEndTime: apiModel.hasBreak ? apiModel.breakEndTime : null,
               ).where((s) => !mergedBooked.any((b) => b.toLowerCase() == s.toLowerCase())).toList();
 
         final resolved = apiModel.copyWith(
@@ -8069,9 +8713,11 @@ class PatientProblemService extends ChangeNotifier {
       debugPrint('getDoctorAvailability api fetch notice: $e');
     }
 
-    // Check if we have a cached model when network/API was unreachable
+    // Check if we have a mode-specific cached model when network/API was unreachable
     final baseCacheKey = '${doctorId}_$dateStr';
-    if (_availabilityCache.containsKey(cacheKey) || _availabilityCache.containsKey(baseCacheKey)) {
+    final hasSeparateSched = _doctorScheduleCache[doctorId]?.useSeparateOnlineHours == true;
+    if (_availabilityCache.containsKey(cacheKey) ||
+        (!hasSeparateSched && _availabilityCache.containsKey(baseCacheKey))) {
       final cached = (_availabilityCache[cacheKey] ?? _availabilityCache[baseCacheKey])!;
       final mergedBooked = <String>[...cached.bookedSlots];
       for (final lb in localBooked) {
@@ -8079,12 +8725,17 @@ class PatientProblemService extends ChangeNotifier {
           mergedBooked.add(lb);
         }
       }
-      final available = (cached.isBlocked || !cached.isWorkingDay)
+      final available = (!cached.modeEnabled || cached.isBlocked || !cached.isWorkingDay || cached.dailyLimitReached)
           ? <String>[]
           : BookingRulesConfig.computeHybridAvailableSlots(
               date: date,
               slots: cached.allSlots,
               consultationMode: normMode,
+              durationMinutesOverride: cached.consultationDurationMinutes > 0
+                  ? cached.consultationDurationMinutes
+                  : cached.slotDurationMinutes,
+              bufferMinutesOverride: cached.bufferMinutes,
+              breaks: cached.breaks,
               occupiedIntervals: cached.occupiedIntervals,
               blockedIntervals: cached.blockedSlots,
               workingEndTime: cached.endTime,
@@ -8116,21 +8767,65 @@ class PatientProblemService extends ChangeNotifier {
     }
 
     final sched = _doctorScheduleCache[doctorId];
-    final timePattern = RegExp(r'^\d{1,2}:\d{2}\s*(AM|PM)$', caseSensitive: false);
-    final validCustomSlots = doctor.nextAvailableSlots
-        .map((s) => s.trim())
-        .where((s) => timePattern.hasMatch(s))
-        .toList();
+    final isOnlineMode = normMode == 'Online';
+    final useSep = sched?.useSeparateOnlineHours == true;
+    final modeEnabled = isOnlineMode ? (sched?.onlineEnabled ?? true) : (sched?.inPersonEnabled ?? true);
+    final effectiveWorkingDays = (isOnlineMode && sched?.onlineWorkingDays != null && sched!.onlineWorkingDays!.isNotEmpty)
+        ? sched.onlineWorkingDays!
+        : (sched?.workingDays ?? const ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']);
+    const weekdayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    final weekdayName = weekdayNames[date.weekday - 1];
+    final isWorkingDay = modeEnabled &&
+        ((sched == null || !sched.isConfigured) || effectiveWorkingDays.contains(weekdayName));
 
-    final List<String> defaultSlots = validCustomSlots.isNotEmpty
-        ? validCustomSlots
-        : generateTimeSlots(
-            startTime: sched?.startTime ?? '09:00 AM',
-            endTime: sched?.endTime ?? '05:00 PM',
-            durationMinutes: sched?.slotDurationMinutes ?? 30,
-            breakStartTime: (sched?.hasBreak ?? true) ? (sched?.breakStartTime ?? '01:00 PM') : null,
-            breakEndTime: (sched?.hasBreak ?? true) ? (sched?.breakEndTime ?? '02:00 PM') : null,
-          );
+    final effectiveStart = (isOnlineMode && (useSep || (sched?.onlineStartTime != null && sched!.onlineStartTime!.isNotEmpty)))
+        ? (sched?.onlineStartTime ?? sched?.startTime ?? '09:00 AM')
+        : (sched?.startTime ?? '09:00 AM');
+    final effectiveEnd = (isOnlineMode && (useSep || (sched?.onlineEndTime != null && sched!.onlineEndTime!.isNotEmpty)))
+        ? (sched?.onlineEndTime ?? sched?.endTime ?? '05:00 PM')
+        : (sched?.endTime ?? '05:00 PM');
+    final effectiveDur = isOnlineMode
+        ? (sched?.onlineDurationMinutes ?? BookingRulesConfig.durationForMode('Online'))
+        : (sched?.inPersonDurationMinutes ?? sched?.slotDurationMinutes ?? 30);
+    final effectiveBuf = isOnlineMode
+        ? (sched?.onlineBufferMinutes ?? BookingRulesConfig.bufferForMode('Online'))
+        : (sched?.inPersonBufferMinutes ?? BookingRulesConfig.bufferForMode('In-Person'));
+    final effectiveBreaks = isOnlineMode
+        ? (useSep
+            ? (sched?.onlineBreaks ?? const <Map<String, String>>[])
+            : ((sched?.onlineBreaks.isNotEmpty == true)
+                ? sched!.onlineBreaks
+                : (sched?.breaks ?? const <Map<String, String>>[])))
+        : (sched?.breaks ??
+            const <Map<String, String>>[
+              {'startTime': '01:00 PM', 'endTime': '02:00 PM', 'label': 'Lunch Break'},
+            ]);
+    final effectiveHasBreak = isOnlineMode
+        ? (useSep ? (sched?.onlineHasBreak ?? false) : (sched?.hasBreak ?? true))
+        : (sched?.hasBreak ?? true);
+
+    final timePattern = RegExp(r'^\d{1,2}:\d{2}\s*(AM|PM)$', caseSensitive: false);
+    final validCustomSlots = (!useSep)
+        ? doctor.nextAvailableSlots
+            .map((s) => s.trim())
+            .where((s) => timePattern.hasMatch(s))
+            .toList()
+        : const <String>[];
+
+    final List<String> defaultSlots = (!modeEnabled || !isWorkingDay)
+        ? <String>[]
+        : (validCustomSlots.isNotEmpty
+            ? validCustomSlots
+            : BookingRulesConfig.generateSlotsWithBreaks(
+                startTime: effectiveStart,
+                endTime: effectiveEnd,
+                durationMinutes: effectiveDur,
+                bufferMinutes: effectiveBuf,
+                stepMinutes: useSep ? (effectiveDur + effectiveBuf) : effectiveDur,
+                breaks: effectiveBreaks
+                    .map((b) => Map<String, dynamic>.from(b))
+                    .toList(),
+              ));
 
     final unbooked = defaultSlots.where((s) => !localBooked.any((b) => b.toLowerCase() == s.toLowerCase())).toList();
     final available = BookingRulesConfig.filterBookableSlotsForDate(date, unbooked);
@@ -8138,22 +8833,20 @@ class PatientProblemService extends ChangeNotifier {
     final fallbackModel = DoctorAvailabilityModel(
       dentistId: doctorId,
       date: dateStr,
-      startTime: sched?.startTime ?? '09:00 AM',
-      endTime: sched?.endTime ?? '05:00 PM',
-      slotDurationMinutes: normMode == 'Online'
-          ? (sched?.onlineDurationMinutes ?? BookingRulesConfig.durationForMode('Online'))
-          : (sched?.inPersonDurationMinutes ?? sched?.slotDurationMinutes ?? 30),
+      dayOfWeek: weekdayName,
+      startTime: effectiveStart,
+      endTime: effectiveEnd,
+      slotDurationMinutes: effectiveDur,
       consultationType: normMode,
-      consultationDurationMinutes: normMode == 'Online'
-          ? (sched?.onlineDurationMinutes ?? BookingRulesConfig.durationForMode('Online'))
-          : (sched?.inPersonDurationMinutes ?? BookingRulesConfig.durationForMode('In-Person')),
-      bufferMinutes: normMode == 'Online'
-          ? (sched?.onlineBufferMinutes ?? BookingRulesConfig.bufferForMode('Online'))
-          : (sched?.inPersonBufferMinutes ?? BookingRulesConfig.bufferForMode('In-Person')),
-      hasBreak: sched?.hasBreak ?? true,
-      breakStartTime: sched?.breakStartTime,
-      breakEndTime: sched?.breakEndTime,
-      workingDays: sched?.workingDays ?? const ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
+      consultationDurationMinutes: effectiveDur,
+      bufferMinutes: effectiveBuf,
+      hasBreak: effectiveHasBreak,
+      breakStartTime: effectiveHasBreak && effectiveBreaks.isNotEmpty ? effectiveBreaks.first['startTime'] : null,
+      breakEndTime: effectiveHasBreak && effectiveBreaks.isNotEmpty ? effectiveBreaks.first['endTime'] : null,
+      breaks: effectiveBreaks.map((b) => Map<String, dynamic>.from(b)).toList(),
+      workingDays: effectiveWorkingDays,
+      isWorkingDay: isWorkingDay,
+      modeEnabled: modeEnabled,
       allSlots: defaultSlots,
       bookedSlots: localBooked,
       availableSlots: available,
@@ -8162,6 +8855,17 @@ class PatientProblemService extends ChangeNotifier {
 
     _availabilityCache[cacheKey] = fallbackModel;
     return fallbackModel;
+  }
+
+  Future<void> _persistDoctorSchedulesToPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final encoded = <String, dynamic>{};
+      _doctorScheduleCache.forEach((docId, sched) {
+        encoded[docId] = sched.toJson();
+      });
+      await prefs.setString('dentaguru_doctor_schedules_v2', jsonEncode(encoded));
+    } catch (_) {}
   }
 
   /// Update persisted weekly & smart schedule (working days, hours, multiple breaks, Online/In-Person schedules, durations, buffers, daily limits)
@@ -8179,9 +8883,14 @@ class PatientProblemService extends ChangeNotifier {
     int? inPersonDurationMinutes,
     bool? onlineEnabled,
     int? onlineDurationMinutes,
+    bool? useSeparateOnlineHours,
     List<String>? onlineWorkingDays,
     String? onlineStartTime,
     String? onlineEndTime,
+    bool? onlineHasBreak,
+    String? onlineBreakStartTime,
+    String? onlineBreakEndTime,
+    List<Map<String, String>>? onlineBreaks,
     int? inPersonBufferMinutes,
     int? onlineBufferMinutes,
     int? maxAppointmentsPerDay,
@@ -8204,9 +8913,14 @@ class PatientProblemService extends ChangeNotifier {
       inPersonDurationMinutes: inPersonDurationMinutes,
       onlineEnabled: onlineEnabled,
       onlineDurationMinutes: onlineDurationMinutes,
+      useSeparateOnlineHours: useSeparateOnlineHours,
       onlineWorkingDays: onlineWorkingDays,
       onlineStartTime: onlineStartTime,
       onlineEndTime: onlineEndTime,
+      onlineHasBreak: onlineHasBreak,
+      onlineBreakStartTime: onlineBreakStartTime,
+      onlineBreakEndTime: onlineBreakEndTime,
+      onlineBreaks: onlineBreaks,
       inPersonBufferMinutes: inPersonBufferMinutes,
       onlineBufferMinutes: onlineBufferMinutes,
       maxAppointmentsPerDay: maxAppointmentsPerDay,
@@ -8215,39 +8929,49 @@ class PatientProblemService extends ChangeNotifier {
       slots: slots,
       applyToUpcomingDays: applyToUpcomingDays,
     );
-    if (res['success'] == true) {
-      if (res['schedule'] is Map) {
-        _doctorScheduleCache[doctorId] = DoctorScheduleModel.fromJson(Map<String, dynamic>.from(res['schedule'] as Map));
-      } else {
-        _doctorScheduleCache[doctorId] = DoctorScheduleModel(
-          workingDays: workingDays,
-          startTime: startTime,
-          endTime: endTime,
-          slotDurationMinutes: inPersonDurationMinutes ?? slotDurationMinutes,
-          hasBreak: hasBreak,
-          breakStartTime: hasBreak ? breakStartTime : null,
-          breakEndTime: hasBreak ? breakEndTime : null,
-          breaks: breaks ?? const [],
-          inPersonEnabled: inPersonEnabled ?? true,
-          inPersonDurationMinutes: inPersonDurationMinutes ?? slotDurationMinutes,
-          onlineEnabled: onlineEnabled ?? true,
-          onlineDurationMinutes: onlineDurationMinutes ?? 20,
-          onlineWorkingDays: onlineWorkingDays,
-          onlineStartTime: onlineStartTime,
-          onlineEndTime: onlineEndTime,
-          inPersonBufferMinutes: inPersonBufferMinutes ?? 10,
-          onlineBufferMinutes: onlineBufferMinutes ?? 5,
-          maxAppointmentsPerDay: maxAppointmentsPerDay,
-          allowSimultaneousOnlineAndInPerson: allowSimultaneousOnlineAndInPerson ?? false,
-          blockedTimeRanges: blockedTimeRanges ?? const {},
-          isConfigured: true,
-        );
-      }
-      // Invalidate date caches so Patient & Doctor screens re-read updated slots
-      _availabilityCache.removeWhere((k, _) => k.startsWith('${doctorId}_'));
-      notifyListeners();
-    }
-    return res;
+    final resolvedModel = (res['success'] == true && res['schedule'] is Map)
+        ? DoctorScheduleModel.fromJson(Map<String, dynamic>.from(res['schedule'] as Map))
+        : DoctorScheduleModel(
+            workingDays: workingDays,
+            startTime: startTime,
+            endTime: endTime,
+            slotDurationMinutes: inPersonDurationMinutes ?? slotDurationMinutes,
+            hasBreak: hasBreak,
+            breakStartTime: hasBreak ? breakStartTime : null,
+            breakEndTime: hasBreak ? breakEndTime : null,
+            breaks: breaks ?? const [],
+            inPersonEnabled: inPersonEnabled ?? true,
+            inPersonDurationMinutes: inPersonDurationMinutes ?? slotDurationMinutes,
+            onlineEnabled: onlineEnabled ?? true,
+            onlineDurationMinutes: onlineDurationMinutes ?? 20,
+            useSeparateOnlineHours: useSeparateOnlineHours ??
+                (onlineStartTime != null && onlineStartTime.isNotEmpty && onlineEndTime != null && onlineEndTime.isNotEmpty),
+            onlineWorkingDays: onlineWorkingDays,
+            onlineStartTime: onlineStartTime,
+            onlineEndTime: onlineEndTime,
+            onlineHasBreak: onlineHasBreak ?? (onlineBreaks != null && onlineBreaks.isNotEmpty),
+            onlineBreakStartTime: (onlineHasBreak == true) ? onlineBreakStartTime : null,
+            onlineBreakEndTime: (onlineHasBreak == true) ? onlineBreakEndTime : null,
+            onlineBreaks: onlineBreaks ?? const [],
+            inPersonBufferMinutes: inPersonBufferMinutes ?? 10,
+            onlineBufferMinutes: onlineBufferMinutes ?? 5,
+            maxAppointmentsPerDay: maxAppointmentsPerDay,
+            allowSimultaneousOnlineAndInPerson: allowSimultaneousOnlineAndInPerson ?? false,
+            blockedTimeRanges: blockedTimeRanges ?? const {},
+            isConfigured: true,
+          );
+    _doctorScheduleCache[doctorId] = resolvedModel;
+    await _persistDoctorSchedulesToPrefs();
+    // Invalidate date caches so Patient & Doctor screens re-read updated slots
+    _availabilityCache.removeWhere((k, _) => k.startsWith('${doctorId}_'));
+    notifyListeners();
+    return res['success'] == true
+        ? res
+        : {
+            'success': true,
+            'localFallback': true,
+            'schedule': resolvedModel.toJson(),
+          };
   }
 
   /// Acquire a temporary slot lock for secure atomic booking

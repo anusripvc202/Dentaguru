@@ -190,26 +190,18 @@ async function authorizeAdminCalendarAccess(req) {
             return {
                 ok: false,
                 status: 403,
-                message: 'Access Denied: Your Sub-Admin account does not have permission to view Requests & Referrals Calendar.',
+                message: 'Access Denied: Your Coordinator account does not have permission to view Requests & Referrals Calendar.',
             };
         }
 
         const assignedDistricts = await SubAdminDistrict.getDistrictsForSubAdmin(caller.id).catch(() => []);
-        const allowedDistrictNames = Array.isArray(assignedDistricts) && assignedDistricts.length > 0
-            ? new Set(
-                assignedDistricts
-                    .filter((d) => !d.status || String(d.status).toUpperCase() === 'ACTIVE')
-                    .map((d) => String(d.name || '').trim().toLowerCase())
-                    .filter(Boolean)
-            )
-            : null;
 
         return {
             ok: true,
             isMainAdmin: false,
             isSubAdmin: true,
             callerId: caller.id,
-            allowedDistrictNames,
+            assignedDistricts: Array.isArray(assignedDistricts) ? assignedDistricts : [],
         };
     }
 
@@ -393,15 +385,16 @@ exports.getRequestsReferralsCalendar = async (req, res) => {
             const patientId = String(reqRow.patient_id || reqRow.patientId || reqRow.users?.id || '').trim();
             const patientUser = patientId ? usersById.get(patientId) : null;
 
-            if (authCheck.allowedDistrictNames) {
-                const locRes = District.resolveDistrictFromLocation({
-                    city: reqRow.city || patientUser?.city,
-                    district: reqRow.district || patientUser?.district,
-                    state: reqRow.state || patientUser?.state,
-                    pincode: reqRow.pincode || patientUser?.pincode,
-                });
-                const distLower = String(locRes.district || reqRow.city || patientUser?.city || '').trim().toLowerCase();
-                if (!distLower || !authCheck.allowedDistrictNames.has(distLower)) {
+            if (authCheck.isSubAdmin) {
+                const locPayload = {
+                    districtId: patientUser?.district_id || patientUser?.districtId || reqRow.district_id || null,
+                    district: patientUser?.district || reqRow.district || null,
+                    city: patientUser?.city || reqRow.city || '',
+                    state: patientUser?.state || reqRow.state || '',
+                    pincode: patientUser?.pincode || reqRow.pincode || '',
+                    device_token: patientUser?.device_token || null,
+                };
+                if (!SubAdminDistrict.canSubAdminAccessPatientSync(authCheck.assignedDistricts, locPayload).allowed) {
                     continue;
                 }
             }
@@ -542,14 +535,18 @@ exports.getRequestsReferralsCalendar = async (req, res) => {
                 ''
             ).trim();
 
-            if (authCheck.allowedDistrictNames) {
-                const locRes = District.resolveDistrictFromLocation({
-                    city: refRow.referred_patient_city || referredUser?.city,
-                    state: refRow.referred_patient_state || referredUser?.state,
-                    pincode: refRow.referred_patient_pincode || referredUser?.pincode,
-                });
-                const distLower = String(locRes.district || refRow.referred_patient_city || '').trim().toLowerCase();
-                if (!distLower || !authCheck.allowedDistrictNames.has(distLower)) {
+            if (authCheck.isSubAdmin) {
+                const locPayload = (referredUser || refRow.referred_patient_city || refRow.referred_patient_pincode)
+                    ? {
+                        districtId: referredUser?.district_id || referredUser?.districtId || refRow.referred_patient_district_id || null,
+                        district: referredUser?.district || refRow.referred_patient_district || null,
+                        city: referredUser?.city || refRow.referred_patient_city || '',
+                        state: referredUser?.state || refRow.referred_patient_state || '',
+                        pincode: referredUser?.pincode || refRow.referred_patient_pincode || '',
+                        device_token: referredUser?.device_token || null,
+                    }
+                    : ((refRow.referrer_patient_id || refRow.referrer_id) ? usersById.get(String(refRow.referrer_patient_id || refRow.referrer_id).trim()) : null);
+                if (!SubAdminDistrict.canSubAdminAccessPatientSync(authCheck.assignedDistricts, locPayload || {}).allowed) {
                     continue;
                 }
             }

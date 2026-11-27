@@ -11,6 +11,7 @@ import '../../../../core/services/session_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../widgets/admin_global_visits_calendar.dart';
 import '../widgets/gs_health_admin_overview.dart';
+import 'patient_details_screen.dart';
 
 class SubAdminDashboardScreen extends StatefulWidget {
   const SubAdminDashboardScreen({super.key});
@@ -90,13 +91,33 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
       List<AdminAppointmentItem> items = const [];
       if (_service.hasPermission(AppPermissions.appointmentView)) {
         final rows = await ApiService().fetchAllAppointmentsForAdmin();
+        final allowedRows = rows.whereType<Map>().where((r) {
+          final patObj = r['patient'] is Map
+              ? r['patient'] as Map
+              : (r['users'] is Map ? r['users'] as Map : const {});
+          final pid = (r['patient_id'] ?? r['patientId'] ?? patObj['id'] ?? '').toString();
+          final pPhone = (r['patient_phone'] ?? r['phone'] ?? patObj['phone'] ?? '').toString();
+          final pDistId = (r['patientDistrictId'] ?? r['patient_district_id'] ?? patObj['districtId'] ?? patObj['district_id'] ?? '').toString();
+          final pDist = (r['patientDistrict'] ?? r['patient_district'] ?? patObj['district'] ?? '').toString();
+          final pCity = (r['patientCity'] ?? r['patient_city'] ?? patObj['city'] ?? '').toString();
+          final pState = (r['patientState'] ?? r['patient_state'] ?? patObj['state'] ?? '').toString();
+          final pPin = (r['patientPincode'] ?? r['patient_pincode'] ?? patObj['pincode'] ?? '').toString();
+          return _service.isPatientRecordOrAppointmentAllowed(
+            patientId: pid,
+            patientPhone: pPhone,
+            districtId: pDistId,
+            district: pDist,
+            city: pCity,
+            state: pState,
+            pincode: pPin,
+          );
+        }).toList();
         items = deduplicateAdminAppointments(
-          rows
-              .whereType<Map>()
+          allowedRows
               .map(
                 (r) => AdminAppointmentItem.fromRow(
                   r,
-                  patients: _service.allPatients,
+                  patients: _service.getPatientsForCurrentRole(),
                   doctors: _service.allDoctors,
                 ),
               )
@@ -228,7 +249,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
             child: Column(
               children: [
                 GsHealthAdminHeader(
-                  subtitle: 'Sub-Admin console',
+                  subtitle: 'Coordinator Dashboard',
                   title: 'GS HEALTH',
                   unreadCount: unreadCount,
                   onNotifications: () => showAdminNotificationsSheet(
@@ -269,14 +290,15 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
           const Icon(Icons.location_on_rounded, color: Color(0xFFFE3434), size: 16),
           const SizedBox(width: 6),
           const Text(
-            'Assigned Territory: ',
+            'Assigned District: ',
             style: TextStyle(color: Colors.white70, fontSize: 11.5, fontWeight: FontWeight.bold),
           ),
           Expanded(
             child: districts.isEmpty
                 ? const Text(
-                    'All Districts (Global Jurisdiction)',
-                    style: TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w600),
+                    'No District Assigned (Patient Access Restricted)',
+                    key: Key('sub_admin_no_district_banner'),
+                    style: TextStyle(color: Color(0xFFFCA5A5), fontSize: 11.5, fontWeight: FontWeight.w700),
                     overflow: TextOverflow.ellipsis,
                   )
                 : SingleChildScrollView(
@@ -285,6 +307,8 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                     child: Row(
                       children: districts.map((d) {
                         final name = (d['name'] ?? 'District').toString();
+                        final state = (d['state'] ?? '').toString().trim();
+                        final label = state.isNotEmpty ? '$name ($state)' : name;
                         return Container(
                           margin: const EdgeInsets.only(right: 6),
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -293,7 +317,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
-                            name,
+                            label,
                             style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.bold),
                           ),
                         );
@@ -333,10 +357,11 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
             final isSelected = _selectedTabIndex == idx;
 
             int badgeCount = 0;
+            final roleReqs = _service.getRequestsForCurrentRole();
             if (mod.badgeCountKey == 'assignments') {
-              badgeCount = _service.requests.where((r) => r.assignedDoctorId == null || r.assignedDoctorId!.isEmpty).length;
+              badgeCount = roleReqs.where((r) => r.assignedDoctorId == null || r.assignedDoctorId!.isEmpty).length;
             } else if (mod.badgeCountKey == 'problems') {
-              badgeCount = _service.requests.length;
+              badgeCount = roleReqs.length;
             }
 
             return Padding(
@@ -423,7 +448,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          content: Text('Access restricted: your Sub-Admin role cannot open $area.'),
+          content: Text('Access restricted: your Coordinator role cannot open $area.'),
           backgroundColor: AppTheme.gsRed,
           duration: const Duration(seconds: 2),
         ),
@@ -654,12 +679,24 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
                 onOpenSchedule: () => _switchToModuleKey(tabs, 'appointments', 'appointments'),
               )
           : null,
+      recentRequests: (canAssignView || canProblemView) ? filteredRequests : const [],
+      onViewAllRequests: (canAssignView || canProblemView)
+          ? () => _switchToModuleKey(tabs, canAssignView ? 'assignments' : 'problems', 'requests')
+          : null,
+      recentReferrals: canAssignView ? _service.getReferralsForCurrentRole() : const [],
+      onViewAllReferrals: canAssignView
+          ? () => _switchToModuleKey(tabs, 'assignments', 'referrals')
+          : null,
+      recentPatients: canPatientView ? filteredPatients.reversed.toList() : const [],
+      onViewAllPatients: canPatientView
+          ? () => _switchToModuleKey(tabs, 'patients', 'patients directory')
+          : null,
       footer: tabs.length > 1 ? _buildModuleTabBar(tabs) : null,
     );
   }
 
   void _showSubAdminProfileSheet(BuildContext outerContext) {
-    final name = _service.subAdminName.isNotEmpty ? _service.subAdminName : 'Sub-Admin';
+    final name = _service.subAdminName.isNotEmpty ? _service.subAdminName : 'Coordinator';
     final email = _service.subAdminEmail.isNotEmpty ? _service.subAdminEmail : 'No email configured';
     final perms = _service.subAdminPermissions;
 
@@ -1134,13 +1171,17 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
   // MODULE 3: PATIENT DIRECTORY
   // ==========================================
   Widget _buildPatientsModule() {
+    final hasAssignedDistricts = _service.subAdminAssignedDistrictIds.isNotEmpty;
     final patients = _service.getPatientsForCurrentRole().where((p) {
-      final match = _patientSearch.isEmpty ||
-          p.name.toLowerCase().contains(_patientSearch.toLowerCase()) ||
-          p.email.toLowerCase().contains(_patientSearch.toLowerCase()) ||
-          p.phone.toLowerCase().contains(_patientSearch.toLowerCase()) ||
-          p.city.toLowerCase().contains(_patientSearch.toLowerCase());
-      return match;
+      final q = _patientSearch.trim().toLowerCase();
+      if (q.isEmpty) return true;
+      return p.name.toLowerCase().contains(q) ||
+          p.email.toLowerCase().contains(q) ||
+          p.phone.toLowerCase().contains(q) ||
+          p.city.toLowerCase().contains(q) ||
+          (p.district ?? '').toLowerCase().contains(q) ||
+          p.state.toLowerCase().contains(q) ||
+          p.pincode.toLowerCase().contains(q);
     }).toList();
 
     return SingleChildScrollView(
@@ -1149,11 +1190,12 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
       child: Column(
         children: [
           TextField(
+            key: const Key('sub_admin_patients_search_field'),
             onChanged: (v) => setState(() => _patientSearch = v),
             style: const TextStyle(color: Color(0xFF0F172A), fontSize: 13.5, fontWeight: FontWeight.w500),
             cursorColor: AppTheme.primaryBlue,
             decoration: InputDecoration(
-              hintText: 'Search patients by name, email, phone, city...',
+              hintText: 'Search patients by name, email, phone, district...',
               prefixIcon: const Icon(Icons.search_rounded, size: 18),
               filled: true,
               fillColor: Colors.white,
@@ -1162,8 +1204,13 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
             ),
           ),
           const SizedBox(height: 14),
-          if (patients.isEmpty)
-            _buildEmptyCard('No patients match your search.', Icons.people_outline_rounded)
+          if (!hasAssignedDistricts)
+            _buildEmptyCard(
+              'No district is assigned to your Coordinator account yet. Contact Main Admin to assign your district jurisdiction.',
+              Icons.location_off_outlined,
+            )
+          else if (patients.isEmpty)
+            _buildEmptyCard('No patients in your assigned district match your search.', Icons.people_outline_rounded)
           else
             ListView.separated(
               shrinkWrap: true,
@@ -1172,39 +1219,64 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
               separatorBuilder: (_, __) => const SizedBox(height: 10),
               itemBuilder: (ctx, idx) {
                 final p = patients[idx];
-                return Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
+                final resolved = _service.resolvePatientDistrictStrict(
+                  districtId: p.districtId,
+                  district: p.district,
+                  city: p.city,
+                  state: p.state,
+                  pincode: p.pincode,
+                );
+                final distText = resolved.isVerified && (resolved.districtName ?? '').isNotEmpty
+                    ? '${resolved.districtName}${(resolved.state ?? '').isNotEmpty ? ", ${resolved.state}" : ""}'
+                    : p.city;
+                return Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    key: Key('sub_admin_patient_card_${p.id}'),
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                  ),
-                  child: Row(
-                    children: [
-                      CircleAvatar(
-                        backgroundColor: const Color(0xFFFE3434).withValues(alpha: 0.1),
-                        child: Text(p.name.isNotEmpty ? p.name[0].toUpperCase() : 'P',
-                            style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFE3434))),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(p.name.isNotEmpty ? p.name : 'Registered Patient',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
-                                overflow: TextOverflow.ellipsis),
-                            Text('✉️ ${p.email} • 📞 ${p.phone}',
-                                style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
-                                overflow: TextOverflow.ellipsis),
-                            if (p.city.isNotEmpty)
-                              Text('📍 ${p.city} ${p.pincode.isNotEmpty ? "(${p.pincode})" : ""}',
-                                  style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
-                                  overflow: TextOverflow.ellipsis),
-                          ],
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => PatientDetailsScreen(patient: p),
                         ),
+                      );
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
                       ),
-                    ],
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            backgroundColor: const Color(0xFFFE3434).withValues(alpha: 0.1),
+                            child: Text(p.name.isNotEmpty ? p.name[0].toUpperCase() : 'P',
+                                style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFE3434))),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(p.name.isNotEmpty ? p.name : 'Registered Patient',
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textDark),
+                                    overflow: TextOverflow.ellipsis),
+                                Text('✉️ ${p.email} • 📞 ${p.phone}',
+                                    style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                                    overflow: TextOverflow.ellipsis),
+                                if (distText.isNotEmpty)
+                                  Text('📍 $distText ${p.pincode.isNotEmpty ? "(${p.pincode})" : ""}',
+                                      style: const TextStyle(fontSize: 11, color: AppTheme.gsNavy, fontWeight: FontWeight.w600),
+                                      overflow: TextOverflow.ellipsis),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.chevron_right_rounded, color: AppTheme.gsNavy, size: 20),
+                        ],
+                      ),
+                    ),
                   ),
                 );
               },
@@ -1357,7 +1429,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
             clinics: _service.allClinics,
             doctors: _service.getDentistsForCurrentRole(),
             patients: _service.getPatientsForCurrentRole(),
-            referrals: _service.adminPatientReferrals,
+            referrals: _service.getReferralsForCurrentRole(),
             isSubAdmin: true,
             assignedDistricts: _service.subAdminDistricts,
             canViewPatientContact: canViewPhone,
@@ -1512,7 +1584,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
             ),
             const SizedBox(height: 8),
             const Text(
-              'Your Sub-Admin account is active, but you do not currently have any permissions configured.\n\nPlease reach out to the Primary Admin to grant access to platform modules.',
+              'Your Coordinator account is active, but you do not currently have any permissions configured.\n\nPlease reach out to the Main Admin to grant access to platform modules.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 12, color: AppTheme.textMuted, height: 1.5),
             ),
@@ -1827,7 +1899,7 @@ class _SubAdminDashboardScreenState extends State<SubAdminDashboardScreen>
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Logged out of Sub-Admin workspace.'),
+        content: Text('Logged out of Coordinator workspace.'),
         duration: Duration(seconds: 2),
       ),
     );

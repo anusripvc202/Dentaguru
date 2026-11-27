@@ -5,7 +5,6 @@ import '../../../../core/models/referral_model.dart';
 import '../../../../core/services/patient_problem_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/denta_guru_logo.dart';
-import '../widgets/admin_requests_referrals_calendar.dart';
 
 class AdminReferralsScreen extends StatefulWidget {
   const AdminReferralsScreen({super.key});
@@ -19,7 +18,8 @@ class _AdminReferralsScreenState extends State<AdminReferralsScreen> {
   String _selectedStatus = 'All';
   String _searchQuery = '';
   final TextEditingController _searchCtrl = TextEditingController();
-  bool _isCalendarView = false;
+  static const int _pageSize = 10;
+  int _currentPage = 1;
 
   @override
   void initState() {
@@ -42,13 +42,15 @@ class _AdminReferralsScreenState extends State<AdminReferralsScreen> {
   }
 
   List<PatientReferral> _getFilteredReferrals() {
-    final list = _problemService.adminPatientReferrals;
+    final list = List<PatientReferral>.from(_problemService.adminPatientReferrals)
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return list.where((r) {
       if (_selectedStatus != 'All' && r.status.toLowerCase() != _selectedStatus.toLowerCase()) {
         return false;
       }
       if (_searchQuery.trim().isNotEmpty) {
         final q = _searchQuery.toLowerCase().trim();
+        final matchId = r.id.toLowerCase().contains(q);
         final matchPatient = r.referredPatientName.toLowerCase().contains(q) ||
             r.referredPatientMobile.contains(q) ||
             r.referredPatientCity.toLowerCase().contains(q);
@@ -58,7 +60,7 @@ class _AdminReferralsScreenState extends State<AdminReferralsScreen> {
         final matchReferrer = r.referrerPatientName.toLowerCase().contains(q) ||
             r.referrerPatientPhone.contains(q);
         final matchComplaint = r.clinicalComplaint.toLowerCase().contains(q);
-        if (!matchPatient && !matchDoctor && !matchReferrer && !matchComplaint) {
+        if (!matchId && !matchPatient && !matchDoctor && !matchReferrer && !matchComplaint) {
           return false;
         }
       }
@@ -270,92 +272,6 @@ class _AdminReferralsScreenState extends State<AdminReferralsScreen> {
                       ),
                     ),
                   ),
-                  Container(
-                    key: const Key('admin_referrals_screen_view_toggle'),
-                    padding: const EdgeInsets.all(3),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF1F5F9),
-                      borderRadius: BorderRadius.circular(11),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        InkWell(
-                          key: const Key('admin_referrals_screen_list_view_btn'),
-                          onTap: () {
-                            if (_isCalendarView) {
-                              setState(() => _isCalendarView = false);
-                            }
-                          },
-                          borderRadius: BorderRadius.circular(8),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: !_isCalendarView ? AppTheme.gsNavy : Colors.transparent,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.view_list_rounded,
-                                  size: 14,
-                                  color: !_isCalendarView ? Colors.white : const Color(0xFF475569),
-                                ),
-                                const SizedBox(width: 5),
-                                Text(
-                                  'List View',
-                                  style: TextStyle(
-                                    fontSize: 11.5,
-                                    fontWeight: FontWeight.w800,
-                                    color: !_isCalendarView ? Colors.white : const Color(0xFF475569),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        InkWell(
-                          key: const Key('admin_referrals_screen_calendar_view_btn'),
-                          onTap: () {
-                            if (!_isCalendarView) {
-                              setState(() => _isCalendarView = true);
-                            }
-                          },
-                          borderRadius: BorderRadius.circular(8),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: _isCalendarView ? AppTheme.gsNavy : Colors.transparent,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.calendar_month_rounded,
-                                  size: 14,
-                                  color: _isCalendarView ? Colors.white : const Color(0xFF475569),
-                                ),
-                                const SizedBox(width: 5),
-                                Text(
-                                  'Calendar View',
-                                  style: TextStyle(
-                                    fontSize: 11.5,
-                                    fontWeight: FontWeight.w800,
-                                    color: _isCalendarView ? Colors.white : const Color(0xFF475569),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
                   IconButton(
                     icon: const Icon(Icons.refresh_rounded, color: AppTheme.gsNavy),
                     onPressed: () => _problemService.syncAdminReferralsFromApi(),
@@ -366,17 +282,23 @@ class _AdminReferralsScreenState extends State<AdminReferralsScreen> {
 
             // Main Content
             Expanded(
-              child: _isCalendarView
-                  ? SingleChildScrollView(
-                      physics: const BouncingScrollPhysics(),
-                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-                      child: AdminRequestsReferralsCalendarView(
-                        problemService: _problemService,
-                      ),
-                    )
-                  : RefreshIndicator(
+              child: RefreshIndicator(
                 onRefresh: () => _problemService.syncAdminReferralsFromApi(),
-                child: ListView(
+                child: Builder(
+                  builder: (context) {
+                    final totalPages = filtered.isEmpty
+                        ? 1
+                        : ((filtered.length - 1) ~/ _pageSize) + 1;
+                    final safePage = _currentPage.clamp(1, totalPages);
+                    final startIndex = (safePage - 1) * _pageSize;
+                    final endIndex = (startIndex + _pageSize) > filtered.length
+                        ? filtered.length
+                        : (startIndex + _pageSize);
+                    final paginatedReferrals = filtered.isEmpty
+                        ? const <PatientReferral>[]
+                        : filtered.sublist(startIndex, endIndex);
+
+                    return ListView(
                   physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
                   padding: const EdgeInsets.symmetric(horizontal: 18),
                   children: [
@@ -404,9 +326,12 @@ class _AdminReferralsScreenState extends State<AdminReferralsScreen> {
                       child: TextField(
                         key: const Key('admin_referrals_search_input'),
                         controller: _searchCtrl,
-                        onChanged: (val) => setState(() => _searchQuery = val),
+                        onChanged: (val) => setState(() {
+                          _searchQuery = val;
+                          _currentPage = 1;
+                        }),
                         decoration: InputDecoration(
-                          hintText: 'Search by patient, doctor, or city...',
+                          hintText: 'Search by referral ID, patient, doctor, or city...',
                           hintStyle: const TextStyle(fontSize: 14, color: Color(0xFF94A3B8)),
                           prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF64748B), size: 20),
                           suffixIcon: _searchQuery.isNotEmpty
@@ -414,7 +339,10 @@ class _AdminReferralsScreenState extends State<AdminReferralsScreen> {
                                   icon: const Icon(Icons.clear_rounded, size: 18),
                                   onPressed: () {
                                     _searchCtrl.clear();
-                                    setState(() => _searchQuery = '');
+                                    setState(() {
+                                      _searchQuery = '';
+                                      _currentPage = 1;
+                                    });
                                   },
                                 )
                               : null,
@@ -448,7 +376,10 @@ class _AdminReferralsScreenState extends State<AdminReferralsScreen> {
                                 color: isSelected ? AppTheme.gsNavy : const Color(0xFFE2E8F0),
                               ),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                              onSelected: (_) => setState(() => _selectedStatus = status),
+                              onSelected: (_) => setState(() {
+                                _selectedStatus = status;
+                                _currentPage = 1;
+                              }),
                             ),
                           );
                         }).toList(),
@@ -498,8 +429,43 @@ class _AdminReferralsScreenState extends State<AdminReferralsScreen> {
                           ],
                         ),
                       )
-                    else
-                      ...filtered.map((ref) => _buildReferralCard(ref)),
+                    else ...[
+                      ...paginatedReferrals.map((ref) => _buildReferralCard(ref)),
+                      if (totalPages > 1)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Row(
+                            key: const Key('admin_referrals_pagination_bar'),
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Showing ${startIndex + 1}–$endIndex of ${filtered.length}',
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF64748B)),
+                              ),
+                              Row(
+                                children: [
+                                  TextButton.icon(
+                                    key: const Key('admin_referrals_prev_page_btn'),
+                                    onPressed: safePage > 1 ? () => setState(() => _currentPage = safePage - 1) : null,
+                                    icon: const Icon(Icons.chevron_left_rounded, size: 18),
+                                    label: const Text('Prev'),
+                                  ),
+                                  Text(
+                                    'Page $safePage of $totalPages',
+                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.gsNavy),
+                                  ),
+                                  TextButton.icon(
+                                    key: const Key('admin_referrals_next_page_btn'),
+                                    onPressed: safePage < totalPages ? () => setState(() => _currentPage = safePage + 1) : null,
+                                    icon: const Icon(Icons.chevron_right_rounded, size: 18),
+                                    label: const Text('Next'),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
 
                     const SizedBox(height: 24),
                     const Center(
@@ -507,6 +473,8 @@ class _AdminReferralsScreenState extends State<AdminReferralsScreen> {
                     ),
                     const SizedBox(height: 24),
                   ],
+                );
+                  },
                 ),
               ),
             ),
@@ -543,6 +511,12 @@ class _AdminReferralsScreenState extends State<AdminReferralsScreen> {
   Widget _buildReferralCard(PatientReferral ref) {
     final statusColor = _getStatusColor(ref.status);
     final statusBg = _getStatusBg(ref.status);
+    final referringDoc = ref.referrerPatientName.trim().isNotEmpty
+        ? ref.referrerPatientName.trim()
+        : 'Referring Doctor';
+    final referredDoc = ref.doctorName.trim().isNotEmpty
+        ? ref.doctorName.trim()
+        : (ref.requiredSpecialist.trim().isNotEmpty ? ref.requiredSpecialist.trim() : 'Specialist');
 
     return Container(
       key: Key('admin_referral_card_${ref.id}'),
@@ -575,8 +549,17 @@ class _AdminReferralsScreenState extends State<AdminReferralsScreen> {
                             color: Color(0xFF0F172A),
                           ),
                         ),
+                        const SizedBox(height: 3),
+                        Text(
+                          'Referral ID: ${ref.id}',
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.gsNavy,
+                          ),
+                        ),
                         if (ref.referredPatientMobile.isNotEmpty || ref.referredPatientCity.isNotEmpty) ...[
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 3),
                           Text(
                             [
                               if (ref.referredPatientMobile.isNotEmpty) ref.referredPatientMobile,
@@ -605,22 +588,34 @@ class _AdminReferralsScreenState extends State<AdminReferralsScreen> {
                   ),
                 ],
               ),
-              if (ref.doctorName.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    const Icon(Icons.person_outline_rounded, size: 15, color: Color(0xFF64748B)),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        'Assigned: ${ref.doctorName} (${ref.doctorSpecialty})',
-                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  const Icon(Icons.person_pin_rounded, size: 15, color: Color(0xFF64748B)),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Referring: $referringDoc',
+                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  ],
-                ),
-              ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  const Icon(Icons.medical_services_outlined, size: 15, color: Color(0xFF64748B)),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Referred Doctor: $referredDoc${ref.doctorSpecialty.isNotEmpty ? " (${ref.doctorSpecialty})" : ""}',
+                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
               if (ref.clinicalComplaint.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Row(

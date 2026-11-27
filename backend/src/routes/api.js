@@ -64,6 +64,10 @@ router.delete('/admin/problem-requests/:id', optionalAuth, requirePermission('PR
 router.delete('/patient/problem-requests/:id', optionalAuth, problemRequests.deleteProblemRequest);
 router.get('/admin/patients', optionalAuth, requirePermission('PATIENT_VIEW'), auth.getPatients);
 router.get('/patients', optionalAuth, requirePermission('PATIENT_VIEW'), auth.getPatients);
+router.get('/admin/patients/:id', optionalAuth, requirePermission('PATIENT_VIEW'), auth.getPatientById);
+router.get('/patients/:id', optionalAuth, requirePermission('PATIENT_VIEW'), auth.getPatientById);
+router.put('/admin/patients/:id/district', optionalAuth, requireMainAdmin, auth.updatePatientDistrictByAdmin);
+router.patch('/admin/patients/:id/district', optionalAuth, requireMainAdmin, auth.updatePatientDistrictByAdmin);
 
 // Sub-Admin Management Routes (Strictly Primary Main Admin Only)
 router.post('/admin/sub-admins', optionalAuth, requireMainAdmin, auth.createSubAdmin);

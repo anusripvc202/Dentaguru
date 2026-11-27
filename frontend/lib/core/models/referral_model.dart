@@ -19,6 +19,10 @@ class PatientReferral {
   final String referredPatientAge;
   final String referredPatientGender;
   final String referredPatientCity;
+  final String referredPatientState;
+  final String referredPatientDistrict;
+  final String? patientDistrictId;
+  final String districtIdentificationStatus;
   final String referredPatientPincode;
   final String referredPatientLocation;
 
@@ -54,6 +58,10 @@ class PatientReferral {
     this.referredPatientAge = '',
     this.referredPatientGender = '',
     this.referredPatientCity = '',
+    this.referredPatientState = '',
+    this.referredPatientDistrict = '',
+    this.patientDistrictId,
+    this.districtIdentificationStatus = 'UNVERIFIED',
     this.referredPatientPincode = '',
     this.referredPatientLocation = '',
     required this.requiredSpecialist,
@@ -145,6 +153,10 @@ class PatientReferral {
       referredPatientAge: json['referredPatientAge']?.toString() ?? json['referred_patient_age']?.toString() ?? '',
       referredPatientGender: json['referredPatientGender']?.toString() ?? json['referred_patient_gender']?.toString() ?? '',
       referredPatientCity: json['referredPatientCity']?.toString() ?? json['referred_patient_city']?.toString() ?? '',
+      referredPatientState: json['referredPatientState']?.toString() ?? json['patientState']?.toString() ?? json['referred_patient_state']?.toString() ?? '',
+      referredPatientDistrict: json['referredPatientDistrict']?.toString() ?? json['patientDistrict']?.toString() ?? json['referred_patient_district']?.toString() ?? '',
+      patientDistrictId: (json['patientDistrictId'] ?? json['referredPatientDistrictId'] ?? json['referred_patient_district_id'])?.toString(),
+      districtIdentificationStatus: json['districtIdentificationStatus']?.toString() ?? 'UNVERIFIED',
       referredPatientPincode: json['referredPatientPincode']?.toString() ?? json['referred_patient_pincode']?.toString() ?? '',
       referredPatientLocation: json['referredPatientLocation']?.toString() ?? json['referred_patient_location']?.toString() ?? '',
 
@@ -187,6 +199,10 @@ class PatientReferral {
       'referred_patient_age': referredPatientAge,
       'referred_patient_gender': referredPatientGender,
       'referred_patient_city': referredPatientCity,
+      'referred_patient_state': referredPatientState,
+      'referred_patient_district': referredPatientDistrict,
+      if (patientDistrictId != null) 'patientDistrictId': patientDistrictId,
+      'districtIdentificationStatus': districtIdentificationStatus,
       'referred_patient_pincode': referredPatientPincode,
       'referred_patient_location': referredPatientLocation,
       'required_specialist': requiredSpecialist,

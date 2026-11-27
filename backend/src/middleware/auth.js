@@ -6,10 +6,10 @@ const { getJwtSecret, isCloudEnv } = require('../config/secrets');
 const enforceActiveSubAdminStatus = (dbUser, tokenIssuedAtSec = null) => {
     if (!dbUser) return null;
     const roleLower = (dbUser.role || '').toString().trim().toLowerCase();
-    const isSubAdmin = roleLower === 'sub-admin' || roleLower === 'subadmin' || roleLower === 'sub_admin';
+    const isSubAdmin = roleLower === 'sub-admin' || roleLower === 'subadmin' || roleLower === 'sub_admin' || roleLower === 'coordinator';
     const effectiveStatus = (dbUser.status || 'ACTIVE').toString().trim().toUpperCase();
     if (isSubAdmin && (effectiveStatus === 'INACTIVE' || effectiveStatus === 'DEACTIVATED')) {
-        return 'Access Denied: Your Sub-Admin account has been deactivated by the Main Admin. Please contact the administrator.';
+        return 'Access Denied: Your Coordinator account has been deactivated by the Main Admin. Please contact the administrator.';
     }
     if (isSubAdmin && tokenIssuedAtSec && dbUser.device_token && typeof dbUser.device_token === 'string' && dbUser.device_token.trim().startsWith('{')) {
         try {
@@ -161,10 +161,10 @@ const optionalAuth = async (req, res, next) => {
     const enforceActiveSubAdminStatus = (dbUser, tokenIssuedAtSec = null) => {
         if (!dbUser) return null;
         const roleLower = (dbUser.role || '').toString().trim().toLowerCase();
-        const isSubAdmin = roleLower === 'sub-admin' || roleLower === 'subadmin' || roleLower === 'sub_admin';
+        const isSubAdmin = roleLower === 'sub-admin' || roleLower === 'subadmin' || roleLower === 'sub_admin' || roleLower === 'coordinator';
         const effectiveStatus = (dbUser.status || 'ACTIVE').toString().trim().toUpperCase();
         if (isSubAdmin && (effectiveStatus === 'INACTIVE' || effectiveStatus === 'DEACTIVATED')) {
-            return 'Access Denied: Your Sub-Admin account has been deactivated by the Main Admin. Please contact the administrator.';
+            return 'Access Denied: Your Coordinator account has been deactivated by the Main Admin. Please contact the administrator.';
         }
         if (isSubAdmin && tokenIssuedAtSec && dbUser.device_token && typeof dbUser.device_token === 'string' && dbUser.device_token.trim().startsWith('{')) {
             try {
@@ -367,7 +367,7 @@ const requirePermission = (requiredPermission, alternativePermissions = []) => {
                 return res.status(403).json({
                     success: false,
                     code: 'ACCOUNT_DEACTIVATED',
-                    message: 'Access Denied: Your Sub-Admin account has been deactivated by the Main Admin.'
+                    message: 'Access Denied: Your Coordinator account has been deactivated by the Main Admin.'
                 });
             }
 
@@ -462,7 +462,7 @@ const requireChatAccess = async (req, res, next) => {
         if (chatRole === 'SUB_ADMIN') {
             return res.status(403).json({
                 success: false,
-                message: 'Access Denied: Sub-Admins are strictly prohibited from viewing, searching, or accessing patient-doctor chat messages and conversations.'
+                message: 'Access Denied: Coordinators are strictly prohibited from viewing, searching, or accessing patient-doctor chat messages and conversations.'
             });
         }
 
@@ -538,10 +538,73 @@ const requireChatAccess = async (req, res, next) => {
     }
 };
 
+// Helper: Resolve caller role & assigned districts across both authenticated and optional-auth endpoints
+const resolveCallerAccessContext = async (req) => {
+    let user = req.user || null;
+    if (!user) {
+        const authHeader = req.headers?.authorization || req.headers?.Authorization;
+        if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+            const token = authHeader.split(' ')[1];
+            try {
+                user = jwt.verify(token, getAccessSecret());
+            } catch (_) { }
+        }
+    }
+    if (!user && !isCloudEnv() && req.headers) {
+        const headerId = req.headers['x-user-id'] ? String(req.headers['x-user-id']).trim() : '';
+        const headerRole = req.headers['x-user-role'] ? String(req.headers['x-user-role']).trim() : '';
+        if (headerId || headerRole) {
+            let dbUser = null;
+            if (headerId) {
+                try {
+                    const { User } = require('../models/Schemas');
+                    dbUser = await User.findById(headerId);
+                } catch (_) { }
+            }
+            user = dbUser || {
+                id: headerId || 'local-caller',
+                role: headerRole || 'Patient'
+            };
+        }
+    }
+
+    const roleLower = String(user?.role || '').trim().toLowerCase();
+    const isMainAdmin = roleLower === 'admin' || roleLower === 'primaryadmin' || roleLower === 'primary_admin' || roleLower === 'superadmin' || roleLower === 'super_admin';
+    const isSubAdmin = roleLower === 'sub-admin' || roleLower === 'subadmin' || roleLower === 'sub_admin' || roleLower === 'coordinator';
+
+    let assignedDistricts = [];
+    const assignedDistrictIds = new Set();
+    const assignedDistrictNames = new Set();
+
+    if (isSubAdmin && user?.id) {
+        try {
+            const { SubAdminDistrict } = require('../models/Schemas');
+            assignedDistricts = await SubAdminDistrict.getDistrictsForSubAdmin(user.id);
+            for (const d of (assignedDistricts || [])) {
+                const dId = String(d?.id || d?.district_id || '').trim().toLowerCase();
+                const dName = String(d?.name || d?.district_name || '').trim().toLowerCase();
+                if (dId) assignedDistrictIds.add(dId);
+                if (dName) assignedDistrictNames.add(dName);
+            }
+        } catch (_) { }
+    }
+
+    return {
+        user,
+        userId: user?.id ? String(user.id).trim() : null,
+        roleLower,
+        isMainAdmin,
+        isSubAdmin,
+        assignedDistricts,
+        assignedDistrictIds,
+        assignedDistrictNames
+    };
+};
+
 // Middleware: Strict District-Level Access Control (Section 5)
 // - Main Admin: full access to all districts
-// - Sub-Admin: restricted to assigned districts only
-// - Injects req.assignedDistricts and req.isAuthorizedDistrict(districtId, districtName)
+// - Sub-Admin: restricted strictly to assigned districts by districtId
+// - Injects req.assignedDistricts, req.assignedDistrictIds, and req.isAuthorizedDistrict(districtId, districtName)
 const enforceDistrictAccess = async (req, res, next) => {
     if (!req.user) {
         return res.status(401).json({ success: false, message: 'Authentication required.' });
@@ -552,25 +615,34 @@ const enforceDistrictAccess = async (req, res, next) => {
 
     if (isMainAdmin) {
         req.assignedDistricts = [];
+        req.assignedDistrictIds = new Set();
         req.isAuthorizedDistrict = () => true;
         return next();
     }
 
-    const isSubAdmin = roleLower === 'sub-admin' || roleLower === 'subadmin' || roleLower === 'sub_admin';
+    const isSubAdmin = roleLower === 'sub-admin' || roleLower === 'subadmin' || roleLower === 'sub_admin' || roleLower === 'coordinator';
     if (!isSubAdmin) {
         return res.status(403).json({ success: false, message: 'Unauthorized role.' });
     }
 
-    const { SubAdminDistrict } = require('../models/Schemas');
+    const { SubAdminDistrict, District } = require('../models/Schemas');
     const assignedDistricts = await SubAdminDistrict.getDistrictsForSubAdmin(req.user.id);
     req.assignedDistricts = assignedDistricts;
 
-    const authIds = new Set(assignedDistricts.map(d => d.id));
-    const authNames = new Set(assignedDistricts.map(d => d.name.toLowerCase()));
+    const authIds = new Set(assignedDistricts.map(d => String(d.id || d.district_id || '').trim().toLowerCase()).filter(Boolean));
+    req.assignedDistrictIds = authIds;
 
     req.isAuthorizedDistrict = (dId, dName) => {
-        if (dId && authIds.has(dId)) return true;
-        if (dName && authNames.has(dName.toLowerCase())) return true;
+        if (authIds.size === 0) return false;
+        if (dId) {
+            return authIds.has(String(dId).trim().toLowerCase());
+        }
+        if (dName) {
+            const resolved = District.resolveDistrictFromLocation({ district: dName });
+            if (resolved && resolved.districtId && resolved.isVerified) {
+                return authIds.has(String(resolved.districtId).trim().toLowerCase());
+            }
+        }
         return false;
     };
 
@@ -581,6 +653,7 @@ const enforceDistrictAccess = async (req, res, next) => {
         if (!req.isAuthorizedDistrict(targetDistrictId, targetDistrictName)) {
             return res.status(403).json({
                 success: false,
+                code: 'DISTRICT_ACCESS_DENIED',
                 message: `Access Denied: You do not have authorization to access district '${targetDistrictName || targetDistrictId}'.`
             });
         }
@@ -597,7 +670,8 @@ module.exports = {
     requirePermission,
     enforceSubAdminPermissionIfAuthenticated,
     requireChatAccess,
-    enforceDistrictAccess
+    enforceDistrictAccess,
+    resolveCallerAccessContext
 };
 
 

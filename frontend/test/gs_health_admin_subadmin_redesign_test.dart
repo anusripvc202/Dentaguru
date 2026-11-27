@@ -432,7 +432,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
 
     expect(tester.takeException(), isNull);
-    expect(find.text('Sub-Admin console'), findsOneWidget);
+    expect(find.text('Coordinator Dashboard'), findsOneWidget);
     expect(find.text('Assign 2 waiting request(s)'), findsOneWidget);
 
     await _capturePngIfPossible(tester, boundaryKey, '$artifactDir/gs_health_sub_admin_top.png');

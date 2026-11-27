@@ -3,10 +3,12 @@ const {
     Dentist,
     MedicalRecord,
     Notification,
+    SubAdminDistrict,
     resolveUserUuid,
     resolveDentistIds
 } = require('../models/Schemas');
 const supabaseStorageService = require('../services/supabaseStorageService');
+const { resolveCallerAccessContext } = require('../middleware/auth');
 
 const ALLOWED_CATEGORIES = [
     'Dental X-ray',
@@ -187,6 +189,26 @@ exports.getPatientRecords = async (req, res) => {
                 return res.status(403).json({
                     success: false,
                     message: 'Access Denied: You can only view your own health records.'
+                });
+            }
+        }
+
+        // Strict Sub-Admin District Access Check for Patient Health Records
+        const callerCtx = await resolveCallerAccessContext(req);
+        if (callerCtx.isSubAdmin) {
+            const targetPatient = await User.findById(resolvedTargetUuid || targetId).catch(() => null);
+            if (!targetPatient) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Patient record not found.'
+                });
+            }
+            const check = SubAdminDistrict.canSubAdminAccessPatientSync(callerCtx.assignedDistricts, targetPatient);
+            if (!check.allowed) {
+                return res.status(403).json({
+                    success: false,
+                    code: 'DISTRICT_ACCESS_DENIED',
+                    message: 'Access Denied: You cannot access medical records for patients outside your assigned district.'
                 });
             }
         }

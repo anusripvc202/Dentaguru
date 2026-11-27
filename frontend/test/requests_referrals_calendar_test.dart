@@ -285,7 +285,7 @@ void main() {
   });
 
   testWidgets(
-      'AdminReferralsScreen allows switching between List View and Calendar View seamlessly',
+      'AdminReferralsScreen has Calendar View completely removed and renders referrals list view with search and status filters',
       (WidgetTester tester) async {
     tester.view.physicalSize = const Size(1440, 1200);
     tester.view.devicePixelRatio = 1.0;
@@ -299,19 +299,18 @@ void main() {
     );
     await tester.pump();
 
-    // Initially in List View
-    expect(find.byKey(const Key('admin_referrals_screen_list_view_btn')), findsOneWidget);
-    expect(find.byKey(const Key('admin_referrals_screen_calendar_view_btn')), findsOneWidget);
+    // Calendar View toggle is completely removed from Referrals section
+    expect(find.byKey(const Key('admin_referrals_screen_view_toggle')), findsNothing);
+    expect(find.byKey(const Key('admin_referrals_screen_list_view_btn')), findsNothing);
+    expect(find.byKey(const Key('admin_referrals_screen_calendar_view_btn')), findsNothing);
+    expect(find.text('Calendar View'), findsNothing);
     expect(find.byKey(const Key('admin_requests_referrals_calendar_root')), findsNothing);
 
-    // Switch to Calendar View
-    await tester.tap(find.byKey(const Key('admin_referrals_screen_calendar_view_btn')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('admin_requests_referrals_calendar_root')), findsOneWidget);
-
-    // Switch back to List View
-    await tester.tap(find.byKey(const Key('admin_referrals_screen_list_view_btn')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('admin_requests_referrals_calendar_root')), findsNothing);
+    // Search and status filter chips remain available
+    expect(find.byKey(const Key('admin_referrals_search_input')), findsOneWidget);
+    expect(find.text('All'), findsWidgets);
+    expect(find.text('Pending'), findsWidgets);
+    expect(find.text('Accepted'), findsWidgets);
+    expect(find.text('Rejected'), findsWidgets);
   });
 }

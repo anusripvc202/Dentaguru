@@ -151,7 +151,7 @@ void main() {
       expect(find.text('Total Assignments'), findsOneWidget);
       expect(find.text('Direct Bookings'), findsOneWidget);
       expect(find.text('Main Admin Assigned'), findsOneWidget);
-      expect(find.text('Sub-Admin Assigned'), findsOneWidget);
+      expect(find.text('Coordinator Assigned'), findsOneWidget);
     });
   });
 

@@ -101,9 +101,14 @@ class DoctorScheduleModel {
   final int inPersonDurationMinutes;
   final bool onlineEnabled;
   final int onlineDurationMinutes;
+  final bool useSeparateOnlineHours;
   final List<String>? onlineWorkingDays;
   final String? onlineStartTime;
   final String? onlineEndTime;
+  final bool onlineHasBreak;
+  final String? onlineBreakStartTime;
+  final String? onlineBreakEndTime;
+  final List<Map<String, String>> onlineBreaks;
   final int inPersonBufferMinutes;
   final int onlineBufferMinutes;
   final int? maxAppointmentsPerDay;
@@ -126,9 +131,14 @@ class DoctorScheduleModel {
     this.inPersonDurationMinutes = 30,
     this.onlineEnabled = true,
     this.onlineDurationMinutes = 20,
+    this.useSeparateOnlineHours = false,
     this.onlineWorkingDays,
     this.onlineStartTime,
     this.onlineEndTime,
+    this.onlineHasBreak = false,
+    this.onlineBreakStartTime,
+    this.onlineBreakEndTime,
+    this.onlineBreaks = const [],
     this.inPersonBufferMinutes = 10,
     this.onlineBufferMinutes = 5,
     this.maxAppointmentsPerDay,
@@ -143,24 +153,27 @@ class DoctorScheduleModel {
         ? rawDays.map((e) => e.toString().trim()).where((s) => s.isNotEmpty).toList()
         : <String>[];
 
-    final rawBreaks = json['breaks'];
-    final parsedBreaks = <Map<String, String>>[];
-    if (rawBreaks is List) {
-      for (final item in rawBreaks) {
-        if (item is Map) {
-          final s = (item['startTime'] ?? item['start_time'] ?? '').toString().trim();
-          final e = (item['endTime'] ?? item['end_time'] ?? '').toString().trim();
-          if (s.isNotEmpty && e.isNotEmpty) {
-            parsedBreaks.add({
-              'startTime': s,
-              'endTime': e,
-              'label': (item['label'] ?? 'Break').toString().trim(),
-            });
+    List<Map<String, String>> parseBreakList(dynamic rawBreaks) {
+      final out = <Map<String, String>>[];
+      if (rawBreaks is List) {
+        for (final item in rawBreaks) {
+          if (item is Map) {
+            final s = (item['startTime'] ?? item['start_time'] ?? '').toString().trim();
+            final e = (item['endTime'] ?? item['end_time'] ?? '').toString().trim();
+            if (s.isNotEmpty && e.isNotEmpty) {
+              out.add({
+                'startTime': s,
+                'endTime': e,
+                'label': (item['label'] ?? 'Break').toString().trim(),
+              });
+            }
           }
         }
       }
+      return out;
     }
 
+    final parsedBreaks = parseBreakList(json['breaks']);
     final bStart = (json['breakStartTime'] ?? json['break_start_time'])?.toString();
     final bEnd = (json['breakEndTime'] ?? json['break_end_time'])?.toString();
     if (parsedBreaks.isEmpty && bStart != null && bStart.isNotEmpty && bEnd != null && bEnd.isNotEmpty) {
@@ -174,6 +187,20 @@ class DoctorScheduleModel {
             : (json['has_break'] != null
                 ? json['has_break'] == true
                 : parsedBreaks.isNotEmpty));
+
+    final parsedOnlineBreaks = parseBreakList(json['onlineBreaks'] ?? json['online_breaks']);
+    final obStart = (json['onlineBreakStartTime'] ?? json['online_break_start_time'])?.toString();
+    final obEnd = (json['onlineBreakEndTime'] ?? json['online_break_end_time'])?.toString();
+    if (parsedOnlineBreaks.isEmpty && obStart != null && obStart.isNotEmpty && obEnd != null && obEnd.isNotEmpty) {
+      parsedOnlineBreaks.add({'startTime': obStart, 'endTime': obEnd, 'label': 'Online Break'});
+    }
+    final onlineHasBreakVal = (json['onlineBreaks'] is List || json['online_breaks'] is List)
+        ? parsedOnlineBreaks.isNotEmpty
+        : (json['onlineHasBreak'] != null
+            ? json['onlineHasBreak'] == true
+            : (json['online_has_break'] != null
+                ? json['online_has_break'] == true
+                : parsedOnlineBreaks.isNotEmpty));
 
     final inPersonDur = int.tryParse(
           (json['inPersonDurationMinutes'] ??
@@ -198,6 +225,7 @@ class DoctorScheduleModel {
     final blockedRanges = <String, List<Map<String, dynamic>>>{};
     if (rawBlockedMap is Map) {
       rawBlockedMap.forEach((k, v) {
+        if (k.toString() == '_scheduleMeta') return;
         if (v is List) {
           blockedRanges[k.toString()] = v.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
         }
@@ -207,9 +235,19 @@ class DoctorScheduleModel {
     final maxPerDayRaw = json['maxAppointmentsPerDay'] ?? json['max_appointments_per_day'];
     final maxPerDay = maxPerDayRaw != null ? int.tryParse(maxPerDayRaw.toString()) : null;
 
+    final resolvedStart = (json['startTime'] ?? json['start_time'] ?? '09:00 AM').toString();
+    final rawOnStart = (json['onlineStartTime'] ?? json['online_start_time'])?.toString().trim();
+    final rawOnEnd = (json['onlineEndTime'] ?? json['online_end_time'])?.toString().trim();
+    final onStart = (rawOnStart != null && rawOnStart.isNotEmpty && rawOnStart != 'null') ? rawOnStart : null;
+    final onEnd = (rawOnEnd != null && rawOnEnd.isNotEmpty && rawOnEnd != 'null') ? rawOnEnd : null;
+
+    final bool useSeparate = (json['useSeparateOnlineHours'] != null || json['use_separate_online_hours'] != null)
+        ? (json['useSeparateOnlineHours'] == true || json['use_separate_online_hours'] == true)
+        : (onStart != null && onEnd != null && (onStart != resolvedStart || parsedOnlineBreaks.isNotEmpty));
+
     return DoctorScheduleModel(
       workingDays: days.isNotEmpty ? days : const ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
-      startTime: (json['startTime'] ?? json['start_time'] ?? '09:00 AM').toString(),
+      startTime: resolvedStart,
       endTime: (json['endTime'] ?? json['end_time'] ?? '05:00 PM').toString(),
       slotDurationMinutes: inPersonDur,
       hasBreak: hasBreakVal,
@@ -220,9 +258,14 @@ class DoctorScheduleModel {
       inPersonDurationMinutes: inPersonDur,
       onlineEnabled: json['onlineEnabled'] != false && json['online_enabled'] != false,
       onlineDurationMinutes: onlineDur,
+      useSeparateOnlineHours: useSeparate,
       onlineWorkingDays: (onlineDays != null && onlineDays.isNotEmpty) ? onlineDays : null,
-      onlineStartTime: (json['onlineStartTime'] ?? json['online_start_time'])?.toString(),
-      onlineEndTime: (json['onlineEndTime'] ?? json['online_end_time'])?.toString(),
+      onlineStartTime: onStart,
+      onlineEndTime: onEnd,
+      onlineHasBreak: onlineHasBreakVal,
+      onlineBreakStartTime: onlineHasBreakVal && parsedOnlineBreaks.isNotEmpty ? parsedOnlineBreaks.first['startTime'] : null,
+      onlineBreakEndTime: onlineHasBreakVal && parsedOnlineBreaks.isNotEmpty ? parsedOnlineBreaks.first['endTime'] : null,
+      onlineBreaks: onlineHasBreakVal ? parsedOnlineBreaks : const [],
       inPersonBufferMinutes:
           int.tryParse((json['inPersonBufferMinutes'] ?? json['in_person_buffer_minutes'] ?? '10').toString()) ?? 10,
       onlineBufferMinutes:
@@ -248,9 +291,14 @@ class DoctorScheduleModel {
         'inPersonDurationMinutes': inPersonDurationMinutes,
         'onlineEnabled': onlineEnabled,
         'onlineDurationMinutes': onlineDurationMinutes,
+        'useSeparateOnlineHours': useSeparateOnlineHours,
         if (onlineWorkingDays != null) 'onlineWorkingDays': onlineWorkingDays,
         if (onlineStartTime != null) 'onlineStartTime': onlineStartTime,
         if (onlineEndTime != null) 'onlineEndTime': onlineEndTime,
+        'onlineHasBreak': onlineHasBreak,
+        if (onlineBreakStartTime != null) 'onlineBreakStartTime': onlineBreakStartTime,
+        if (onlineBreakEndTime != null) 'onlineBreakEndTime': onlineBreakEndTime,
+        'onlineBreaks': onlineBreaks,
         'inPersonBufferMinutes': inPersonBufferMinutes,
         'onlineBufferMinutes': onlineBufferMinutes,
         'maxAppointmentsPerDay': maxAppointmentsPerDay,

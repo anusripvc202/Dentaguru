@@ -1,6 +1,7 @@
-const { Referral, User, Appointment, Dentist, Clinic, Notification, PatientProblemRequest, isDoctorRecordAvailable } = require('../models/Schemas');
+const { Referral, User, Appointment, Dentist, Clinic, Notification, PatientProblemRequest, District, SubAdminDistrict, isDoctorRecordAvailable } = require('../models/Schemas');
 const { isCloudEnv } = require('../config/secrets');
 const { sendPushNotification } = require('../services/notificationService');
+const { resolveCallerAccessContext } = require('../middleware/auth');
 const {
     sendNewReferralWhatsApp,
     sendReferralAcceptedWhatsApp,
@@ -113,6 +114,66 @@ const isReferralAssignedToDoctor = (ref, doctorIdSet) => {
     return (primary && doctorIdSet.has(primary)) || (assigned && doctorIdSet.has(assigned));
 };
 
+const isSubAdminRoleString = (role) => {
+    const r = String(role || '').trim().toLowerCase();
+    return r === 'sub-admin' || r === 'subadmin' || r === 'sub_admin';
+};
+
+/**
+ * Resolves the patient location for a referral strictly from the REFERRED PATIENT (or REFERRING PATIENT if referred location is absent).
+ * NEVER uses doctor_city, doctor_pincode, doctor_location, or clinic location as a substitute for patient district!
+ */
+const resolveReferralPatientLocationStrict = async (ref) => {
+    if (!ref) return {};
+    const referredId = ref.referred_patient_id || ref.referred_user_id;
+    let referredUser = null;
+    if (referredId) {
+        referredUser = await User.findById(referredId).catch(() => null);
+    } else if (ref.referred_patient_mobile) {
+        referredUser = await User.findOne({ phone: ref.referred_patient_mobile }).catch(() => null);
+    }
+
+    const hasReferredLoc = Boolean(
+        referredUser?.district_id ||
+        referredUser?.district ||
+        referredUser?.city ||
+        referredUser?.pincode ||
+        ref.referred_patient_district_id ||
+        ref.referred_patient_district ||
+        ref.referred_patient_city ||
+        ref.referred_patient_pincode
+    );
+
+    if (hasReferredLoc) {
+        return {
+            districtId: referredUser?.district_id || referredUser?.districtId || ref.referred_patient_district_id || null,
+            district: referredUser?.district || ref.referred_patient_district || null,
+            city: (referredUser?.city && String(referredUser.city).trim()) ? referredUser.city : (ref.referred_patient_city || ''),
+            state: (referredUser?.state && String(referredUser.state).trim()) ? referredUser.state : (ref.referred_patient_state || ''),
+            pincode: (referredUser?.pincode && String(referredUser.pincode).trim()) ? referredUser.pincode : (ref.referred_patient_pincode || ''),
+            device_token: referredUser?.device_token || null
+        };
+    }
+
+    // Fallback to referring patient (ONLY if the referrer is a Patient, never a Doctor!)
+    const referrerId = ref.referrer_patient_id || ref.referrer_id;
+    if (referrerId) {
+        const referrerUser = await User.findById(referrerId).catch(() => null);
+        if (referrerUser && String(referrerUser.role || 'Patient').trim().toLowerCase() === 'patient') {
+            return {
+                districtId: referrerUser.district_id || referrerUser.districtId || null,
+                district: referrerUser.district || null,
+                city: referrerUser.city || '',
+                state: referrerUser.state || '',
+                pincode: referrerUser.pincode || '',
+                device_token: referrerUser.device_token || null
+            };
+        }
+    }
+
+    return {};
+};
+
 /**
  * Enforce backend RBAC & ownership before reading or mutating a referral record.
  * @returns {Promise<{ ok: true, caller: { id: string, role: string, fromJwt: boolean }, status?: number, message?: string } | { ok: false, status: number, message: string, caller?: any }>}
@@ -121,6 +182,20 @@ const authorizeReferralAccess = async (req, ref, { forStatusMutation = false } =
     const caller = await resolveCallerIdentity(req);
     if (!caller || !caller.id) {
         return { ok: false, status: 401, message: 'Authentication required to access referral records.' };
+    }
+
+    if (isSubAdminRoleString(caller.role)) {
+        const assignedDistricts = await SubAdminDistrict.getDistrictsForSubAdmin(caller.id);
+        const patientLoc = await resolveReferralPatientLocationStrict(ref);
+        const check = SubAdminDistrict.canSubAdminAccessPatientSync(assignedDistricts, patientLoc);
+        if (!check.allowed) {
+            return {
+                ok: false,
+                status: 403,
+                message: 'Access Denied: You cannot access or manage referrals involving patients outside your assigned district.'
+            };
+        }
+        return { ok: true, caller };
     }
 
     if (isAdminRoleString(caller.role)) {
@@ -271,6 +346,18 @@ const populateReferralData = async (ref) => {
         }
     }
 
+    const patientLocForDistrict = (referredUser || ref.referred_patient_city || ref.referred_patient_pincode)
+        ? {
+            districtId: referredUser?.district_id || referredUser?.districtId || ref.referred_patient_district_id || null,
+            district: referredUser?.district || ref.referred_patient_district || null,
+            city: (referredUser?.city && String(referredUser.city).trim()) ? referredUser.city : (ref.referred_patient_city || ''),
+            state: (referredUser?.state && String(referredUser.state).trim()) ? referredUser.state : (ref.referred_patient_state || ''),
+            pincode: (referredUser?.pincode && String(referredUser.pincode).trim()) ? referredUser.pincode : (ref.referred_patient_pincode || ''),
+            device_token: referredUser?.device_token || null
+        }
+        : (referrer && String(referrer.role || 'Patient').trim().toLowerCase() === 'patient' ? referrer : {});
+    const patientDistInfo = District.resolvePatientDistrictStrict(patientLocForDistrict);
+
     return {
         id: ref.id,
         referralId: ref.id,
@@ -286,6 +373,15 @@ const populateReferralData = async (ref) => {
         referredPatientGender: ref.referred_patient_gender || '',
         referredPatientCity: ref.referred_patient_city || '',
         referredPatientPincode: ref.referred_patient_pincode || '',
+        referredPatientCity: ref.referred_patient_city || referredUser?.city || '',
+        referredPatientState: patientDistInfo.state || ref.referred_patient_state || referredUser?.state || '',
+        referredPatientDistrict: patientDistInfo.districtName || '',
+        referredPatientDistrictId: patientDistInfo.districtId || null,
+        patientDistrictId: patientDistInfo.districtId || null,
+        patientDistrict: patientDistInfo.districtName || '',
+        patientState: patientDistInfo.state || '',
+        districtIdentificationStatus: patientDistInfo.isVerified ? 'VERIFIED' : 'UNVERIFIED',
+        referredPatientPincode: ref.referred_patient_pincode || referredUser?.pincode || '',
         referredPatientLocation: ref.referred_patient_location || '',
 
         requiredSpecialist: ref.required_specialist || docSpecialty,
@@ -1241,7 +1337,7 @@ exports.updateReferralStatus = async (req, res) => {
                 type: `REFERRAL_${normalizedStatus.toUpperCase()}`,
                 title: `Referral ${normalizedStatus}`,
                 message: `Your referral for ${populated.referredPatientName} is now marked "${normalizedStatus}".`,
-            }).catch(() => {});
+            }).catch(() => { });
         }
 
         return res.status(200).json({
@@ -1340,6 +1436,7 @@ exports.notifyWhatsApp = async (req, res) => {
 
 /**
  * 10. GET ALL REFERRALS (Admin Management Table — Strictly Admin/Sub-Admin Only)
+ * 10. GET ALL REFERRALS (Admin Management Table — Strictly Admin/Sub-Admin Only, District-Scoped for Sub-Admin)
  */
 exports.getAllReferralsAdmin = async (req, res) => {
     try {
@@ -1357,18 +1454,101 @@ exports.getAllReferralsAdmin = async (req, res) => {
             });
         }
 
+        const isCallerSubAdmin = isSubAdminRoleString(caller.role);
+        const subAdminAssignedDistricts = isCallerSubAdmin
+            ? await SubAdminDistrict.getDistrictsForSubAdmin(caller.id)
+            : [];
+        const subAdminDistrictIds = new Set(
+            (subAdminAssignedDistricts || []).map(d => String(d.id || d.district_id || '').trim().toLowerCase()).filter(Boolean)
+        );
+
+        const reqDistrictId = String(req.query.districtId || req.query.district_id || '').trim();
+        const reqDistrictName = String(req.query.district || '').trim();
+        if (isCallerSubAdmin && (reqDistrictId || reqDistrictName) && reqDistrictName.toLowerCase() !== 'all' && reqDistrictId.toLowerCase() !== 'all') {
+            let requestedIdLower = reqDistrictId.toLowerCase();
+            if (!requestedIdLower && reqDistrictName) {
+                const resolvedFilter = District.resolveDistrictFromLocation({ district: reqDistrictName });
+                requestedIdLower = resolvedFilter?.districtId ? String(resolvedFilter.districtId).toLowerCase() : '__unmatched__';
+            }
+            if (!subAdminDistrictIds.has(requestedIdLower)) {
+                return res.status(403).json({
+                    success: false,
+                    code: 'DISTRICT_ACCESS_DENIED',
+                    message: 'Access Denied: You cannot view referrals outside your assigned district.'
+                });
+            }
+        }
+
         const rawReferrals = await Referral.find();
-        const populatedList = [];
+        let populatedList = [];
 
         for (const ref of rawReferrals) {
+            if (isCallerSubAdmin) {
+                const patientLoc = await resolveReferralPatientLocationStrict(ref);
+                const check = SubAdminDistrict.canSubAdminAccessPatientSync(subAdminAssignedDistricts, patientLoc);
+                if (!check.allowed) {
+                    continue;
+                }
+            }
             const item = await populateReferralData(ref);
             if (item) populatedList.push(item);
         }
 
+        // Optional State, District, Status, and Search Filters
+        const stateFilter = String(req.query.state || '').trim().toLowerCase();
+        if (stateFilter && stateFilter !== 'all') {
+            populatedList = populatedList.filter(r => String(r.patientState || '').trim().toLowerCase() === stateFilter);
+        }
+        if ((reqDistrictId && reqDistrictId.toLowerCase() !== 'all') || (reqDistrictName && reqDistrictName.toLowerCase() !== 'all')) {
+            const resolvedFilter = !reqDistrictId && reqDistrictName
+                ? District.resolveDistrictFromLocation({ district: reqDistrictName })
+                : null;
+            const effectiveIdLower = (reqDistrictId || resolvedFilter?.districtId || '').toString().toLowerCase();
+            const targetNameLower = reqDistrictName.toLowerCase();
+            populatedList = populatedList.filter(r => {
+                if (effectiveIdLower && r.patientDistrictId && String(r.patientDistrictId).toLowerCase() === effectiveIdLower) return true;
+                if (!effectiveIdLower && targetNameLower && String(r.patientDistrict || '').toLowerCase() === targetNameLower) return true;
+                return false;
+            });
+        }
+        const statusFilter = String(req.query.status || '').trim().toLowerCase();
+        if (statusFilter && statusFilter !== 'all') {
+            populatedList = populatedList.filter(r => String(r.status || '').trim().toLowerCase() === statusFilter);
+        }
+        const searchQuery = String(req.query.search || req.query.q || '').trim().toLowerCase();
+        if (searchQuery) {
+            populatedList = populatedList.filter(r =>
+                String(r.referredPatientName || '').toLowerCase().includes(searchQuery) ||
+                String(r.referredPatientMobile || '').toLowerCase().includes(searchQuery) ||
+                String(r.referrerPatientName || '').toLowerCase().includes(searchQuery) ||
+                String(r.doctorName || '').toLowerCase().includes(searchQuery) ||
+                String(r.referredPatientCity || '').toLowerCase().includes(searchQuery) ||
+                String(r.patientDistrict || '').toLowerCase().includes(searchQuery)
+            );
+        }
+
+        // Sort by actual creation timestamp descending (newest first)
+        populatedList.sort((a, b) => {
+            const tA = new Date(a.createdAt || a.referralDate || 0).getTime() || 0;
+            const tB = new Date(b.createdAt || b.referralDate || 0).getTime() || 0;
+            return tB - tA;
+        });
+
+        const totalCount = populatedList.length;
+        const rawLimit = parseInt(req.query.limit, 10);
+        const rawPage = parseInt(req.query.page, 10);
+        let resultReferrals = populatedList;
+        if (Number.isFinite(rawLimit) && rawLimit > 0) {
+            const page = (Number.isFinite(rawPage) && rawPage > 0) ? rawPage : 1;
+            const start = (page - 1) * rawLimit;
+            resultReferrals = populatedList.slice(start, start + rawLimit);
+        }
+
         return res.status(200).json({
             success: true,
-            count: populatedList.length,
-            referrals: populatedList
+            count: resultReferrals.length,
+            totalCount,
+            referrals: resultReferrals
         });
     } catch (err) {
         console.error('❌ Error fetching admin referrals:', err);
@@ -1381,6 +1561,7 @@ exports.getAllReferralsAdmin = async (req, res) => {
 
 /**
  * 11. GET ADMIN REFERRAL GROWTH ANALYTICS (Strictly Admin/Sub-Admin Only)
+ * 11. GET ADMIN REFERRAL GROWTH ANALYTICS (Strictly Admin/Sub-Admin Only, District-Scoped for Sub-Admin)
  */
 exports.getAdminReferralAnalytics = async (req, res) => {
     try {
@@ -1398,7 +1579,21 @@ exports.getAdminReferralAnalytics = async (req, res) => {
             });
         }
 
-        const rawReferrals = await Referral.find();
+        const isCallerSubAdmin = isSubAdminRoleString(caller.role);
+        const subAdminAssignedDistricts = isCallerSubAdmin
+            ? await SubAdminDistrict.getDistrictsForSubAdmin(caller.id)
+            : [];
+
+        const allRawReferrals = await Referral.find();
+        const rawReferrals = [];
+        for (const r of allRawReferrals) {
+            if (isCallerSubAdmin) {
+                const patientLoc = await resolveReferralPatientLocationStrict(r);
+                const check = SubAdminDistrict.canSubAdminAccessPatientSync(subAdminAssignedDistricts, patientLoc);
+                if (!check.allowed) continue;
+            }
+            rawReferrals.push(r);
+        }
 
         let totalReferrals = rawReferrals.length;
         let totalRegistered = 0;

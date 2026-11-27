@@ -392,11 +392,15 @@ exports.updateDoctorSchedule = async (req, res) => {
         const {
             dentistId,
             workingDays,
+            inPersonWorkingDays,
             startTime,
+            inPersonStartTime,
             endTime,
+            inPersonEndTime,
             slotDurationMinutes,
             defaultDurationMinutes,
             breaks,
+            inPersonBreaks,
             hasBreak,
             breakStartTime,
             breakEndTime,
@@ -404,9 +408,14 @@ exports.updateDoctorSchedule = async (req, res) => {
             inPersonDurationMinutes,
             onlineEnabled,
             onlineDurationMinutes,
+            useSeparateOnlineHours,
             onlineWorkingDays,
             onlineStartTime,
             onlineEndTime,
+            onlineBreaks,
+            onlineHasBreak,
+            onlineBreakStartTime,
+            onlineBreakEndTime,
             bufferMinutes,
             onlineBufferMinutes,
             inPersonBufferMinutes,
@@ -436,8 +445,10 @@ exports.updateDoctorSchedule = async (req, res) => {
             });
         }
 
-        const startMins = timeToMinutes(startTime || '09:00 AM');
-        const endMins = timeToMinutes(endTime || '05:00 PM');
+        const effectiveIpStart = inPersonStartTime || startTime || '09:00 AM';
+        const effectiveIpEnd = inPersonEndTime || endTime || '05:00 PM';
+        const startMins = timeToMinutes(effectiveIpStart);
+        const endMins = timeToMinutes(effectiveIpEnd);
         if (startMins >= endMins) {
             return res.status(400).json({
                 success: false,
@@ -445,7 +456,7 @@ exports.updateDoctorSchedule = async (req, res) => {
             });
         }
 
-        if (onlineStartTime && onlineEndTime) {
+        if (onlineStartTime && onlineEndTime && useSeparateOnlineHours !== false) {
             const onStart = parseClockSlotMinutes(onlineStartTime);
             const onEnd = parseClockSlotMinutes(onlineEndTime);
             if (onStart === null || onEnd === null || onStart >= onEnd) {
@@ -474,9 +485,10 @@ exports.updateDoctorSchedule = async (req, res) => {
             }
         }
 
+        const effectiveIpBreaks = inPersonBreaks !== undefined ? inPersonBreaks : breaks;
         // Validate breaks if provided
-        if (Array.isArray(breaks)) {
-            for (const b of breaks) {
+        if (Array.isArray(effectiveIpBreaks)) {
+            for (const b of effectiveIpBreaks) {
                 const bS = parseClockSlotMinutes(b?.startTime || b?.start_time);
                 const bE = parseClockSlotMinutes(b?.endTime || b?.end_time);
                 if (bS === null || bE === null || bE <= bS) {
@@ -487,24 +499,43 @@ exports.updateDoctorSchedule = async (req, res) => {
                 }
             }
         }
+        if (Array.isArray(onlineBreaks)) {
+            for (const b of onlineBreaks) {
+                const bS = parseClockSlotMinutes(b?.startTime || b?.start_time);
+                const bE = parseClockSlotMinutes(b?.endTime || b?.end_time);
+                if (bS === null || bE === null || bE <= bS) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Every Online break period must have a valid startTime and endTime with endTime after startTime.'
+                    });
+                }
+            }
+        }
 
         const savedSchedule = await DoctorAvailability.saveSchedule(dentistId, {
-            workingDays,
-            startTime: startTime || '09:00 AM',
-            endTime: endTime || '05:00 PM',
+            workingDays: inPersonWorkingDays || workingDays,
+            startTime: effectiveIpStart,
+            endTime: effectiveIpEnd,
             slotDurationMinutes: slotDurationMinutes ?? inPersonDurationMinutes ?? defaultDurationMinutes ?? 30,
             defaultDurationMinutes: defaultDurationMinutes ?? slotDurationMinutes ?? inPersonDurationMinutes ?? 30,
-            breaks,
-            hasBreak: breaks !== undefined ? (Array.isArray(breaks) && breaks.length > 0) : (hasBreak !== undefined ? Boolean(hasBreak) : Boolean(breakStartTime && breakEndTime)),
+            breaks: effectiveIpBreaks,
+            hasBreak: effectiveIpBreaks !== undefined
+                ? (Array.isArray(effectiveIpBreaks) && effectiveIpBreaks.length > 0)
+                : (hasBreak !== undefined ? Boolean(hasBreak) : Boolean(breakStartTime && breakEndTime)),
             breakStartTime: breakStartTime || null,
             breakEndTime: breakEndTime || null,
             inPersonEnabled,
             inPersonDurationMinutes: inPersonDurationMinutes ?? slotDurationMinutes,
             onlineEnabled,
             onlineDurationMinutes,
+            useSeparateOnlineHours,
             onlineWorkingDays,
             onlineStartTime,
             onlineEndTime,
+            onlineBreaks,
+            onlineHasBreak,
+            onlineBreakStartTime,
+            onlineBreakEndTime,
             bufferMinutes,
             onlineBufferMinutes,
             inPersonBufferMinutes,
@@ -523,14 +554,26 @@ exports.updateDoctorSchedule = async (req, res) => {
             } catch (_) { }
         }
 
-        const generatedSlots = (Array.isArray(slots) && slots.length > 0)
+        const ipWin = getModeScheduleWindow(savedSchedule, 'In-Person');
+        const onWin = getModeScheduleWindow(savedSchedule, 'Online');
+        const generatedSlots = (Array.isArray(slots) && slots.length > 0 && !savedSchedule.useSeparateOnlineHours)
             ? [...new Set(slots.map(s => String(s).trim()).filter(Boolean))]
             : generateBaseSlotsWithBreaks({
-                startTime: savedSchedule.startTime,
-                endTime: savedSchedule.endTime,
-                durationMinutes: savedSchedule.inPersonDurationMinutes || savedSchedule.slotDurationMinutes,
-                breaks: savedSchedule.breaks,
+                startTime: ipWin.startTime,
+                endTime: ipWin.endTime,
+                durationMinutes: ipWin.durationMinutes,
+                bufferMinutes: ipWin.bufferMinutes,
+                stepMinutes: ipWin.stepMinutes,
+                breaks: ipWin.breaks,
             });
+        const generatedOnlineSlots = generateBaseSlotsWithBreaks({
+            startTime: onWin.startTime,
+            endTime: onWin.endTime,
+            durationMinutes: onWin.durationMinutes,
+            bufferMinutes: onWin.bufferMinutes,
+            stepMinutes: onWin.stepMinutes,
+            breaks: onWin.breaks,
+        });
 
         // Update existing unblocked future records (keep blocked dates intact)
         const todayStr = DoctorAvailability.extractDateYmd(new Date());
@@ -593,6 +636,8 @@ exports.updateDoctorSchedule = async (req, res) => {
             message: 'Doctor working schedule & slots updated successfully.',
             schedule: savedSchedule,
             slots: generatedSlots,
+            inPersonSlots: generatedSlots,
+            onlineSlots: generatedOnlineSlots,
             blockedDates
         });
     } catch (err) {

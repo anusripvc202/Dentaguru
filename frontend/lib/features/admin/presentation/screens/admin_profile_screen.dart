@@ -471,7 +471,7 @@ class _AdminProfileScreenState extends State<AdminProfileScreen> {
           child: Text(
             'GS HEALTH CLINICAL ADMINISTRATOR TERMS OF SERVICE\n\n'
             '1. Administrator Access & Roles\n'
-            'Authorized administrators must ensure strictly authenticated operations when auditing patient cases, doctor rosters, sub-admin credentials, and facility records.\n\n'
+            'Authorized administrators must ensure strictly authenticated operations when auditing patient cases, doctor rosters, coordinator credentials, and facility records.\n\n'
             '2. Patient Data & Clinical Confidentiality\n'
             'All medical records, specialist referrals, diagnostic files, and patient health information are strictly confidential and governed by Indian Medical Council & Telemedicine Practice Guidelines.\n\n'
             '3. Referral Management & Assignment\n'

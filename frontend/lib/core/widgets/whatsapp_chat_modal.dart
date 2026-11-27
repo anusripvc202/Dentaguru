@@ -145,7 +145,8 @@ class _WhatsAppChatModalState extends State<WhatsAppChatModal>
         final roleLower = session.role.trim().toLowerCase();
         final isSubAdmin = roleLower.contains('sub-admin') ||
             roleLower.contains('subadmin') ||
-            roleLower.contains('sub_admin');
+            roleLower.contains('sub_admin') ||
+            roleLower.contains('coordinator');
         if (!isSubAdmin) {
           await SessionService().bindRealtimeSession(session);
         }
